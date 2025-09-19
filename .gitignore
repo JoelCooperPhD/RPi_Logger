@@ -8,3 +8,22 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Camera recordings and media files
+*.h264
+*.mp4
+*.avi
+*.mov
+*.jpg
+*.jpeg
+*.png
+*.gif
+recordings/
+examples_output/
+**/recordings/
+**/examples_output/
+
+# Temporary and test files
+/tmp/
+*.tmp
+*.log
