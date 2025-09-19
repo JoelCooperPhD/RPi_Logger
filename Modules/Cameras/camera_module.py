@@ -18,7 +18,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     stream=sys.stderr,  # Force logging to stderr
 )
-logger = logging.getLogger("DualCamera")
+logger = logging.getLogger("CameraSystem")
 
 
 class CameraHandler:
@@ -110,9 +110,9 @@ class CameraHandler:
         self.logger.info("Cleanup completed")
 
 
-class DualCameraSystem:
+class CameraSystem:
     def __init__(self, args):
-        self.logger = logging.getLogger("DualCamera")
+        self.logger = logging.getLogger("CameraSystem")
         self.cameras = []
         self.running = False
         self.recording = False
@@ -311,7 +311,7 @@ class DualCameraSystem:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Dual camera recorder with preview and overlays")
+    parser = argparse.ArgumentParser(description="Multi-camera recorder with preview and overlays")
     parser.add_argument("--width", type=int, default=1920, help="Recording width")
     parser.add_argument("--height", type=int, default=1080, help="Recording height")
     parser.add_argument("--fps", type=int, default=30, help="Recording FPS")
@@ -326,7 +326,7 @@ def main():
     args = parse_args()
     system = None
     try:
-        system = DualCameraSystem(args)
+        system = CameraSystem(args)
         system.run()
     except Exception as e:
         logger.error("Fatal error: %s", e, exc_info=True)

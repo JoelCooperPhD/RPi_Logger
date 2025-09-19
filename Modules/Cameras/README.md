@@ -1,361 +1,186 @@
-# Camera Module Documentation
+# Camera Module
 
-A comprehensive camera module for Raspberry Pi systems with real-time preview, timestamp overlays, and flexible control options.
+A professional multi-camera recording system for Raspberry Pi 5 with master-slave architecture, real-time preview, and programmatic control.
 
 ## Features
 
-🎥 **Real-time Preview**: Live video feed with timestamp overlays and recording indicators
+🎥 **Multi-Camera Support**: Simultaneous recording from multiple cameras (tested with 2x IMX296)
 📹 **High-Quality Recording**: H.264 video encoding with configurable resolution and frame rate
-⏰ **Timestamp Overlays**: Automatic timestamp embedding in both preview and recorded video
-🖱️ **Interactive Controls**: Keyboard shortcuts (q=quit, s=snapshot) and window close detection
-🔄 **IPC Support**: Subprocess communication via JSON commands
-⚙️ **Flexible Configuration**: Headless mode, custom resolutions, frame rates
-📸 **Still Image Capture**: High-resolution snapshot capability
-🛡️ **Robust Error Handling**: Comprehensive cleanup and error recovery
+⏰ **Timestamp Overlays**: Automatic timestamp and FPS embedding in preview
+🔄 **Master-Slave Architecture**: Command-driven operation via JSON protocol
+🖱️ **Interactive Controls**: Standalone mode with keyboard shortcuts (q=quit, s=snapshot, r=record)
+⚙️ **Flexible Configuration**: Multiple resolutions, frame rates, and output options
+📸 **Synchronized Snapshots**: Simultaneous image capture from both cameras
+🛡️ **Signal Handling**: Graceful shutdown with proper resource cleanup
 
-## Hardware Compatibility
+## Hardware Requirements
 
-- **Raspberry Pi Models**: Pi 4, Pi 5, and compatible boards
-- **Camera Modules**: All official Raspberry Pi cameras (V1, V2, V3, HQ, Global Shutter)
-- **USB Cameras**: Limited support via libcamera
+- **Raspberry Pi 5** (recommended for multi-camera support)
+- **Multiple Camera Modules** (tested with 2x IMX296 Global Shutter sensors)
+- **Adequate Cooling** (multi-camera operation generates heat)
+- **Fast Storage** (Class 10+ SD card or USB 3.0 storage)
 - **Operating System**: Raspberry Pi OS Bullseye or later
 
 ## Quick Start
 
-### Basic Recording with Preview (Default)
+### Standalone Mode (Interactive)
+
 ```bash
-# Record with live preview until 'q' is pressed
-python camera_module.py
+# Start camera system with default settings
+uv run camera_module.py
 
-# Record for 30 seconds with preview
-python camera_module.py --duration 30
+# Custom resolution and frame rate
+uv run camera_module.py --width 1280 --height 720 --fps 25
+
+# Custom output directory
+uv run camera_module.py --output recordings
 ```
 
-### Headless Recording
+### Slave Mode (Programmatic Control)
+
 ```bash
-# Record without preview window
-python camera_module.py --duration 30 --no-preview
+# Start in slave mode for master control
+uv run camera_module.py --slave --output recordings
 ```
 
-### High-Resolution Recording
+### Master Control Example
+
 ```bash
-# 4K recording at 24fps
-python camera_module.py --resolution 3840x2160 --fps 24 --duration 60
+# Run example master program
+uv run camera_master.py
 ```
 
-## Installation
+## Usage Modes
 
-### Requirements
-```bash
-# Install dependencies
-sudo apt update
-sudo apt install -y python3-picamera2 python3-opencv python3-numpy
+### Standalone Mode Controls
 
-# Or using pip/uv
-pip install picamera2 opencv-python numpy
+- **`q`**: Quit application
+- **`s`**: Take snapshot from all cameras
+- **`r`**: Toggle recording on/off
+- **Close Window**: Graceful shutdown
+
+### Slave Mode Commands
+
+Send JSON commands via stdin when running in `--slave` mode:
+
+```json
+{"command": "start_recording"}
+{"command": "stop_recording"}
+{"command": "take_snapshot"}
+{"command": "get_status"}
+{"command": "quit"}
 ```
 
-### Verify Installation
-```bash
-# Test camera connection
-python camera_module.py --duration 3 --no-preview
+## Configuration Options
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--width` | 1920 | Recording width in pixels |
+| `--height` | 1080 | Recording height in pixels |
+| `--fps` | 30 | Frames per second |
+| `--preview-width` | 640 | Preview window width |
+| `--preview-height` | 360 | Preview window height |
+| `--output` | "recordings" | Output directory for files |
+| `--slave` | False | Run in slave mode (no GUI) |
+
+## File Structure
+
+```
+Cameras/
+├── camera_module.py          # Main multi-camera system
+├── camera_master.py          # Example master control program
+├── README.md                 # This documentation
+└── picamera2_reference.md    # Technical reference
 ```
 
-## Command Line Options
+## Architecture
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--resolution` | `1920x1080` | Video resolution (e.g., 1280x720, 3840x2160) |
-| `--fps` | `30` | Frames per second (10-60) |
-| `--save-location` | `./recordings` | Directory for saved files |
-| `--camera-id` | `0` | Camera index (0 or 1 for Pi 5) |
-| `--duration` | `None` | Recording duration in seconds (None for manual) |
-| `--no-preview` | `False` | Disable preview window (headless mode) |
-| `--ipc` | `False` | Run in IPC mode for subprocess communication |
+### Standalone Mode
+- Multiple OpenCV preview windows (one per camera)
+- Real-time FPS display and timestamps
+- Interactive keyboard controls
+- Direct camera control
 
-## Interactive Controls
+### Slave Mode
+- No GUI interface
+- JSON command protocol via stdin/stdout
+- Status reporting to master process
+- Signal handling for graceful shutdown
 
-When preview is enabled:
-- **Q**: Quit recording and exit
-- **S**: Take snapshot (saved as .jpg)
-- **X button**: Close window and terminate gracefully
+## Performance Characteristics
 
-## Programming Interface
+Based on timing analysis:
 
-### Basic Usage
-```python
-import asyncio
-from camera_module import CameraModule
+- **Frame Rate**: ~25 FPS effective (target 30 FPS)
+- **Inter-Camera Sync**: ~23ms average offset
+- **Command Response**: <1ms for control commands
+- **Frame Jitter**: ~20-25ms variation
 
-async def record_video():
-    camera = CameraModule(
-        resolution=(1920, 1080),
-        fps=30,
-        save_location="./my_recordings"
-    )
+## Dependencies
 
-    try:
-        await camera.initialize_camera()
-        await camera.start_camera()
+- **picamera2**: Camera control and capture
+- **opencv-python**: Image processing and display
+- **numpy**: Array operations
 
-        # Start recording
-        recording_path = await camera.start_recording("my_video.h264")
-
-        # Record for 10 seconds
-        await asyncio.sleep(10)
-
-        # Stop recording
-        await camera.stop_recording()
-
-    finally:
-        await camera.cleanup()
-
-# Run the recording
-asyncio.run(record_video())
-```
-
-### IPC Mode (Subprocess Control)
-```python
-import subprocess
-import json
-
-# Start camera in IPC mode
-proc = subprocess.Popen([
-    "python", "camera_module.py", "--ipc"
-], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-
-# Send commands
-commands = [
-    {"action": "start_recording", "params": {"filename": "test.h264"}},
-    {"action": "capture_image", "params": {"filename": "snapshot.jpg"}},
-    {"action": "stop_recording"},
-    {"action": "shutdown"}
-]
-
-for cmd in commands:
-    proc.stdin.write(json.dumps(cmd) + '\\n')
-    proc.stdin.flush()
-
-    response = json.loads(proc.stdout.readline())
-    print(f"Response: {response}")
-```
-
-### Available IPC Commands
-
-| Command | Parameters | Description |
-|---------|------------|-------------|
-| `get_status` | None | Get camera status and configuration |
-| `start_recording` | `filename` (optional) | Start video recording |
-| `stop_recording` | None | Stop current recording |
-| `capture_image` | `filename` (optional) | Take still image |
-| `set_controls` | Camera controls dict | Adjust camera settings |
-| `shutdown` | None | Gracefully shutdown camera |
-
-## Configuration Examples
-
-### Low Latency Setup
-```python
-camera = CameraModule(
-    resolution=(640, 480),
-    fps=60,
-    show_preview=True
-)
-```
-
-### Security Camera Setup
-```python
-camera = CameraModule(
-    resolution=(1920, 1080),
-    fps=15,
-    save_location="/media/storage/recordings",
-    show_preview=False
-)
-```
-
-### Time-lapse Setup
-```python
-# Take photos at intervals
-camera = CameraModule(resolution=(3840, 2160), show_preview=False)
-await camera.initialize_camera()
-await camera.start_camera()
-
-for i in range(100):
-    await camera.capture_image(f"timelapse_{i:04d}.jpg")
-    await asyncio.sleep(60)  # One photo per minute
-```
-
-## File Formats and Quality
-
-### Video Recording
-- **Format**: H.264 (.h264 files)
-- **Quality**: High quality encoding (10 Mbps bitrate)
-- **Compatibility**: Can be converted to MP4 using ffmpeg
-
-### Still Images
-- **Format**: JPEG (.jpg files)
-- **Quality**: Full sensor resolution
-- **Metadata**: EXIF data included
-
-### Converting H.264 to MP4
-```bash
-# Using ffmpeg
-ffmpeg -i recording_20231201_143022.h264 -c copy output.mp4
-
-# Batch convert all recordings
-for f in *.h264; do ffmpeg -i "$f" -c copy "${f%.h264}.mp4"; done
-```
-
-## Performance Optimization
-
-### For High Frame Rates
-- Use lower resolutions (1280x720 or below)
-- Disable preview for headless operation
-- Ensure sufficient storage speed (Class 10 SD card minimum)
-
-### For High Resolutions
-- Use lower frame rates (15-24fps)
-- Ensure adequate cooling for Raspberry Pi
-- Monitor CPU temperature during recording
-
-### Memory Usage
-- Higher resolutions use more memory
-- Consider buffer_count in configuration
-- Monitor system resources during operation
+All dependencies are managed via `uv` package manager.
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Camera not detected**
-```bash
-# Check camera connection
-libcamera-hello --list-cameras
+1. **Camera Busy Error**: Kill existing processes with `pkill -f camera_module`
+2. **Import Errors**: Use `uv run` instead of direct Python execution
+3. **Permission Issues**: Ensure user is in camera/video groups
+4. **Resource Conflicts**: Only one instance can access cameras at a time
 
-# Check permissions
-sudo usermod -a -G video $USER
-# Logout and login again
-```
+### Hardware Setup
 
-**Preview window not showing**
-```bash
-# Check display environment
-echo $DISPLAY
-
-# For SSH users, enable X11 forwarding
-ssh -X pi@raspberry-pi-ip
-```
-
-**Recording files empty or corrupted**
-```bash
-# Check storage space
-df -h
-
-# Check write permissions
-ls -la recordings/
-
-# Test with shorter duration
-python camera_module.py --duration 5 --no-preview
-```
-
-**High CPU usage**
-- Lower resolution or frame rate
-- Disable preview for headless operation
-- Check system temperature
-
-### Error Messages
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `Camera __init__ sequence did not complete` | Camera in use by another process | Kill other camera processes |
-| `Unable to set controls: Device or resource busy` | Multiple camera access | Ensure only one camera instance |
-| `Failed to add timestamp overlay` | OpenCV/array issues | Check numpy/opencv installation |
-| `Preview window destroyed` | User closed window | Normal termination behavior |
-
-## Testing
-
-Run the comprehensive test suite:
-```bash
-# Run all tests
-python test_camera_comprehensive.py
-
-# Run specific test categories
-python -m unittest test_camera_comprehensive.TestCameraModule
-python -m unittest test_camera_comprehensive.TestCameraIntegration
-python -m unittest test_camera_comprehensive.TestCameraStress
-```
+1. Connect cameras to Pi 5 CSI ports (tested with 2x IMX296)
+2. Ensure adequate cooling (multiple cameras generate heat)
+3. Use fast storage for recording (USB 3.0 recommended)
+4. Verify camera detection: `libcamera-hello --list-cameras`
 
 ## Examples
 
-Explore various usage patterns:
+### Basic Recording Session
+
 ```bash
-# Run interactive examples
-python camera_examples.py
+# Start interactive mode
+uv run camera_module.py --width 1280 --height 720
 
-# Or run specific examples directly
-python -c "import asyncio; from camera_examples import example_basic_recording; asyncio.run(example_basic_recording())"
+# Controls:
+# Press 'r' to start recording
+# Press 's' to take snapshots
+# Press 'q' to quit
 ```
 
-## Integration with Other Systems
+### Programmatic Control
 
-### Motion Detection
 ```python
-# Framework for motion detection
-import cv2
+import subprocess
+import json
 
-async def motion_detection_loop():
-    camera = CameraModule(resolution=(640, 480), show_preview=False)
-    await camera.initialize_camera()
-    await camera.start_camera()
+# Start camera system
+proc = subprocess.Popen(
+    ["uv", "run", "camera_module.py", "--slave"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    text=True
+)
 
-    prev_frame = None
+# Send commands
+proc.stdin.write(json.dumps({"command": "start_recording"}) + "\n")
+proc.stdin.flush()
 
-    while True:
-        frame = camera.picam2.capture_array("main")
-        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+# Read status
+status = json.loads(proc.stdout.readline())
+print(f"Status: {status}")
 
-        if prev_frame is not None:
-            diff = cv2.absdiff(prev_frame, gray)
-            if cv2.countNonZero(diff) > threshold:
-                # Motion detected - start recording
-                await camera.start_recording()
-
-        prev_frame = gray
-        await asyncio.sleep(0.1)
+# Cleanup
+proc.stdin.write(json.dumps({"command": "quit"}) + "\n")
+proc.wait()
 ```
 
-### Web Streaming
-```python
-# Basic framework for web streaming
-from flask import Flask, Response
-import cv2
+## Support
 
-app = Flask(__name__)
-camera = CameraModule(show_preview=False)
-
-def generate_frames():
-    while True:
-        frame = camera.picam2.capture_array("main")
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame = buffer.tobytes()
-        yield (b'--frame\\r\\n'
-               b'Content-Type: image/jpeg\\r\\n\\r\\n' + frame + b'\\r\\n')
-
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-```
-
-## License and Support
-
-This module is part of the RPi_Logger project. For issues, feature requests, or contributions, please refer to the main project repository.
-
-### Version History
-- **v1.0**: Initial release with basic recording
-- **v1.1**: Added preview functionality and IPC support
-- **v1.2**: Enhanced error handling and window close detection
-- **v1.3**: Comprehensive testing and documentation
-
----
-
-For more examples and advanced usage, see `camera_examples.py` and `test_camera_comprehensive.py`.
+For issues and questions, refer to the main project documentation in `/CLAUDE.md`.

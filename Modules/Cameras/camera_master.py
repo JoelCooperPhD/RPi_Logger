@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-Example master program for controlling dual_camera_module.py in slave mode
-Demonstrates subprocess communication via stdin/stdout with JSON commands
+EXAMPLE: Master program for controlling camera_module.py in slave mode
+
+This is a demonstration/example program showing how to control the camera
+system programmatically. It demonstrates subprocess communication via stdin/stdout
+with JSON commands.
+
+Usage:
+    uv run camera_master.py              # Demo session
+    uv run camera_master.py interactive  # Interactive session
 """
 
 import subprocess
@@ -32,7 +39,7 @@ class CameraMaster:
 
     def start_camera_system(self, **camera_args):
         """Start the camera system as a subprocess"""
-        cmd = ["uv", "run", "dual_camera_module.py", "--slave"]
+        cmd = ["uv", "run", "camera_module.py", "--slave"]
 
         # Add camera arguments
         for key, value in camera_args.items():
