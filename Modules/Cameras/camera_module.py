@@ -120,24 +120,73 @@ class CameraSystem:
         self.slave_mode = args.slave
         self.command_thread = None
         self.shutdown_event = threading.Event()
+        self.device_timeout = getattr(args, 'timeout', 5)  # Default 5 seconds timeout
 
         # Setup signal handlers
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
-        cam_infos = Picamera2.global_camera_info()
+        # Device will be initialized in run() method after signal handlers are ready
+        if self.slave_mode:
+            self.send_status("initializing", {"device": "cameras"})
+
+    def _initialize_cameras(self):
+        """Initialize cameras with timeout and graceful handling"""
+        self.logger.info("Searching for cameras (timeout: %ds)...", self.device_timeout)
+
+        start_time = time.time()
+        cam_infos = []
+
+        # Try to detect cameras with timeout
+        while time.time() - start_time < self.device_timeout:
+            try:
+                cam_infos = Picamera2.global_camera_info()
+                if cam_infos:
+                    break
+            except Exception as e:
+                self.logger.debug("Camera detection attempt failed: %s", e)
+
+            # Check if we should abort
+            if self.shutdown_event.is_set():
+                raise KeyboardInterrupt("Device discovery cancelled")
+
+            time.sleep(0.5)  # Brief pause between attempts
+
+        # Log found cameras
         for i, info in enumerate(cam_infos):
             self.logger.info("Found camera %d: %s", i, info)
 
-        if len(cam_infos) < 2:
-            raise RuntimeError("Expected at least 2 cameras")
+        # Check if we have the required cameras
+        if not cam_infos:
+            error_msg = f"No cameras found within {self.device_timeout} seconds"
+            self.logger.error(error_msg)
+            if self.slave_mode:
+                self.send_status("error", {"message": error_msg})
+            raise RuntimeError(error_msg)
 
-        self.logger.info("Initializing cameras: [0, 1]")
-        self.cameras = [CameraHandler(cam_infos[0], 0, args),
-                        CameraHandler(cam_infos[1], 1, args)]
+        if len(cam_infos) < 2 and not self.args.single_camera:
+            warning_msg = f"Only {len(cam_infos)} camera(s) found, expected at least 2"
+            self.logger.warning(warning_msg)
+            if not self.args.allow_partial:
+                if self.slave_mode:
+                    self.send_status("error", {"message": warning_msg})
+                raise RuntimeError(warning_msg)
 
-        if self.slave_mode:
-            self.send_status("initialized", {"cameras": 2})
+        # Initialize available cameras
+        self.logger.info("Initializing %d camera(s)...", min(len(cam_infos), 2))
+        try:
+            for i in range(min(len(cam_infos), 2)):
+                self.cameras.append(CameraHandler(cam_infos[i], i, self.args))
+
+            self.logger.info("Successfully initialized %d camera(s)", len(self.cameras))
+            if self.slave_mode:
+                self.send_status("initialized", {"cameras": len(self.cameras)})
+
+        except Exception as e:
+            self.logger.error("Failed to initialize cameras: %s", e)
+            if self.slave_mode:
+                self.send_status("error", {"message": f"Camera initialization failed: {e}"})
+            raise
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals"""
@@ -239,18 +288,24 @@ class CameraSystem:
 
     def preview_loop(self):
         """Interactive preview mode (standalone only)"""
+        if not self.cameras:
+            self.logger.error("No cameras available for preview")
+            return
+
         self.running = True
-        cv2.namedWindow("Camera 0")
-        cv2.namedWindow("Camera 1")
+
+        # Create windows for available cameras
+        for i, cam in enumerate(self.cameras):
+            cv2.namedWindow(f"Camera {i}")
 
         self.logger.info("Preview mode: 'q' to quit, 's' for snapshot, 'r' to toggle recording")
         while self.running and not self.shutdown_event.is_set():
             frames = [cam.get_frame() for cam in self.cameras]
 
-            if frames[0] is not None:
-                cv2.imshow("Camera 0", frames[0])
-            if frames[1] is not None:
-                cv2.imshow("Camera 1", frames[1])
+            # Display frames for available cameras
+            for i, frame in enumerate(frames):
+                if frame is not None:
+                    cv2.imshow(f"Camera {i}", frame)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
@@ -298,10 +353,26 @@ class CameraSystem:
 
     def run(self):
         """Main run method - chooses mode based on configuration"""
-        if self.slave_mode:
-            self.slave_loop()
-        else:
-            self.preview_loop()
+        try:
+            # Initialize cameras now that signal handlers are set up
+            self._initialize_cameras()
+
+            if self.slave_mode:
+                self.slave_loop()
+            else:
+                self.preview_loop()
+
+        except KeyboardInterrupt:
+            self.logger.info("Camera system cancelled by user")
+            if self.slave_mode:
+                self.send_status("error", {"message": "Cancelled by user"})
+        except RuntimeError as e:
+            # Device not found or initialization failed - already logged
+            pass
+        except Exception as e:
+            self.logger.error("Unexpected error in run: %s", e)
+            if self.slave_mode:
+                self.send_status("error", {"message": f"Unexpected error: {e}"})
 
     def cleanup(self):
         self.logger.info("Cleaning up cameras...")
@@ -319,6 +390,9 @@ def parse_args():
     parser.add_argument("--preview-height", type=int, default=360, help="Preview window height")
     parser.add_argument("--output", type=str, default="recordings", help="Output directory")
     parser.add_argument("--slave", action="store_true", help="Run in slave mode (no preview, command-driven)")
+    parser.add_argument("--timeout", type=int, default=5, help="Device discovery timeout in seconds (default: 5)")
+    parser.add_argument("--single-camera", action="store_true", help="Allow running with single camera")
+    parser.add_argument("--allow-partial", action="store_true", help="Allow running with fewer cameras than expected")
     return parser.parse_args()
 
 
