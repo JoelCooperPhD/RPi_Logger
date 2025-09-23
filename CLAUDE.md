@@ -20,6 +20,48 @@ RPiLogger - A comprehensive logging and camera system for Raspberry Pi 5 with mu
 - Package Manager: uv (Python package manager)
 - Camera Hardware: Multiple camera support (tested with 2x IMX296)
 
+### Package Management with uv
+
+This project uses `uv` for modern Python package management:
+
+**Installation (if uv not available):**
+```bash
+# Install uv if not present
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# Or using pip
+pip install uv
+```
+
+**Adding Dependencies:**
+```bash
+uv add package-name                    # Add runtime dependency
+uv add --dev package-name              # Add development dependency
+uv add package-name==1.2.3            # Add specific version
+```
+
+**Managing Environment:**
+```bash
+uv sync                                # Install all dependencies
+uv lock                                # Update lock file
+uv run python script.py               # Run with proper environment
+uv shell                               # Activate virtual environment
+```
+
+**Project Commands:**
+```bash
+uv run --help                          # Show available scripts
+uv tree                               # Show dependency tree
+uv pip list                           # List installed packages
+```
+
+**Fallback (if uv unavailable):**
+```bash
+# Use traditional venv if uv not installed
+source .venv/bin/activate
+pip install package-name
+python script.py
+```
+
 ## Project Structure
 
 ```
@@ -80,6 +122,12 @@ uv run camera_master.py
 
 ## Development Notes
 
+**Programming Patterns:**
+- **Prefer asyncio**: Use modern async/await patterns for I/O operations, camera handling, and concurrent tasks
+- **Async Best Practices**: Use `asyncio.gather()` for concurrent operations, `asyncio.Queue` for producer-consumer patterns
+- **Resource Management**: Use `async with` context managers for camera resources and file operations
+- **Error Handling**: Implement proper exception handling with `try/except` in async contexts
+
 **Hardware Considerations:**
 - Raspberry Pi 5 with adequate cooling recommended
 - Multiple cameras require proper ribbon cable connections
@@ -87,7 +135,9 @@ uv run camera_master.py
 
 **Dependencies:**
 - All dependencies are ARM-compatible via uv
-- Key libraries: picamera2, opencv-python, numpy
+- Key libraries: picamera2, opencv-python, numpy, pupil-labs-realtime-api
+- Use `uv add` to manage dependencies, not pip
+- Note: uv path may be `/home/rs-pi-2/.local/bin/uv` if not in PATH
 
 **Testing:**
 - Always test on actual hardware (camera dependencies)
@@ -98,6 +148,13 @@ uv run camera_master.py
 - Camera resources must be properly released
 - Use signal handlers for graceful shutdown
 - Master-slave communication uses JSON over stdin/stdout
+- Implement async signal handling with `asyncio.create_task()`
+
+**Hardware Documentation:**
+- When working with specific hardware (cameras, sensors, etc.), always reference original manufacturer documentation
+- For Raspberry Pi: Use official raspberrypi.com documentation and GPIO pinout references
+- For camera modules: Reference official camera module specifications and programming guides
+- Source hardware-specific examples from manufacturer repositories and technical documentation
 
 ## Common Issues
 
