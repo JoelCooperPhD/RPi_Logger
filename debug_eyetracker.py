@@ -1,117 +1,109 @@
 #!/usr/bin/env python3
-"""
-Debug script to test eye tracker detection and data reception
-"""
+"""Async debug utility for the Pupil Labs eye tracker."""
 
+from __future__ import annotations
+
+import asyncio
+import logging
 import sys
 import time
-from pupil_labs.realtime_api.simple import discover_one_device
+from typing import Optional
 
-print("="*70)
-print("EYE TRACKER DEBUG TEST")
-print("="*70)
-print()
+from pupil_labs.realtime_api.device import Device
+from pupil_labs.realtime_api.discovery import discover_devices
+from pupil_labs.realtime_api.streaming.gaze import receive_gaze_data
+from pupil_labs.realtime_api.streaming.video import receive_video_frames
 
-# Step 1: Try to discover device
-print("Step 1: Discovering device (10 second timeout)...")
-try:
-    device = discover_one_device(max_search_duration_seconds=10)
-    if device:
-        print(f"✓ Device found: {device}")
-        print(f"  Type: {type(device)}")
-        try:
-            print(f"  Device info: {dir(device)}")
-        except:
-            pass
-    else:
-        print("✗ No device found")
-        sys.exit(1)
-except Exception as e:
-    print(f"✗ Discovery failed: {e}")
-    sys.exit(1)
+LOGGER = logging.getLogger("debug.eye")
 
-# Step 2: Try to get gaze data
-print("\nStep 2: Testing gaze data reception...")
-gaze_received = False
-for i in range(10):
-    try:
-        print(f"  Attempt {i+1}/10...", end="")
-        gaze = device.receive_gaze_datum(timeout_seconds=1.0)
-        if gaze:
-            print(f" ✓ Got gaze data!")
-            print(f"    x={gaze.x:.2f}, y={gaze.y:.2f}, worn={gaze.worn}")
-            gaze_received = True
+
+async def discover_device(timeout: float) -> Optional[Device]:
+    """Return the first discovered device within the timeout window."""
+    LOGGER.info("Scanning for devices (timeout %.1fs)...", timeout)
+    async for device_info in discover_devices(timeout_seconds=timeout):
+        LOGGER.info(
+            "Found device '%s' at %s:%s",
+            device_info.name,
+            device_info.addresses[0],
+            device_info.port,
+        )
+        return Device.from_discovered_device(device_info)
+    LOGGER.error("No device discovered")
+    return None
+
+
+async def sample_gaze(device: Device, duration: float) -> int:
+    """Receive gaze samples for the specified duration."""
+    assert device.address is not None
+    gaze_url = f"rtsp://{device.address}:8086/?camera=gaze"
+    LOGGER.info("Sampling gaze from %s", gaze_url)
+
+    count = 0
+    end_time = time.time() + duration
+    async for datum in receive_gaze_data(gaze_url):
+        LOGGER.debug(
+            "Gaze: worn=%s x=%.3f y=%.3f t=%.3f",
+            datum.worn,
+            datum.x,
+            datum.y,
+            datum.timestamp_unix_seconds,
+        )
+        count += 1
+        if time.time() >= end_time:
             break
-        else:
-            print(" - No data")
-    except Exception as e:
-        print(f" ✗ Error: {e}")
-    time.sleep(0.5)
+    LOGGER.info("Received %d gaze samples", count)
+    return count
 
-if not gaze_received:
-    print("  ⚠ No gaze data received in 10 attempts")
 
-# Step 3: Try to get scene frame
-print("\nStep 3: Testing scene video frame reception...")
-frame_received = False
-for i in range(5):
-    try:
-        print(f"  Attempt {i+1}/5...", end="")
-        frame = device.receive_scene_video_frame(timeout_seconds=1.0)
-        if frame:
-            print(f" ✓ Got scene frame!")
-            print(f"    Shape: {frame.bgr_pixels.shape}")
-            print(f"    Timestamp: {frame.timestamp_unix_seconds}")
-            frame_received = True
+async def sample_video(device: Device, frame_limit: int) -> int:
+    """Fetch a limited number of video frames and report basic metadata."""
+    assert device.address is not None
+    video_url = f"rtsp://{device.address}:8086/?camera=world"
+    LOGGER.info("Sampling video from %s", video_url)
+
+    count = 0
+    async for frame in receive_video_frames(video_url):
+        array = frame.to_ndarray(format="bgr24")
+        LOGGER.debug(
+            "Frame %d: shape=%s ts=%.3f",
+            count + 1,
+            array.shape,
+            frame.timestamp_unix_seconds,
+        )
+        count += 1
+        if count >= frame_limit:
             break
-        else:
-            print(" - No frame")
-    except Exception as e:
-        print(f" ✗ Error: {e}")
-    time.sleep(0.5)
+    LOGGER.info("Received %d video frames", count)
+    return count
 
-if not frame_received:
-    print("  ⚠ No scene frames received in 5 attempts")
 
-# Step 4: Test continuous data stream
-print("\nStep 4: Testing continuous data stream (5 seconds)...")
-start_time = time.time()
-gaze_count = 0
-frame_count = 0
+async def main() -> int:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
-while time.time() - start_time < 5:
+    timeout = float(sys.argv[1]) if len(sys.argv) > 1 else 10.0
+    device = await discover_device(timeout)
+    if device is None:
+        return 1
+
     try:
-        # Try gaze
-        gaze = device.receive_gaze_datum(timeout_seconds=0.01)
-        if gaze:
-            gaze_count += 1
+        await asyncio.gather(
+            sample_gaze(device, duration=5.0),
+            sample_video(device, frame_limit=30),
+        )
+    finally:
+        await device.close()
 
-        # Try frame (less frequently)
-        if int(time.time() - start_time) % 1 == 0:
-            frame = device.receive_scene_video_frame(timeout_seconds=0.01)
-            if frame:
-                frame_count += 1
-    except:
-        pass
+    LOGGER.info("Debug session complete")
+    return 0
 
-print(f"  Received {gaze_count} gaze samples and {frame_count} frames in 5 seconds")
 
-# Summary
-print("\n" + "="*70)
-print("SUMMARY")
-print("="*70)
-if gaze_received or frame_received:
-    print("✅ Device is connected and sending data!")
-    print(f"   Gaze data: {'Yes' if gaze_received else 'No'}")
-    print(f"   Scene frames: {'Yes' if frame_received else 'No'}")
-    print(f"   Data rate: {gaze_count/5:.1f} Hz gaze, {frame_count/5:.1f} Hz frames")
-else:
-    print("⚠ Device found but no data received")
-    print("  Possible issues:")
-    print("  - Device may need to be powered on/activated")
-    print("  - Device may be in a different mode")
-    print("  - Connection may be unstable")
-
-# Cleanup
-device.close()
-print("\nDevice closed.")
+if __name__ == "__main__":
+    try:
+        exit_code = asyncio.run(main())
+    except KeyboardInterrupt:
+        exit_code = 130
+    sys.exit(exit_code)

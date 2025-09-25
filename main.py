@@ -1,356 +1,640 @@
 #!/usr/bin/env python3
+"""Async car data logger entrypoint.
+
+This version replaces the legacy multiprocessing controller with an
+``asyncio``-driven architecture that focuses on the eye tracker module.
+It exclusively uses the Pupil Labs **async** realtime API as documented at
+https://pupil-labs.github.io/pl-realtime-api/dev/api/async/ and adds
+comprehensive debug logging so that every stage of the data flow can be
+observed from the CLI.
 """
-Simple Car Data Logger - Main Controller
-Coordinates all data logging modules in separate processes
-"""
-from multiprocessing import Process, Queue
-import time
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import datetime as dt
+import logging
+import signal
 import sys
-import os
-import importlib.util
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Dict, Optional
 
-class CarDataLogger:
-    def __init__(self):
-        self.modules = []
-        self.current_session = None
-        self.running = True
-        
-        # Create data directory if it doesn't exist
-        self.data_dir = Path("data")
-        self.data_dir.mkdir(exist_ok=True)
-        
-    def start_module(self, module_name, module_file):
-        """Start a module in its own process"""
-        if not os.path.exists(module_file):
-            print(f"Warning: Module file {module_file} not found, skipping...")
-            return None
-            
-        try:
-            # Create communication queues for this module
-            command_queue = Queue()
-            status_queue = Queue()
-            
-            # Dynamically import the module
-            spec = importlib.util.spec_from_file_location(module_name, module_file)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            
-            # Check if module has the required run_in_process function
-            if not hasattr(module, 'run_in_process'):
-                print(f"Warning: {module_file} doesn't have run_in_process function, skipping...")
-                return None
-            
-            # Start the module process
-            process = Process(target=module.run_in_process, args=(command_queue, status_queue))
-            process.start()
-            
-            module_info = {
-                'name': module_name,
-                'file': module_file,
-                'process': process,
-                'command_queue': command_queue,
-                'status_queue': status_queue,
-                'last_status': 'starting',
-                'start_time': time.time()
+import cv2
+import numpy as np
+from pupil_labs.realtime_api.discovery import discover_devices
+from pupil_labs.realtime_api.device import Device
+from pupil_labs.realtime_api.streaming.gaze import GazeData, receive_gaze_data
+from pupil_labs.realtime_api.streaming.video import receive_video_frames
+
+# ---------------------------------------------------------------------------
+# Utility dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SessionInfo:
+    """Represents a recording session."""
+
+    name: str
+    path: Path
+
+
+@dataclass
+class ModuleStatus:
+    """Lightweight status descriptor used by the CLI."""
+
+    state: str = "idle"
+    details: Dict[str, Any] = field(default_factory=dict)
+    last_update: float = field(default_factory=time.time)
+
+
+# ---------------------------------------------------------------------------
+# Eye tracker module
+# ---------------------------------------------------------------------------
+
+
+class EyeTrackerModule:
+    """Async eye tracker interface built on the Pupil Labs async API."""
+
+    def __init__(self, data_root: Path, target_fps: float = 30.0) -> None:
+        self.logger = logging.getLogger("eye_tracker")
+        self.data_root = data_root
+        self.target_fps = target_fps
+
+        self.device: Optional[Device] = None
+        self.device_info: Optional[Any] = None
+        self.video_url: Optional[str] = None
+        self.gaze_url: Optional[str] = None
+
+        self._running = False
+        self._connected = False
+        self._status = ModuleStatus(state="created")
+
+        self._session: Optional[SessionInfo] = None
+        self._session_active = False
+
+        self._gaze_task: Optional[asyncio.Task] = None
+        self._video_task: Optional[asyncio.Task] = None
+        self._monitor_task: Optional[asyncio.Task] = None
+        self._gaze_writer_task: Optional[asyncio.Task] = None
+        self._video_writer_task: Optional[asyncio.Task] = None
+
+        self._gaze_queue: Optional[asyncio.Queue[Any]] = None
+        self._video_queue: Optional[asyncio.Queue[Any]] = None
+        self._queue_sentinel: object = object()
+
+        self._last_gaze: Optional[GazeData] = None
+        self._last_frame: Optional[np.ndarray] = None
+        self._frame_shape: Optional[tuple[int, int, int]] = None
+
+        self._frame_count = 0
+        self._gaze_count = 0
+        self._reconnect_attempts = 0
+
+        self._start_time = 0.0
+        self._last_metrics_time = 0.0
+        self._last_metrics_frame_count = 0
+        self._last_metrics_gaze_count = 0
+        self._last_frame_time = 0.0
+        self._last_gaze_time = 0.0
+
+    # ------------------------------------------------------------------
+    # Status helpers
+    # ------------------------------------------------------------------
+
+    def _set_status(self, state: str, **details: Any) -> None:
+        """Update the exposed status object."""
+        self._status.state = state
+        self._status.details = details
+        self._status.last_update = time.time()
+        self.logger.debug("status -> %s | %s", state, details)
+
+    def snapshot(self) -> ModuleStatus:
+        """Return a copy of the current module status."""
+        details = dict(self._status.details)
+        details.update(
+            {
+                "connected": self._connected,
+                "running": self._running,
+                "session": self._session.name if self._session else None,
+                "frames": self._frame_count,
+                "gaze_samples": self._gaze_count,
+                "frame_shape": self._frame_shape,
+                "last_frame_age": self._age(self._last_frame_time),
+                "last_gaze_age": self._age(self._last_gaze_time),
             }
-            
-            self.modules.append(module_info)
-            print(f"Started {module_name} module (PID: {process.pid})")
-            return module_info
-            
-        except Exception as e:
-            print(f"Error starting {module_name}: {e}")
-            return None
-    
-    def send_command_to_module(self, module_name, command):
-        """Send command to specific module"""
-        for module in self.modules:
-            if module['name'] == module_name:
-                try:
-                    module['command_queue'].put(command, timeout=1)
-                    return True
-                except Exception as e:
-                    print(f"Error sending command to {module_name}: {e}")
-                    return False
-        print(f"Module {module_name} not found")
-        return False
-    
-    def broadcast_command(self, command):
-        """Send command to all modules"""
-        success_count = 0
-        for module in self.modules:
-            try:
-                module['command_queue'].put(command, timeout=1)
-                success_count += 1
-            except Exception as e:
-                print(f"Error sending command to {module['name']}: {e}")
-        
-        print(f"Command sent to {success_count}/{len(self.modules)} modules")
-        return success_count
-    
-    def collect_status(self):
-        """Collect status updates from all modules"""
-        status_updates = []
-        
-        for module in self.modules:
-            while not module['status_queue'].empty():
-                try:
-                    status = module['status_queue'].get_nowait()
-                    status_updates.append(status)
-                    module['last_status'] = status.get('status', 'unknown')
-                    
-                    # Print status update
-                    timestamp = time.strftime('%H:%M:%S', time.localtime(status.get('timestamp', time.time())))
-                    print(f"[{timestamp}] {status['module']}: {status['status']}")
-                    
-                except Exception as e:
-                    print(f"Error reading status from {module['name']}: {e}")
-                    break
-        
-        return status_updates
-    
-    def check_module_health(self):
-        """Check if modules are still running and healthy"""
-        dead_modules = []
-        
-        for module in self.modules:
-            if not module['process'].is_alive():
-                exit_code = module['process'].exitcode
-                print(f"WARNING: Module {module['name']} has died (exit code: {exit_code})")
-                dead_modules.append(module)
-        
-        # Remove dead modules from the list
-        for dead_module in dead_modules:
-            self.modules.remove(dead_module)
-        
-        return len(dead_modules) == 0
-    
-    def show_status(self):
-        """Display current system status"""
-        print("\n" + "="*50)
-        print("SYSTEM STATUS")
-        print("="*50)
-        print(f"Active Session: {self.current_session or 'None'}")
-        print(f"Running Modules: {len(self.modules)}")
-        print()
-        
-        for i, module in enumerate(self.modules, 1):
-            uptime = int(time.time() - module['start_time'])
-            status = "RUNNING" if module['process'].is_alive() else "DEAD"
-            print(f"{i}. {module['name']}")
-            print(f"   Status: {status}")
-            print(f"   Last Update: {module['last_status']}")
-            print(f"   Uptime: {uptime}s")
-            print(f"   PID: {module['process'].pid}")
-            print()
-    
-    def start_recording_session(self):
-        """Start a new recording session"""
-        if self.current_session:
-            print("Session already active. Stop current session first.")
-            return False
-        
-        # Generate session name with timestamp
-        session_name = time.strftime("session_%Y%m%d_%H%M%S")
-        
-        print(f"\nStarting recording session: {session_name}")
-        
-        # Create session directory
-        session_dir = self.data_dir / session_name
-        session_dir.mkdir(exist_ok=True)
-        
-        # Send start command to all modules
-        command = {
-            'action': 'start_session',
-            'session_name': session_name,
-            'session_dir': str(session_dir)
-        }
-        
-        success_count = self.broadcast_command(command)
-        
-        if success_count > 0:
-            self.current_session = session_name
-            print(f"Session '{session_name}' started successfully")
-            return True
-        else:
-            print("Failed to start session - no modules responded")
-            return False
-    
-    def stop_recording_session(self):
-        """Stop current recording session"""
-        if not self.current_session:
-            print("No active session to stop")
-            return False
-        
-        print(f"\nStopping recording session: {self.current_session}")
-        
-        command = {'action': 'stop_session'}
-        success_count = self.broadcast_command(command)
-        
-        if success_count > 0:
-            print(f"Session '{self.current_session}' stopped successfully")
-            self.current_session = None
-            return True
-        else:
-            print("Failed to stop session - no modules responded")
-            return False
-    
-    def restart_module(self, module_name):
-        """Restart a specific module"""
-        # Find the module
-        target_module = None
-        for module in self.modules:
-            if module['name'] == module_name:
-                target_module = module
-                break
-        
-        if not target_module:
-            print(f"Module {module_name} not found")
-            return False
-        
-        print(f"Restarting module {module_name}...")
-        
-        # Stop the module
-        try:
-            target_module['command_queue'].put({'action': 'shutdown'}, timeout=1)
-            target_module['process'].join(timeout=3)
-            if target_module['process'].is_alive():
-                target_module['process'].terminate()
-        except:
-            pass
-        
-        # Remove from modules list
-        self.modules.remove(target_module)
-        
-        # Restart it
-        new_module = self.start_module(target_module['name'], target_module['file'])
-        return new_module is not None
-    
-    def shutdown_all_modules(self):
-        """Gracefully shutdown all modules"""
-        if not self.modules:
-            return
-        
-        print("\nShutting down all modules...")
-        
-        # Send shutdown command to all modules
-        shutdown_command = {'action': 'shutdown'}
-        for module in self.modules:
-            try:
-                module['command_queue'].put(shutdown_command, timeout=1)
-            except:
-                pass  # Queue might be closed or full
-        
-        # Wait for graceful shutdown
-        for module in self.modules:
-            print(f"Waiting for {module['name']} to shutdown...")
-            module['process'].join(timeout=5)  # Wait up to 5 seconds
-            
-            # Force terminate if still alive
-            if module['process'].is_alive():
-                print(f"Force terminating {module['name']}")
-                module['process'].terminate()
-                module['process'].join()  # Wait for termination
-        
-        self.modules.clear()
-        print("All modules stopped")
-    
-    def run_interactive_mode(self):
-        """Run the interactive command-line interface"""
-        print("Car Data Logger Started")
-        print("Type 'help' for available commands")
-        
-        try:
-            while self.running:
-                # Collect any status updates
-                self.collect_status()
-                
-                # Check module health
-                self.check_module_health()
-                
-                # Show prompt
-                session_indicator = f"[{self.current_session}]" if self.current_session else ""
-                prompt = f"\ncar-logger{session_indicator}> "
-                
-                try:
-                    command = input(prompt).strip().lower()
-                except EOFError:
-                    break
-                
-                if not command:
-                    continue
-                
-                # Process commands
-                if command == 'help' or command == 'h':
-                    self.show_help()
-                elif command == 'start' or command == '1':
-                    self.start_recording_session()
-                elif command == 'stop' or command == '2':
-                    self.stop_recording_session()
-                elif command == 'status' or command == '3':
-                    self.show_status()
-                elif command == 'quit' or command == 'q' or command == '4':
-                    self.running = False
-                elif command.startswith('restart '):
-                    module_name = command.split(' ', 1)[1]
-                    self.restart_module(module_name)
-                else:
-                    print(f"Unknown command: {command}")
-                    print("Type 'help' for available commands")
-        
-        except KeyboardInterrupt:
-            print("\nReceived interrupt signal...")
-        
-        finally:
-            self.shutdown_all_modules()
-    
-    def show_help(self):
-        """Show available commands"""
-        print("\nAvailable Commands:")
-        print("  start (1)     - Start recording session")
-        print("  stop (2)      - Stop current recording session") 
-        print("  status (3)    - Show system and module status")
-        print("  restart <mod> - Restart specific module")
-        print("  help (h)      - Show this help")
-        print("  quit (q)      - Quit the application")
+        )
+        return ModuleStatus(
+            state=self._status.state,
+            details=details,
+            last_update=self._status.last_update,
+        )
 
-def main():
-    """Main entry point"""
-    print("Initializing Car Data Logger...")
-    
-    # Create the main logger instance
-    logger = CarDataLogger()
-    
-    # Start all available modules
-    available_modules = [
-        ("camera", "RPiCam.py"),
-        ("gps", "GPS_logger.py"),
-        ("obd", "OBD_reader.py"),
-        ("sensors", "sensor_hub.py")
-    ]
-    
-    started_modules = 0
-    for name, filename in available_modules:
-        if logger.start_module(name, filename):
-            started_modules += 1
-    
-    if started_modules == 0:
-        print("No modules could be started. Exiting...")
-        sys.exit(1)
-    
-    print(f"Successfully started {started_modules} modules")
-    
-    # Give modules time to initialize
-    time.sleep(2)
-    
-    # Collect any initialization status
-    logger.collect_status()
-    
-    # Run the interactive interface
-    logger.run_interactive_mode()
-    
-    print("Car Data Logger stopped")
+    @staticmethod
+    def _age(timestamp: float) -> Optional[float]:
+        if not timestamp:
+            return None
+        return round(time.time() - timestamp, 3)
+
+    # ------------------------------------------------------------------
+    # Connection and streaming lifecycle
+    # ------------------------------------------------------------------
+
+    async def connect(self, timeout_seconds: float = 10.0) -> bool:
+        """Discover and connect to the first available Pupil Labs device."""
+        if self._connected and self.device and self.video_url and self.gaze_url:
+            self.logger.debug("Device already connected")
+            return True
+
+        self.logger.info(
+            "Searching for Pupil Labs devices (timeout %.1fs)...", timeout_seconds
+        )
+        start_time = time.perf_counter()
+
+        try:
+            async for device_info in discover_devices(timeout_seconds=timeout_seconds):
+                self.logger.info(
+                    "Discovered device '%s' at %s:%s",
+                    device_info.name,
+                    device_info.addresses[0],
+                    device_info.port,
+                )
+
+                self.device_info = device_info
+                self.device = Device.from_discovered_device(device_info)
+                self.video_url = f"rtsp://{device_info.addresses[0]}:8086/?camera=world"
+                self.gaze_url = f"rtsp://{device_info.addresses[0]}:8086/?camera=gaze"
+                self._connected = True
+                self._set_status(
+                    "connected",
+                    device=device_info.name,
+                    ip=device_info.addresses[0],
+                    port=device_info.port,
+                )
+
+                # Basic health check so we fail fast if the device is unhappy
+                with contextlib.suppress(Exception):
+                    await self.device.get_status()
+                    self.logger.debug("Device status query succeeded")
+
+                elapsed = time.perf_counter() - start_time
+                self.logger.info("Connected in %.2fs", elapsed)
+                return True
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.exception("Device discovery failed: %s", exc)
+            self._set_status("error", error=str(exc))
+            return False
+
+        elapsed = time.perf_counter() - start_time
+        self.logger.error("No Pupil Labs device found after %.2fs", elapsed)
+        self._set_status("error", error="device_not_found")
+        return False
+
+    async def start_streams(self) -> None:
+        """Start the RTSP gaze and video streams."""
+        if not self._connected or not self.device:
+            raise RuntimeError("Cannot start streams before connecting to the device")
+        if not self.video_url or not self.gaze_url:
+            raise RuntimeError("Missing RTSP URLs for video or gaze stream")
+        if self._running:
+            self.logger.debug("Stream already running")
+            return
+
+        self.logger.info("Starting gaze and video streams")
+        self._running = True
+        self._start_time = time.time()
+        self._last_metrics_time = self._start_time
+        self._last_metrics_frame_count = 0
+        self._last_metrics_gaze_count = 0
+
+        self._gaze_task = asyncio.create_task(self._gaze_stream_loop(), name="gaze-stream")
+        self._video_task = asyncio.create_task(
+            self._video_stream_loop(), name="video-stream"
+        )
+        self._monitor_task = asyncio.create_task(
+            self._metrics_monitor_loop(), name="eye-metrics"
+        )
+        self._set_status("streaming")
+
+    async def stop(self) -> None:
+        """Stop streaming and release device resources."""
+        if not self._running and not self._connected:
+            return
+
+        self.logger.info("Stopping eye tracker module")
+        await self.stop_session()
+
+        self._running = False
+        tasks = [self._gaze_task, self._video_task, self._monitor_task]
+        for task in tasks:
+            if task and not task.done():
+                task.cancel()
+
+        await asyncio.gather(*[t for t in tasks if t], return_exceptions=True)
+
+        self._gaze_task = None
+        self._video_task = None
+        self._monitor_task = None
+
+        if self.device:
+            with contextlib.suppress(Exception):
+                await self.device.close()
+        self.device = None
+        self._connected = False
+        self._set_status("stopped")
+
+    # ------------------------------------------------------------------
+    # Session lifecycle
+    # ------------------------------------------------------------------
+
+    def can_record(self) -> bool:
+        return self._running and self._connected
+
+    async def start_session(self, session: SessionInfo) -> None:
+        if not self.can_record():
+            raise RuntimeError("Eye tracker is not streaming; cannot start session")
+        if self._session_active:
+            raise RuntimeError("Recording session already active")
+
+        eye_dir = session.path / "eye_tracker"
+        eye_dir.mkdir(parents=True, exist_ok=True)
+
+        self._gaze_queue = asyncio.Queue(maxsize=5000)
+        self._video_queue = asyncio.Queue(maxsize=300)
+        self._session = session
+        self._session_active = True
+
+        self._gaze_writer_task = asyncio.create_task(
+            self._gaze_writer_loop(eye_dir), name="gaze-writer"
+        )
+        self._video_writer_task = asyncio.create_task(
+            self._video_writer_loop(eye_dir), name="video-writer"
+        )
+
+        self._set_status("recording", session=session.name)
+        self.logger.info("Recording eye tracker data into %s", eye_dir)
+
+    async def stop_session(self) -> None:
+        if not self._session_active:
+            return
+
+        self.logger.info("Stopping eye tracker recording")
+        self._session_active = False
+
+        if self._gaze_queue:
+            await self._gaze_queue.put(self._queue_sentinel)
+        if self._video_queue:
+            await self._video_queue.put(self._queue_sentinel)
+
+        await asyncio.gather(
+            *[t for t in (self._gaze_writer_task, self._video_writer_task) if t],
+            return_exceptions=True,
+        )
+
+        self._gaze_queue = None
+        self._video_queue = None
+        self._gaze_writer_task = None
+        self._video_writer_task = None
+        self._session = None
+        self._set_status("streaming")
+
+    # ------------------------------------------------------------------
+    # Streaming loops
+    # ------------------------------------------------------------------
+
+    async def _gaze_stream_loop(self) -> None:
+        assert self.gaze_url is not None
+        while self._running:
+            try:
+                async for datum in receive_gaze_data(self.gaze_url):
+                    if not self._running:
+                        break
+                    await self._handle_gaze_sample(datum)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self._reconnect_attempts += 1
+                self.logger.exception("Gaze stream error (%d): %s", self._reconnect_attempts, exc)
+                await asyncio.sleep(1.0)
+            else:
+                if self._running:
+                    self.logger.warning("Gaze stream ended unexpectedly; retrying...")
+                    await asyncio.sleep(1.0)
+
+    async def _video_stream_loop(self) -> None:
+        assert self.video_url is not None
+        while self._running:
+            try:
+                async for frame in receive_video_frames(self.video_url):
+                    if not self._running:
+                        break
+                    await self._handle_video_frame(frame)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self._reconnect_attempts += 1
+                self.logger.exception(
+                    "Video stream error (%d): %s", self._reconnect_attempts, exc
+                )
+                await asyncio.sleep(1.0)
+            else:
+                if self._running:
+                    self.logger.warning("Video stream ended unexpectedly; retrying...")
+                    await asyncio.sleep(1.0)
+
+    async def _metrics_monitor_loop(self) -> None:
+        while self._running:
+            await asyncio.sleep(1.0)
+            now = time.time()
+            interval = max(now - self._last_metrics_time, 1e-6)
+            frame_rate = (
+                self._frame_count - self._last_metrics_frame_count
+            ) / interval
+            gaze_rate = (
+                self._gaze_count - self._last_metrics_gaze_count
+            ) / interval
+
+            self._last_metrics_time = now
+            self._last_metrics_frame_count = self._frame_count
+            self._last_metrics_gaze_count = self._gaze_count
+
+            self._set_status(
+                "streaming" if not self._session_active else "recording",
+                frame_rate=round(frame_rate, 2),
+                gaze_rate=round(gaze_rate, 2),
+                reconnects=self._reconnect_attempts,
+                session=self._session.name if self._session else None,
+            )
+
+    # ------------------------------------------------------------------
+    # Helpers for handling incoming data
+    # ------------------------------------------------------------------
+
+    async def _handle_gaze_sample(self, datum: GazeData) -> None:
+        self._last_gaze = datum
+        self._gaze_count += 1
+        self._last_gaze_time = time.time()
+
+        if self._session_active and self._gaze_queue:
+            csv_line = self._format_gaze_csv(datum)
+            await self._enqueue_with_backpressure(self._gaze_queue, csv_line)
+
+    async def _handle_video_frame(self, frame: Any) -> None:
+        try:
+            array = frame.to_ndarray(format="bgr24")
+        except Exception:  # pragma: no cover - fallback
+            array = frame.to_ndarray()
+
+        if array.ndim == 2:
+            array = cv2.cvtColor(array, cv2.COLOR_GRAY2BGR)
+
+        self._last_frame = array
+        self._frame_shape = array.shape
+        self._frame_count += 1
+        self._last_frame_time = time.time()
+
+        if self._session_active and self._video_queue:
+            await self._enqueue_with_backpressure(self._video_queue, array)
+
+    async def _enqueue_with_backpressure(
+        self, queue: asyncio.Queue[Any], item: Any
+    ) -> None:
+        try:
+            queue.put_nowait(item)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                _ = queue.get_nowait()
+            queue.put_nowait(item)
+            self.logger.debug("Queue full; dropped oldest item")
+
+    @staticmethod
+    def _format_gaze_csv(datum: GazeData) -> str:
+        return f"{datum.timestamp_unix_seconds:.6f},{datum.x:.6f},{datum.y:.6f},{int(datum.worn)}\n"
+
+    # ------------------------------------------------------------------
+    # Writer loops
+    # ------------------------------------------------------------------
+
+    async def _gaze_writer_loop(self, eye_dir: Path) -> None:
+        assert self._gaze_queue is not None
+        file_path = eye_dir / "gaze.csv"
+        self.logger.debug("Writing gaze data to %s", file_path)
+
+        try:
+            with file_path.open("w", encoding="utf-8") as fh:
+                await asyncio.to_thread(fh.write, "timestamp,x,y,worn\n")
+                writes = 0
+                while True:
+                    item = await self._gaze_queue.get()
+                    if item is self._queue_sentinel:
+                        break
+                    await asyncio.to_thread(fh.write, item)
+                    writes += 1
+                    if writes % 100 == 0:
+                        await asyncio.to_thread(fh.flush)
+                await asyncio.to_thread(fh.flush)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.exception("Failed to write gaze data: %s", exc)
+
+    async def _video_writer_loop(self, eye_dir: Path) -> None:
+        assert self._video_queue is not None
+        file_path = eye_dir / "scene.mp4"
+        self.logger.debug("Recording video to %s", file_path)
+
+        writer: Optional[cv2.VideoWriter] = None
+        try:
+            while True:
+                item = await self._video_queue.get()
+                if item is self._queue_sentinel:
+                    break
+                frame = item
+                if writer is None:
+                    height, width = frame.shape[:2]
+                    writer = cv2.VideoWriter(
+                        str(file_path),
+                        cv2.VideoWriter_fourcc(*"mp4v"),
+                        self.target_fps,
+                        (width, height),
+                    )
+                    if not writer.isOpened():
+                        raise RuntimeError("Failed to open video writer")
+                await asyncio.to_thread(writer.write, frame)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.exception("Video writer failed: %s", exc)
+        finally:
+            if writer is not None:
+                await asyncio.to_thread(writer.release)
+                self.logger.info("Scene video saved to %s", file_path)
+
+
+# ---------------------------------------------------------------------------
+# Application controller
+# ---------------------------------------------------------------------------
+
+
+class AsyncController:
+    """Coordinates the eye tracker module and exposes a CLI."""
+
+    def __init__(self, recordings_dir: Path) -> None:
+        self.logger = logging.getLogger("controller")
+        self.recordings_dir = recordings_dir
+        self.recordings_dir.mkdir(parents=True, exist_ok=True)
+
+        self.eye_tracker = EyeTrackerModule(self.recordings_dir)
+        self.session: Optional[SessionInfo] = None
+        self.running = True
+
+    async def initialize(self) -> None:
+        connected = await self.eye_tracker.connect()
+        if connected:
+            await self.eye_tracker.start_streams()
+        else:
+            self.logger.warning(
+                "Eye tracker not found. Use the 'connect' command once the device is available."
+            )
+
+    async def shutdown(self) -> None:
+        self.logger.info("Shutting down controller")
+        await self.stop_session()
+        await self.eye_tracker.stop()
+        self.running = False
+
+    # ------------------------------------------------------------------
+    # Session commands
+    # ------------------------------------------------------------------
+
+    async def start_session(self) -> None:
+        if self.session is not None:
+            self.logger.warning("Session %s already active", self.session.name)
+            return
+        if not self.eye_tracker.can_record():
+            raise RuntimeError("Eye tracker stream not running; cannot start session")
+
+        session_name = dt.datetime.now().strftime("session_%Y%m%d_%H%M%S")
+        session_path = self.recordings_dir / session_name
+        session_path.mkdir(parents=True, exist_ok=True)
+        self.session = SessionInfo(session_name, session_path)
+        await self.eye_tracker.start_session(self.session)
+        self.logger.info("Session %s started", session_name)
+
+    async def stop_session(self) -> None:
+        if self.session is None:
+            return
+        await self.eye_tracker.stop_session()
+        self.logger.info("Session %s stopped", self.session.name)
+        self.session = None
+
+    # ------------------------------------------------------------------
+    # CLI helpers
+    # ------------------------------------------------------------------
+
+    async def run_cli(self) -> None:
+        self.logger.info("Entering interactive mode. Type 'help' for commands.")
+        while self.running:
+            try:
+                prompt = self._prompt()
+                command_line = await asyncio.to_thread(input, prompt)
+            except (EOFError, KeyboardInterrupt):
+                command_line = "quit"
+
+            command_line = command_line.strip()
+            if not command_line:
+                continue
+
+            cmd, *args = command_line.split()
+            cmd = cmd.lower()
+
+            try:
+                if cmd in {"help", "h"}:
+                    self._print_help()
+                elif cmd in {"status", "s"}:
+                    self._print_status()
+                elif cmd in {"connect", "c"}:
+                    await self._cmd_connect()
+                elif cmd in {"start", "record", "1"}:
+                    await self.start_session()
+                elif cmd in {"stop", "0", "2"}:
+                    await self.stop_session()
+                elif cmd in {"quit", "q", "exit"}:
+                    await self.shutdown()
+                else:
+                    self.logger.warning("Unknown command: %s", cmd)
+            except Exception as exc:  # pragma: no cover - user feedback
+                self.logger.error("Command '%s' failed: %s", cmd, exc)
+
+    async def _cmd_connect(self) -> None:
+        connected = await self.eye_tracker.connect()
+        if connected:
+            await self.eye_tracker.start_streams()
+        else:
+            self.logger.error("Device discovery failed. Check the connection and retry.")
+
+    def _prompt(self) -> str:
+        session_part = f"[{self.session.name}]" if self.session else ""
+        return f"eye-logger{session_part}> "
+
+    def _print_help(self) -> None:
+        print(
+            "\nCommands:\n"
+            "  help (h)        Show this help message\n"
+            "  status (s)      Show module status\n"
+            "  connect (c)     Retry device discovery\n"
+            "  start           Start a recording session\n"
+            "  stop            Stop the active session\n"
+            "  quit (q)        Exit the program\n"
+        )
+
+    def _print_status(self) -> None:
+        status = self.eye_tracker.snapshot()
+        details = status.details
+        print("\nEYE TRACKER STATUS")
+        print("  State:        ", status.state)
+        print("  Connected:    ", details.get("connected"))
+        print("  Running:      ", details.get("running"))
+        print("  Session:      ", details.get("session"))
+        print("  Frames:       ", details.get("frames"))
+        print("  Gaze samples: ", details.get("gaze_samples"))
+        print("  Frame shape:  ", details.get("frame_shape"))
+        print("  Frame rate:   ", details.get("frame_rate"))
+        print("  Gaze rate:    ", details.get("gaze_rate"))
+        print("  Last frame age:", details.get("last_frame_age"))
+        print("  Last gaze age: ", details.get("last_gaze_age"))
+        print()
+
+
+# ---------------------------------------------------------------------------
+# Entrypoint
+# ---------------------------------------------------------------------------
+
+
+async def main() -> None:
+    """Main coroutine used by asyncio.run."""
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    controller = AsyncController(Path("recordings"))
+    await controller.initialize()
+
+    loop = asyncio.get_running_loop()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(controller.shutdown()))
+
+    await controller.run_cli()
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # asyncio.run already handles SIGINT, but keep a fallback for completeness
+        print("\nInterrupted")
+        sys.exit(130)
