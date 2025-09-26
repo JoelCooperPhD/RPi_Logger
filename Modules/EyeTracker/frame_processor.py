@@ -89,10 +89,20 @@ class FrameProcessor:
             # Return original frame if processing fails
             return raw_frame
 
-    def add_overlays(self, frame: np.ndarray, frame_count: int, camera_frames: int,
-                    start_time: Optional[float], recording: bool,
-                    last_gaze: Optional[Any], rolling_camera_fps: Optional[float] = None,
-                    dropped_frames: int = 0, duplicates: int = 0, requested_fps: float = 30.0) -> np.ndarray:
+    def add_overlays(
+        self,
+        frame: np.ndarray,
+        frame_count: int,
+        camera_frames: int,
+        start_time: Optional[float],
+        recording: bool,
+        last_gaze: Optional[Any],
+        rolling_camera_fps: Optional[float] = None,
+        dropped_frames: int = 0,
+        duplicates: int = 0,
+        requested_fps: float = 30.0,
+        experiment_label: Optional[str] = None,
+    ) -> np.ndarray:
         """Add overlays to frame"""
         h, w = frame.shape[:2]
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -101,7 +111,8 @@ class FrameProcessor:
 
         # Dim the top banner without allocating multiple full-frame copies
         overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (w, 170), (255, 255, 255), -1)
+        banner_height = 200
+        cv2.rectangle(overlay, (0, 0), (w, banner_height), (255, 255, 255), -1)
         cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, dst=frame)
 
         # Timestamp
@@ -124,6 +135,10 @@ class FrameProcessor:
             cv2.putText(frame, f"Duplicated: {duplicates}", (10, 125),
                        font, font_scale, (0, 0, 0), thickness)
             cv2.putText(frame, f"Display Frames: {frame_count}", (10, 150),
+                       font, font_scale, (0, 0, 0), thickness)
+
+        if experiment_label:
+            cv2.putText(frame, f"Experiment: {experiment_label}", (10, 175),
                        font, font_scale, (0, 0, 0), thickness)
 
         # Recording status
@@ -242,6 +257,7 @@ class FrameProcessor:
         dropped_frames: int = 0,
         duplicates: int = 0,
         requested_fps: float = 30.0,
+        experiment_label: Optional[str] = None,
     ) -> np.ndarray:
         return await asyncio.to_thread(
             self.add_overlays,
@@ -255,6 +271,7 @@ class FrameProcessor:
             dropped_frames,
             duplicates,
             requested_fps,
+            experiment_label,
         )
 
     async def display_frame_async(self, frame: np.ndarray) -> None:

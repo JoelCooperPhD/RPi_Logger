@@ -46,16 +46,20 @@ class DeviceManager:
             logger.error(f"Connection failed: {e}")
             return False
 
-    def get_rtsp_urls(self) -> tuple[str, str]:
-        """Get RTSP URLs for video and gaze streaming"""
+    def get_stream_urls(self) -> dict[str, str]:
+        """Return RTSP endpoints for all available realtime streams."""
         if not self.device_ip:
             raise RuntimeError("No device connected")
 
         base_port = 8086  # RTSP port is typically different from HTTP port
-        video_url = f"rtsp://{self.device_ip}:{base_port}/?camera=world"
-        gaze_url = f"rtsp://{self.device_ip}:{base_port}/?camera=gaze"
+        base = f"rtsp://{self.device_ip}:{base_port}"
 
-        return video_url, gaze_url
+        return {
+            "video": f"{base}/?camera=world",
+            "gaze": f"{base}/?camera=gaze",
+            "imu": f"{base}/live/imu",
+            "events": f"{base}/live/events",
+        }
 
     @property
     def is_connected(self) -> bool:

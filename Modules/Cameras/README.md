@@ -6,6 +6,7 @@ A professional multi-camera recording system for Raspberry Pi 5 with master-slav
 
 🎥 **Multi-Camera Support**: Simultaneous recording from multiple cameras (tested with 2x IMX296)
 📹 **High-Quality Recording**: H.264 video encoding with configurable resolution and frame rate
+🧭 **Precise Frame Timing**: Deterministic FPS enforcement with dropped/duplicate tracking and per-recording diagnostics
 ⏰ **Timestamp Overlays**: Automatic timestamp and FPS embedding in preview
 🔄 **Master-Slave Architecture**: Command-driven operation via JSON protocol
 🖱️ **Interactive Controls**: Standalone mode with keyboard shortcuts (q=quit, s=snapshot, r=record)
@@ -93,6 +94,16 @@ Cameras/
 └── picamera2_reference.md    # Technical reference
 ```
 
+## Session Output
+
+Each runtime spawns a dedicated session folder inside the configured `--output` directory:
+
+- `session_YYYYMMDD_HHMMSS/` — container for all recordings captured during the run
+- `cam{N}_WIDTHxHEIGHT_FPSfps_TIMESTAMP.mp4` — H.264 scene recording per camera
+- `cam{N}_WIDTHxHEIGHT_FPSfps_TIMESTAMP_frame_timing.csv` — per-frame diagnostics (expected cadence, queue latency, capture timestamps, drop/duplicate counters)
+
+Snapshots (`snapshot_cam{N}_TIMESTAMP.jpg`) continue to save alongside the video artefacts in the same session folder.
+
 ## Architecture
 
 ### Standalone Mode
@@ -109,12 +120,10 @@ Cameras/
 
 ## Performance Characteristics
 
-Based on timing analysis:
-
-- **Frame Rate**: ~25 FPS effective (target 30 FPS)
-- **Inter-Camera Sync**: ~23ms average offset
-- **Command Response**: <1ms for control commands
-- **Frame Jitter**: ~20-25ms variation
+- **Deterministic Output FPS**: Timer-driven recorder guarantees the requested cadence (1 / `--fps`) for every saved frame
+- **Real-Time Telemetry**: Preview overlay surfaces sensor FPS, dropped/duplicate counters, and recorded frame totals
+- **Comprehensive Diagnostics**: Per-recording CSV exposes queue latency, capture-to-write timing, and cadence error for offline analysis
+- **Command Response**: <1 ms control-path latency retained in both preview and slave modes
 
 ## Dependencies
 

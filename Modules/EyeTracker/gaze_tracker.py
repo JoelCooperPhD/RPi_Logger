@@ -63,11 +63,25 @@ class GazeTracker:
         logger.info("Starting gaze tracker - Press Q to quit, R to toggle recording")
 
         try:
+            experiment_dir = None
+            if getattr(self.recording_manager, "current_experiment_dir", None) is None:
+                try:
+                    experiment_dir = self.recording_manager.start_experiment()
+                except Exception as exc:
+                    logger.error("Failed to initialize experiment directory: %s", exc)
+                else:
+                    logger.info("Experiment directory ready: %s", experiment_dir)
+
             # Get RTSP URLs
-            video_url, gaze_url = self.device_manager.get_rtsp_urls()
+            stream_urls = self.device_manager.get_stream_urls()
 
             # Start streaming
-            stream_tasks = await self.stream_handler.start_streaming(video_url, gaze_url) or []
+            stream_tasks = await self.stream_handler.start_streaming(
+                stream_urls["video"],
+                stream_urls["gaze"],
+                imu_url=stream_urls.get("imu"),
+                events_url=stream_urls.get("events"),
+            ) or []
 
             # Create frame processing task
             frame_task = asyncio.create_task(self._process_frames(), name="frame-processor")
@@ -132,6 +146,22 @@ class GazeTracker:
                         break
                     latest_gaze = next_gaze
 
+                latest_imu = self.stream_handler.get_latest_imu()
+                while True:
+                    next_imu = await self.stream_handler.next_imu(timeout=0)
+                    if next_imu is None:
+                        break
+                    latest_imu = next_imu
+                    self.recording_manager.write_imu_sample(next_imu)
+
+                latest_event = self.stream_handler.get_latest_event()
+                while True:
+                    next_event = await self.stream_handler.next_event(timeout=0)
+                    if next_event is None:
+                        break
+                    latest_event = next_event
+                    self.recording_manager.write_event_sample(next_event)
+
                 display_frame = await self.frame_processor.add_overlays_async(
                     processed_frame,
                     self.frame_count,
@@ -143,6 +173,7 @@ class GazeTracker:
                     self.dropped_frames,
                     self.recording_manager.duplicated_frames,  # Use recording manager's duplicated frames
                     self.config.fps,
+                    experiment_label=self.recording_manager.current_experiment_label,
                 )
 
                 if self.recording_manager.is_recording:

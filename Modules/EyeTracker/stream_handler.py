@@ -12,7 +12,12 @@ from dataclasses import dataclass
 from typing import Optional, Any, List
 
 import numpy as np
-from pupil_labs.realtime_api import receive_video_frames, receive_gaze_data
+from pupil_labs.realtime_api import (
+    receive_video_frames,
+    receive_gaze_data,
+    receive_imu_data,
+    receive_eye_events_data,
+)
 from rolling_fps import RollingFPS
 
 logger = logging.getLogger(__name__)
@@ -36,28 +41,54 @@ class StreamHandler:
         self.last_frame: Optional[np.ndarray] = None
         self._last_frame_packet: Optional[FramePacket] = None
         self.last_gaze: Optional[Any] = None
+        self.last_imu: Optional[Any] = None
+        self.last_event: Optional[Any] = None
         self.camera_frames = 0
         self.tasks: List[asyncio.Task] = []
         self._video_task_active = False
         self._gaze_task_active = False
+        self._imu_task_active = False
+        self._event_task_active = False
         self.camera_fps_tracker = RollingFPS(window_seconds=5.0)
         self._frame_queue: asyncio.Queue[FramePacket] = asyncio.Queue(maxsize=6)
         self._gaze_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=32)
+        self._imu_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+        self._event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
 
     def _update_running_flag(self) -> None:
         """Update the aggregate running flag based on individual streams."""
-        self.running = self._video_task_active or self._gaze_task_active
+        self.running = any(
+            (
+                self._video_task_active,
+                self._gaze_task_active,
+                self._imu_task_active,
+                self._event_task_active,
+            )
+        )
 
-    async def start_streaming(self, video_url: str, gaze_url: str):
+    async def start_streaming(
+        self,
+        video_url: str,
+        gaze_url: str,
+        *,
+        imu_url: Optional[str] = None,
+        events_url: Optional[str] = None,
+    ):
         """Start video and gaze streaming tasks"""
         if self.running:
             return
 
         self._video_task_active = True
         self._gaze_task_active = True
+        self._imu_task_active = bool(imu_url)
+        self._event_task_active = bool(events_url)
         self._update_running_flag()
         logger.info(f"Video URL: {video_url}")
         logger.info(f"Gaze URL: {gaze_url}")
+        if imu_url:
+            logger.info(f"IMU URL: {imu_url}")
+        if events_url:
+            logger.info(f"Events URL: {events_url}")
 
         # Create streaming tasks
         self.tasks = [
@@ -65,12 +96,23 @@ class StreamHandler:
             asyncio.create_task(self._stream_gaze_data(gaze_url), name="gaze-stream"),
         ]
 
+        if imu_url:
+            self.tasks.append(
+                asyncio.create_task(self._stream_imu_data(imu_url), name="imu-stream")
+            )
+        if events_url:
+            self.tasks.append(
+                asyncio.create_task(self._stream_eye_events(events_url), name="events-stream")
+            )
+
         return self.tasks
 
     async def stop_streaming(self):
         """Stop streaming tasks"""
         self._video_task_active = False
         self._gaze_task_active = False
+        self._imu_task_active = False
+        self._event_task_active = False
         self._update_running_flag()
 
         # Cancel all tasks
@@ -184,6 +226,74 @@ class StreamHandler:
             self._gaze_task_active = False
             self._update_running_flag()
 
+    async def _stream_imu_data(self, imu_url: str):
+        """Continuously stream IMU samples."""
+        logger.info("Starting IMU stream...")
+
+        imu_count = 0
+        try:
+            async for imu in receive_imu_data(imu_url):
+                if not self.running:
+                    break
+
+                imu_count += 1
+                if imu_count == 1:
+                    logger.info("First IMU sample received!")
+                    logger.info(
+                        "IMU sample attributes: %s",
+                        [attr for attr in dir(imu) if not attr.startswith("_")],
+                    )
+
+                self.last_imu = imu
+                self._enqueue_latest(self._imu_queue, imu)
+
+                if imu_count % 100 == 1:
+                    logger.info("IMU samples received: %d", imu_count)
+
+        except asyncio.CancelledError:
+            logger.debug("IMU stream task cancelled")
+            raise
+        except Exception as exc:
+            if self.running:
+                logger.error("IMU stream error: %s", exc)
+        finally:
+            self._imu_task_active = False
+            self._update_running_flag()
+
+    async def _stream_eye_events(self, events_url: str):
+        """Continuously stream eye event samples."""
+        logger.info("Starting eye events stream...")
+
+        event_count = 0
+        try:
+            async for event in receive_eye_events_data(events_url):
+                if not self.running:
+                    break
+
+                event_count += 1
+                if event_count == 1:
+                    logger.info("First eye event received!")
+                    logger.info(
+                        "Eye event attributes: %s",
+                        [attr for attr in dir(event) if not attr.startswith("_")],
+                    )
+
+                self.last_event = event
+                self._enqueue_latest(self._event_queue, event)
+
+                if event_count % 50 == 1:
+                    logger.info("Eye events received: %d", event_count)
+
+        except asyncio.CancelledError:
+            logger.debug("Eye events stream task cancelled")
+            raise
+        except Exception as exc:
+            if self.running:
+                logger.error("Eye events stream error: %s", exc)
+        finally:
+            self._event_task_active = False
+            self._update_running_flag()
+
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """Get the latest video frame"""
         return self.last_frame
@@ -196,6 +306,14 @@ class StreamHandler:
         """Get the latest gaze data"""
         return self.last_gaze
 
+    def get_latest_imu(self) -> Optional[Any]:
+        """Get the latest IMU sample."""
+        return self.last_imu
+
+    def get_latest_event(self) -> Optional[Any]:
+        """Get the latest eye event sample."""
+        return self.last_event
+
     def get_camera_fps(self) -> float:
         """Get rolling camera FPS over the last 5 seconds"""
         return self.camera_fps_tracker.get_fps()
@@ -207,6 +325,14 @@ class StreamHandler:
     async def next_gaze(self, timeout: Optional[float] = None) -> Optional[Any]:
         """Return the next queued gaze sample, or ``None`` on timeout."""
         return await self._dequeue_with_timeout(self._gaze_queue, timeout)
+
+    async def next_imu(self, timeout: Optional[float] = None) -> Optional[Any]:
+        """Return the next queued IMU sample, or ``None`` on timeout."""
+        return await self._dequeue_with_timeout(self._imu_queue, timeout)
+
+    async def next_event(self, timeout: Optional[float] = None) -> Optional[Any]:
+        """Return the next queued eye event, or ``None`` on timeout."""
+        return await self._dequeue_with_timeout(self._event_queue, timeout)
 
     @staticmethod
     def _enqueue_latest(queue: asyncio.Queue, item: Any) -> None:
@@ -230,7 +356,7 @@ class StreamHandler:
             return None
 
     def _drain_queues(self) -> None:
-        for queue in (self._frame_queue, self._gaze_queue):
+        for queue in (self._frame_queue, self._gaze_queue, self._imu_queue, self._event_queue):
             while True:
                 try:
                     queue.get_nowait()
