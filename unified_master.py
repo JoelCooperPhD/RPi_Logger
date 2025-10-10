@@ -17,12 +17,18 @@ from queue import Queue, Empty
 from datetime import datetime
 import argparse
 import logging
+from pathlib import Path
+from typing import Optional
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+from cli_utils import (
+    add_common_cli_arguments,
+    configure_logging,
+    ensure_directory,
+    parse_resolution,
+    positive_float,
+    positive_int,
 )
+
 logger = logging.getLogger("UnifiedMaster")
 
 
@@ -45,15 +51,12 @@ class ModuleController:
         """Start the module subprocess"""
         # Build command - use full path to uv
         uv_path = "/home/rs-pi-2/.local/bin/uv"
-        cmd = [uv_path, "run", self.module_path, "--slave"]
+        cmd = [uv_path, "run", self.module_path]
         cmd.extend(self.args)
 
         self.logger.info("Starting module: %s", " ".join(cmd))
 
         try:
-            # Get the base directory for the module
-            module_dir = os.path.dirname(os.path.abspath(self.module_path))
-
             self.proc = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -249,8 +252,8 @@ class UnifiedMaster:
     def start_modules(self):
         """Start all available modules"""
         modules_config = [
-            ("camera", "Modules/Cameras/camera_module.py", self.camera_args),
-            ("eyetracker", "Modules/EyeTracker/fixation_recorder.py", self.tracker_args)
+            ("camera", "Modules/Cameras/main_camera.py", self.camera_args),
+            ("eyetracker", "Modules/EyeTracker/main_eye_tracker.py", self.tracker_args)
         ]
 
         started = []
@@ -493,54 +496,146 @@ class UnifiedMaster:
         self.get_status()
 
 
-def main():
+
+def parse_args(argv: Optional[list[str]] = None):
     parser = argparse.ArgumentParser(description="Unified Master Controller")
+    add_common_cli_arguments(
+        parser,
+        default_output=Path("unified_recordings"),
+        allowed_modes=("interactive", "demo"),
+        default_mode="interactive",
+    )
     parser.add_argument("--demo", action="store_true", help="Run demo mode")
-    parser.add_argument("--camera-timeout", type=int, default=5,
-                       help="Camera discovery timeout (seconds)")
-    parser.add_argument("--tracker-timeout", type=int, default=10,
-                       help="Eye tracker discovery timeout (seconds)")
-    parser.add_argument("--camera-fps", type=int, default=25,
-                       help="Camera recording FPS")
-    parser.add_argument("--camera-width", type=int, default=1280,
-                       help="Camera recording width")
-    parser.add_argument("--camera-height", type=int, default=720,
-                       help="Camera recording height")
-    parser.add_argument("--allow-partial", action="store_true",
-                       help="Allow running with single camera")
+    parser.add_argument(
+        "--camera-resolution",
+        type=parse_resolution,
+        default=(1280, 720),
+        help="Camera recording resolution as WIDTHxHEIGHT",
+    )
+    parser.add_argument(
+        "--camera-fps",
+        type=positive_float,
+        default=25.0,
+        help="Camera recording frames per second",
+    )
+    parser.add_argument(
+        "--camera-discovery-timeout",
+        type=positive_float,
+        default=5.0,
+        help="Camera discovery timeout (seconds)",
+    )
+    parser.add_argument(
+        "--camera-discovery-retry",
+        type=positive_float,
+        default=3.0,
+        help="Camera discovery retry interval when no devices are found",
+    )
+    parser.add_argument(
+        "--camera-min-count",
+        type=positive_int,
+        default=2,
+        help="Minimum number of cameras required at startup",
+    )
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Allow running with fewer cameras than the minimum",
+    )
+    parser.add_argument(
+        "--tracker-resolution",
+        type=parse_resolution,
+        default=(1280, 720),
+        help="Eye tracker scene resolution as WIDTHxHEIGHT",
+    )
+    parser.add_argument(
+        "--tracker-target-fps",
+        type=positive_float,
+        default=5.0,
+        help="Eye tracker processing FPS",
+    )
+    parser.add_argument(
+        "--tracker-retry-delay",
+        type=positive_float,
+        default=5.0,
+        help="Seconds to wait between eye tracker connection retries",
+    )
+    parser.add_argument(
+        "--tracker-reconnect-interval",
+        type=positive_float,
+        default=5.0,
+        help="Seconds between background reconnect attempts when eye tracker is absent",
+    )
+    parser.add_argument(
+        "--tracker-max-retries",
+        type=int,
+        default=3,
+        help="Additional eye tracker connection attempts (-1 for infinite)",
+    )
+    parser.add_argument(
+        "--tracker-preview-width",
+        type=positive_int,
+        default=640,
+        help="Preview width for diagnostic rendering",
+    )
+    parser.add_argument(
+        "--session-prefix",
+        type=str,
+        default="session",
+        help="Prefix applied to module session folders",
+    )
 
-    args = parser.parse_args()
+    return parser.parse_args(argv)
 
-    # Build module arguments
+
+def main(argv: Optional[list[str]] = None) -> None:
+    args = parse_args(argv)
+    if args.demo:
+        args.mode = "demo"
+    configure_logging(args.log_level, args.log_file)
+
+    args.output_dir = ensure_directory(args.output_dir)
+    camera_output_dir = ensure_directory(args.output_dir / "camera")
+    tracker_output_dir = ensure_directory(args.output_dir / "eyetracker")
+
+    camera_res = args.camera_resolution
+    tracker_res = args.tracker_resolution
+
     camera_args = [
-        "--timeout", str(args.camera_timeout),
-        "--fps", str(args.camera_fps),
-        "--width", str(args.camera_width),
-        "--height", str(args.camera_height),
-        "--output", "unified_recordings/camera"
+        "--mode", "slave",
+        "--resolution", f"{camera_res[0]}x{camera_res[1]}",
+        "--target-fps", str(args.camera_fps),
+        "--discovery-timeout", str(args.camera_discovery_timeout),
+        "--discovery-retry", str(args.camera_discovery_retry),
+        "--min-cameras", str(args.camera_min_count),
+        "--output-dir", str(camera_output_dir),
+        "--session-prefix", args.session_prefix,
+        "--log-level", args.log_level,
     ]
     if args.allow_partial:
         camera_args.append("--allow-partial")
 
     tracker_args = [
-        "--timeout", str(args.tracker_timeout),
-        "--output", "unified_recordings/eyetracker"
+        "--mode", "headless",
+        "--output-dir", str(tracker_output_dir),
+        "--target-fps", str(args.tracker_target_fps),
+        "--resolution", f"{tracker_res[0]}x{tracker_res[1]}",
+        "--retry-delay", str(args.tracker_retry_delay),
+        "--max-retries", str(args.tracker_max_retries),
+        "--preview-width", str(args.tracker_preview_width),
+        "--reconnect-interval", str(args.tracker_reconnect_interval),
+        "--log-level", args.log_level,
     ]
 
-    # Create master controller
     master = UnifiedMaster(camera_args, tracker_args)
 
     try:
-        # Start modules
         if not master.start_modules():
             print("\nNo modules could be started. Exiting...")
             sys.exit(1)
 
-        # Give modules a moment to stabilize
         time.sleep(1)
 
-        # Run in selected mode
-        if args.demo:
+        if args.mode == "demo":
             master.demo_mode()
         else:
             master.interactive_mode()

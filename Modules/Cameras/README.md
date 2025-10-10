@@ -24,31 +24,33 @@ A professional multi-camera recording system for Raspberry Pi 5 with master-slav
 
 ## Quick Start
 
+> **Hot-plug friendly:** the controller stays alive when no cameras are present and retries discovery every `--discovery-retry` seconds so you can connect hardware without restarting.
+
 ### Standalone Mode (Interactive)
 
 ```bash
 # Start camera system with default settings
-uv run camera_module.py
+uv run main_camera.py
 
 # Custom resolution and frame rate
-uv run camera_module.py --width 1280 --height 720 --fps 25
+uv run main_camera.py --resolution 1280x720 --target-fps 25
 
 # Custom output directory
-uv run camera_module.py --output recordings
+uv run main_camera.py --output-dir recordings/cameras
 ```
 
 ### Slave Mode (Programmatic Control)
 
 ```bash
 # Start in slave mode for master control
-uv run camera_module.py --slave --output recordings
+uv run main_camera.py --mode slave --discovery-retry 3 --output-dir recordings/cameras
 ```
 
 ### Master Control Example
 
 ```bash
 # Run example master program
-uv run camera_master.py
+uv run examples/camera_master.py
 ```
 
 ## Usage Modes
@@ -62,7 +64,7 @@ uv run camera_master.py
 
 ### Slave Mode Commands
 
-Send JSON commands via stdin when running in `--slave` mode:
+Send JSON commands via stdin when running in `--mode slave`:
 
 ```json
 {"command": "start_recording"}
@@ -76,22 +78,42 @@ Send JSON commands via stdin when running in `--slave` mode:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--width` | 1920 | Recording width in pixels |
-| `--height` | 1080 | Recording height in pixels |
-| `--fps` | 30 | Frames per second |
-| `--preview-width` | 640 | Preview window width |
-| `--preview-height` | 360 | Preview window height |
-| `--output` | "recordings" | Output directory for files |
-| `--slave` | False | Run in slave mode (no GUI) |
+| `--resolution` | 1920x1080 | Recording resolution as WIDTHxHEIGHT |
+| `--target-fps` | 30 | Recording frames per second |
+| `--preview-size` | 640x360 | Preview window size as WIDTHxHEIGHT |
+| `--output-dir` | `recordings/cameras` | Output directory for session folders |
+| `--mode` | interactive | Execution mode (`interactive`, `headless`, `slave`) |
+| `--discovery-timeout` | 5 | Seconds to wait for camera discovery |
+| `--discovery-retry` | 3 | Seconds between discovery retries when no devices are found |
+| `--min-cameras` | 2 | Minimum cameras required before starting |
+| `--allow-partial` | False | Allow running with fewer cameras than minimum |
+| `--session-prefix` | session | Prefix for generated session folders |
 
 ## File Structure
 
 ```
 Cameras/
-├── camera_module.py          # Main multi-camera system
-├── camera_master.py          # Example master control program
+├── main_camera.py            # Main multi-camera system entry point
 ├── README.md                 # This documentation
-└── picamera2_reference.md    # Technical reference
+├── config.txt                # Overlay configuration (JSON)
+├── camera_core/              # Core camera system modules
+│   ├── camera_capture_loop.py    # Async capture at 30 FPS
+│   ├── camera_collator_loop.py   # Timing-based collation
+│   ├── camera_processor.py       # Processing orchestrator
+│   ├── camera_overlay.py         # Overlay rendering
+│   ├── camera_display.py         # Display management
+│   ├── camera_recorder.py        # Video recording
+│   ├── camera_handler.py         # Single camera coordinator
+│   ├── camera_system.py          # Multi-camera system
+│   ├── camera_supervisor.py      # Retry wrapper
+│   ├── camera_utils.py           # Utilities
+│   ├── __init__.py               # Package exports
+│   └── README.md                 # Core module documentation
+├── examples/                 # Example scripts and demos
+│   ├── camera_master.py      # Example master control program
+│   └── simple_camera_test*.py # Simple test scripts
+└── docs/                     # Technical documentation
+    └── architecture.md       # System architecture details
 ```
 
 ## Session Output
@@ -106,9 +128,33 @@ Snapshots (`snapshot_cam{N}_TIMESTAMP.jpg`) continue to save alongside the video
 
 ## Architecture
 
+### System Overview
+
+The camera system uses a **3-loop async architecture** for optimal performance:
+
+```
+Camera Hardware (30 FPS)
+    ↓
+Capture Loop (30 FPS) → extracts hardware_fps from metadata
+    ↓
+Collator Loop (10 FPS) → timing-based frame collation
+    ↓
+Processor Loop → orchestrates processing pipeline
+    ├→ Overlay Renderer → adds text, FPS, counters
+    ├→ Display Manager → thread-safe preview frames
+    └→ Recording Manager → ffmpeg encoding + timing CSV
+```
+
+**Key Features:**
+- **Hardware FPS Decoupling**: Camera captures at 30 FPS, display/recording at 10 FPS
+- **Independent Async Loops**: Capture, collator, and processor run concurrently
+- **Metadata Propagation**: Hardware FPS flows from camera → capture → collator → processor → overlay
+- **Frame Management**: Automatic duplication/skipping based on FPS mismatch
+
 ### Standalone Mode
 - Multiple OpenCV preview windows (one per camera)
-- Real-time FPS display and timestamps
+- Real-time FPS display: `FPS_10: 10 / 30` (collation / hardware)
+- Frame counters: `Frames: 100 / 300` (collated / captured)
 - Interactive keyboard controls
 - Direct camera control
 
@@ -117,6 +163,12 @@ Snapshots (`snapshot_cam{N}_TIMESTAMP.jpg`) continue to save alongside the video
 - JSON command protocol via stdin/stdout
 - Status reporting to master process
 - Signal handling for graceful shutdown
+- Optional base64-encoded frame streaming for remote preview
+
+### Headless Mode
+- Continuous recording without preview
+- Minimal CPU overhead
+- Suitable for long-running background recording
 
 ## Performance Characteristics
 
@@ -137,7 +189,7 @@ All dependencies are managed via `uv` package manager.
 
 ### Common Issues
 
-1. **Camera Busy Error**: Kill existing processes with `pkill -f camera_module`
+1. **Camera Busy Error**: Kill existing processes with `pkill -f main_camera`
 2. **Import Errors**: Use `uv run` instead of direct Python execution
 3. **Permission Issues**: Ensure user is in camera/video groups
 4. **Resource Conflicts**: Only one instance can access cameras at a time
@@ -155,7 +207,7 @@ All dependencies are managed via `uv` package manager.
 
 ```bash
 # Start interactive mode
-uv run camera_module.py --width 1280 --height 720
+uv run main_camera.py --width 1280 --height 720
 
 # Controls:
 # Press 'r' to start recording
@@ -171,7 +223,7 @@ import json
 
 # Start camera system
 proc = subprocess.Popen(
-    ["uv", "run", "camera_module.py", "--slave"],
+    ["uv", "run", "main_camera.py", "--slave"],
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     text=True

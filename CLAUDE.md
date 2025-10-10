@@ -68,7 +68,7 @@ python script.py
 RPi_Logger/
 ├── Modules/
 │   └── Cameras/
-│       ├── camera_module.py         # Main multi-camera system
+│       ├── main_camera.py           # Main multi-camera system
 │       ├── camera_master.py         # Example master control program
 │       ├── README.md                # Module documentation
 │       └── picamera2_reference.md   # Technical reference
@@ -78,7 +78,7 @@ RPi_Logger/
 
 ## Key Features
 
-### Camera Module (`camera_module.py`)
+### Camera Module (`main_camera.py`)
 - **Standalone Mode**: Interactive preview with keyboard controls
 - **Slave Mode**: Command-driven operation for master-slave architecture
 - **Signal Handling**: Graceful shutdown with SIGTERM/SIGINT
@@ -88,12 +88,12 @@ RPi_Logger/
 
 **Standalone Mode:**
 ```bash
-uv run camera_module.py --width 1280 --height 720 --fps 25
+uv run main_camera.py --width 1280 --height 720 --fps 25
 ```
 
 **Slave Mode:**
 ```bash
-uv run camera_module.py --slave --output recordings
+uv run main_camera.py --mode slave --output-dir recordings/cameras
 ```
 
 **Master Control:**
@@ -112,7 +112,7 @@ uv run camera_master.py
 
 Run comprehensive test suite:
 ```bash
-uv run camera_module.py --help
+uv run main_camera.py --help
 ```
 
 Test individual components:
@@ -158,6 +158,6 @@ uv run camera_master.py
 
 ## Common Issues
 
-1. **Camera Busy Error**: Kill existing camera processes with `pkill -f camera_module`
+1. **Camera Busy Error**: Kill existing camera processes with `pkill -f main_camera`
 2. **Import Errors**: Use `uv run` instead of direct Python execution
 3. **Permission Issues**: Ensure user is in camera/video groups

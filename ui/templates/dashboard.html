@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPi Logger - Control Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0f1117;
+            --bg-secondary: #1a1d2e;
+            --bg-card: #1e2139;
+            --sidebar-bg: #16192a;
+            --text-primary: #e4e6eb;
+            --text-secondary: #8b92a7;
+            --accent-cyan: #00d4ff;
+            --accent-blue: #4c6fff;
+            --accent-purple: #7c3aed;
+            --accent-green: #10b981;
+            --accent-yellow: #fbbf24;
+            --accent-red: #ef4444;
+            --border-color: #2a2f45;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow-x: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 240px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            z-index: 100;
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sidebar-header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-header p {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+            overflow-y: auto;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: all 0.2s;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+        }
+
+        .nav-item:hover {
+            background: rgba(76, 111, 255, 0.05);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: rgba(76, 111, 255, 0.1);
+            color: var(--accent-cyan);
+            border-left-color: var(--accent-cyan);
+        }
+
+        .nav-item i {
+            width: 20px;
+            text-align: center;
+            font-size: 1.1rem;
+        }
+
+        /* Main content */
+        .main-content {
+            margin-left: 240px;
+            min-height: 100vh;
+        }
+
+        .top-bar {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 32px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .top-bar-left h2 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .top-bar-left p {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .top-bar-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--accent-green);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--accent-red);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--accent-yellow);
+            color: var(--bg-primary);
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Content area */
+        .content-area {
+            padding: 24px 32px;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--text-primary);
+        }
+
+        .tab.active {
+            color: var(--accent-cyan);
+            border-bottom-color: var(--accent-cyan);
+        }
+
+        /* Panel */
+        .panel {
+            display: none;
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+
+        /* Video preview */
+        .video-preview {
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            aspect-ratio: 16 / 9;
+            position: relative;
+        }
+
+        .video-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 20px;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), transparent);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .live-badge {
+            background: rgba(239, 68, 68, 0.9);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: white;
+        }
+
+        /* Settings form */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        /* Stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent-cyan);
+        }
+
+        /* Status badge */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-offline {
+            background: rgba(139, 146, 167, 0.2);
+            color: var(--text-secondary);
+        }
+
+        .status-starting,
+        .status-reconnecting {
+            background: rgba(251, 191, 36, 0.2);
+            color: var(--accent-yellow);
+        }
+
+        .status-ready {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+        }
+
+        .status-recording {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-red);
+            animation: pulse 2s infinite;
+        }
+
+        .status-error {
+            background: rgba(239, 68, 68, 0.3);
+            color: var(--accent-red);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            padding: 16px 20px;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            transform: translateX(500px);
+            transition: transform 0.3s;
+            z-index: 1000;
+            max-width: 400px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast-success {
+            background: var(--accent-green);
+            color: white;
+        }
+
+        .toast-error {
+            background: var(--accent-red);
+            color: white;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent-cyan);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Toggle switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: var(--border-color);
+            transition: 0.3s;
+            border-radius: 24px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: var(--accent-green);
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        .camera-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .camera-label {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            .main-content {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h1><i class="fas fa-video"></i> RPi Logger</h1>
+            <p>Data Collection System</p>
+        </div>
+        <nav class="sidebar-nav">
+            <a class="nav-item active" data-module="eye_tracker">
+                <i class="fas fa-eye"></i>
+                <span>Eye Tracker</span>
+            </a>
+            <a class="nav-item" data-module="camera">
+                <i class="fas fa-camera"></i>
+                <span>Cameras</span>
+            </a>
+            <a class="nav-item" data-module="audio">
+                <i class="fas fa-microphone"></i>
+                <span>Audio</span>
+            </a>
+        </nav>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <div class="top-bar-left">
+                <h2 id="module-title">Eye Tracker</h2>
+                <p id="module-subtitle">Configure and monitor eye tracking system</p>
+            </div>
+            <div class="top-bar-actions">
+                <button class="btn btn-success" id="btn-start">
+                    <i class="fas fa-play"></i> Start
+                </button>
+                <button class="btn btn-primary" id="btn-record">
+                    <i class="fas fa-circle"></i> Record
+                </button>
+                <button class="btn btn-danger" id="btn-stop-record" style="display:none;">
+                    <i class="fas fa-stop"></i> Stop Recording
+                </button>
+                <button class="btn btn-warning" id="btn-stop" style="display:none;">
+                    <i class="fas fa-stop"></i> Stop
+                </button>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="content-area">
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" data-tab="preview">
+                    <i class="fas fa-video"></i> Preview
+                </button>
+                <button class="tab" data-tab="settings">
+                    <i class="fas fa-cog"></i> Settings
+                </button>
+            </div>
+
+            <!-- Preview Panel -->
+            <div class="panel active" id="preview-panel">
+                <!-- Status Card -->
+                <div class="card">
+                    <div class="stats-grid" id="stats-container">
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading module status...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Video Preview -->
+                <div class="card" id="video-container">
+                    <!-- Will be populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Settings Panel -->
+            <div class="panel" id="settings-panel">
+                <div class="card" id="settings-container">
+                    <!-- Will be populated dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast" class="toast"></div>
+
+    <script>
+        let currentModule = 'eye_tracker';
+        let currentTab = 'preview';
+        let moduleData = {};
+        let statusInterval;
+
+        const moduleTitles = {
+            'eye_tracker': {
+                title: 'Eye Tracker',
+                subtitle: 'Configure and monitor eye tracking system',
+                icon: 'fa-eye'
+            },
+            'camera': {
+                title: 'Cameras',
+                subtitle: 'Manage camera feeds and recording settings',
+                icon: 'fa-camera'
+            },
+            'audio': {
+                title: 'Audio',
+                subtitle: 'Configure audio recording devices',
+                icon: 'fa-microphone'
+            }
+        };
+
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${message}`;
+            toast.className = `toast toast-${type} show`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 4000);
+        }
+
+        async function apiCall(url, method = 'GET', body = null) {
+            try {
+                const options = {
+                    method,
+                    headers: {'Content-Type': 'application/json'}
+                };
+                if (body) options.body = JSON.stringify(body);
+
+                const response = await fetch(url, options);
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error(data.error || 'Request failed');
+                }
+
+                return data;
+            } catch (error) {
+                showToast(error.message, 'error');
+                throw error;
+            }
+        }
+
+        async function updateStatus() {
+            try {
+                const data = await fetch('/api/status').then(r => r.json());
+                if (!data.success) return;
+
+                moduleData = data.modules;
+                updateCurrentModuleDisplay();
+            } catch (error) {
+                console.error('Status update failed:', error);
+            }
+        }
+
+        function updateCurrentModuleDisplay() {
+            const module = moduleData[currentModule];
+            if (!module) return;
+
+            updateStats(module);
+            updateButtons(module);
+
+            if (currentTab === 'preview') {
+                updateVideoPreview(module);
+            } else {
+                updateSettings(module);
+            }
+        }
+
+        function updateStats(module) {
+            const container = document.getElementById('stats-container');
+
+            let stats = {
+                'Status': `<span class="status-badge status-${module.state}">${module.state}</span>`,
+                'Recording': module.recording ? '<span class="status-badge status-recording">ACTIVE</span>' : '<span class="status-badge status-offline">IDLE</span>'
+            };
+
+            if (currentModule === 'camera') {
+                stats['Cameras'] = module.details.cameras || 0;
+                stats['FPS'] = module.details.frame_rate || 0;
+            } else if (currentModule === 'eye_tracker') {
+                stats['Frames'] = module.details.frames || 0;
+                stats['Gaze Samples'] = module.details.gaze_samples || 0;
+            } else if (currentModule === 'audio') {
+                stats['Devices'] = module.details.devices ? Object.keys(module.details.devices).length : 0;
+                stats['Selected'] = module.details.selected ? module.details.selected.length : 0;
+            }
+
+            container.innerHTML = Object.entries(stats).map(([key, value]) => `
+                <div class="stat-card">
+                    <div class="stat-label">${key}</div>
+                    <div class="stat-value">${value}</div>
+                </div>
+            `).join('');
+        }
+
+        function updateButtons(module) {
+            const canStart = !['starting', 'ready', 'recording', 'reconnecting'].includes(module.state);
+            const canStop = ['starting', 'ready', 'recording', 'reconnecting'].includes(module.state);
+            const canRecord = module.state === 'ready' && !module.recording;
+            const canStopRecord = module.recording;
+
+            document.getElementById('btn-start').style.display = canStart ? 'inline-flex' : 'none';
+            document.getElementById('btn-stop').style.display = canStop ? 'inline-flex' : 'none';
+            document.getElementById('btn-record').style.display = canRecord ? 'inline-flex' : 'none';
+            document.getElementById('btn-stop-record').style.display = canStopRecord ? 'inline-flex' : 'none';
+        }
+
+        function updateVideoPreview(module) {
+            const container = document.getElementById('video-container');
+
+            if (currentModule === 'eye_tracker' && module.state !== 'offline') {
+                container.innerHTML = `
+                    <div class="card-title">Live Preview</div>
+                    <div class="video-preview">
+                        <img src="/video/eye_tracker" alt="Eye Tracker Feed">
+                        <div class="video-overlay">
+                            <div style="color: white; font-weight: 600;">
+                                <i class="fas fa-eye"></i> Scene Camera
+                            </div>
+                            <div class="live-badge">
+                                <span class="status-dot"></span>
+                                LIVE
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (currentModule === 'camera' && module.state !== 'offline') {
+                const numCameras = module.details.cameras || 0;
+                let cameraHTML = '<div class="card-title">Live Camera Feeds</div>';
+
+                if (numCameras === 0) {
+                    cameraHTML += `
+                        <div class="video-preview">
+                            <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary);">
+                                <div style="text-align: center;">
+                                    <i class="fas fa-camera-slash" style="font-size: 3rem; margin-bottom: 16px;"></i>
+                                    <p>No cameras detected</p>
+                                    <p style="font-size: 0.875rem; margin-top: 8px;">Please connect cameras to the Pi's CSI ports</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    cameraHTML += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px;">';
+                    for (let i = 0; i < numCameras; i++) {
+                        cameraHTML += `
+                            <div>
+                                <div class="camera-controls">
+                                    <span class="camera-label"><i class="fas fa-camera"></i> Camera ${i} Preview</span>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="camera-preview-${i}" checked data-camera-id="${i}">
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="video-preview">
+                                    <img src="/video/camera/${i}" alt="Camera ${i} Feed" id="camera-feed-${i}">
+                                    <div class="video-overlay">
+                                        <div style="color: white; font-weight: 600;">
+                                            <i class="fas fa-camera"></i> Camera ${i}
+                                        </div>
+                                        <div class="live-badge">
+                                            <span class="status-dot"></span>
+                                            LIVE
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    cameraHTML += '</div>';
+                }
+                container.innerHTML = cameraHTML;
+
+                // Attach toggle event listeners
+                for (let i = 0; i < numCameras; i++) {
+                    const toggle = document.getElementById(`camera-preview-${i}`);
+                    if (toggle) {
+                        toggle.addEventListener('change', handleCameraPreviewToggle);
+                    }
+                }
+            } else {
+                container.innerHTML = `
+                    <div class="card-title">Live Preview</div>
+                    <div class="video-preview">
+                        <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary);">
+                            <div style="text-align: center;">
+                                <i class="fas fa-video-slash" style="font-size: 3rem; margin-bottom: 16px;"></i>
+                                <p>Preview not available</p>
+                                <p style="font-size: 0.875rem; margin-top: 8px;">Start the module to view live feed</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function updateSettings(module) {
+            const container = document.getElementById('settings-container');
+            container.innerHTML = '<div class="card-title">Module Settings</div>';
+
+            if (currentModule === 'camera') {
+                container.innerHTML += `
+                    <div class="form-group">
+                        <label class="form-label">Resolution</label>
+                        <select class="form-select">
+                            <option>1920x1080 (Full HD)</option>
+                            <option selected>1280x720 (HD)</option>
+                            <option>640x480 (SD)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Frame Rate (FPS)</label>
+                        <input type="number" class="form-input" value="25" min="1" max="60">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Output Directory</label>
+                        <input type="text" class="form-input" value="recordings/camera" readonly>
+                    </div>
+                    <button class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save Settings
+                    </button>
+                `;
+            } else if (currentModule === 'eye_tracker') {
+                container.innerHTML += `
+                    <div class="form-group">
+                        <label class="form-label">Discovery Timeout (seconds)</label>
+                        <input type="number" class="form-input" value="10" min="1" max="30">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Reconnect Interval (seconds)</label>
+                        <input type="number" class="form-input" value="5" min="1" max="30">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Output Directory</label>
+                        <input type="text" class="form-input" value="recordings/eye_tracker" readonly>
+                    </div>
+                    <button class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save Settings
+                    </button>
+                `;
+            } else if (currentModule === 'audio') {
+                container.innerHTML += `
+                    <div class="form-group">
+                        <label class="form-label">Sample Rate (Hz)</label>
+                        <select class="form-select">
+                            <option>44100</option>
+                            <option selected>48000</option>
+                            <option>96000</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Auto-select New Devices</label>
+                        <select class="form-select">
+                            <option selected>Yes</option>
+                            <option>No</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Output Directory</label>
+                        <input type="text" class="form-input" value="recordings/audio" readonly>
+                    </div>
+                    <button class="btn btn-primary">
+                        <i class="fas fa-save"></i> Save Settings
+                    </button>
+                `;
+            }
+        }
+
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const module = item.dataset.module;
+                if (module === currentModule) return;
+
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+
+                currentModule = module;
+                const info = moduleTitles[module];
+                document.getElementById('module-title').textContent = info.title;
+                document.getElementById('module-subtitle').textContent = info.subtitle;
+
+                updateCurrentModuleDisplay();
+            });
+        });
+
+        // Tabs
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+                if (tabName === currentTab) return;
+
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                document.getElementById(tabName + '-panel').classList.add('active');
+
+                currentTab = tabName;
+                updateCurrentModuleDisplay();
+            });
+        });
+
+        // Camera preview toggle handler
+        async function handleCameraPreviewToggle(event) {
+            const cameraId = parseInt(event.target.dataset.cameraId);
+            const enabled = event.target.checked;
+
+            try {
+                await apiCall(`/api/camera/preview/${cameraId}/toggle`, 'POST', { enabled });
+                showToast(`Camera ${cameraId} preview ${enabled ? 'enabled' : 'disabled'}`);
+            } catch (error) {
+                // Revert toggle on error
+                event.target.checked = !enabled;
+            }
+        }
+
+        // Control buttons
+        document.getElementById('btn-start').addEventListener('click', async () => {
+            const data = await apiCall(`/api/module/${currentModule}/start`, 'POST');
+            showToast(data.message);
+            updateStatus();
+        });
+
+        document.getElementById('btn-stop').addEventListener('click', async () => {
+            const data = await apiCall(`/api/module/${currentModule}/stop`, 'POST');
+            showToast(data.message);
+            updateStatus();
+        });
+
+        document.getElementById('btn-record').addEventListener('click', async () => {
+            const data = await apiCall(`/api/module/${currentModule}/start_recording`, 'POST');
+            showToast(data.message);
+            updateStatus();
+        });
+
+        document.getElementById('btn-stop-record').addEventListener('click', async () => {
+            const data = await apiCall(`/api/module/${currentModule}/stop_recording`, 'POST');
+            showToast(data.message);
+            updateStatus();
+        });
+
+        // Initialize
+        updateStatus();
+        statusInterval = setInterval(updateStatus, 2000);
+
+        window.addEventListener('beforeunload', () => {
+            clearInterval(statusInterval);
+        });
+    </script>
+</body>
+</html>

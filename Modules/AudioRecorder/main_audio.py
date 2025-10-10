@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
+import argparse
 import asyncio
+import logging
 import sys
 import select
 import tty
@@ -13,6 +15,12 @@ import numpy as np
 import wave
 import aiofiles
 from typing import Dict, List, Optional
+
+# Add project root to path for cli_utils import
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from cli_utils import add_common_cli_arguments, configure_logging, ensure_directory, positive_int
+
+logger = logging.getLogger("audio_recorder")
 
 
 async def get_audio_input_devices():
@@ -66,10 +74,11 @@ async def get_usb_audio_devices():
 class MultiMicRecorder:
     """Manages multi-microphone recording with sounddevice."""
 
-    def __init__(self, experiment_dir):
+    def __init__(self, experiment_dir: Path, sample_rate: int, auto_select_new: bool) -> None:
         self.experiment_dir = experiment_dir
         self.recording_count = 0
-        self.sample_rate = 48000  # Changed from 44100 to 48000 for USB mic compatibility
+        self.sample_rate = sample_rate
+        self.auto_select_new = auto_select_new
 
         # Track multiple microphones
         self.available_devices = {}  # device_id -> device_info
@@ -79,10 +88,15 @@ class MultiMicRecorder:
         self.feedback_queue = asyncio.Queue()
         self.is_recording = False
         self.start_time = None
+        self._known_devices: set[int] = set()
 
     async def initialize_devices(self):
         """Initialize and display available input devices."""
+        previous = set(self._known_devices)
         self.available_devices = await get_audio_input_devices()
+        current = set(self.available_devices)
+        self._known_devices = current
+        newly_added = sorted(current - previous)
 
         print("\nAvailable Input Devices:")
         print("=" * 40)
@@ -93,6 +107,11 @@ class MultiMicRecorder:
         if not self.available_devices:
             print("No input devices found!")
         print()
+
+        if self.auto_select_new and newly_added and not self.selected_devices:
+            for device_id in newly_added:
+                if self.toggle_device_selection(device_id):
+                    break
 
     def toggle_device_selection(self, device_id: int):
         """Toggle device selection for recording."""
@@ -264,18 +283,18 @@ class MultiMicRecorder:
 
 
 
-async def create_experiment_folder():
-    """Create a timestamped experiment folder in the data directory."""
+async def create_experiment_folder(base_dir: Path, prefix: str) -> Path:
+    """Create a timestamped experiment folder in the configured directory."""
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    experiment_name = f"experiment_{timestamp}"
+    prefix = prefix.rstrip("_")
+    experiment_name = f"{prefix}_{timestamp}" if prefix else timestamp
 
-    data_dir = Path(__file__).parent / "data"
-    experiment_dir = data_dir / experiment_name
+    base_dir = ensure_directory(base_dir)
+    experiment_dir = base_dir / experiment_name
 
-    # Use thread pool for directory operations to avoid blocking
     loop = asyncio.get_event_loop()
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        await loop.run_in_executor(executor, lambda: data_dir.mkdir(exist_ok=True))
         await loop.run_in_executor(executor, lambda: experiment_dir.mkdir(exist_ok=True))
 
     return experiment_dir
@@ -288,17 +307,21 @@ async def get_keyboard_input():
     return None
 
 
-async def monitor_loop():
+async def monitor_loop(args) -> None:
     """Main monitoring loop with audio recording capability."""
     current_devices = {}
     running = True
 
     # Create experiment folder
-    experiment_dir = await create_experiment_folder()
+    experiment_dir = await create_experiment_folder(args.output_dir, args.session_prefix)
     print(f"Created experiment folder: {experiment_dir}")
 
     # Initialize multi-mic recorder
-    recorder = MultiMicRecorder(experiment_dir)
+    recorder = MultiMicRecorder(
+        experiment_dir,
+        sample_rate=args.sample_rate,
+        auto_select_new=args.auto_select_new,
+    )
     await recorder.initialize_devices()
 
     print("Multi-Microphone Audio Recorder - Controls:")
@@ -358,7 +381,32 @@ async def monitor_loop():
                 print("No USB audio devices")
             print()
 
+            await recorder.initialize_devices()
             current_devices = devices
+
+            if (
+                args.auto_record_on_attach
+                and recorder.selected_devices
+                and not recorder.is_recording
+            ):
+                logger.info("Auto-starting recording after device attachment")
+                started = recorder.start_recording()
+                if not started:
+                    logger.warning("Unable to auto-start recording; verify device selection")
+
+            missing_selected = {
+                device_id
+                for device_id in list(recorder.selected_devices)
+                if device_id not in recorder.available_devices
+            }
+            if missing_selected:
+                for device_id in missing_selected:
+                    recorder.selected_devices.discard(device_id)
+                    recorder.active_recorders.pop(device_id, None)
+                    logger.info("Deselected removed device %s", device_id)
+                if recorder.is_recording:
+                    logger.info("Stopping recording after device removal to keep data consistent")
+                    await recorder.stop_recording()
 
         await asyncio.sleep(0.005)  # 5ms
 
@@ -373,8 +421,52 @@ async def monitor_loop():
             pass
 
 
-if __name__ == "__main__":
+def parse_args(argv: Optional[list[str]] = None):
+    parser = argparse.ArgumentParser(description="Multi-microphone audio recorder")
+    add_common_cli_arguments(
+        parser,
+        default_output=Path("recordings/audio"),
+        allowed_modes=("interactive",),
+        default_mode="interactive",
+    )
+    parser.add_argument(
+        "--sample-rate",
+        type=positive_int,
+        default=48000,
+        help="Sample rate (Hz) for each active microphone",
+    )
+    parser.add_argument(
+        "--session-prefix",
+        type=str,
+        default="experiment",
+        help="Prefix for experiment directories",
+    )
+    parser.add_argument(
+        "--auto-record-on-attach",
+        action="store_true",
+        help="Automatically start recording when devices become available",
+    )
+    parser.add_argument(
+        "--no-auto-select-new",
+        action="store_false",
+        dest="auto_select_new",
+        help="Disable automatic selection of newly detected input devices",
+    )
+    parser.set_defaults(auto_select_new=True, auto_record_on_attach=False)
+
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    args = parse_args(argv)
+    configure_logging(args.log_level, args.log_file)
+    args.output_dir = ensure_directory(args.output_dir)
+
     try:
-        asyncio.run(monitor_loop())
+        asyncio.run(monitor_loop(args))
     except KeyboardInterrupt:
-        pass
+        logger.info("Interrupted by user")
+
+
+if __name__ == "__main__":
+    main()

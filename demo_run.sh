@@ -20,5 +20,10 @@ echo "Starting unified master controller..."
 echo "(Camera timeout: 5s, Eye tracker timeout: 5s)"
 echo
 
-# Run in demo mode with reasonable timeouts
-/home/rs-pi-2/.local/bin/uv run unified_master.py --demo --camera-timeout 5 --tracker-timeout 5 --allow-partial
+# Run in demo mode with updated CLI options
+/home/rs-pi-2/.local/bin/uv run unified_master.py --demo \
+  --camera-discovery-timeout 5 \
+  --camera-discovery-retry 3 \
+  --tracker-retry-delay 5 \
+  --tracker-reconnect-interval 5 \
+  --allow-partial

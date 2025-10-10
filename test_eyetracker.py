@@ -20,9 +20,9 @@ def test_eyetracker_detection(timeout=5):
     # Run the eye tracker module in slave mode to capture status messages
     cmd = [
         "/home/rs-pi-2/.local/bin/uv", "run",
-        "Modules/EyeTracker/fixation_recorder.py",
-        "--slave",
-        "--timeout", str(timeout)
+        "Modules/EyeTracker/main_eye_tracker.py",
+        "--retry-delay", str(timeout),
+        "--log-level", "warning"
     ]
 
     print("Starting eye tracker module...")
@@ -128,8 +128,8 @@ def test_standalone_mode():
 
     cmd = [
         "/home/rs-pi-2/.local/bin/uv", "run",
-        "Modules/EyeTracker/fixation_recorder.py",
-        "--timeout", "5"
+        "Modules/EyeTracker/main_eye_tracker.py",
+        "--retry-delay", "5"
     ]
 
     print("Running:", " ".join(cmd))

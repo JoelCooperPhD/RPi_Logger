@@ -10,7 +10,7 @@
 
 ### Operating Modes
 - **Standalone Mode**: Interactive GUI with OpenCV preview windows
-- **Slave Mode**: Headless operation controlled via JSON commands
+- **Slave Mode** (`--mode slave`): Headless operation controlled via JSON commands
 - **Preview Loop**: Continuous frame capture with real-time display
 - **Command Listener**: Asynchronous command processing with select() polling
 

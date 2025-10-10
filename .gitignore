@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
 
 # Virtual environments
 .venv
@@ -18,7 +19,17 @@ wheels/
 *.jpeg
 *.png
 *.gif
+*.avif
+
+# Audio recordings
+*.wav
+*.mp3
+*.flac
+*.ogg
+
 recordings/
+unified_recordings/
+eye_tracking_data/
 examples_output/
 **/recordings/
 **/examples_output/
@@ -27,3 +38,7 @@ examples_output/
 /tmp/
 *.tmp
 *.log
+
+# Development notes
+AGENTS.md
+debug_*.py

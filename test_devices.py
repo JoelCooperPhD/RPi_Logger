@@ -14,7 +14,28 @@ def test_module(name, module_path, timeout=5):
     print(f"Testing {name} module (timeout: {timeout}s)")
     print(f"{'='*50}")
 
-    cmd = ["/home/rs-pi-2/.local/bin/uv", "run", module_path, "--slave", "--timeout", str(timeout)]
+    cmd = ["/home/rs-pi-2/.local/bin/uv", "run", module_path]
+
+    if "Camera" in name:
+        cmd.extend([
+            "--mode",
+            "slave",
+            "--discovery-timeout",
+            str(timeout),
+            "--discovery-retry",
+            str(max(1, timeout // 2 or 1)),
+            "--log-level",
+            "warning",
+        ])
+    else:
+        cmd.extend([
+            "--retry-delay",
+            str(timeout),
+            "--reconnect-interval",
+            str(timeout),
+            "--log-level",
+            "warning",
+        ])
 
     print(f"Command: {' '.join(cmd)}")
     print("Starting module...")
@@ -98,8 +119,8 @@ def main():
     print()
 
     modules = [
-        ("Camera", "Modules/Cameras/camera_module.py", 3),
-        ("Eye Tracker", "Modules/EyeTracker/fixation_recorder.py", 5)
+        ("Camera", "Modules/Cameras/main_camera.py", 3),
+        ("Eye Tracker", "Modules/EyeTracker/main_eye_tracker.py", 5)
     ]
 
     results = []

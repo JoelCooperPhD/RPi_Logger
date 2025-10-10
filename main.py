@@ -11,6 +11,7 @@ observed from the CLI.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import datetime as dt
@@ -28,6 +29,13 @@ from pupil_labs.realtime_api.discovery import discover_devices
 from pupil_labs.realtime_api.device import Device
 from pupil_labs.realtime_api.streaming.gaze import GazeData, receive_gaze_data
 from pupil_labs.realtime_api.streaming.video import receive_video_frames
+
+from cli_utils import (
+    add_common_cli_arguments,
+    configure_logging,
+    ensure_directory,
+    positive_float,
+)
 
 # ---------------------------------------------------------------------------
 # Utility dataclasses
@@ -100,6 +108,7 @@ class EyeTrackerModule:
         self._last_metrics_gaze_count = 0
         self._last_frame_time = 0.0
         self._last_gaze_time = 0.0
+        self._connect_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Status helpers
@@ -149,9 +158,14 @@ class EyeTrackerModule:
             self.logger.debug("Device already connected")
             return True
 
-        self.logger.info(
-            "Searching for Pupil Labs devices (timeout %.1fs)...", timeout_seconds
-        )
+        async with self._connect_lock:
+            if self._connected and self.device and self.video_url and self.gaze_url:
+                self.logger.debug("Device already connected")
+                return True
+
+            self.logger.info(
+                "Searching for Pupil Labs devices (timeout %.1fs)...", timeout_seconds
+            )
         start_time = time.perf_counter()
 
         try:
@@ -252,6 +266,12 @@ class EyeTrackerModule:
 
     def can_record(self) -> bool:
         return self._running and self._connected
+
+    def is_connected(self) -> bool:
+        return self._connected and self.device is not None
+
+    def is_streaming(self) -> bool:
+        return self._running
 
     async def start_session(self, session: SessionInfo) -> None:
         if not self.can_record():
@@ -478,27 +498,46 @@ class EyeTrackerModule:
 class AsyncController:
     """Coordinates the eye tracker module and exposes a CLI."""
 
-    def __init__(self, recordings_dir: Path) -> None:
+    def __init__(self, recordings_dir: Path, *, session_prefix: str = "session") -> None:
         self.logger = logging.getLogger("controller")
-        self.recordings_dir = recordings_dir
-        self.recordings_dir.mkdir(parents=True, exist_ok=True)
+        self.recordings_dir = ensure_directory(recordings_dir)
 
+        self.session_prefix = session_prefix
         self.eye_tracker = EyeTrackerModule(self.recordings_dir)
         self.session: Optional[SessionInfo] = None
         self.running = True
+        self.discovery_timeout = 10.0
+        self.auto_reconnect_interval = 5.0
+        self._auto_reconnect_task: Optional[asyncio.Task] = None
 
-    async def initialize(self) -> None:
-        connected = await self.eye_tracker.connect()
-        if connected:
-            await self.eye_tracker.start_streams()
+    async def initialize(
+        self,
+        *,
+        auto_connect: bool,
+        discovery_timeout: float,
+        reconnect_interval: float,
+    ) -> None:
+        self.discovery_timeout = discovery_timeout
+        self.auto_reconnect_interval = reconnect_interval
+        if not auto_connect:
+            self.logger.info("Auto-connect disabled; waiting for manual 'connect' command")
         else:
-            self.logger.warning(
-                "Eye tracker not found. Use the 'connect' command once the device is available."
+            connected = await self.eye_tracker.connect(
+                timeout_seconds=self.discovery_timeout
             )
+            if connected:
+                await self.eye_tracker.start_streams()
+            else:
+                self.logger.warning(
+                    "Eye tracker not found. Will continue watching for device availability."
+                )
+
+        self._ensure_auto_reconnect_task()
 
     async def shutdown(self) -> None:
         self.logger.info("Shutting down controller")
         await self.stop_session()
+        await self._stop_auto_reconnect()
         await self.eye_tracker.stop()
         self.running = False
 
@@ -506,14 +545,21 @@ class AsyncController:
     # Session commands
     # ------------------------------------------------------------------
 
-    async def start_session(self) -> None:
+    def _generate_session_name(self, name: Optional[str] = None) -> str:
+        if name:
+            return name
+        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = self.session_prefix.rstrip("_")
+        return f"{prefix}_{timestamp}" if prefix else timestamp
+
+    async def start_session(self, name: Optional[str] = None) -> None:
         if self.session is not None:
             self.logger.warning("Session %s already active", self.session.name)
             return
         if not self.eye_tracker.can_record():
             raise RuntimeError("Eye tracker stream not running; cannot start session")
 
-        session_name = dt.datetime.now().strftime("session_%Y%m%d_%H%M%S")
+        session_name = self._generate_session_name(name)
         session_path = self.recordings_dir / session_name
         session_path.mkdir(parents=True, exist_ok=True)
         self.session = SessionInfo(session_name, session_path)
@@ -555,7 +601,8 @@ class AsyncController:
                 elif cmd in {"connect", "c"}:
                     await self._cmd_connect()
                 elif cmd in {"start", "record", "1"}:
-                    await self.start_session()
+                    name = args[0] if args else None
+                    await self.start_session(name)
                 elif cmd in {"stop", "0", "2"}:
                     await self.stop_session()
                 elif cmd in {"quit", "q", "exit"}:
@@ -565,8 +612,44 @@ class AsyncController:
             except Exception as exc:  # pragma: no cover - user feedback
                 self.logger.error("Command '%s' failed: %s", cmd, exc)
 
+    async def run_headless(
+        self,
+        *,
+        auto_start: bool,
+        session_name: Optional[str],
+        status_interval: float,
+    ) -> None:
+        """Run without interactive CLI, optionally auto-starting a session."""
+
+        if auto_start and self.session is None:
+            await self.start_session(session_name)
+
+        self.logger.info("Headless mode active; awaiting termination signal")
+        try:
+            while self.running:
+                await asyncio.sleep(status_interval)
+                self._log_status()
+        finally:
+            await self.shutdown()
+
+    def _ensure_auto_reconnect_task(self) -> None:
+        if self._auto_reconnect_task and not self._auto_reconnect_task.done():
+            return
+        self._auto_reconnect_task = asyncio.create_task(
+            self._auto_reconnect_loop(), name="eye-auto-reconnect"
+        )
+
+    async def _stop_auto_reconnect(self) -> None:
+        task = self._auto_reconnect_task
+        if not task:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        self._auto_reconnect_task = None
+
     async def _cmd_connect(self) -> None:
-        connected = await self.eye_tracker.connect()
+        connected = await self.eye_tracker.connect(timeout_seconds=self.discovery_timeout)
         if connected:
             await self.eye_tracker.start_streams()
         else:
@@ -604,37 +687,130 @@ class AsyncController:
         print("  Last gaze age: ", details.get("last_gaze_age"))
         print()
 
+    def _log_status(self) -> None:
+        status = self.eye_tracker.snapshot()
+        details = status.details
+        self.logger.debug(
+            "status=%s connected=%s running=%s session=%s frames=%s gaze=%s",
+            status.state,
+            details.get("connected"),
+            details.get("running"),
+            details.get("session"),
+            details.get("frames"),
+            details.get("gaze_samples"),
+        )
+
+    async def _auto_reconnect_loop(self) -> None:
+        while self.running:
+            try:
+                if not self.eye_tracker.is_connected():
+                    self.logger.debug("Auto-reconnect attempting device discovery")
+                    connected = await self.eye_tracker.connect(
+                        timeout_seconds=self.discovery_timeout
+                    )
+                    if connected:
+                        await self.eye_tracker.start_streams()
+                        self.logger.info("Eye tracker connected and streaming")
+                await asyncio.sleep(self.auto_reconnect_interval)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.exception("Auto-reconnect loop error: %s", exc)
+                await asyncio.sleep(self.auto_reconnect_interval)
+
 
 # ---------------------------------------------------------------------------
 # Entrypoint
 # ---------------------------------------------------------------------------
 
 
-async def main() -> None:
-    """Main coroutine used by asyncio.run."""
-
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Async eye tracker controller")
+    add_common_cli_arguments(
+        parser,
+        default_output=Path("recordings"),
+        allowed_modes=("interactive", "headless"),
+        default_mode="interactive",
     )
 
-    controller = AsyncController(Path("recordings"))
-    await controller.initialize()
+    parser.add_argument(
+        "--discovery-timeout",
+        type=positive_float,
+        default=10.0,
+        help="Seconds to wait for device discovery attempts",
+    )
+    parser.add_argument(
+        "--status-interval",
+        type=positive_float,
+        default=5.0,
+        help="Seconds between status log messages in headless mode",
+    )
+    parser.add_argument(
+        "--reconnect-interval",
+        type=positive_float,
+        default=5.0,
+        help="Seconds between auto-reconnect attempts when device is absent",
+    )
+    parser.add_argument(
+        "--auto-start",
+        action="store_true",
+        help="Automatically start a recording session in headless mode",
+    )
+    parser.add_argument(
+        "--session-name",
+        type=str,
+        default=None,
+        help="Explicit session name to use when auto-starting",
+    )
+    parser.add_argument(
+        "--session-prefix",
+        type=str,
+        default="session",
+        help="Prefix for generated session directories",
+    )
+    parser.add_argument(
+        "--no-auto-connect",
+        dest="auto_connect",
+        action="store_false",
+        help="Skip automatic device discovery on startup",
+    )
+    parser.set_defaults(auto_connect=True)
+
+    return parser
+
+
+async def main(argv: Optional[list[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    configure_logging(args.log_level, args.log_file)
+    controller = AsyncController(args.output_dir, session_prefix=args.session_prefix)
+    await controller.initialize(
+        auto_connect=args.auto_connect,
+        discovery_timeout=args.discovery_timeout,
+        reconnect_interval=args.reconnect_interval,
+    )
 
     loop = asyncio.get_running_loop()
-
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(controller.shutdown()))
 
-    await controller.run_cli()
+    if args.mode == "interactive":
+        await controller.run_cli()
+    else:
+        await controller.run_headless(
+            auto_start=args.auto_start,
+            session_name=args.session_name,
+            status_interval=args.status_interval,
+        )
+
+    return 0
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        sys.exit(asyncio.run(main()))
     except KeyboardInterrupt:
-        # asyncio.run already handles SIGINT, but keep a fallback for completeness
         print("\nInterrupted")
         sys.exit(130)
