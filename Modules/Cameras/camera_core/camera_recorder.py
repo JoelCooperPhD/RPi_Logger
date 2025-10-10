@@ -52,6 +52,14 @@ class CameraRecordingManager:
         self._skipped_frames = 0
         self._duplicated_frames = 0
         self._last_write_monotonic: Optional[float] = None
+        self._last_camera_frame_index: Optional[int] = None
+
+        # Batch flushing for performance
+        # Increased intervals to reduce disk I/O stuttering
+        self._csv_write_counter = 0
+        self._csv_flush_interval = 60  # Flush CSV every N frames (was 10, ~2 sec at 30fps)
+        self._video_write_counter = 0
+        self._video_flush_interval = 120  # Flush video every N frames (was 30, ~4 sec at 30fps)
 
     @property
     def written_frames(self) -> int:
@@ -117,10 +125,10 @@ class CameraRecordingManager:
 
         self._frame_timing_file = open(self.frame_timing_path, "w", encoding="utf-8")
         self._frame_timing_file.write(
-            "frame_number,write_time_unix,write_time_iso,expected_delta,actual_delta,delta_error,"
+            "frame_number,write_time_unix,actual_delta,"
             "queue_delay,capture_latency,write_duration,queue_backlog_after,camera_frame_index,"
-            "display_frame_index,camera_timestamp_unix,camera_timestamp_diff,available_camera_fps,"
-            "dropped_frames_total,duplicates_total,is_duplicate\n"
+            "display_frame_index,camera_timestamp_unix,available_camera_fps,"
+            "dropped_since_last,duplicates_total,is_duplicate,collator_is_duplicate\n"
         )
 
         max_queue = max(int(self.fps * 4), 60)
@@ -131,6 +139,7 @@ class CameraRecordingManager:
         self._skipped_frames = 0
         self._duplicated_frames = 0
         self._last_write_monotonic = None
+        self._last_camera_frame_index = None
         self._last_frame_used = None
 
         self._writer_thread = threading.Thread(target=self._frame_writer_loop, name=f"Cam{self.camera_id}-writer", daemon=True)
@@ -172,6 +181,9 @@ class CameraRecordingManager:
 
         if self._ffmpeg_process is not None:
             try:
+                # Flush any remaining buffered video data
+                if self._ffmpeg_process.stdin is not None:
+                    self._ffmpeg_process.stdin.flush()
                 self._ffmpeg_process.stdin.close()
                 self._ffmpeg_process.wait(timeout=5)
             except Exception:
@@ -179,6 +191,7 @@ class CameraRecordingManager:
             self._ffmpeg_process = None
 
         if self._frame_timing_file is not None:
+            # Flush any remaining buffered CSV data
             self._frame_timing_file.flush()
             self._frame_timing_file.close()
             self._frame_timing_file = None
@@ -198,7 +211,8 @@ class CameraRecordingManager:
             return
 
         with self._latest_lock:
-            self._latest_frame = np.ascontiguousarray(frame)
+            # Frame is already contiguous from cv2 operations, no need to copy
+            self._latest_frame = frame
             metadata.is_duplicate = False
             self._latest_metadata = metadata
 
@@ -311,7 +325,12 @@ class CameraRecordingManager:
 
         try:
             self._ffmpeg_process.stdin.write(frame.tobytes())
-            self._ffmpeg_process.stdin.flush()
+
+            # Batch flush: only flush every N frames for better performance
+            self._video_write_counter += 1
+            if self._video_write_counter >= self._video_flush_interval:
+                self._ffmpeg_process.stdin.flush()
+                self._video_write_counter = 0
         except Exception:
             logger.exception("Failed to write frame for camera %d", self.camera_id)
 
@@ -326,44 +345,50 @@ class CameraRecordingManager:
         if self._frame_timing_file is None:
             return
 
-        expected_delta = 1.0 / self.fps if self.fps > 0 else 0.0
         actual_delta = None
         if self._last_write_monotonic is not None:
             actual_delta = write_start_monotonic - self._last_write_monotonic
-
-        delta_error = None
-        if actual_delta is not None:
-            delta_error = actual_delta - expected_delta
 
         queue_delay = write_start_monotonic - queued.enqueued_monotonic
         capture_latency = None
         if queued.metadata.capture_monotonic is not None:
             capture_latency = write_start_monotonic - queued.metadata.capture_monotonic
 
-        camera_timestamp_diff = None
-        if queued.metadata.capture_unix is not None:
-            camera_timestamp_diff = write_time_unix - queued.metadata.capture_unix
-
         write_duration = write_end_monotonic - write_start_monotonic
+
+        # Calculate dropped frames since last
+        dropped_since_last = None
+        if (queued.metadata.camera_frame_index is not None and
+            self._last_camera_frame_index is not None and
+            not queued.metadata.is_duplicate):
+            dropped_since_last = max(0, queued.metadata.camera_frame_index - self._last_camera_frame_index - 1)
+
+        # Update last camera frame index (only for non-duplicates with valid index)
+        if queued.metadata.camera_frame_index is not None and not queued.metadata.is_duplicate:
+            self._last_camera_frame_index = queued.metadata.camera_frame_index
 
         self._written_frames += 1
         self._last_write_monotonic = write_start_monotonic
-
-        write_time_iso = datetime.datetime.fromtimestamp(write_time_unix, tz=datetime.timezone.utc).isoformat(timespec="milliseconds")
 
         def fmt(value: Optional[float]) -> str:
             return f"{value:.6f}" if value is not None else ""
 
         row = (
-            f"{self._written_frames},{write_time_unix:.6f},{write_time_iso},{fmt(expected_delta)},{fmt(actual_delta)},{fmt(delta_error)},"
+            f"{self._written_frames},{write_time_unix:.6f},{fmt(actual_delta)},"
             f"{fmt(queue_delay)},{fmt(capture_latency)},{fmt(write_duration)},{backlog_after},"
             f"{queued.metadata.camera_frame_index if queued.metadata.camera_frame_index is not None else ''},"
             f"{queued.metadata.display_frame_index if queued.metadata.display_frame_index is not None else ''},"
-            f"{fmt(queued.metadata.capture_unix)},{fmt(camera_timestamp_diff)},{fmt(queued.metadata.available_camera_fps)},"
-            f"{queued.metadata.dropped_frames_total if queued.metadata.dropped_frames_total is not None else ''},"
+            f"{fmt(queued.metadata.capture_unix)},{fmt(queued.metadata.available_camera_fps)},"
+            f"{dropped_since_last if dropped_since_last is not None else ''},"
             f"{queued.metadata.duplicates_total if queued.metadata.duplicates_total is not None else ''},"
-            f"{1 if queued.metadata.is_duplicate else 0}\n"
+            f"{1 if queued.metadata.is_duplicate else 0},"
+            f"{1 if queued.metadata.collator_is_duplicate else 0}\n"
         )
 
         self._frame_timing_file.write(row)
-        self._frame_timing_file.flush()
+
+        # Batch flush: only flush every N frames for better performance
+        self._csv_write_counter += 1
+        if self._csv_write_counter >= self._csv_flush_interval:
+            self._frame_timing_file.flush()
+            self._csv_write_counter = 0

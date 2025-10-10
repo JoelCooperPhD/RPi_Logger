@@ -60,8 +60,8 @@ class CameraCollatorLoop:
         if self._running:
             return
         self._running = True
-        # Create queue in the running event loop
-        self._output_queue = asyncio.Queue(maxsize=2)
+        # Create queue in the running event loop with larger buffer for smoother playback
+        self._output_queue = asyncio.Queue(maxsize=10)
         self._task = asyncio.create_task(self._collation_loop())
         self.logger.info("Camera collation loop started at %.1f FPS", self.target_fps)
 
@@ -99,7 +99,7 @@ class CameraCollatorLoop:
                     await asyncio.sleep(wait_time)
 
                 # TIMING: Grab latest frame from capture loop
-                frame, metadata, capture_time, _ = await self.capture_loop.get_latest_frame()
+                frame, metadata, capture_time, capture_monotonic, _ = await self.capture_loop.get_latest_frame()
 
                 # TIMING: Get hardware FPS from capture loop (always current)
                 hardware_fps = self.capture_loop.get_hardware_fps()
@@ -115,8 +115,8 @@ class CameraCollatorLoop:
                     frame = self.last_collated_frame
                     is_duplicate = True
                 else:
-                    # Got new frame, store it
-                    self.last_collated_frame = frame.copy()
+                    # Got new frame, store reference (no copy needed - frame already owned by capture loop)
+                    self.last_collated_frame = frame
 
                 # TIMING: Increment collated frame counter
                 self.collated_frames += 1
@@ -129,6 +129,7 @@ class CameraCollatorLoop:
                     'frame': frame,
                     'metadata': metadata,
                     'capture_time': capture_time,
+                    'capture_monotonic': capture_monotonic,
                     'hardware_fps': hardware_fps,
                     'is_duplicate': is_duplicate,
                     'collated_frame_num': self.collated_frames,
@@ -158,14 +159,32 @@ class CameraCollatorLoop:
 
     async def get_frame(self):
         """
-        Get next collated frame (blocking with timeout).
+        Get LATEST collated frame, discarding any older queued frames.
+
+        This ensures display always shows the freshest frame, preventing
+        lag when processor falls behind collator.
 
         Returns: frame_data dict or None on timeout
         """
+        latest_frame = None
+
+        # Drain queue to get only the newest frame (discard old frames)
         try:
-            return await asyncio.wait_for(self._output_queue.get(), timeout=0.2)
-        except asyncio.TimeoutError:
-            return None
+            while True:
+                latest_frame = self._output_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+
+        # If no frames were in queue, wait for next one
+        if latest_frame is None:
+            try:
+                # Adaptive timeout: 2x frame interval (e.g., 66ms for 30 FPS)
+                timeout = 2.0 / self.target_fps if self.target_fps > 0 else 0.1
+                latest_frame = await asyncio.wait_for(self._output_queue.get(), timeout=timeout)
+            except asyncio.TimeoutError:
+                return None
+
+        return latest_frame
 
     def get_fps(self) -> float:
         """Get current collation FPS."""

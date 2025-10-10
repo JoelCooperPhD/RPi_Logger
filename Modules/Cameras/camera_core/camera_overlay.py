@@ -76,27 +76,13 @@ class CameraOverlay:
         thickness = max(1, int(cfg['thickness_base'] * scale_factor))
         line_type = cfg['line_type']
 
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         line_y = int(cfg['line_start_y'] * scale_factor)
-        line_step = int(cfg['line_spacing'] * scale_factor)
         x_margin = int(cfg['margin_left'] * scale_factor)
 
-        # Background if enabled
+        # Background if enabled - always show just one line for frame number
+        # OPTIMIZED: Draw directly on frame instead of copying entire frame for alpha blending
         if cfg['background_enabled']:
-            num_lines = 0
-            if cfg['show_camera_and_time']:
-                num_lines += 1
-            if cfg['show_session']:
-                num_lines += 1
-            if cfg['show_requested_fps'] or cfg['show_sensor_fps'] or cfg['show_display_fps']:
-                num_lines += 1
-            if cfg['show_frame_counter']:
-                num_lines += 1
-            if is_recording:
-                if cfg['show_recording_info']:
-                    num_lines += 1
-                if cfg['show_recording_filename']:
-                    num_lines += 1
+            num_lines = 1  # Just frame number
 
             padding_top = int(cfg['background_padding_top'] * scale_factor)
             padding_bottom = int(cfg['background_padding_bottom'] * scale_factor)
@@ -104,14 +90,20 @@ class CameraOverlay:
             padding_right = int(cfg['background_padding_right'] * scale_factor)
 
             bg_y1 = line_y - padding_top - int(20 * scale_factor)
-            bg_y2 = line_y + (num_lines * line_step) + padding_bottom
+            bg_y2 = line_y + (num_lines * int(cfg['line_spacing'] * scale_factor)) + padding_bottom
             bg_x1 = x_margin - padding_left
-            bg_x2 = w - padding_right
+            bg_x2 = x_margin + padding_left + int(200 * scale_factor)  # Fixed width for frame number
 
             background_color = (cfg['background_color_b'], cfg['background_color_g'], cfg['background_color_r'])
-            overlay = frame.copy()
-            cv2.rectangle(overlay, (bg_x1, bg_y1), (bg_x2, bg_y2), background_color, -1)
-            cv2.addWeighted(overlay, cfg['background_opacity'], frame, 1 - cfg['background_opacity'], 0, frame)
+
+            # Only copy the small ROI for blending, not the entire frame
+            if cfg['background_opacity'] < 1.0:
+                roi = frame[bg_y1:bg_y2, bg_x1:bg_x2].copy()
+                cv2.rectangle(roi, (0, 0), (bg_x2-bg_x1, bg_y2-bg_y1), background_color, -1)
+                cv2.addWeighted(roi, cfg['background_opacity'], frame[bg_y1:bg_y2, bg_x1:bg_x2], 1 - cfg['background_opacity'], 0, frame[bg_y1:bg_y2, bg_x1:bg_x2])
+            else:
+                # Fully opaque, no blending needed
+                cv2.rectangle(frame, (bg_x1, bg_y1), (bg_x2, bg_y2), background_color, -1)
 
         # Text colors
         text_color = (cfg['text_color_b'], cfg['text_color_g'], cfg['text_color_r'])
@@ -123,77 +115,8 @@ class CameraOverlay:
                 cv2.putText(frame, text, (x, y), font, font_scale, outline_color, outline_thickness, line_type)
             cv2.putText(frame, text, (x, y), font, font_scale, text_color, thickness, line_type)
 
-        # Camera and time
-        if cfg['show_camera_and_time']:
-            draw_text(f"Cam {self.camera_id} | {timestamp}", x_margin, line_y)
-            line_y += line_step
-
-        # Session
-        if cfg['show_session']:
-            draw_text(f"Session: {session_name}", x_margin, line_y)
-            line_y += line_step
-
-        # FPS display: "FPS_10: 10 / 30"
-        # Subscript = collation FPS (actual delivered frames)
-        # After colon = "collation / capture" (delivered / camera provided)
-        if cfg['show_requested_fps'] or cfg['show_sensor_fps'] or cfg['show_display_fps']:
-            fps_line = "FPS"
-
-            # Subscript shows actual collation FPS (delivered frames)
-            if cfg['show_requested_fps']:
-                fps_line += f"_{collation_fps:.0f}"
-
-            if cfg['show_display_fps'] or cfg['show_sensor_fps']:
-                fps_line += ": "
-
-                if cfg['show_display_fps']:
-                    fps_line += f"{collation_fps:.0f}"
-
-                if cfg['show_display_fps'] and cfg['show_sensor_fps']:
-                    fps_line += " / "
-
-                if cfg['show_sensor_fps']:
-                    fps_line += f"{capture_fps:.0f}"
-
-            draw_text(fps_line, x_margin, line_y)
-            line_y += line_step
-
-        # Frame counters: "Frames: Collated / Captured"
-        if cfg['show_frame_counter']:
-            draw_text(f"Frames: {collated_frames} / {captured_frames}", x_margin, line_y)
-            line_y += line_step
-
-        # Recording indicator
-        if is_recording and recording_filename:
-            rec_x = int(w - 160 * scale_factor)
-            rec_y = int(30 * scale_factor)
-            cv2.putText(frame, "RECORDING", (rec_x, rec_y), font, font_scale, (0, 0, 255), thickness + 1)
-
-            if cfg['show_recording_info']:
-                draw_text(f"Recorded Frames: {recorded_frames}", x_margin, line_y)
-                line_y += line_step
-
-            if cfg['show_recording_filename']:
-                draw_text(recording_filename, x_margin, line_y)
-        else:
-            idle_x = int(w - 80 * scale_factor)
-            idle_y = int(30 * scale_factor)
-            draw_text("Idle", idle_x, idle_y)
-
-        # Control hints
-        if cfg['show_controls']:
-            bar_height = int(28 * scale_factor)
-            bar_text_y = int(h - 8 * scale_factor)
-            cv2.rectangle(frame, (0, h - bar_height), (w, h), (0, 0, 0), -1)
-            cv2.putText(
-                frame,
-                "Q: Quit | R: Record | S: Snapshot",
-                (x_margin, bar_text_y),
-                font,
-                font_scale,
-                (255, 255, 255),
-                thickness - 1,
-            )
+        # ONLY show frame number (collated_frames matches display_frame_index in CSV)
+        draw_text(f"Frame: {collated_frames}", x_margin, line_y)
 
         return frame
 
