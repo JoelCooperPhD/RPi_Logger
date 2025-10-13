@@ -47,7 +47,12 @@ def parse_args(argv: Optional[list[str]] = None):
 
     def get_config_bool(key, default):
         if key in config:
-            return config[key].lower() in ('true', '1', 'yes', 'on')
+            value = config[key]
+            # If already a boolean (parsed by config loader), return it
+            if isinstance(value, bool):
+                return value
+            # Otherwise parse from string
+            return str(value).lower() in ('true', '1', 'yes', 'on')
         return default
 
     def get_config_str(key, default):

@@ -4,8 +4,17 @@
 # Edit values below and restart the application for changes to take effect
 #
 # QUICK REFERENCE:
-#   Resolution Presets: 0=1456x1088, 1=1280x960, 2=1280x720(HD), 3=1024x768,
-#                       4=800x600, 5=640x480(VGA), 6=480x360, 7=320x240
+#
+#   Resolution Presets:
+#     0 = 1456x1088  (Native - Full sensor resolution, 4:3)
+#     1 = 1280x960   (SXGA - Slight downscale, minimal crop, 4:3)
+#     2 = 1280x720   (HD 720p - Standard HD, 16:9)
+#     3 = 1024x768   (XGA - Good balance, 4:3)
+#     4 = 800x600    (SVGA - Lower CPU usage, 4:3)
+#     5 = 640x480    (VGA - Minimal CPU usage, 4:3)
+#     6 = 480x360    (QVGA+ - Very low CPU, 4:3)
+#     7 = 320x240    (QVGA - Ultra minimal, 4:3)
+#
 #   Target FPS: 1-60 (IMX296 sensor supports up to 60 FPS at full resolution)
 #   Common FPS: 60=max smooth, 30=standard, 24=cinematic, 10=low CPU
 #

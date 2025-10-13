@@ -3,26 +3,27 @@
 CAMERA PROCESSOR - Frame processing orchestrator.
 
 This orchestrates the processing flow:
-1. Receive frames from collator (awaits newest frame)
+1. Poll capture loop for new frames directly
 2. Convert RGB to BGR
 3. Add frame number overlay to full-res frame (1920x1080)
 4. Pass overlaid full-res frame to recorder (if recording)
 5. Resize overlaid frame to preview size (640x360)
 6. Pass to display manager
 
-This is the "glue" that connects collator→display→recorder.
+Simplified architecture: capture → processor → display & recorder
 Frame number overlay is rendered ONCE at full resolution, then appears in both recording and preview.
 """
 
 import asyncio
 import functools
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
 import cv2
 
-from .camera_utils import FrameTimingMetadata
+from .camera_utils import FrameTimingMetadata, RollingFPS
 from .camera_overlay import CameraOverlay
 from .camera_display import CameraDisplay
 
@@ -33,23 +34,26 @@ class CameraProcessor:
     """
     Frame processor orchestrator.
 
-    Receives frames from collator, orchestrates the flow through:
-    collator → processor → overlay → display & recorder
+    Polls capture loop directly, orchestrates the flow through:
+    capture → processor → overlay → display & recorder
     """
 
     def __init__(self, camera_id: int, args, overlay_config: dict, recording_manager,
-                 capture_loop, collator_loop, session_dir: Path):
+                 capture_loop, session_dir: Path):
         self.camera_id = camera_id
         self.args = args
         self.recording_manager = recording_manager
         self.capture_loop = capture_loop
-        self.collator_loop = collator_loop
         self.session_dir = session_dir
         self.logger = logging.getLogger(f"CameraProcessor{camera_id}")
 
         # Create overlay renderer and display manager
         self.overlay = CameraOverlay(camera_id, overlay_config)
         self.display = CameraDisplay(camera_id)
+
+        # FPS tracking
+        self.fps_tracker = RollingFPS(window_seconds=5.0)
+        self.processed_frames = 0
 
         # Control
         self._running = False
@@ -97,32 +101,40 @@ class CameraProcessor:
         """
         PROCESSING LOOP
 
-        Orchestrates: collator → overlay → recorder → resize → display
+        Orchestrates: capture → overlay → recorder → display
         (Frame number overlay rendered once at full-res, appears in both recording and preview)
 
-        ALL blocking operations (cv2.cvtColor, overlay rendering, cv2.resize) are moved to
+        Polls capture loop directly for new frames (simplified architecture).
+        ALL blocking operations (cv2.cvtColor, overlay rendering) are moved to
         executor threads to prevent blocking the async event loop and causing stuttering.
         """
-        self.logger.info("Entering processing loop")
+        self.logger.info("Entering processing loop (direct capture polling)")
         loop = asyncio.get_event_loop()
+        last_frame_ref = None  # Track last frame to detect new frames
 
         while self._running:
             try:
-                # 1. Get frame from collator (blocking with timeout)
-                frame_data = await self.collator_loop.get_frame()
-                if frame_data is None:
-                    # Brief sleep to prevent tight spinning when queue empty
-                    await asyncio.sleep(0.001)
+                # 1. Poll capture loop for new frame (1ms polling interval)
+                await asyncio.sleep(0.001)
+
+                # Get latest frame from capture loop
+                raw_frame, metadata, capture_time, capture_monotonic, sensor_timestamp_ns, _ = await self.capture_loop.get_latest_frame()
+
+                # Skip if no frame available yet
+                if raw_frame is None:
                     continue
 
-                # Extract frame data
-                raw_frame = frame_data['frame']
-                metadata = frame_data['metadata']
-                capture_time = frame_data['capture_time']
-                capture_monotonic = frame_data.get('capture_monotonic')
-                sensor_timestamp_ns = frame_data.get('sensor_timestamp_ns')
-                hardware_fps = frame_data.get('hardware_fps', 0.0)
-                collated_frame_num = frame_data['collated_frame_num']
+                # Skip if same frame as last time (wait for new frame)
+                if raw_frame is last_frame_ref:
+                    continue
+
+                # NEW FRAME - process it
+                last_frame_ref = raw_frame
+                self.processed_frames += 1
+                self.fps_tracker.add_frame(time.time())
+
+                # Get hardware FPS from capture loop
+                hardware_fps = self.capture_loop.get_hardware_fps()
 
                 # Get frame number from hardware timing (most accurate)
                 hardware_frame_number = None
@@ -131,30 +143,29 @@ class CameraProcessor:
 
                 if metadata:
                     # Debug: Log available metadata keys on first few frames
-                    if collated_frame_num <= 3:
-                        self.logger.info("Frame %d metadata keys: %s", collated_frame_num, list(metadata.keys()))
+                    if self.processed_frames <= 3:
+                        self.logger.info("Frame %d metadata keys: %s", self.processed_frames, list(metadata.keys()))
 
                     # Primary: Use HardwareFrameNumber (calculated from SensorTimestamp deltas)
                     hardware_frame_number = metadata.get("HardwareFrameNumber")
                     if hardware_frame_number is not None:
-                        if collated_frame_num <= 3:
+                        if self.processed_frames <= 3:
                             self.logger.info("Frame %d: Using HardwareFrameNumber=%d (timestamp-based)",
-                                           collated_frame_num, hardware_frame_number)
+                                           self.processed_frames, hardware_frame_number)
 
                     # Also get software frame index for reference
                     software_frame_index = metadata.get("CaptureFrameIndex")
 
                     # Get pre-calculated dropped frame count from capture loop
                     dropped_since_last = metadata.get("DroppedSinceLast")
-                    if dropped_since_last is not None and dropped_since_last > 0 and collated_frame_num <= 10:
+                    if dropped_since_last is not None and dropped_since_last > 0 and self.processed_frames <= 10:
                         self.logger.info("Frame %d: Hardware detected %d dropped frames (timestamp gap)",
-                                       collated_frame_num, dropped_since_last)
+                                       self.processed_frames, dropped_since_last)
 
                 # Gather stats for overlay (fast, no blocking)
                 capture_fps = self.capture_loop.get_fps()
-                collation_fps = self.collator_loop.get_fps()
+                processing_fps = self.fps_tracker.get_fps()
                 captured_frames = self.capture_loop.get_frame_count()
-                collated_frames = self.collator_loop.get_frame_count()
 
                 # 2. Skip color conversion - use frame directly
                 # Lores is RGB888, and apparently OpenCV imshow on this platform shows it correctly
@@ -168,9 +179,9 @@ class CameraProcessor:
                     self._add_overlays_wrapper,
                     frame_bgr,
                     hardware_fps,
-                    collation_fps,
+                    processing_fps,
                     captured_frames,
-                    hardware_frame_number if hardware_frame_number is not None else collated_frames,  # Use hardware frame number
+                    hardware_frame_number if hardware_frame_number is not None else self.processed_frames,  # Use hardware frame number
                     float(self.args.fps),
                     self.recording_manager.is_recording,
                     self.recording_manager.video_path.name if self.recording_manager.video_path else None,
@@ -188,7 +199,7 @@ class CameraProcessor:
                     frame_metadata = FrameTimingMetadata(
                         sensor_timestamp_ns=sensor_timestamp_ns,  # ESSENTIAL: Hardware timestamp
                         dropped_since_last=dropped_since_last,  # ESSENTIAL: Drop detection
-                        display_frame_index=hardware_frame_number if hardware_frame_number is not None else collated_frame_num,  # ESSENTIAL: Frame number
+                        display_frame_index=hardware_frame_number if hardware_frame_number is not None else self.processed_frames,  # ESSENTIAL: Frame number
                         camera_frame_index=hardware_frame_number,  # DIAGNOSTIC: For logging
                         software_frame_index=software_frame_index,  # DIAGNOSTIC: For logging
                     )

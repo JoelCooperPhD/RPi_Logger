@@ -180,16 +180,34 @@ Cameras/
 ├── config.txt                       # System configuration (resolution, FPS, overlay settings)
 ├── camera_core/                     # Core camera system modules
 │   ├── camera_capture_loop.py      # Async capture at hardware FPS (1-60)
-│   ├── camera_collator_loop.py     # Timing-based collation
-│   ├── camera_processor.py         # Processing orchestrator
+│   ├── camera_processor.py         # Processing orchestrator (polls capture directly)
 │   ├── camera_overlay.py           # Overlay rendering
 │   ├── camera_display.py           # Display management
-│   ├── camera_recorder.py          # Video recording with H.264 hardware encoding
 │   ├── camera_handler.py           # Single camera coordinator
 │   ├── camera_system.py            # Multi-camera system with interactive/slave/headless modes
 │   ├── camera_supervisor.py        # Async supervisor with retry logic
 │   ├── camera_utils.py             # Utilities (FPS tracker, config loader, metadata)
-│   ├── video_remux.py              # Video format conversion utilities
+│   ├── recording/                  # Recording subsystem (modular design)
+│   │   ├── manager.py              # Recording coordinator (public API)
+│   │   ├── encoder.py              # H.264 hardware encoder wrapper
+│   │   ├── overlay.py              # Frame overlay handler
+│   │   ├── csv_logger.py           # CSV timing logger (threaded)
+│   │   ├── remux.py                # Video format conversion utilities
+│   │   └── __init__.py             # Recording module exports
+│   ├── commands/                   # JSON command protocol
+│   │   ├── command_handler.py      # Command processing
+│   │   ├── command_protocol.py     # Command definitions
+│   │   └── __init__.py             # Command exports
+│   ├── config/                     # Configuration management
+│   │   ├── config_loader.py        # Config file loading
+│   │   ├── camera_config.py        # Camera configuration utilities
+│   │   └── __init__.py             # Config exports
+│   ├── modes/                      # Operation modes
+│   │   ├── base_mode.py            # Base mode class
+│   │   ├── interactive_mode.py     # Interactive mode with preview
+│   │   ├── slave_mode.py           # JSON command-driven mode
+│   │   ├── headless_mode.py        # Background recording mode
+│   │   └── __init__.py             # Mode exports
 │   └── __init__.py                 # Package exports
 └── docs/                            # Technical documentation
     ├── camera_module_spec.md        # Camera hardware specifications
@@ -246,28 +264,31 @@ recordings/
 
 ### System Overview
 
-The camera system uses a **3-loop async architecture** for optimal performance:
+The camera system uses a **simplified 2-loop async architecture** for optimal performance:
 
 ```
 Camera Hardware (configurable 1-60 FPS)
     ↓
 Capture Loop → extracts hardware_fps from metadata
     ↓
-Collator Loop → timing-based frame collation
-    ↓
-Processor Loop → orchestrates processing pipeline
+Processor Loop (polls capture directly) → orchestrates processing pipeline
     ├→ Overlay Renderer → adds text, FPS, counters
     ├→ Display Manager → thread-safe preview frames
-    └→ Recording Manager → H.264 hardware encoding + timing CSV
+    └→ Recording Module → modular recording subsystem
+        ├→ H.264 Encoder → hardware-accelerated encoding
+        ├→ CSV Logger → frame timing diagnostics (threaded)
+        ├→ Overlay Handler → frame number overlay via post_callback
+        └→ Remuxer → H.264 to MP4 conversion
 ```
 
 **Key Features:**
 - **Flexible FPS**: Supports 1-60 FPS at hardware level (IMX296 sensor max: 60 FPS @ 1456x1088)
-- **Independent Async Loops**: Capture, collator, and processor run concurrently
-- **Metadata Propagation**: Hardware FPS flows from camera → capture → collator → processor → overlay
+- **Simplified Architecture**: 2 async loops (capture → processor) with direct polling
+- **Metadata Propagation**: Hardware FPS flows from camera → capture → processor → overlay
 - **Zero Frame Drops**: Optimized capture pipeline with atomic frame+metadata retrieval via `capture_request()`
 - **Hardware Drop Detection**: Uses sensor timestamp deltas to accurately detect dropped frames
 - **Dual-Stream Architecture**: Lores stream for preview (hardware-scaled), main stream for H.264 recording
+- **Modular Recording**: Recording subsystem split into focused components (encoder, CSV logger, overlay, remux)
 
 ### Standalone Mode (Interactive)
 - **With Preview** (default):

@@ -15,7 +15,15 @@ logger = logging.getLogger("CameraUtils")
 
 
 def load_config_file() -> dict:
-    """Load configuration from config.txt file."""
+    """
+    Load configuration from config.txt file.
+
+    NOTE: This is a legacy function kept for backward compatibility.
+    For new code, use: from camera_core.config import load_config_file
+
+    Returns:
+        Simple dict with string values (no type conversion)
+    """
     # Config is in the parent directory (Cameras/), not in camera_core/
     config_path = Path(__file__).parent.parent / "config.txt"
     config = {}

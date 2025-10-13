@@ -2,12 +2,11 @@
 """
 Single camera handler with async loop architecture.
 
-This orchestrates three independent async loops:
+This orchestrates two independent async loops:
 1. Capture Loop - Tight camera capture at configured FPS (1-60)
-2. Collator Loop - Timing-based frame collation
-3. Processor Loop - Heavy processing (overlays, recording, resizing)
+2. Processor Loop - Heavy processing (overlays, recording, display)
 
-Each loop is in its own file and runs independently.
+Simplified architecture: capture → processor (no intermediate buffering layer).
 
 CLEANUP ARCHITECTURE:
 The cleanup process is carefully orchestrated to ensure fast, clean exits:
@@ -26,10 +25,10 @@ from typing import Optional
 import numpy as np
 from picamera2 import Picamera2
 
-from .camera_recorder import CameraRecordingManager
+from .recording import CameraRecordingManager
 from .camera_capture_loop import CameraCaptureLoop
-from .camera_collator_loop import CameraCollatorLoop
 from .camera_processor import CameraProcessor
+from .config import ConfigLoader, CameraConfig
 
 logger = logging.getLogger("CameraHandler")
 
@@ -48,7 +47,8 @@ class CameraHandler:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Load overlay configuration
-        self.overlay_config = self._load_overlay_config()
+        config_path = Path(__file__).parent.parent / "config.txt"
+        self.overlay_config = ConfigLoader.load_overlay_config(config_path)
 
         self.logger.info("Initializing camera %d", cam_num)
         self.picam2 = Picamera2(cam_num)
@@ -57,46 +57,11 @@ class CameraHandler:
         # MATCHED FPS MODE: Camera captures at same rate as recording
         # This eliminates artificial frame drops and improves efficiency
         requested_fps = float(args.fps)
-        min_hardware_fps = 1.0   # Minimum practical FPS
-        max_hardware_fps = 60.0  # IMX296 sensor maximum (1456x1088 @ 60fps)
-
-        # Clamp FPS to valid hardware range [1, 60]
-        if requested_fps > max_hardware_fps:
-            self.logger.warning(
-                "Requested FPS (%.1f) exceeds hardware limit (%.1f). "
-                "Capping at %.1f FPS.",
-                requested_fps, max_hardware_fps, max_hardware_fps
-            )
-            effective_fps = max_hardware_fps
-        elif requested_fps < min_hardware_fps:
-            self.logger.warning(
-                "Requested FPS (%.1f) is below minimum (%.1f). "
-                "Setting to %.1f FPS.",
-                requested_fps, min_hardware_fps, min_hardware_fps
-            )
-            effective_fps = min_hardware_fps
-        else:
-            effective_fps = requested_fps
-
-        # Configure camera to capture at effective FPS (matched to recording rate)
-        frame_duration_us = int(1e6 / effective_fps)
+        effective_fps = CameraConfig.validate_fps(requested_fps)
+        frame_duration_us = CameraConfig.calculate_frame_duration_us(effective_fps)
 
         # Log resolution preset being used
-        try:
-            import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-            from cli_utils import RESOLUTION_TO_PRESET, RESOLUTION_PRESETS
-            resolution_tuple = (args.width, args.height)
-            if resolution_tuple in RESOLUTION_TO_PRESET:
-                preset_num = RESOLUTION_TO_PRESET[resolution_tuple]
-                _, _, desc, aspect = RESOLUTION_PRESETS[preset_num]
-                self.logger.info("Camera %d using resolution preset %d: %dx%d - %s (%s)",
-                                cam_num, preset_num, args.width, args.height, desc, aspect)
-            else:
-                self.logger.info("Camera %d using custom resolution: %dx%d",
-                                cam_num, args.width, args.height)
-        except Exception:
-            pass
+        CameraConfig.log_resolution_info(cam_num, args.width, args.height)
 
         # DUAL STREAM CONFIG:
         # - main: Full resolution for H.264 encoder (hardware accelerated)
@@ -131,119 +96,22 @@ class CameraHandler:
             enable_overlay=True,  # Always enable for frame/CSV correlation
             overlay_config=self.overlay_config,
         )
+        # NOTE: Recording manager registers overlay callback internally in its __init__
 
-        # Register post_callback immediately for overlay on both preview and recording
-        # This ensures frame numbers appear on preview even when not recording
-        self.picam2.post_callback = self.recording_manager._overlay_callback
-        self.logger.info("Camera %d: Registered overlay callback for both streams (main+lores)", cam_num)
-
-        # Create async loops
+        # Create async loops (simplified: capture → processor)
         self.capture_loop = CameraCaptureLoop(cam_num, self.picam2)
-        self.collator_loop = CameraCollatorLoop(cam_num, effective_fps, self.capture_loop)
         self.processor = CameraProcessor(
             cam_num,
             args,
             self.overlay_config,
             self.recording_manager,
             self.capture_loop,
-            self.collator_loop,
             self.session_dir
         )
 
         # Event loop task
         self._loop_task: Optional[asyncio.Task] = None
         self._running = False
-
-    def _load_overlay_config(self) -> dict:
-        """Load configuration from file."""
-        config_path = Path(__file__).parent.parent / "config.txt"
-        defaults = {
-            # Camera settings
-            'resolution_width': 1920,
-            'resolution_height': 1080,
-            'preview_width': 640,
-            'preview_height': 360,
-            'target_fps': 30.0,
-            'min_cameras': 1,
-            'allow_partial': True,
-            'discovery_timeout': 5.0,
-            'discovery_retry': 3.0,
-            'output_dir': 'recordings',
-            'session_prefix': 'session',
-            # Overlay settings
-            'font_scale_base': 0.6,
-            'thickness_base': 2,
-            'font_type': 'SIMPLEX',
-            'outline_enabled': True,
-            'outline_extra_thickness': 2,
-            'line_start_y': 30,
-            'line_spacing': 30,
-            'margin_left': 10,
-            'text_color_b': 255,
-            'text_color_g': 255,
-            'text_color_r': 255,
-            'outline_color_b': 0,
-            'outline_color_g': 0,
-            'outline_color_r': 0,
-            'line_type': 16,
-            'background_enabled': False,
-            'background_shape': 'rectangle',
-            'background_color_b': 0,
-            'background_color_g': 0,
-            'background_color_r': 0,
-            'background_opacity': 0.6,
-            'background_padding_top': 10,
-            'background_padding_bottom': 10,
-            'background_padding_left': 10,
-            'background_padding_right': 10,
-            'background_corner_radius': 10,
-            'show_camera_and_time': True,
-            'show_session': True,
-            'show_requested_fps': True,
-            'show_sensor_fps': True,
-            'show_display_fps': True,
-            'show_frame_counter': True,
-            'show_recording_info': True,
-            'show_recording_filename': True,
-            'show_controls': True,
-            'show_frame_number': True,
-            'scale_mode': 'auto',
-            'manual_scale_factor': 3.0,
-            # Recording settings
-            'enable_csv_timing_log': True,
-            'disable_mp4_conversion': True,
-        }
-
-        if not config_path.exists():
-            self.logger.warning("Overlay config not found at %s, using defaults", config_path)
-            return defaults
-
-        try:
-            with open(config_path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    if '=' in line:
-                        key, value = line.split('=', 1)
-                        key = key.strip()
-                        value = value.strip()
-                        if '#' in value:
-                            value = value.split('#')[0].strip()
-                        if key in defaults:
-                            if isinstance(defaults[key], bool):
-                                defaults[key] = value.lower() in ('true', '1', 'yes', 'on')
-                            elif isinstance(defaults[key], float):
-                                defaults[key] = float(value)
-                            elif isinstance(defaults[key], int):
-                                defaults[key] = int(value)
-                            else:
-                                defaults[key] = value
-            self.logger.info("Loaded overlay config from %s", config_path)
-        except Exception as e:
-            self.logger.warning("Failed to load overlay config: %s, using defaults", e)
-
-        return defaults
 
     def start_loops(self):
         """Start all async loops in a background thread."""
@@ -331,7 +199,6 @@ class CameraHandler:
 
     async def _run_all_loops(self):
         await self.capture_loop.start()
-        await self.collator_loop.start()
         await self.processor.start()
 
         try:
@@ -341,7 +208,6 @@ class CameraHandler:
             self.logger.debug("Stopping async loops...")
             await asyncio.gather(
                 self.capture_loop.stop(),
-                self.collator_loop.stop(),
                 self.processor.stop(),
                 return_exceptions=True
             )
