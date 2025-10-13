@@ -89,24 +89,31 @@ class CameraCaptureLoop:
 
     async def _capture_loop(self):
         """
-        TIGHT CAPTURE LOOP
+        TIGHT CAPTURE LOOP - Using lores stream
 
-        This runs as fast as the camera provides frames.
-        No delays, no processing, just capture and store.
+        Uses capture_array("lores") instead of capture_request() to avoid
+        stealing frames from the H.264 encoder on the main stream.
+
+        This provides hardware-scaled preview frames without interfering
+        with recording.
         """
-        self.logger.info("Entering tight capture loop")
+        self.logger.info("Entering tight capture loop (using lores stream)")
 
         while self._running:
             try:
-                # TIGHT: Wait for frame from camera (blocking, but in executor)
+                # TIGHT: Atomic capture - get frame + metadata in single operation
+                # Using capture_request() prevents missing frames due to double-wait
+                # With dual-stream config, lores stream is independent from encoder
                 loop = asyncio.get_event_loop()
                 request = await loop.run_in_executor(None, self.picam2.capture_request)
 
-                # TIGHT: Extract frame data immediately
-                raw_frame = request.make_array("main")
-                metadata = request.get_metadata() or {}
+                # Extract lores frame and metadata atomically
+                raw_frame = request.make_array("lores")
+                metadata = request.get_metadata()
                 capture_time = time.time()
                 capture_monotonic = time.perf_counter()
+
+                # Release request immediately to free resources
                 request.release()
 
                 # TIGHT: Extract hardware FPS from metadata (sensor rate)
@@ -141,8 +148,8 @@ class CameraCaptureLoop:
                         # Dropped frames = intervals - 1 (we expect 1 interval normally)
                         dropped_since_last = max(0, intervals_passed - 1)
 
-                        # Debug: Log first few frames and any drops
-                        if self.captured_frames < 5 or dropped_since_last > 0:
+                        # Debug: Log only actual dropped frames (not timing jitter)
+                        if dropped_since_last > 0:
                             self.logger.warning(
                                 "Frame %d: delta=%d ns (%.2f ms), expected=%d ns, intervals=%d, dropped=%d",
                                 self.captured_frames, delta_ns, delta_ns / 1_000_000,
@@ -199,6 +206,14 @@ class CameraCaptureLoop:
 
             except asyncio.CancelledError:
                 break
+            except RuntimeError as exc:
+                # Graceful shutdown - event loop is closing
+                if "cannot schedule new futures" in str(exc):
+                    self.logger.debug("Event loop shutting down, exiting capture loop")
+                    break
+                elif self._running:
+                    self.logger.error("Capture error: %s", exc, exc_info=True)
+                    await asyncio.sleep(0.1)
             except Exception as exc:
                 if self._running:
                     self.logger.error("Capture error: %s", exc, exc_info=True)

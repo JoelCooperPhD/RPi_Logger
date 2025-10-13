@@ -1,110 +1,71 @@
 ################################################################################
 # CAMERA SYSTEM CONFIGURATION
 ################################################################################
-# Edit these values to configure your camera system
-# Changes take effect when you restart the application
+# Edit values below and restart the application for changes to take effect
 #
-# Quick Start Guide:
-#   1. BASIC SETTINGS - Set resolution, FPS, and output directory
-#   2. OVERLAY APPEARANCE - Customize what info appears on screen
-#   3. ADVANCED - Fine-tune text appearance and behavior
+# QUICK REFERENCE:
+#   Resolution Presets: 0=1456x1088, 1=1280x960, 2=1280x720(HD), 3=1024x768,
+#                       4=800x600, 5=640x480(VGA), 6=480x360, 7=320x240
+#   Target FPS: 1-60 (IMX296 sensor supports up to 60 FPS at full resolution)
+#   Common FPS: 60=max smooth, 30=standard, 24=cinematic, 10=low CPU
+#
+# NOTE: System automatically detects all attached cameras (any slot, any count)
 ################################################################################
 
+
 ################################################################################
-# 1. BASIC CAMERA SETTINGS
+# RECORDING SETTINGS
 ################################################################################
 
-# Resolution (recording quality)
-resolution_width = 640
-resolution_height = 480
-# Common presets: 1920x1080 (Full HD), 1280x720 (HD), 640x480 (SD)
+# Resolution (0-7 presets, see Quick Reference above)
+resolution_preset = 0
 
-# Frame rate (smoothness)
-target_fps = 20.0
-# Common values: 30 (standard), 24 (cinematic)
+# Frame rate (1-60 fps)
+target_fps = 30.0
 
-# Preview window size (display only, doesn't affect recording)
-preview_width = 320
-preview_height = 240
-
-# Output location
+# Output files
 output_dir = recordings
 session_prefix = session
-# Recordings saved to: output_dir/session_YYYYMMDD_HHMMSS/
 
-# Camera requirements
-min_cameras = 2              # Minimum cameras needed to start
-allow_partial = false        # Continue if some cameras missing?
-discovery_timeout = 5.0      # Seconds to wait for cameras
-discovery_retry = 3.0        # Seconds between retry attempts
+# Auto-start recording
+auto_start_recording = false # Automatically start recording on startup (true/false)
 
-
-################################################################################
-# 2. ON-SCREEN OVERLAY - Frame Number Display Only
-################################################################################
-# Overlay has been simplified to only show frame number for CSV alignment
-
-# Show frame number overlay
-show_frame_number = true           # Display frame number on video?
-
-# === Text appearance ===
-font_scale_base = 0.6              # Text size (0.4 to 1.0)
-thickness_base = 1                 # Text boldness (1 to 4)
-font_type = SIMPLEX                # Font style: SIMPLEX, DUPLEX, PLAIN, COMPLEX
-
-# Text color (Blue, Green, Red format, 0-255 each)
-text_color_b = 0                   # Blue amount
-text_color_g = 0                   # Green amount
-text_color_r = 0                   # Red amount
-# Examples: 0,0,0 = black | 255,255,255 = white | 0,0,255 = red | 0,255,0 = green
-
-# === Text outline (makes text easier to read) ===
-outline_enabled = false            # Add outline around text?
-outline_extra_thickness = 4        # Outline thickness (1 to 4)
-outline_color_b = 255              # Outline color (BGR format)
-outline_color_g = 255
-outline_color_r = 255
-
-# === Text position and spacing ===
-line_start_y = 30                  # Distance from top of screen
-line_spacing = 18                  # Space between lines (not used with single line)
-margin_left = 10                   # Distance from left edge
-
-# === Background box behind text ===
-background_enabled = true          # Show background box?
-background_opacity = 0.2           # Transparency (0.0 = invisible, 1.0 = solid)
-
-# Background color (BGR format)
-background_color_b = 255
-background_color_g = 255
-background_color_r = 255
-
-# Background padding (extra space around text)
-background_padding_top = 10
-background_padding_bottom = 0
-background_padding_left = 10
-background_padding_right = 10
+# Video format (raw .h264 vs MP4 container)
+disable_mp4_conversion = false # Keep raw .h264 files (better for power-loss resilience)
 
 
 ################################################################################
-# 3. ADVANCED SETTINGS
+# DISPLAY & PREVIEW
 ################################################################################
 
-# Recording diagnostics
-enable_csv_timing_log = true       # Save detailed frame timing data to CSV?
-                                    # Disable for better performance if you don't need timing analysis
-                                    # CSV includes: frame numbers, timestamps, latencies, dropped frames
+# Preview windows (OpenCV)
+show_preview = false         # Show live preview windows (true/false)
+preview_preset = 7           # Preview size (0-7, smaller = lower CPU)
 
-# Text rendering quality
-line_type = 16
-# 16 = smooth/anti-aliased (best quality)
-# 8 = sharper edges
-# 4 = sharpest but jagged
+# Frame number overlay
+show_frame_number = true     # Display frame number on video/preview
+font_scale_base = 0.6        # Text size (0.4-1.0)
+thickness_base = 1           # Text boldness (1-4)
+text_color_b = 0             # Text color: Blue component (0-255)
+text_color_g = 0             # Text color: Green component (0-255)
+text_color_r = 0             # Text color: Red component (0-255)
+margin_left = 10             # Pixels from left edge
+line_start_y = 30            # Pixels from top edge
 
-# Scale mode (usually leave as 'auto')
-scale_mode = auto                  # auto or manual
-manual_scale_factor = 3.0          # Only used if scale_mode = manual
 
 ################################################################################
-# End of configuration
+# LOGGING
 ################################################################################
+
+# Log file: output_dir/session_YYYYMMDD_HHMMSS/session.log
+log_level = info             # Python log level (debug/info/warning/error/critical)
+console_output = false       # Also print to console (true/false)
+libcamera_log_level = WARN   # Camera library logs (DEBUG/INFO/WARN/ERROR/FATAL)
+
+
+################################################################################
+# ADVANCED
+################################################################################
+
+# Frame timing diagnostics (CSV export)
+enable_csv_timing_log = true # Save per-frame timing data for analysis

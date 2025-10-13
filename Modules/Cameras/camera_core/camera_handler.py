@@ -3,11 +3,19 @@
 Single camera handler with async loop architecture.
 
 This orchestrates three independent async loops:
-1. Capture Loop - Tight camera capture at native FPS (~30)
-2. Collator Loop - Timing-based frame collation at display FPS (10)
+1. Capture Loop - Tight camera capture at configured FPS (1-60)
+2. Collator Loop - Timing-based frame collation
 3. Processor Loop - Heavy processing (overlays, recording, resizing)
 
 Each loop is in its own file and runs independently.
+
+CLEANUP ARCHITECTURE:
+The cleanup process is carefully orchestrated to ensure fast, clean exits:
+- Uses DaemonThreadPoolExecutor for asyncio run_in_executor operations
+- Daemon executor threads don't block Python's atexit shutdown
+- Non-daemon event loop thread ensures proper cleanup completes
+- Cleanup sequence: recording → camera → loops → executor → event loop
+- Typical cleanup time: < 1 second
 """
 
 import asyncio
@@ -49,23 +57,54 @@ class CameraHandler:
         # MATCHED FPS MODE: Camera captures at same rate as recording
         # This eliminates artificial frame drops and improves efficiency
         requested_fps = float(args.fps)
-        max_hardware_fps = 30.0  # IMX296 sensor typical maximum
+        min_hardware_fps = 1.0   # Minimum practical FPS
+        max_hardware_fps = 60.0  # IMX296 sensor maximum (1456x1088 @ 60fps)
 
-        # Cap FPS if user requests more than hardware can deliver
+        # Clamp FPS to valid hardware range [1, 60]
         if requested_fps > max_hardware_fps:
             self.logger.warning(
                 "Requested FPS (%.1f) exceeds hardware limit (%.1f). "
-                "Capping at %.1f FPS. Video will be remuxed with actual FPS.",
+                "Capping at %.1f FPS.",
                 requested_fps, max_hardware_fps, max_hardware_fps
             )
             effective_fps = max_hardware_fps
+        elif requested_fps < min_hardware_fps:
+            self.logger.warning(
+                "Requested FPS (%.1f) is below minimum (%.1f). "
+                "Setting to %.1f FPS.",
+                requested_fps, min_hardware_fps, min_hardware_fps
+            )
+            effective_fps = min_hardware_fps
         else:
             effective_fps = requested_fps
 
         # Configure camera to capture at effective FPS (matched to recording rate)
         frame_duration_us = int(1e6 / effective_fps)
+
+        # Log resolution preset being used
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+            from cli_utils import RESOLUTION_TO_PRESET, RESOLUTION_PRESETS
+            resolution_tuple = (args.width, args.height)
+            if resolution_tuple in RESOLUTION_TO_PRESET:
+                preset_num = RESOLUTION_TO_PRESET[resolution_tuple]
+                _, _, desc, aspect = RESOLUTION_PRESETS[preset_num]
+                self.logger.info("Camera %d using resolution preset %d: %dx%d - %s (%s)",
+                                cam_num, preset_num, args.width, args.height, desc, aspect)
+            else:
+                self.logger.info("Camera %d using custom resolution: %dx%d",
+                                cam_num, args.width, args.height)
+        except Exception:
+            pass
+
+        # DUAL STREAM CONFIG:
+        # - main: Full resolution for H.264 encoder (hardware accelerated)
+        # - lores: Preview resolution for display (hardware scaled, no frame stealing)
+        # IMPORTANT: Explicitly set RGB888 format for both streams to ensure color output
         config = self.picam2.create_video_configuration(
-            main={"size": (args.width, args.height)},
+            main={"size": (args.width, args.height), "format": "RGB888"},
+            lores={"size": (args.preview_width, args.preview_height), "format": "RGB888"},
             controls={
                 "FrameDurationLimits": (frame_duration_us, frame_duration_us),
             },
@@ -74,14 +113,29 @@ class CameraHandler:
         self.picam2.start()
         self.logger.info("Camera %d initialized at %.1f FPS (FrameDuration=%d us)",
                         cam_num, effective_fps, frame_duration_us)
+        self.logger.info("Camera %d dual-stream: main=%dx%d (recording), lores=%dx%d (preview)",
+                        cam_num, args.width, args.height, args.preview_width, args.preview_height)
 
-        # Recording manager
+        # Recording manager with hardware H.264 encoding
+        # Pass overlay config so recorder can add frame numbers via post_callback
+        # NOTE: The post_callback will be registered immediately, not just during recording
+        auto_remux = not self.overlay_config.get('disable_mp4_conversion', True)
         self.recording_manager = CameraRecordingManager(
             camera_id=cam_num,
+            picam2=self.picam2,
             resolution=(args.width, args.height),
             fps=effective_fps,
+            bitrate=10_000_000,  # 10 Mbps default
             enable_csv_logging=self.overlay_config.get('enable_csv_timing_log', True),
+            auto_remux=auto_remux,
+            enable_overlay=True,  # Always enable for frame/CSV correlation
+            overlay_config=self.overlay_config,
         )
+
+        # Register post_callback immediately for overlay on both preview and recording
+        # This ensures frame numbers appear on preview even when not recording
+        self.picam2.post_callback = self.recording_manager._overlay_callback
+        self.logger.info("Camera %d: Registered overlay callback for both streams (main+lores)", cam_num)
 
         # Create async loops
         self.capture_loop = CameraCaptureLoop(cam_num, self.picam2)
@@ -110,8 +164,8 @@ class CameraHandler:
             'preview_width': 640,
             'preview_height': 360,
             'target_fps': 30.0,
-            'min_cameras': 2,
-            'allow_partial': False,
+            'min_cameras': 1,
+            'allow_partial': True,
             'discovery_timeout': 5.0,
             'discovery_retry': 3.0,
             'output_dir': 'recordings',
@@ -157,6 +211,7 @@ class CameraHandler:
             'manual_scale_factor': 3.0,
             # Recording settings
             'enable_csv_timing_log': True,
+            'disable_mp4_conversion': True,
         }
 
         if not config_path.exists():
@@ -196,22 +251,91 @@ class CameraHandler:
             return
 
         self._running = True
+        self._loop = None
 
         # Run event loop in thread
         import threading
 
         def run_loops():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            self._loop_task = loop.create_task(self._run_all_loops())
-            try:
-                loop.run_until_complete(self._loop_task)
-            except asyncio.CancelledError:
-                pass
-            finally:
-                loop.close()
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
 
-        self._loop_thread = threading.Thread(target=run_loops, daemon=True)
+            # CRITICAL: Set up custom executor with daemon threads
+            # Problem: asyncio's default ThreadPoolExecutor uses non-daemon threads
+            # Impact: Python's atexit hangs trying to join executor threads on shutdown
+            # Solution: Override ThreadPoolExecutor to create daemon worker threads
+            # Result: Clean, fast exit without blocking on executor cleanup
+            from concurrent.futures import ThreadPoolExecutor
+            import threading
+            import weakref
+
+            class DaemonThreadPoolExecutor(ThreadPoolExecutor):
+                """ThreadPoolExecutor that creates daemon worker threads."""
+                def _adjust_thread_count(self):
+                    def weakref_cb(_, q=self._work_queue):
+                        q.put(None)
+
+                    num_threads = len(self._threads)
+                    if num_threads < self._max_workers:
+                        thread_name = f'{self._thread_name_prefix or self}_{num_threads}'
+                        t = threading.Thread(
+                            name=thread_name,
+                            target=self._worker,
+                            args=(weakref.ref(self, weakref_cb), self._work_queue,
+                                  self._initializer, self._initargs),
+                            daemon=True  # Daemon threads don't block program exit
+                        )
+                        t.start()
+                        self._threads.add(t)
+
+            executor = DaemonThreadPoolExecutor(max_workers=4)
+            self._loop.set_default_executor(executor)
+
+            self._loop_task = self._loop.create_task(self._run_all_loops())
+            try:
+                self._loop.run_until_complete(self._loop_task)
+            except asyncio.CancelledError:
+                self.logger.debug("Loop task cancelled")
+            except Exception as e:
+                self.logger.error("Loop error: %s", e)
+            finally:
+                # Clean up event loop and executor on thread exit
+                try:
+                    # Cancel any remaining async tasks (1 second timeout)
+                    pending = asyncio.all_tasks(self._loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        try:
+                            self._loop.run_until_complete(
+                                asyncio.wait_for(
+                                    asyncio.gather(*pending, return_exceptions=True),
+                                    timeout=1.0
+                                )
+                            )
+                        except (asyncio.TimeoutError, Exception):
+                            pass  # Force close if tasks don't cancel quickly
+                except Exception:
+                    pass
+
+                # Shutdown executor without waiting (daemon threads will exit on their own)
+                try:
+                    executor = self._loop._default_executor
+                    if executor is not None:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+
+                # Close event loop
+                try:
+                    self._loop.close()
+                except Exception:
+                    pass
+                self._loop = None
+
+        # Start event loop in non-daemon thread
+        # Non-daemon ensures Python waits for proper cleanup during shutdown
+        self._loop_thread = threading.Thread(target=run_loops, daemon=False)
         self._loop_thread.start()
         self.logger.info("Started all async loops")
 
@@ -222,9 +346,20 @@ class CameraHandler:
         await self.collator_loop.start()
         await self.processor.start()
 
-        # Keep running until stopped
-        while self._running:
-            await asyncio.sleep(0.1)
+        try:
+            # Keep running until stopped
+            while self._running:
+                await asyncio.sleep(0.1)
+        finally:
+            # Properly stop all loops when exiting
+            self.logger.debug("Stopping async loops...")
+            await asyncio.gather(
+                self.capture_loop.stop(),
+                self.collator_loop.stop(),
+                self.processor.stop(),
+                return_exceptions=True
+            )
+            self.logger.debug("All async loops stopped")
 
     def start_recording(self, session_dir: Optional[Path] = None):
         """Start recording. If session_dir provided, use it and store for this session."""
@@ -270,43 +405,47 @@ class CameraHandler:
         return self.processor.get_display_frame()
 
     def cleanup(self):
-        """Clean up all resources."""
+        """
+        Clean up all resources in the correct order.
+
+        Cleanup sequence:
+        1. Stop recording → releases H.264 encoder
+        2. Stop camera hardware → unblocks capture operations
+        3. Signal loops to stop → triggers async loop exit
+        4. Wait for event loop thread → allows graceful shutdown
+        5. Close camera resources
+        """
+        # Stop recording first to release encoder
+        if self.recording:
+            self.stop_recording()
+            self.recording_manager.cleanup()
+
+        # Stop camera hardware to unblock capture loops
+        try:
+            self.picam2.stop()
+        except Exception as e:
+            self.logger.debug("Camera stop error (ignored): %s", e)
+
+        # Signal loops to stop
         self._running = False
 
-        # Stop async loops properly
-        try:
-            import threading
-            import time
+        # Wait for event loop thread to finish (typically < 1 second)
+        if hasattr(self, '_loop_thread') and self._loop_thread.is_alive():
+            self._loop_thread.join(timeout=2.0)
+            if self._loop_thread.is_alive():
+                self.logger.warning(
+                    "Async loop thread did not finish within 2 seconds"
+                )
 
-            def stop_loops_sync():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Stop all loops
-                    loop.run_until_complete(asyncio.gather(
-                        self.capture_loop.stop(),
-                        self.collator_loop.stop(),
-                        self.processor.stop(),
-                        return_exceptions=True
-                    ))
-                except Exception as e:
-                    self.logger.debug("Loop stop error: %s", e)
-                finally:
-                    loop.close()
-
-            thread = threading.Thread(target=stop_loops_sync, daemon=True)
-            thread.start()
-            thread.join(timeout=1.0)
-        except Exception as e:
-            self.logger.debug("Async cleanup error: %s", e)
-
-        self.stop_recording()
-        self.recording_manager.cleanup()
-
+        # Final camera cleanup
         try:
             self.picam2.stop_preview()
         except Exception:
             pass
-        self.picam2.stop()
-        self.picam2.close()
+
+        try:
+            self.picam2.close()
+        except Exception as e:
+            self.logger.debug("Camera close error: %s", e)
+
         self.logger.info("Cleanup completed")

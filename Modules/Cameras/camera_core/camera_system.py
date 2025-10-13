@@ -41,16 +41,32 @@ class CameraSystem:
         self.mode = getattr(args, "mode", "interactive")
         self.slave_mode = self.mode == "slave"
         self.headless_mode = self.mode == "headless"
+        self.show_preview = getattr(args, "show_preview", True)
+        self.auto_start_recording = getattr(args, "auto_start_recording", False)
         self.session_prefix = getattr(args, "session_prefix", "session")
         self.command_thread = None
         self.shutdown_event = threading.Event()
         self.device_timeout = getattr(args, "discovery_timeout", 5)
-        self.session_dir: Optional[Path] = None
-        self.session_label: Optional[str] = None
         self.initialized = False
 
+        # Get console stdout for user-facing messages (falls back to sys.stdout if not available)
+        self.console = getattr(args, "console_stdout", sys.stdout)
+
+        # Session directory is created in main() and passed via args
+        self.session_dir = getattr(args, "session_dir", None)
+        if self.session_dir is None:
+            # Fallback: create session directory if not provided
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            prefix = self.session_prefix.rstrip("_")
+            session_name = f"{prefix}_{timestamp}" if prefix else timestamp
+            base = Path(self.args.output_dir)
+            self.session_dir = base / session_name
+            self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.session_label = self.session_dir.name
+        self.logger.info("Session directory: %s", self.session_dir)
+
         # Frame streaming for UI preview
-        self.preview_enabled = [True, True]  # Enable preview by default for up to 2 cameras
+        self.preview_enabled = []  # Will be populated dynamically based on detected cameras
         self.last_preview_time = 0
         self.preview_interval = 0.033  # ~30 FPS for preview streaming
 
@@ -64,15 +80,7 @@ class CameraSystem:
             self.send_status("initializing", {"device": "cameras"})
 
     def _ensure_session_dir(self) -> Path:
-        if self.session_dir is None:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            prefix = self.session_prefix.rstrip("_")
-            session_name = f"{prefix}_{timestamp}" if prefix else timestamp
-            base = Path(self.args.output_dir)
-            self.session_dir = base / session_name
-            self.session_dir.mkdir(parents=True, exist_ok=True)
-            self.session_label = self.session_dir.name
-            self.logger.info("New recording session directory: %s", self.session_dir)
+        """Return the session directory (created at initialization)."""
         return self.session_dir
 
     def _initialize_cameras(self):
@@ -127,15 +135,17 @@ class CameraSystem:
                     {"message": warning_msg, "cameras": len(cam_infos)},
                 )
 
-        # Initialize available cameras
-        self.logger.info("Initializing %d camera(s)...", min(len(cam_infos), 2))
+        # Initialize all detected cameras
+        num_cameras = len(cam_infos)
+        self.logger.info("Initializing %d camera(s)...", num_cameras)
         try:
             # Don't create session dir yet - wait until first recording/snapshot
             # Just pass output_dir to handlers, they'll use session_dir when recording starts
-            for i in range(min(len(cam_infos), 2)):
+            for i in range(num_cameras):
                 handler = CameraHandler(cam_infos[i], i, self.args, None)  # Pass None for session_dir
                 handler.start_loops()  # Start async capture/collator/processor loops
                 self.cameras.append(handler)
+                self.preview_enabled.append(True)  # Enable preview for this camera by default
 
             self.logger.info("Successfully initialized %d camera(s)", len(self.cameras))
             if self.slave_mode:
@@ -294,6 +304,109 @@ class CameraSystem:
 
         self.running = True
 
+        # Check if preview is enabled
+        if not self.show_preview:
+            self.logger.info("Preview disabled - running in headless interactive mode")
+            self.logger.info("Commands: 'r' to toggle recording, 's' for snapshot, 'q' to quit")
+            self.logger.info("Type command and press Enter")
+
+            # Print control instructions to console (always visible to user)
+            print("\n" + "="*60, file=self.console)
+            print("HEADLESS INTERACTIVE MODE", file=self.console)
+            print("="*60, file=self.console)
+            print("Commands:", file=self.console)
+            print("  r + Enter : Toggle recording on/off", file=self.console)
+            print("  s + Enter : Take snapshot from all cameras", file=self.console)
+            print("  q + Enter : Quit application", file=self.console)
+            print("  Ctrl+C    : Also quits gracefully", file=self.console)
+            print("="*60 + "\n", file=self.console)
+            self.console.flush()
+
+            # Auto-start recording if enabled
+            if self.auto_start_recording:
+                session_dir = self._ensure_session_dir()
+                for cam in self.cameras:
+                    cam.start_recording(session_dir)
+                self.recording = True
+                self.logger.info("Auto-started recording")
+                print(f"✓ Recording auto-started → {session_dir.name}", file=self.console)
+                self.console.flush()
+
+            # Run stdin listener in background thread
+            def stdin_listener():
+                while self.running and not self.shutdown_event.is_set():
+                    try:
+                        # Check if stdin has data available (non-blocking)
+                        if select.select([sys.stdin], [], [], 0.1)[0]:
+                            line = sys.stdin.readline().strip().lower()
+                            if not line:
+                                continue
+
+                            cmd = line[0]  # Take first character
+
+                            if cmd == 'q':
+                                self.logger.info("Quit command received")
+                                print("✓ Quitting...", file=self.console)
+                                self.console.flush()
+                                self.running = False
+                                self.shutdown_event.set()
+                            elif cmd == 'r':
+                                if not self.recording:
+                                    session_dir = self._ensure_session_dir()
+                                    for cam in self.cameras:
+                                        cam.start_recording(session_dir)
+                                    self.recording = True
+                                    self.logger.info("Recording started")
+                                    print(f"✓ Recording started → {session_dir.name}", file=self.console)
+                                    self.console.flush()
+                                else:
+                                    for cam in self.cameras:
+                                        cam.stop_recording()
+                                    self.recording = False
+                                    self.logger.info("Recording stopped")
+                                    print("✓ Recording stopped", file=self.console)
+                                    self.console.flush()
+                            elif cmd == 's':
+                                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                session_dir = self._ensure_session_dir()
+                                snapshot_count = 0
+                                for i, cam in enumerate(self.cameras):
+                                    frame = cam.update_preview_cache()
+                                    if frame is not None:
+                                        filename = session_dir / f"snapshot_cam{i}_{ts}.jpg"
+                                        cv2.imwrite(str(filename), frame)
+                                        self.logger.info("Saved snapshot %s", filename)
+                                        snapshot_count += 1
+                                print(f"✓ Saved {snapshot_count} snapshot(s)", file=self.console)
+                                self.console.flush()
+                            else:
+                                self.logger.warning("Unknown command: %s (use r/s/q)", cmd)
+                                print(f"✗ Unknown command '{cmd}' (use r/s/q)", file=self.console)
+                                self.console.flush()
+                    except Exception as e:
+                        self.logger.error("Stdin listener error: %s", e)
+                        break
+
+            stdin_thread = threading.Thread(target=stdin_listener, daemon=True)
+            stdin_thread.start()
+
+            # Just keep cameras active without GUI
+            try:
+                while self.running and not self.shutdown_event.is_set():
+                    # Update frame cache to keep pipeline active
+                    for cam in self.cameras:
+                        cam.update_preview_cache()
+                    time.sleep(0.01)  # 100 FPS polling
+            except KeyboardInterrupt:
+                self.logger.info("Interrupted by user")
+                self.running = False
+
+            # Wait for stdin thread to finish
+            if stdin_thread.is_alive():
+                stdin_thread.join(timeout=0.5)
+
+            return
+
         # Set OpenCV to use GTK backend if available (more stable than Qt)
         try:
             cv2.namedWindow("test_window", cv2.WINDOW_NORMAL)
@@ -311,6 +424,27 @@ class CameraSystem:
 
         self.logger.info("Preview mode: 'q' to quit, 's' for snapshot, 'r' to toggle recording")
 
+        # Print control instructions to console (always visible to user)
+        print("\n" + "="*60, file=self.console)
+        print("PREVIEW MODE", file=self.console)
+        print("="*60, file=self.console)
+        print("Commands (keyboard shortcuts in preview window):", file=self.console)
+        print("  q : Quit application", file=self.console)
+        print("  r : Toggle recording on/off", file=self.console)
+        print("  s : Take snapshot from all cameras", file=self.console)
+        print("="*60 + "\n", file=self.console)
+        self.console.flush()
+
+        # Auto-start recording if enabled
+        if self.auto_start_recording:
+            session_dir = self._ensure_session_dir()
+            for cam in self.cameras:
+                cam.start_recording(session_dir)
+            self.recording = True
+            self.logger.info("Auto-started recording")
+            print(f"✓ Recording auto-started → {session_dir.name}", file=self.console)
+            self.console.flush()
+
         while self.running and not self.shutdown_event.is_set():
             frames = [cam.update_preview_cache() for cam in self.cameras]
 
@@ -322,6 +456,8 @@ class CameraSystem:
             # Use waitKey(1) which only waits 1ms - this allows high frame rates
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
+                print("✓ Quitting...", file=self.console)
+                self.console.flush()
                 self.running = False
             elif key == ord("r"):
                 if not self.recording:
@@ -329,40 +465,81 @@ class CameraSystem:
                     for cam in self.cameras:
                         cam.start_recording(session_dir)
                     self.recording = True
+                    print(f"✓ Recording started → {session_dir.name}", file=self.console)
+                    self.console.flush()
                 else:
                     for cam in self.cameras:
                         cam.stop_recording()
                     self.recording = False
+                    print("✓ Recording stopped", file=self.console)
+                    self.console.flush()
             elif key == ord("s"):
                 ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 session_dir = self._ensure_session_dir()
+                snapshot_count = 0
                 for i, frame in enumerate(frames):
                     if frame is not None:
                         filename = session_dir / f"snapshot_cam{i}_{ts}.jpg"
                         cv2.imwrite(str(filename), frame)
                         self.logger.info("Saved snapshot %s", filename)
+                        snapshot_count += 1
+                print(f"✓ Saved {snapshot_count} snapshot(s)", file=self.console)
+                self.console.flush()
 
         self.logger.info("All preview windows closed")
+        # Gracefully shut down OpenCV Qt event loop
+        # Multiple waitKey calls allow Qt to process pending events
+        for _ in range(5):
+            cv2.waitKey(10)
         cv2.destroyAllWindows()
+        # Final event processing to let Qt clean up properly
+        for _ in range(5):
+            cv2.waitKey(10)
+        time.sleep(0.05)  # Give Qt backend time to finish cleanup
 
     def slave_loop(self):
-        """Command-driven slave mode (no GUI)"""
+        """Command-driven slave mode (optional GUI)"""
         self.running = True
 
         # Start command listener thread
         self.command_thread = threading.Thread(target=self.command_listener, daemon=True)
         self.command_thread.start()
 
-        self.logger.info("Slave mode: waiting for commands...")
+        # If preview is enabled, create OpenCV windows for local display
+        if self.show_preview:
+            self.logger.info("Slave mode with preview: showing local windows alongside JSON commands")
+            try:
+                cv2.namedWindow("test_window", cv2.WINDOW_NORMAL)
+                cv2.destroyWindow("test_window")
+                self.logger.info("OpenCV window system available")
 
-        # Keep cameras active but don't display
+                # Create windows for available cameras
+                for i, cam in enumerate(self.cameras):
+                    cv2.namedWindow(f"Camera {i}", cv2.WINDOW_NORMAL)
+                    cv2.resizeWindow(f"Camera {i}", self.args.preview_width, self.args.preview_height)
+            except Exception as e:
+                self.logger.warning("OpenCV window system not available: %s - disabling preview", e)
+                self.show_preview = False
+        else:
+            self.logger.info("Slave mode: waiting for commands (no preview windows)...")
+
+        # Keep cameras active
         while self.running and not self.shutdown_event.is_set():
             current_time = time.time()
 
             # Capture frames from all cameras
             frames = [cam.update_preview_cache() for cam in self.cameras]
 
-            # Send preview frames if enabled and enough time has passed
+            # Display frames if preview is enabled
+            if self.show_preview:
+                for i, frame in enumerate(frames):
+                    if frame is not None:
+                        cv2.imshow(f"Camera {i}", frame)
+                # Check for window close or key press (1ms wait to allow high frame rates)
+                key = cv2.waitKey(1) & 0xFF
+                # Note: In slave mode, we don't act on keypresses (only JSON commands)
+
+            # Send preview frames via JSON if enabled and enough time has passed
             if current_time - self.last_preview_time >= self.preview_interval:
                 self.last_preview_time = current_time
 
@@ -381,7 +558,14 @@ class CameraSystem:
                             })
 
             # Minimal sleep to prevent excessive CPU usage but allow high frame rates
-            time.sleep(0.001)  # 1ms sleep - allows up to ~1000 FPS polling
+            if not self.show_preview:
+                time.sleep(0.001)  # 1ms sleep - allows up to ~1000 FPS polling
+
+        # Clean up OpenCV windows if they were created
+        if self.show_preview:
+            cv2.destroyAllWindows()
+            for _ in range(5):
+                cv2.waitKey(10)
 
         self.logger.info("Slave mode ended")
 
@@ -434,13 +618,44 @@ class CameraSystem:
             raise
 
     def cleanup(self):
-        self.logger.info("Cleaning up cameras...")
+        """Clean up all cameras and resources."""
         self.running = False
+        self.shutdown_event.set()
+
+        # Stop recording first (if active) to release encoders
+        if self.recording:
+            for cam in self.cameras:
+                try:
+                    cam.stop_recording()
+                except Exception as e:
+                    self.logger.debug("Error stopping recording on camera %d: %s", cam.cam_num, e)
+            self.recording = False
+
+        # Clean up cameras in parallel for faster shutdown
+        cleanup_threads = []
         for cam in self.cameras:
-            cam.cleanup()
+            def cleanup_camera(camera):
+                try:
+                    camera.cleanup()
+                except Exception as e:
+                    self.logger.debug("Error cleaning up camera %d: %s", camera.cam_num, e)
+
+            # Non-daemon thread ensures proper cleanup before exit
+            thread = threading.Thread(target=cleanup_camera, args=(cam,), daemon=False)
+            thread.start()
+            cleanup_threads.append(thread)
+
+        # Wait for all cleanup threads (should finish in < 1 second each)
+        for i, thread in enumerate(cleanup_threads):
+            thread.join(timeout=3.0)
+            if thread.is_alive():
+                self.logger.warning("Camera %d cleanup did not finish within 3 seconds", i)
+
         self.cameras.clear()
         self.initialized = False
+
+        # Join command thread if running
         if self.command_thread and self.command_thread.is_alive():
-            self.shutdown_event.set()
-            self.command_thread.join(timeout=1.0)
+            self.command_thread.join(timeout=0.5)
+
         self.logger.info("Cleanup completed")

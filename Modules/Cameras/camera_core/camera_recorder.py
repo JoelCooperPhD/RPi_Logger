@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 Camera recording manager with consistent FPS and detailed timing diagnostics.
-Handles video encoding via ffmpeg and frame timing CSV output.
+Uses picamera2 H264Encoder for hardware-accelerated encoding.
 
 OPTIMIZED FOR PERFORMANCE:
+- Hardware H.264 encoding via picamera2 (minimal CPU usage)
 - Separate CSV logging thread to avoid blocking video writes
-- Direct numpy-to-bytes write to ffmpeg (minimal overhead)
 - Configurable CSV logging (can disable for performance)
 - Increased flush intervals to reduce disk I/O stuttering
 """
@@ -13,7 +13,6 @@ OPTIMIZED FOR PERFORMANCE:
 import datetime
 import logging
 import queue
-import subprocess
 import threading
 import time
 from pathlib import Path
@@ -21,9 +20,11 @@ from typing import Any, Optional, NamedTuple
 
 import cv2
 import numpy as np
+from picamera2 import MappedArray
+from picamera2.encoders import H264Encoder
+from picamera2.outputs import FileOutput
 
-from .camera_utils import FrameTimingMetadata, _QueuedFrame
-from .video_remux import auto_remux_recording
+from .camera_utils import FrameTimingMetadata
 
 logger = logging.getLogger("CameraRecorder")
 
@@ -43,55 +44,52 @@ class _CSVLogEntry(NamedTuple):
 
 class CameraRecordingManager:
     """
-    Camera recorder with frame-drop mode and automatic FPS correction.
+    Camera recorder with hardware H.264 encoding via picamera2.
 
+    Uses picamera2 H264Encoder for efficient hardware-accelerated recording.
     Drops frames when camera can't keep up (no duplication).
     Automatically remuxes video with correct FPS based on actual timing data.
 
     Args:
+        picam2: Picamera2 instance (required for encoder attachment)
         auto_remux: If True (default), automatically correct video FPS after recording
     """
 
-    def __init__(self, camera_id: int, resolution: tuple[int, int], fps: float, enable_csv_logging: bool = True, auto_remux: bool = True):
+    def __init__(self, camera_id: int, picam2, resolution: tuple[int, int], fps: float, bitrate: int = 10_000_000,
+                 enable_csv_logging: bool = True, auto_remux: bool = True, enable_overlay: bool = True, overlay_config: dict = None):
         self.camera_id = camera_id
+        self.picam2 = picam2
         self.resolution = resolution
         self.fps = fps
+        self.bitrate = bitrate
         self.enable_csv_logging = enable_csv_logging
         self.auto_remux = auto_remux
+        self.enable_overlay = enable_overlay
+        self.overlay_config = overlay_config or {}
 
         self.recording = False
         self.video_path: Optional[Path] = None
         self.frame_timing_path: Optional[Path] = None
 
-        self._ffmpeg_process: Optional[subprocess.Popen] = None
+        self._encoder: Optional[H264Encoder] = None
+        self._output: Optional[FileOutput] = None
         self._frame_timing_file: Optional[Any] = None
-        self._frame_queue: Optional[queue.Queue[_QueuedFrame]] = None
         self._csv_queue: Optional[queue.Queue[_CSVLogEntry]] = None
-        self._writer_thread: Optional[threading.Thread] = None
         self._csv_thread: Optional[threading.Thread] = None
-        self._timer_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._queue_sentinel = object()
 
         self._latest_lock = threading.Lock()
-        self._latest_frame: Optional[np.ndarray] = None
-        self._latest_metadata: Optional[FrameTimingMetadata] = None
-
-        self._frame_interval = 1.0 / fps if fps > 0 else 0.0
-        self._next_frame_time: Optional[float] = None
         self._written_frames = 0
         self._skipped_frames = 0
-        self._last_write_monotonic: Optional[float] = None
-        self._last_camera_frame_index: Optional[int] = None
+        self._recorded_frame_count = 0  # Frames processed by post_callback
 
         # Drop tracking (accumulates drops even when recorder skips frames)
         self._accumulated_drops = 0  # Drops not yet written to CSV
         self._total_hardware_drops = 0  # Total drops since recording started
 
-        # Batch flushing for performance
-        # Increased intervals to reduce disk I/O stuttering
-        self._video_write_counter = 0
-        self._video_flush_interval = 120  # Flush video every N frames (~4 sec at 30fps)
+        # Store original callback to restore later
+        self._original_callback = None
 
     @property
     def written_frames(self) -> int:
@@ -105,6 +103,67 @@ class CameraRecordingManager:
     def is_recording(self) -> bool:
         return self.recording
 
+    def _overlay_callback(self, request):
+        """
+        Post-callback that adds overlay to BOTH main and lores streams.
+
+        This is called by picamera2 for every frame before encoding/display.
+        We add frame number overlay here so it appears identically on both:
+        - main stream → H.264 encoder → recording
+        - lores stream → capture loop → preview
+
+        CRITICAL: Uses MappedArray to get DIRECT access to frame buffers.
+        This ensures cv2.putText modifications affect what encoder/preview see.
+        Using make_array() would return a COPY, which wouldn't affect encoding.
+
+        EFFICIENCY: Overlay is rendered ONCE per stream at camera level,
+        not duplicated in Python processing code. Single source of truth.
+        """
+        if not self.enable_overlay:
+            return request
+
+        try:
+            # Increment recorded frame count
+            self._recorded_frame_count += 1
+
+            # Get overlay configuration
+            font_scale = self.overlay_config.get('font_scale_base', 0.6)
+            thickness = self.overlay_config.get('thickness_base', 1)
+
+            # Text color (BGR in config → RGB for picamera2)
+            text_color_b = self.overlay_config.get('text_color_b', 0)
+            text_color_g = self.overlay_config.get('text_color_g', 0)
+            text_color_r = self.overlay_config.get('text_color_r', 0)
+            text_color = (text_color_r, text_color_g, text_color_b)
+
+            margin_left = self.overlay_config.get('margin_left', 10)
+            line_start_y = self.overlay_config.get('line_start_y', 30)
+
+            frame_text = f"Frame: {self._recorded_frame_count}"
+
+            # Add overlay to MAIN stream (for recording) when encoder is running
+            if self.recording and self._encoder is not None:
+                try:
+                    with MappedArray(request, "main") as m:
+                        cv2.putText(
+                            m.array,
+                            frame_text,
+                            (margin_left, line_start_y),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            font_scale,
+                            text_color,
+                            thickness,
+                            cv2.LINE_AA
+                        )
+                except Exception as e:
+                    if self._recorded_frame_count <= 3:
+                        logger.warning("Camera %d: Could not overlay on main stream: %s", self.camera_id, e)
+
+        except Exception as e:
+            logger.error("Error in overlay callback for camera %d: %s", self.camera_id, e)
+
+        return request
+
     def start_recording(self, session_dir: Path) -> None:
         if self.recording:
             return
@@ -114,42 +173,13 @@ class CameraRecordingManager:
         w, h = self.resolution
         base_name = f"cam{self.camera_id}_{w}x{h}_{self.fps:.1f}fps_{timestamp}"
 
-        self.video_path = session_dir / f"{base_name}.mp4"
+        # Use .h264 extension for raw H.264 output
+        self.video_path = session_dir / f"{base_name}.h264"
         self.frame_timing_path = session_dir / f"{base_name}_frame_timing.csv"
 
-        pix_fmt = "bgr24"
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "rawvideo",
-            "-vcodec",
-            "rawvideo",
-            "-s",
-            f"{w}x{h}",
-            "-pix_fmt",
-            pix_fmt,
-            "-r",
-            str(self.fps),
-            "-i",
-            "-",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "ultrafast",
-            "-crf",
-            "23",
-            str(self.video_path),
-        ]
-
-        try:
-            self._ffmpeg_process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            )
-        except FileNotFoundError as exc:
-            raise RuntimeError("ffmpeg is required for recording but was not found") from exc
+        # Create H264 encoder with hardware acceleration
+        self._encoder = H264Encoder(bitrate=self.bitrate)
+        self._output = FileOutput(str(self.video_path))
 
         # Initialize CSV logging if enabled
         if self.enable_csv_logging:
@@ -160,265 +190,141 @@ class CameraRecordingManager:
             # CSV logging queue (larger to prevent blocking)
             self._csv_queue = queue.Queue(maxsize=300)
 
-        max_queue = max(int(self.fps * 4), 60)
-        self._frame_queue = queue.Queue(max_queue)
         self._stop_event.clear()
-        self._next_frame_time = time.perf_counter()
         self._written_frames = 0
         self._skipped_frames = 0
-        self._last_write_monotonic = None
-        self._last_camera_frame_index = None
+        self._recorded_frame_count = 0
         self._accumulated_drops = 0
         self._total_hardware_drops = 0
 
-        # Start threads: video writer (high priority), CSV logger (low priority), timer
-        self._writer_thread = threading.Thread(target=self._frame_writer_loop, name=f"Cam{self.camera_id}-writer", daemon=True)
-        self._writer_thread.start()
+        # NOTE: post_callback is now registered permanently at camera init
+        # No need to register/unregister during recording start/stop
 
+        # Start hardware-accelerated recording
+        try:
+            self.picam2.start_encoder(self._encoder, self._output)
+        except Exception as e:
+            logger.error("Failed to start H264 encoder for camera %d: %s", self.camera_id, e)
+            raise
+
+        # Start CSV logger thread if enabled
         if self.enable_csv_logging:
             self._csv_thread = threading.Thread(target=self._csv_logger_loop, name=f"Cam{self.camera_id}-csv", daemon=True)
             self._csv_thread.start()
 
-        self._timer_thread = threading.Thread(target=self._frame_timer_loop, name=f"Cam{self.camera_id}-timer", daemon=True)
-        self._timer_thread.start()
-
         self.recording = True
         csv_status = "with CSV logging" if self.enable_csv_logging else "CSV logging disabled"
-        logger.info("Camera %d recording to %s (%s)", self.camera_id, self.video_path, csv_status)
+        logger.info("Camera %d recording to %s (%s) [hardware H.264 @ %d bps]",
+                   self.camera_id, self.video_path, csv_status, self.bitrate)
 
     def stop_recording(self) -> None:
-        if not self.recording and self._ffmpeg_process is None:
+        if not self.recording and self._encoder is None:
             return
 
         self.recording = False
         self._stop_event.set()
 
-        if self._frame_queue is not None:
+        # Stop hardware encoder (critical: do this immediately to unblock camera)
+        if self._encoder is not None:
             try:
-                self._frame_queue.put_nowait(self._queue_sentinel)
-            except queue.Full:
-                pass
+                logger.debug("Camera %d: Stopping H264 encoder...", self.camera_id)
+                self.picam2.stop_encoder()
+                logger.debug("Camera %d: Encoder stopped", self.camera_id)
+            except Exception as e:
+                logger.warning("Error stopping encoder for camera %d: %s", self.camera_id, e)
+            self._encoder = None
+            self._output = None
 
+        # NOTE: post_callback stays registered (permanent overlay for preview+recording)
+        # No need to restore/unregister
+
+        # Stop CSV logging thread
         if self._csv_queue is not None:
             try:
                 self._csv_queue.put_nowait(self._queue_sentinel)
             except queue.Full:
                 pass
 
-        if self._timer_thread is not None:
-            self._timer_thread.join(timeout=2.0)
-        self._timer_thread = None
-
-        if self._writer_thread is not None:
-            self._writer_thread.join(timeout=5.0)
-        self._writer_thread = None
-
         if self._csv_thread is not None:
             self._csv_thread.join(timeout=5.0)
         self._csv_thread = None
-
-        if self._frame_queue is not None:
-            while not self._frame_queue.empty():
-                try:
-                    self._frame_queue.get_nowait()
-                except queue.Empty:
-                    break
-        self._frame_queue = None
         self._csv_queue = None
 
-        if self._ffmpeg_process is not None:
-            try:
-                # Flush any remaining buffered video data
-                if self._ffmpeg_process.stdin is not None:
-                    self._ffmpeg_process.stdin.flush()
-                self._ffmpeg_process.stdin.close()
-                self._ffmpeg_process.wait(timeout=5)
-            except Exception:
-                self._ffmpeg_process.terminate()
-            self._ffmpeg_process = None
-
+        # Close CSV file
         if self._frame_timing_file is not None:
-            # Flush any remaining buffered CSV data
             self._frame_timing_file.flush()
             self._frame_timing_file.close()
             self._frame_timing_file = None
 
-        self._latest_frame = None
-        self._latest_metadata = None
+        # Convert .h264 to .mp4 for better compatibility (if enabled)
+        if self.auto_remux and self.video_path and self.video_path.exists():
+            mp4_path = self.video_path.with_suffix('.mp4')
+            try:
+                import subprocess
+                # Use ffmpeg to remux H.264 to MP4 container with correct FPS
+                subprocess.run([
+                    'ffmpeg', '-y',
+                    '-r', str(self.fps),  # Input framerate
+                    '-i', str(self.video_path),
+                    '-c:v', 'copy',  # Copy video stream (no re-encoding)
+                    str(mp4_path)
+                ], check=True, capture_output=True)
 
-        # Auto-remux video with correct FPS if enabled
-        if self.video_path and self.auto_remux and self.enable_csv_logging:
-            logger.info("Camera %d auto-remuxing video with corrected FPS...", self.camera_id)
-            remuxed_path = auto_remux_recording(self.video_path, replace_original=True)
-            if remuxed_path:
-                logger.info("Camera %d recording saved with corrected FPS: %s", self.camera_id, remuxed_path)
-            else:
-                logger.warning("Camera %d remux failed, keeping original: %s", self.camera_id, self.video_path)
+                # Remove original .h264 file
+                self.video_path.unlink()
+                self.video_path = mp4_path
+                logger.info("Camera %d recording saved (MP4): %s", self.camera_id, self.video_path)
+            except Exception as e:
+                logger.warning("Failed to convert .h264 to .mp4 for camera %d: %s. Keeping .h264 file.", self.camera_id, e)
+                if self.video_path:
+                    logger.info("Camera %d recording saved (H.264): %s", self.camera_id, self.video_path)
         elif self.video_path:
-            logger.info("Camera %d recording saved: %s", self.camera_id, self.video_path)
+            logger.info("Camera %d recording saved (H.264): %s", self.camera_id, self.video_path)
 
     def cleanup(self) -> None:
         self.stop_recording()
 
-    def submit_frame(self, frame: np.ndarray, metadata: FrameTimingMetadata) -> None:
-        if frame is None:
+    def submit_frame(self, frame: Optional[np.ndarray], metadata: FrameTimingMetadata) -> None:
+        """
+        Log frame timing metadata to CSV.
+
+        Note: With hardware H.264 encoding + post_callback overlay:
+        - Frame pixels go directly from camera → post_callback → encoder
+        - This method only handles CSV logging for diagnostics
+        - frame parameter can be None (not needed for CSV logging)
+        """
+        if not self.recording or not self.enable_csv_logging:
             return
 
         with self._latest_lock:
+            # Track frame count
+            self._written_frames += 1
+
             # Accumulate any drops from this frame
             if metadata.dropped_since_last is not None and metadata.dropped_since_last > 0:
                 self._accumulated_drops += metadata.dropped_since_last
                 self._total_hardware_drops += metadata.dropped_since_last
-                # Debug: Log when drops are accumulated
-                logger.info("Camera %d: Accumulated %d drops (total now: %d, accumulated now: %d) - hw_frame=%s, sw_frame=%s",
-                           self.camera_id, metadata.dropped_since_last,
-                           self._total_hardware_drops, self._accumulated_drops,
-                           metadata.camera_frame_index, metadata.software_frame_index)
 
-            # Frame is already contiguous from cv2 operations, no need to copy
-            self._latest_frame = frame
-            self._latest_metadata = metadata
+            # Queue CSV logging
+            if self._csv_queue is not None:
+                write_time_unix = time.time()
+                frame_number = metadata.display_frame_index if metadata.display_frame_index is not None else self._written_frames
 
-    def _frame_timer_loop(self) -> None:
-        if self._frame_interval <= 0:
-            return
-
-        while not self._stop_event.is_set():
-            next_frame_time = self._next_frame_time
-            if next_frame_time is None:
-                break
-
-            now = time.perf_counter()
-            if next_frame_time > now:
-                time.sleep(next_frame_time - now)
-                now = time.perf_counter()
-
-            frame_to_write: Optional[np.ndarray]
-            metadata: Optional[FrameTimingMetadata]
-
-            with self._latest_lock:
-                frame_to_write = self._latest_frame
-                metadata = self._latest_metadata
-                if frame_to_write is not None:
-                    self._latest_frame = None
-                    self._latest_metadata = None
-
-            # DROP-ONLY MODE: Skip frames when no new frame available
-            if frame_to_write is None:
-                self._skipped_frames += 1
-                self._next_frame_time = next_frame_time + self._frame_interval
-                continue
-
-            if metadata is None:
-                metadata = FrameTimingMetadata()  # Empty metadata as fallback
-
-            queued = _QueuedFrame(
-                frame=frame_to_write,
-                metadata=metadata,
-                enqueued_monotonic=time.perf_counter(),
-            )
-
-            if self._frame_queue is not None:
-                try:
-                    self._frame_queue.put(queued, timeout=self._frame_interval)
-                except queue.Full:
-                    try:
-                        _ = self._frame_queue.get_nowait()
-                    except queue.Empty:
-                        pass
-                    try:
-                        self._frame_queue.put_nowait(queued)
-                    except queue.Full:
-                        self._skipped_frames += 1
-
-            self._next_frame_time = next_frame_time + self._frame_interval
-
-        logger.debug("Camera %d timer loop exited", self.camera_id)
-
-    def _frame_writer_loop(self) -> None:
-        """
-        OPTIMIZED: Write frames to ffmpeg ONLY. CSV logging happens in separate thread.
-        """
-        while not self._stop_event.is_set():
-            if self._frame_queue is None:
-                break
-            try:
-                queued = self._frame_queue.get(timeout=0.5)
-            except queue.Empty:
-                continue
-
-            if queued is self._queue_sentinel:
-                break
-
-            write_start_monotonic = time.perf_counter()
-            write_time_unix = time.time()
-
-            # Write frame to ffmpeg (FAST PATH - no CSV operations)
-            self._write_frame_impl(queued.frame)
-
-            write_end_monotonic = time.perf_counter()
-
-            # Queue CSV logging data if enabled (non-blocking)
-            # IMPORTANT: Use display_frame_index to match the frame number shown in video overlay
-            if self.enable_csv_logging and self._csv_queue is not None:
-                backlog_after = self._frame_queue.qsize() if self._frame_queue is not None else 0
-                # Use display_frame_index if available, otherwise fall back to written_frames
-                frame_number_for_csv = queued.metadata.display_frame_index if queued.metadata.display_frame_index is not None else self._written_frames
                 csv_entry = _CSVLogEntry(
-                    frame_number=frame_number_for_csv,  # Matches overlay frame number on video
+                    frame_number=frame_number,
                     write_time_unix=write_time_unix,
-                    write_start_monotonic=write_start_monotonic,
-                    write_end_monotonic=write_end_monotonic,
-                    enqueued_monotonic=queued.enqueued_monotonic,
-                    metadata=queued.metadata,
-                    backlog_after=backlog_after,
-                    last_write_monotonic=self._last_write_monotonic,
-                    last_camera_frame_index=self._last_camera_frame_index,
+                    write_start_monotonic=time.perf_counter(),
+                    write_end_monotonic=time.perf_counter(),
+                    enqueued_monotonic=time.perf_counter(),
+                    metadata=metadata,
+                    backlog_after=0,
+                    last_write_monotonic=None,
+                    last_camera_frame_index=metadata.camera_frame_index,
                 )
                 try:
                     self._csv_queue.put_nowait(csv_entry)
                 except queue.Full:
-                    # Drop CSV entry if queue full (video writes take priority)
-                    pass
-
-            # Increment frame counter AFTER logging (so CSV has 0-indexed frame numbers)
-            self._written_frames += 1
-
-            # Update tracking state
-            self._last_write_monotonic = write_start_monotonic
-            if queued.metadata.camera_frame_index is not None:
-                self._last_camera_frame_index = queued.metadata.camera_frame_index
-
-        logger.debug("Camera %d writer loop exited", self.camera_id)
-
-    def _write_frame_impl(self, frame: np.ndarray) -> None:
-        """
-        OPTIMIZED: Direct frame write to ffmpeg stdin
-        """
-        if self._ffmpeg_process is None or self._ffmpeg_process.stdin is None:
-            return
-
-        target_w, target_h = self.resolution
-
-        # Resize if needed (should be rare)
-        if frame.shape[1] != target_w or frame.shape[0] != target_h:
-            frame = cv2.resize(frame, (target_w, target_h))
-
-        try:
-            # OPTIMIZED: Write directly from numpy array to avoid intermediate copies
-            # Using tobytes() is faster than going through bytearray assignment
-            frame_bytes = frame.tobytes()
-
-            # Write directly to ffmpeg stdin
-            self._ffmpeg_process.stdin.write(frame_bytes)
-
-            # Batch flush: only flush every N frames for better performance
-            self._video_write_counter += 1
-            if self._video_write_counter >= self._video_flush_interval:
-                self._ffmpeg_process.stdin.flush()
-                self._video_write_counter = 0
-        except Exception:
-            logger.exception("Failed to write frame for camera %d", self.camera_id)
+                    pass  # Drop CSV entry if queue full
 
     def _csv_logger_loop(self) -> None:
         """

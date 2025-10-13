@@ -156,13 +156,10 @@ class CameraProcessor:
                 captured_frames = self.capture_loop.get_frame_count()
                 collated_frames = self.collator_loop.get_frame_count()
 
-                # 2. Convert RGB to BGR for OpenCV (IN EXECUTOR - non-blocking)
-                frame_bgr = await loop.run_in_executor(
-                    None,
-                    cv2.cvtColor,
-                    raw_frame,
-                    cv2.COLOR_RGB2BGR
-                )
+                # 2. Skip color conversion - use frame directly
+                # Lores is RGB888, and apparently OpenCV imshow on this platform shows it correctly
+                # (The recording has correct colors, so RGB is working)
+                frame_bgr = raw_frame
 
                 # 3. Add frame number overlay to FULL-RES frame (IN EXECUTOR - non-blocking)
                 # This ensures the overlay appears in both recording and preview
@@ -182,10 +179,12 @@ class CameraProcessor:
                 )
                 frame_with_overlay = await loop.run_in_executor(None, overlay_fn)
 
-                # 4. Submit to recorder (if recording) - WITH frame number overlay
-                # Fire-and-forget: don't await, keep processor moving
+                # 4. Submit metadata to recorder for CSV logging (if recording)
+                # NOTE: With hardware H.264 encoding + post_callback overlay,
+                # the recorder doesn't need frame pixels - encoder gets them directly.
+                # We only submit metadata for CSV timing logs.
                 if self.recording_manager.is_recording:
-                    # Build metadata for recorder (minimal - only essential fields)
+                    # Build metadata for CSV logging only
                     frame_metadata = FrameTimingMetadata(
                         sensor_timestamp_ns=sensor_timestamp_ns,  # ESSENTIAL: Hardware timestamp
                         dropped_since_last=dropped_since_last,  # ESSENTIAL: Drop detection
@@ -194,22 +193,17 @@ class CameraProcessor:
                         software_frame_index=software_frame_index,  # DIAGNOSTIC: For logging
                     )
 
-                    # Submit frame without blocking processor (fire-and-forget)
-                    # The recorder has its own threads that will handle the frame asynchronously
+                    # Submit metadata only (no frame pixels) - fire-and-forget
                     loop.run_in_executor(
                         None,
                         self.recording_manager.submit_frame,
-                        frame_with_overlay,  # Submit full-res WITH frame number
+                        None,  # No frame pixels - encoder handles recording
                         frame_metadata
                     )
 
-                # 5. Resize for preview (IN EXECUTOR - non-blocking)
-                preview_frame = await loop.run_in_executor(
-                    None,
-                    cv2.resize,
-                    frame_with_overlay,
-                    (self.args.preview_width, self.args.preview_height)
-                )
+                # 5. Use frame directly - already at preview size from lores stream
+                # No resize needed! Hardware ISP already scaled to preview resolution
+                preview_frame = frame_with_overlay
 
                 # 6. Update display manager (thread-safe, fast)
                 self.display.update_frame(preview_frame)

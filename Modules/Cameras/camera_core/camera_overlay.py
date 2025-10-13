@@ -51,76 +51,39 @@ class CameraOverlay:
         """
         Add overlays to frame.
 
-        This is the ONLY method - pure function that takes frame + metadata,
-        returns frame with overlays.
+        NOTE: Recording overlay is added via post_callback (main stream only).
+        Preview overlay is added here because capture_array("lores") bypasses post_callback.
         """
-        h, w = frame.shape[:2]
         cfg = self.config
-
-        # Map font type
-        font_map = {
-            'SIMPLEX': cv2.FONT_HERSHEY_SIMPLEX,
-            'PLAIN': cv2.FONT_HERSHEY_PLAIN,
-            'DUPLEX': cv2.FONT_HERSHEY_DUPLEX,
-            'COMPLEX': cv2.FONT_HERSHEY_COMPLEX,
-        }
-        font = font_map.get(cfg['font_type'], cv2.FONT_HERSHEY_SIMPLEX)
-
-        # Calculate scale factor
-        if cfg['scale_mode'] == 'auto':
-            scale_factor = w / 640.0
-        else:
-            scale_factor = cfg['manual_scale_factor']
-
-        font_scale = cfg['font_scale_base'] * scale_factor
-        thickness = max(1, int(cfg['thickness_base'] * scale_factor))
-        line_type = cfg['line_type']
-
-        line_y = int(cfg['line_start_y'] * scale_factor)
-        x_margin = int(cfg['margin_left'] * scale_factor)
 
         # Only render overlay if enabled
         if not cfg.get('show_frame_number', True):
             return frame
 
-        # Background if enabled - always show just one line for frame number
-        # OPTIMIZED: Draw directly on frame instead of copying entire frame for alpha blending
-        if cfg['background_enabled']:
-            num_lines = 1  # Just frame number
+        # Simple frame number overlay (matches recording exactly)
+        font_scale = cfg.get('font_scale_base', 0.6)
+        thickness = cfg.get('thickness_base', 1)
 
-            padding_top = int(cfg['background_padding_top'] * scale_factor)
-            padding_bottom = int(cfg['background_padding_bottom'] * scale_factor)
-            padding_left = int(cfg['background_padding_left'] * scale_factor)
-            padding_right = int(cfg['background_padding_right'] * scale_factor)
+        # Text color (BGR)
+        text_color_b = cfg.get('text_color_b', 0)
+        text_color_g = cfg.get('text_color_g', 0)
+        text_color_r = cfg.get('text_color_r', 0)
+        text_color = (text_color_b, text_color_g, text_color_r)
 
-            bg_y1 = line_y - padding_top - int(20 * scale_factor)
-            bg_y2 = line_y + (num_lines * int(cfg['line_spacing'] * scale_factor)) + padding_bottom
-            bg_x1 = x_margin - padding_left
-            bg_x2 = x_margin + padding_left + int(120 * scale_factor)  # Smaller width for just number
+        margin_left = cfg.get('margin_left', 10)
+        line_start_y = cfg.get('line_start_y', 30)
 
-            background_color = (cfg['background_color_b'], cfg['background_color_g'], cfg['background_color_r'])
-
-            # Only copy the small ROI for blending, not the entire frame
-            if cfg['background_opacity'] < 1.0:
-                roi = frame[bg_y1:bg_y2, bg_x1:bg_x2].copy()
-                cv2.rectangle(roi, (0, 0), (bg_x2-bg_x1, bg_y2-bg_y1), background_color, -1)
-                cv2.addWeighted(roi, cfg['background_opacity'], frame[bg_y1:bg_y2, bg_x1:bg_x2], 1 - cfg['background_opacity'], 0, frame[bg_y1:bg_y2, bg_x1:bg_x2])
-            else:
-                # Fully opaque, no blending needed
-                cv2.rectangle(frame, (bg_x1, bg_y1), (bg_x2, bg_y2), background_color, -1)
-
-        # Text colors
-        text_color = (cfg['text_color_b'], cfg['text_color_g'], cfg['text_color_r'])
-        outline_color = (cfg['outline_color_b'], cfg['outline_color_g'], cfg['outline_color_r'])
-        outline_thickness = thickness + cfg['outline_extra_thickness']
-
-        def draw_text(text, x, y):
-            if cfg['outline_enabled']:
-                cv2.putText(frame, text, (x, y), font, font_scale, outline_color, outline_thickness, line_type)
-            cv2.putText(frame, text, (x, y), font, font_scale, text_color, thickness, line_type)
-
-        # ONLY show frame number (collated_frames matches display_frame_index in CSV)
-        draw_text(f"{collated_frames}", x_margin, line_y)
+        # Draw frame number (matches recording format exactly)
+        cv2.putText(
+            frame,
+            f"Frame: {collated_frames}",
+            (margin_left, line_start_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            text_color,
+            thickness,
+            cv2.LINE_AA
+        )
 
         return frame
 
