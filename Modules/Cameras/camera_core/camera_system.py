@@ -618,11 +618,9 @@ class CameraSystem:
             raise
 
     def cleanup(self):
-        """Clean up all cameras and resources."""
         self.running = False
         self.shutdown_event.set()
 
-        # Stop recording first (if active) to release encoders
         if self.recording:
             for cam in self.cameras:
                 try:
@@ -631,7 +629,6 @@ class CameraSystem:
                     self.logger.debug("Error stopping recording on camera %d: %s", cam.cam_num, e)
             self.recording = False
 
-        # Clean up cameras in parallel for faster shutdown
         cleanup_threads = []
         for cam in self.cameras:
             def cleanup_camera(camera):
@@ -640,12 +637,10 @@ class CameraSystem:
                 except Exception as e:
                     self.logger.debug("Error cleaning up camera %d: %s", camera.cam_num, e)
 
-            # Non-daemon thread ensures proper cleanup before exit
             thread = threading.Thread(target=cleanup_camera, args=(cam,), daemon=False)
             thread.start()
             cleanup_threads.append(thread)
 
-        # Wait for all cleanup threads (should finish in < 1 second each)
         for i, thread in enumerate(cleanup_threads):
             thread.join(timeout=3.0)
             if thread.is_alive():
@@ -654,7 +649,6 @@ class CameraSystem:
         self.cameras.clear()
         self.initialized = False
 
-        # Join command thread if running
         if self.command_thread and self.command_thread.is_alive():
             self.command_thread.join(timeout=0.5)
 

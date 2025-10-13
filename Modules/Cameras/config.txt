@@ -39,7 +39,7 @@ disable_mp4_conversion = false # Keep raw .h264 files (better for power-loss res
 ################################################################################
 
 # Preview windows (OpenCV)
-show_preview = false         # Show live preview windows (true/false)
+show_preview = true         # Show live preview windows (true/false)
 preview_preset = 7           # Preview size (0-7, smaller = lower CPU)
 
 # Frame number overlay

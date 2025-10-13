@@ -260,17 +260,13 @@ class CameraHandler:
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
 
-            # CRITICAL: Set up custom executor with daemon threads
-            # Problem: asyncio's default ThreadPoolExecutor uses non-daemon threads
-            # Impact: Python's atexit hangs trying to join executor threads on shutdown
-            # Solution: Override ThreadPoolExecutor to create daemon worker threads
-            # Result: Clean, fast exit without blocking on executor cleanup
+            # Use custom executor with daemon threads to prevent atexit hangs
             from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures.thread import _worker
             import threading
             import weakref
 
             class DaemonThreadPoolExecutor(ThreadPoolExecutor):
-                """ThreadPoolExecutor that creates daemon worker threads."""
                 def _adjust_thread_count(self):
                     def weakref_cb(_, q=self._work_queue):
                         q.put(None)
@@ -280,10 +276,10 @@ class CameraHandler:
                         thread_name = f'{self._thread_name_prefix or self}_{num_threads}'
                         t = threading.Thread(
                             name=thread_name,
-                            target=self._worker,
+                            target=_worker,
                             args=(weakref.ref(self, weakref_cb), self._work_queue,
                                   self._initializer, self._initargs),
-                            daemon=True  # Daemon threads don't block program exit
+                            daemon=True
                         )
                         t.start()
                         self._threads.add(t)
@@ -299,9 +295,7 @@ class CameraHandler:
             except Exception as e:
                 self.logger.error("Loop error: %s", e)
             finally:
-                # Clean up event loop and executor on thread exit
                 try:
-                    # Cancel any remaining async tasks (1 second timeout)
                     pending = asyncio.all_tasks(self._loop)
                     for task in pending:
                         task.cancel()
@@ -314,11 +308,10 @@ class CameraHandler:
                                 )
                             )
                         except (asyncio.TimeoutError, Exception):
-                            pass  # Force close if tasks don't cancel quickly
+                            pass
                 except Exception:
                     pass
 
-                # Shutdown executor without waiting (daemon threads will exit on their own)
                 try:
                     executor = self._loop._default_executor
                     if executor is not None:
@@ -326,32 +319,25 @@ class CameraHandler:
                 except Exception:
                     pass
 
-                # Close event loop
                 try:
                     self._loop.close()
                 except Exception:
                     pass
                 self._loop = None
 
-        # Start event loop in non-daemon thread
-        # Non-daemon ensures Python waits for proper cleanup during shutdown
         self._loop_thread = threading.Thread(target=run_loops, daemon=False)
         self._loop_thread.start()
         self.logger.info("Started all async loops")
 
     async def _run_all_loops(self):
-        """Run all loops concurrently."""
-        # Start all loops (creates tasks)
         await self.capture_loop.start()
         await self.collator_loop.start()
         await self.processor.start()
 
         try:
-            # Keep running until stopped
             while self._running:
                 await asyncio.sleep(0.1)
         finally:
-            # Properly stop all loops when exiting
             self.logger.debug("Stopping async loops...")
             await asyncio.gather(
                 self.capture_loop.stop(),
@@ -362,14 +348,12 @@ class CameraHandler:
             self.logger.debug("All async loops stopped")
 
     def start_recording(self, session_dir: Optional[Path] = None):
-        """Start recording. If session_dir provided, use it and store for this session."""
         if self.recording:
             return
 
-        # If session_dir provided, store it for this session (first recording creates session)
         if session_dir:
             self.session_dir = session_dir
-            self.processor.session_dir = session_dir  # Update processor too
+            self.processor.session_dir = session_dir
 
         if not self.session_dir:
             raise ValueError("No session directory available for recording")
@@ -380,7 +364,6 @@ class CameraHandler:
         self.recording = True
 
     def stop_recording(self):
-        """Stop recording."""
         if not self.recording:
             return
         self.recording_manager.stop_recording()
@@ -389,55 +372,29 @@ class CameraHandler:
         self.recording = False
 
     def get_frame(self):
-        """
-        Get processed frame for preview display.
-
-        Called from main thread for OpenCV display.
-        """
         return self.processor.get_display_frame()
 
     def update_preview_cache(self):
-        """
-        Get the latest preview frame (called from main thread).
-
-        Same as get_frame() - just returns display frame from processor.
-        """
         return self.processor.get_display_frame()
 
     def cleanup(self):
-        """
-        Clean up all resources in the correct order.
-
-        Cleanup sequence:
-        1. Stop recording → releases H.264 encoder
-        2. Stop camera hardware → unblocks capture operations
-        3. Signal loops to stop → triggers async loop exit
-        4. Wait for event loop thread → allows graceful shutdown
-        5. Close camera resources
-        """
-        # Stop recording first to release encoder
+        """Clean up resources: recording → camera → loops → close."""
         if self.recording:
             self.stop_recording()
             self.recording_manager.cleanup()
 
-        # Stop camera hardware to unblock capture loops
         try:
             self.picam2.stop()
         except Exception as e:
             self.logger.debug("Camera stop error (ignored): %s", e)
 
-        # Signal loops to stop
         self._running = False
 
-        # Wait for event loop thread to finish (typically < 1 second)
         if hasattr(self, '_loop_thread') and self._loop_thread.is_alive():
             self._loop_thread.join(timeout=2.0)
             if self._loop_thread.is_alive():
-                self.logger.warning(
-                    "Async loop thread did not finish within 2 seconds"
-                )
+                self.logger.warning("Async loop thread did not finish within 2 seconds")
 
-        # Final camera cleanup
         try:
             self.picam2.stop_preview()
         except Exception:

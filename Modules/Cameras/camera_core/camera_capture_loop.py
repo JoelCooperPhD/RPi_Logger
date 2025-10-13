@@ -1,16 +1,7 @@
 #!/usr/bin/env python3
 """
-CAMERA CAPTURE LOOP - Super tight async loop for frame capture.
-
-This loop does ONLY:
-1. Wait for frame from camera (blocking)
-2. Read frame immediately
-3. Store in shared buffer (atomic)
-4. Track FPS
-5. Increment frame counter
-6. Loop back
-
-NO processing, NO queuing, NO overlays - just raw capture at maximum speed.
+Tight async loop for frame capture at camera's native FPS.
+Captures frames, tracks timing, and detects drops using hardware timestamps.
 """
 
 import asyncio
@@ -43,26 +34,22 @@ class CameraCaptureLoop:
         self.picam2 = picam2
         self.logger = logging.getLogger(f"CameraCapture{camera_id}")
 
-        # FPS tracking
         self.fps_tracker = RollingFPS(window_seconds=5.0)
         self.captured_frames = 0
-        self.camera_hardware_fps: float = 0.0  # FPS from camera metadata (sensor rate)
+        self.camera_hardware_fps: float = 0.0
 
-        # Hardware frame tracking (for accurate drop detection)
-        self.hardware_frame_number = 0  # Calculated from sensor timestamps
+        self.hardware_frame_number = 0
         self.last_sensor_timestamp_ns: Optional[int] = None
         self.expected_frame_interval_ns: Optional[int] = None
 
-        # Latest frame storage (lock-free, just replace)
         self.latest_frame: Optional[np.ndarray] = None
         self.latest_metadata: Optional[dict] = None
         self.latest_capture_time: Optional[float] = None
         self.latest_capture_monotonic: Optional[float] = None
-        self.latest_sensor_timestamp_ns: Optional[int] = None  # Hardware timestamp (nanoseconds)
-        self.latest_hardware_fps: float = 0.0  # Hardware FPS from this frame's metadata
+        self.latest_sensor_timestamp_ns: Optional[int] = None
+        self.latest_hardware_fps: float = 0.0
         self._frame_lock = asyncio.Lock()
 
-        # Control
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -89,43 +76,29 @@ class CameraCaptureLoop:
 
     async def _capture_loop(self):
         """
-        TIGHT CAPTURE LOOP - Using lores stream
-
-        Uses capture_array("lores") instead of capture_request() to avoid
-        stealing frames from the H.264 encoder on the main stream.
-
-        This provides hardware-scaled preview frames without interfering
-        with recording.
+        Capture loop using lores stream for preview.
+        Uses dual-stream config so preview doesn't interfere with H.264 recording.
         """
         self.logger.info("Entering tight capture loop (using lores stream)")
 
         while self._running:
             try:
-                # TIGHT: Atomic capture - get frame + metadata in single operation
-                # Using capture_request() prevents missing frames due to double-wait
-                # With dual-stream config, lores stream is independent from encoder
                 loop = asyncio.get_event_loop()
                 request = await loop.run_in_executor(None, self.picam2.capture_request)
 
-                # Extract lores frame and metadata atomically
                 raw_frame = request.make_array("lores")
                 metadata = request.get_metadata()
                 capture_time = time.time()
                 capture_monotonic = time.perf_counter()
-
-                # Release request immediately to free resources
                 request.release()
 
-                # TIGHT: Extract hardware FPS from metadata (sensor rate)
                 hardware_fps = 0.0
                 if 'FrameDuration' in metadata:
                     frame_duration_us = metadata['FrameDuration']
                     if frame_duration_us > 0:
                         hardware_fps = 1000000.0 / frame_duration_us
                         self.camera_hardware_fps = hardware_fps
-                        # Calculate expected frame interval for drop detection
                         self.expected_frame_interval_ns = int(frame_duration_us * 1000)
-                        # Debug: Log on first few frames
                         if self.captured_frames < 3:
                             self.logger.info(
                                 "Frame %d: FrameDuration=%d us, expected_interval=%d ns (%.2f ms)",
@@ -133,22 +106,16 @@ class CameraCaptureLoop:
                                 self.expected_frame_interval_ns / 1_000_000
                             )
 
-                # TIGHT: Extract hardware timestamp (nanoseconds since boot)
                 sensor_timestamp_ns = metadata.get('SensorTimestamp')
 
-                # TIGHT: Calculate hardware frame number using timestamp deltas
-                # This gives us ACCURATE frame counting even if frames are dropped
+                # Calculate hardware frame number using timestamp deltas for accurate drop detection
                 dropped_since_last = 0
                 if sensor_timestamp_ns is not None:
                     if self.last_sensor_timestamp_ns is not None and self.expected_frame_interval_ns is not None:
-                        # Calculate how many frame intervals passed
                         delta_ns = sensor_timestamp_ns - self.last_sensor_timestamp_ns
-                        # Round to nearest integer (handles small timing variations)
                         intervals_passed = round(delta_ns / self.expected_frame_interval_ns)
-                        # Dropped frames = intervals - 1 (we expect 1 interval normally)
                         dropped_since_last = max(0, intervals_passed - 1)
 
-                        # Debug: Log only actual dropped frames (not timing jitter)
                         if dropped_since_last > 0:
                             self.logger.warning(
                                 "Frame %d: delta=%d ns (%.2f ms), expected=%d ns, intervals=%d, dropped=%d",
@@ -156,10 +123,8 @@ class CameraCaptureLoop:
                                 self.expected_frame_interval_ns, intervals_passed, dropped_since_last
                             )
 
-                        # Increment hardware frame number by intervals passed
                         self.hardware_frame_number += intervals_passed
                     else:
-                        # First frame with valid timestamp
                         self.hardware_frame_number = 0
                         if self.captured_frames < 3:
                             self.logger.info(
@@ -169,23 +134,17 @@ class CameraCaptureLoop:
 
                     self.last_sensor_timestamp_ns = sensor_timestamp_ns
                 else:
-                    # No SensorTimestamp available - use software counting
                     self.hardware_frame_number = self.captured_frames
                     if self.captured_frames < 3:
                         self.logger.warning("Frame %d: No SensorTimestamp in metadata!", self.captured_frames)
 
-                # TIGHT: Increment software counter (counts frames we received)
                 self.captured_frames += 1
-
-                # TIGHT: Track FPS (5 second rolling window)
                 self.fps_tracker.add_frame(capture_time)
 
-                # TIGHT: Add frame tracking to metadata
-                metadata['CaptureFrameIndex'] = self.captured_frames - 1  # Software counter (0-indexed)
-                metadata['HardwareFrameNumber'] = self.hardware_frame_number  # Hardware-based frame number
-                metadata['DroppedSinceLast'] = dropped_since_last  # Calculated from timestamp deltas
+                metadata['CaptureFrameIndex'] = self.captured_frames - 1
+                metadata['HardwareFrameNumber'] = self.hardware_frame_number
+                metadata['DroppedSinceLast'] = dropped_since_last
 
-                # Debug: Log metadata on first few frames
                 if self.captured_frames <= 3:
                     self.logger.info(
                         "Frame %d: Metadata set - CaptureFrameIndex=%d, HardwareFrameNumber=%d, DroppedSinceLast=%d",
@@ -193,7 +152,6 @@ class CameraCaptureLoop:
                         metadata['HardwareFrameNumber'], metadata['DroppedSinceLast']
                     )
 
-                # TIGHT: Store latest frame atomically
                 async with self._frame_lock:
                     self.latest_frame = raw_frame
                     self.latest_metadata = metadata
@@ -202,12 +160,9 @@ class CameraCaptureLoop:
                     self.latest_sensor_timestamp_ns = sensor_timestamp_ns
                     self.latest_hardware_fps = hardware_fps
 
-                # TIGHT: Immediately loop back - no delays!
-
             except asyncio.CancelledError:
                 break
             except RuntimeError as exc:
-                # Graceful shutdown - event loop is closing
                 if "cannot schedule new futures" in str(exc):
                     self.logger.debug("Event loop shutting down, exiting capture loop")
                     break
@@ -217,30 +172,23 @@ class CameraCaptureLoop:
             except Exception as exc:
                 if self._running:
                     self.logger.error("Capture error: %s", exc, exc_info=True)
-                    await asyncio.sleep(0.1)  # Brief pause on error
+                    await asyncio.sleep(0.1)
 
         self.logger.info("Exited tight capture loop")
 
     async def get_latest_frame(self):
-        """
-        Get the latest captured frame (non-blocking).
-
-        Returns: (frame, metadata, capture_time, capture_monotonic, sensor_timestamp_ns, hardware_fps) or (None, None, None, None, None, 0.0) if no frame yet
-        """
+        """Get latest frame with metadata and timing info."""
         async with self._frame_lock:
             return (self.latest_frame, self.latest_metadata, self.latest_capture_time,
                     self.latest_capture_monotonic, self.latest_sensor_timestamp_ns, self.latest_hardware_fps)
 
     def get_fps(self) -> float:
-        """Get current capture FPS (calculated from rolling window)."""
         return self.fps_tracker.get_fps()
 
     def get_hardware_fps(self) -> float:
-        """Get camera hardware FPS (from sensor metadata)."""
         return self.camera_hardware_fps
 
     def get_frame_count(self) -> int:
-        """Get total captured frame count."""
         return self.captured_frames
 
 
