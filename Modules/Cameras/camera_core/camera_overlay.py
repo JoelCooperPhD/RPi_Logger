@@ -79,6 +79,10 @@ class CameraOverlay:
         line_y = int(cfg['line_start_y'] * scale_factor)
         x_margin = int(cfg['margin_left'] * scale_factor)
 
+        # Only render overlay if enabled
+        if not cfg.get('show_frame_number', True):
+            return frame
+
         # Background if enabled - always show just one line for frame number
         # OPTIMIZED: Draw directly on frame instead of copying entire frame for alpha blending
         if cfg['background_enabled']:
@@ -92,7 +96,7 @@ class CameraOverlay:
             bg_y1 = line_y - padding_top - int(20 * scale_factor)
             bg_y2 = line_y + (num_lines * int(cfg['line_spacing'] * scale_factor)) + padding_bottom
             bg_x1 = x_margin - padding_left
-            bg_x2 = x_margin + padding_left + int(200 * scale_factor)  # Fixed width for frame number
+            bg_x2 = x_margin + padding_left + int(120 * scale_factor)  # Smaller width for just number
 
             background_color = (cfg['background_color_b'], cfg['background_color_g'], cfg['background_color_r'])
 
@@ -116,7 +120,7 @@ class CameraOverlay:
             cv2.putText(frame, text, (x, y), font, font_scale, text_color, thickness, line_type)
 
         # ONLY show frame number (collated_frames matches display_frame_index in CSV)
-        draw_text(f"Frame: {collated_frames}", x_margin, line_y)
+        draw_text(f"{collated_frames}", x_margin, line_y)
 
         return frame
 

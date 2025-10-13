@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-CAMERA COLLATOR LOOP - Timing-based frame collation.
+CAMERA COLLATOR LOOP - Hardware-timed frame passthrough.
 
-This loop runs at a specified FPS (e.g., 10 FPS) and:
-1. Waits for precise timing interval
-2. Grabs latest frame from capture loop
-3. Duplicates if no new frame available
-4. Passes frame to processor queue
-5. Tracks collation FPS
-6. Loop back
+In MATCHED FPS MODE (camera FPS = recording FPS):
+1. Polls for new frames from capture loop
+2. Detects new frame arrival (hardware-timed via FrameDurationLimits)
+3. Passes each frame through to processor (1:1 ratio)
+4. Tracks actual FPS from hardware timing
+5. No software timing or frame dropping needed
 
-This decouples capture rate from display/recording rate.
+Hardware (FrameDurationLimits) controls frame rate precisely.
+Software just waits for and forwards each frame as it arrives.
 """
 
 import asyncio
@@ -31,10 +31,13 @@ logger = logging.getLogger("CameraCollator")
 
 class CameraCollatorLoop:
     """
-    Timing-based frame collation loop.
+    Hardware-timed frame collation loop.
 
-    Runs at specified FPS (independent of camera capture rate),
-    grabs latest frames from capture loop, handles duplicates.
+    In matched FPS mode, simply detects and forwards new frames from hardware.
+    Camera FrameDurationLimits controls timing - software just waits for frames.
+
+    Event-driven: Polls for new frames, passes through immediately.
+    FPS tracking measures actual hardware frame rate.
     """
 
     def __init__(self, camera_id: int, target_fps: float, capture_loop):
@@ -80,58 +83,54 @@ class CameraCollatorLoop:
 
     async def _collation_loop(self):
         """
-        TIMING-BASED COLLATION LOOP
+        EVENT-DRIVEN COLLATION LOOP (Hardware-Timed)
 
-        This runs at exact target FPS (e.g., 10 FPS).
-        Grabs latest frame from capture, duplicates if needed.
+        With matched FPS mode, camera hardware controls timing via FrameDurationLimits.
+        This loop simply waits for each new frame from hardware and passes it through.
+        No software timing needed - hardware timing is precise.
         """
-        self.logger.info("Entering collation loop at %.1f FPS", self.target_fps)
+        self.logger.info("Entering hardware-timed collation loop (matched FPS mode)")
 
-        frame_interval = 1.0 / self.target_fps if self.target_fps > 0 else 0.033
-        next_frame_time = time.perf_counter()
+        last_frame_ref = None  # Track last frame reference to detect new frames
 
         while self._running:
             try:
-                # TIMING: Wait until it's time for next frame
-                now = time.perf_counter()
-                wait_time = next_frame_time - now
-                if wait_time > 0:
-                    await asyncio.sleep(wait_time)
+                # WAIT for new frame from hardware (event-driven, not time-driven)
+                # Poll at reasonable rate to detect new frames
+                await asyncio.sleep(0.001)  # 1ms polling - responsive but not CPU intensive
 
-                # TIMING: Grab latest frame from capture loop
-                frame, metadata, capture_time, capture_monotonic, _ = await self.capture_loop.get_latest_frame()
+                # Get latest frame from capture loop
+                frame, metadata, capture_time, capture_monotonic, sensor_timestamp_ns, _ = await self.capture_loop.get_latest_frame()
 
-                # TIMING: Get hardware FPS from capture loop (always current)
+                # Get hardware FPS from capture loop (always current)
                 hardware_fps = self.capture_loop.get_hardware_fps()
 
-                # TIMING: Handle no frame or duplicate
-                is_duplicate = False
+                # Skip if no frame available yet
                 if frame is None:
-                    # No frames from camera yet, use last collated
-                    if self.last_collated_frame is None:
-                        # No frames at all yet, skip this cycle
-                        next_frame_time += frame_interval
-                        continue
-                    frame = self.last_collated_frame
-                    is_duplicate = True
-                else:
-                    # Got new frame, store reference (no copy needed - frame already owned by capture loop)
-                    self.last_collated_frame = frame
+                    continue
 
-                # TIMING: Increment collated frame counter
+                # Skip if same frame as last time (wait for new frame from hardware)
+                if frame is last_frame_ref:
+                    continue
+
+                # NEW FRAME from hardware - process it
+                last_frame_ref = frame
+                self.last_collated_frame = frame
+
+                # Increment collated frame counter
                 self.collated_frames += 1
 
-                # TIMING: Track collation FPS
+                # Track collation FPS (measures actual hardware frame rate)
                 self.fps_tracker.add_frame(time.time())
 
-                # TIMING: Pass to output queue (non-blocking)
+                # Pass to output queue (non-blocking)
                 frame_data = {
                     'frame': frame,
                     'metadata': metadata,
                     'capture_time': capture_time,
                     'capture_monotonic': capture_monotonic,
+                    'sensor_timestamp_ns': sensor_timestamp_ns,
                     'hardware_fps': hardware_fps,
-                    'is_duplicate': is_duplicate,
                     'collated_frame_num': self.collated_frames,
                 }
 
@@ -144,9 +143,6 @@ class CameraCollatorLoop:
                         self._output_queue.put_nowait(frame_data)
                     except (asyncio.QueueEmpty, asyncio.QueueFull):
                         pass
-
-                # TIMING: Schedule next frame
-                next_frame_time += frame_interval
 
             except asyncio.CancelledError:
                 break

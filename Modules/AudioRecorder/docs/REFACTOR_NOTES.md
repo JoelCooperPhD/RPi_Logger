@@ -98,6 +98,38 @@ uv run python3 examples/audio_monitor_fast.py
 4. **Proper gitignore** - Audio recordings excluded from version control
 5. **Follows project conventions** - Matches structure of Cameras module
 
+## Key Features Documented
+
+The following features from `main_audio.py` are now fully documented:
+
+1. **Auto-selection** (lines 99-114)
+   - First newly detected device automatically selected
+   - Configurable via `--no-auto-select-new` flag
+
+2. **Auto-recording** (lines 387-395)
+   - Automatic recording start on device attachment
+   - Enabled via `--auto-record-on-attach` flag
+
+3. **Device removal handling** (lines 397-409)
+   - Automatic deselection of removed devices
+   - Recording stops to maintain data consistency
+   - Prevents partial/corrupted recordings
+
+4. **Recording feedback** (lines 162-167, 265-282)
+   - Async queue-based status updates
+   - ~2 second interval feedback during recording
+   - Real-time duration and device count display
+
+5. **Async file I/O** (lines 216-264)
+   - Thread pool executors for audio processing and file writing
+   - Concurrent saving of multiple device recordings
+   - Non-blocking operation via `asyncio.gather()`
+
+6. **USB device detection** (lines 46-71)
+   - Fast `/proc/asound/cards` parsing
+   - ~5ms polling interval
+   - Zero-dependency USB detection
+
 ## Related Documentation
 
 - Module README: [README.md](../README.md)

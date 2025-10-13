@@ -72,17 +72,18 @@ class RollingFPS:
 
 @dataclass(slots=True)
 class FrameTimingMetadata:
-    """Per-frame metadata captured for timing diagnostics."""
+    """
+    Per-frame metadata for timing analysis and CSV logging.
 
-    capture_monotonic: Optional[float] = None
-    capture_unix: Optional[float] = None
-    camera_frame_index: Optional[int] = None
-    display_frame_index: Optional[int] = None
-    dropped_frames_total: Optional[int] = None
-    duplicates_total: Optional[int] = None
-    available_camera_fps: Optional[float] = None
-    requested_fps: Optional[float] = None
-    is_duplicate: bool = False
+    Only essential fields needed for the minimal 5-column CSV format.
+    """
+    sensor_timestamp_ns: Optional[int] = None  # Hardware timestamp (nanoseconds since boot) - ESSENTIAL
+    dropped_since_last: Optional[int] = None  # Dropped frames detected via timestamp analysis - ESSENTIAL
+    display_frame_index: Optional[int] = None  # Frame number for CSV/video overlay - ESSENTIAL
+
+    # Diagnostic fields (for logging only, not written to CSV)
+    camera_frame_index: Optional[int] = None  # Hardware frame number (same as display_frame_index now)
+    software_frame_index: Optional[int] = None  # Software counter (for diagnostics)
 
 
 @dataclass(slots=True)

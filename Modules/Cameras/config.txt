@@ -15,20 +15,20 @@
 ################################################################################
 
 # Resolution (recording quality)
-resolution_width = 1920
-resolution_height = 1080
+resolution_width = 640
+resolution_height = 480
 # Common presets: 1920x1080 (Full HD), 1280x720 (HD), 640x480 (SD)
 
 # Frame rate (smoothness)
-target_fps = 1.0
-# Common values: 30 (standard), 60 (smooth), 24 (cinematic)
+target_fps = 20.0
+# Common values: 30 (standard), 24 (cinematic)
 
 # Preview window size (display only, doesn't affect recording)
-preview_width = 640
-preview_height = 360
+preview_width = 320
+preview_height = 240
 
 # Output location
-output_dir = recordings/cameras
+output_dir = recordings
 session_prefix = session
 # Recordings saved to: output_dir/session_YYYYMMDD_HHMMSS/
 
@@ -40,19 +40,12 @@ discovery_retry = 3.0        # Seconds between retry attempts
 
 
 ################################################################################
-# 2. ON-SCREEN OVERLAY - What Information to Show
+# 2. ON-SCREEN OVERLAY - Frame Number Display Only
 ################################################################################
+# Overlay has been simplified to only show frame number for CSV alignment
 
-# === Which fields to display ===
-show_camera_and_time = true        # Camera number and current time
-show_session = false               # Recording session name
-show_sensor_fps = true             # Actual camera frame rate
-show_display_fps = true            # Display refresh rate
-show_requested_fps = true          # Target FPS setting
-show_frame_counter = true          # Frame counter: Written / Delivered
-show_recording_info = true         # "Recording" status + frame count
-show_recording_filename = true     # Current video filename
-show_controls = true               # Bottom control hints (Q/R/S keys)
+# Show frame number overlay
+show_frame_number = true           # Display frame number on video?
 
 # === Text appearance ===
 font_scale_base = 0.6              # Text size (0.4 to 1.0)
@@ -74,12 +67,11 @@ outline_color_r = 255
 
 # === Text position and spacing ===
 line_start_y = 30                  # Distance from top of screen
-line_spacing = 18                  # Space between lines
+line_spacing = 18                  # Space between lines (not used with single line)
 margin_left = 10                   # Distance from left edge
 
 # === Background box behind text ===
 background_enabled = true          # Show background box?
-background_shape = rectangle       # Shape: rectangle or rounded_rectangle
 background_opacity = 0.2           # Transparency (0.0 = invisible, 1.0 = solid)
 
 # Background color (BGR format)
@@ -91,13 +83,17 @@ background_color_r = 255
 background_padding_top = 10
 background_padding_bottom = 0
 background_padding_left = 10
-background_padding_right = 250
-background_corner_radius = 10      # Corner roundness (for rounded_rectangle)
+background_padding_right = 10
 
 
 ################################################################################
 # 3. ADVANCED SETTINGS
 ################################################################################
+
+# Recording diagnostics
+enable_csv_timing_log = true       # Save detailed frame timing data to CSV?
+                                    # Disable for better performance if you don't need timing analysis
+                                    # CSV includes: frame numbers, timestamps, latencies, dropped frames
 
 # Text rendering quality
 line_type = 16

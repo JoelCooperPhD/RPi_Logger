@@ -4,12 +4,16 @@ Multi-microphone audio recording system for Raspberry Pi with real-time device m
 
 ## Features
 
-- **Multi-device recording**: Record from multiple USB audio devices simultaneously
-- **Hot-plug support**: Automatic detection of USB audio device connections/disconnections
-- **Real-time monitoring**: Live feedback during recording sessions
+- **Multi-device recording**: Record from multiple USB audio devices simultaneously with independent streams
+- **Hot-plug support**: Automatic detection and handling of USB audio device connections/disconnections
+- **Auto-selection**: Newly detected devices are automatically selected for recording (configurable)
+- **Auto-recording**: Optional automatic recording start when devices are attached
+- **Device removal handling**: Automatically stops recording and removes disconnected devices
+- **Real-time monitoring**: Live feedback with recording duration and active device count
 - **Async architecture**: High-performance async/await implementation with sounddevice
 - **Session management**: Organized output with timestamped experiment folders
 - **Interactive controls**: Keyboard shortcuts for device selection and recording control
+- **Concurrent file I/O**: Asynchronous file saving with thread pool executors for optimal performance
 
 ## Quick Start
 
@@ -33,15 +37,30 @@ uv run main_audio.py
 uv run main_audio.py --output-dir recordings/my_session --sample-rate 48000
 ```
 
-## Controls
+**Auto-Recording Mode** (starts recording automatically when devices are detected):
+```bash
+uv run main_audio.py --auto-record-on-attach
+```
+
+**Manual Device Selection** (disable auto-selection of new devices):
+```bash
+uv run main_audio.py --no-auto-select-new
+```
+
+## Interactive Controls
 
 When running in interactive mode:
 
 - `[r]` - Start/Stop recording from selected devices
-- `[1-9]` - Toggle device selection (by device ID)
-- `[s]` - Show device selection status
-- `[q]` - Quit program
+- `[1-9]` - Toggle device selection (by device ID 1-9)
+- `[s]` - Refresh and show current device selection status
+- `[q]` - Quit program (stops recording if active)
 - `[Ctrl+C]` - Force quit
+
+**Recording Feedback:**
+- Real-time duration display while recording
+- Status updates every ~2 seconds showing active device count
+- Automatic device busy/error notifications
 
 ## Command-Line Options
 
@@ -86,10 +105,14 @@ Files are named: `mic{ID}_{DeviceName}_rec{Number}_{Timestamp}.wav`
 ## Technical Details
 
 - **Audio Format**: 16-bit PCM WAV, mono per device
-- **Default Sample Rate**: 48 kHz
+- **Default Sample Rate**: 48 kHz (configurable)
+- **Block Size**: 1024 samples per callback
 - **Architecture**: Asyncio-based with sounddevice library
-- **Device Detection**: Uses `/proc/asound/cards` for fast USB detection
-- **Concurrency**: Thread pool for I/O operations, async for device management
+- **Device Detection**: Uses `/proc/asound/cards` for ultra-fast USB detection (~5ms polling)
+- **Concurrency**: Thread pool executors for audio processing and file I/O, async event loop for device management
+- **Auto-Selection**: First newly detected device is automatically selected when enabled (default)
+- **Device Removal**: Automatically deselects removed devices and stops recording to maintain data consistency
+- **Recording Feedback**: Asynchronous queue-based status updates with ~2-second intervals
 
 ## Dependencies
 

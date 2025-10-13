@@ -130,9 +130,10 @@ class CameraSystem:
         # Initialize available cameras
         self.logger.info("Initializing %d camera(s)...", min(len(cam_infos), 2))
         try:
-            session_dir = self._ensure_session_dir()
+            # Don't create session dir yet - wait until first recording/snapshot
+            # Just pass output_dir to handlers, they'll use session_dir when recording starts
             for i in range(min(len(cam_infos), 2)):
-                handler = CameraHandler(cam_infos[i], i, self.args, session_dir)
+                handler = CameraHandler(cam_infos[i], i, self.args, None)  # Pass None for session_dir
                 handler.start_loops()  # Start async capture/collator/processor loops
                 self.cameras.append(handler)
 
@@ -180,9 +181,9 @@ class CameraSystem:
 
             if cmd == "start_recording":
                 if not self.recording:
-                    self._ensure_session_dir()
+                    session_dir = self._ensure_session_dir()
                     for cam in self.cameras:
-                        cam.start_recording()
+                        cam.start_recording(session_dir)
                     self.recording = True
                     self.send_status(
                         "recording_started",
@@ -324,8 +325,9 @@ class CameraSystem:
                 self.running = False
             elif key == ord("r"):
                 if not self.recording:
+                    session_dir = self._ensure_session_dir()
                     for cam in self.cameras:
-                        cam.start_recording()
+                        cam.start_recording(session_dir)
                     self.recording = True
                 else:
                     for cam in self.cameras:
@@ -387,9 +389,9 @@ class CameraSystem:
         """Non-interactive mode that records immediately."""
         self.running = True
         self.logger.info("Headless mode: starting continuous recording")
-        self._ensure_session_dir()
+        session_dir = self._ensure_session_dir()
         for cam in self.cameras:
-            cam.start_recording()
+            cam.start_recording(session_dir)
         self.recording = True
 
         try:

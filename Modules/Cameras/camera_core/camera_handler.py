@@ -29,16 +29,15 @@ logger = logging.getLogger("CameraHandler")
 class CameraHandler:
     """Handles individual camera with async loop architecture."""
 
-    def __init__(self, cam_info, cam_num, args, session_dir: Path):
+    def __init__(self, cam_info, cam_num, args, session_dir: Optional[Path]):
         self.logger = logging.getLogger(f"Camera{cam_num}")
         self.cam_num = cam_num
         self.args = args
-        self.session_dir = Path(session_dir)
+        self.session_dir = Path(session_dir) if session_dir else None
         self.output_dir = Path(args.output_dir)
         self.recording = False
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.session_dir.mkdir(parents=True, exist_ok=True)
 
         # Load overlay configuration
         self.overlay_config = self._load_overlay_config()
@@ -47,29 +46,46 @@ class CameraHandler:
         self.picam2 = Picamera2(cam_num)
 
         # Configure camera
-        # Set camera hardware to run at 30 FPS (native rate)
-        # Collation will run at args.fps (e.g., 10 FPS) for display/recording
-        capture_fps = 30.0  # Camera hardware capture rate
+        # MATCHED FPS MODE: Camera captures at same rate as recording
+        # This eliminates artificial frame drops and improves efficiency
+        requested_fps = float(args.fps)
+        max_hardware_fps = 30.0  # IMX296 sensor typical maximum
+
+        # Cap FPS if user requests more than hardware can deliver
+        if requested_fps > max_hardware_fps:
+            self.logger.warning(
+                "Requested FPS (%.1f) exceeds hardware limit (%.1f). "
+                "Capping at %.1f FPS. Video will be remuxed with actual FPS.",
+                requested_fps, max_hardware_fps, max_hardware_fps
+            )
+            effective_fps = max_hardware_fps
+        else:
+            effective_fps = requested_fps
+
+        # Configure camera to capture at effective FPS (matched to recording rate)
+        frame_duration_us = int(1e6 / effective_fps)
         config = self.picam2.create_video_configuration(
             main={"size": (args.width, args.height)},
             controls={
-                "FrameDurationLimits": (int(1e6 / capture_fps), int(1e6 / capture_fps)),
+                "FrameDurationLimits": (frame_duration_us, frame_duration_us),
             },
         )
         self.picam2.configure(config)
         self.picam2.start()
-        self.logger.info("Camera %d initialized", cam_num)
+        self.logger.info("Camera %d initialized at %.1f FPS (FrameDuration=%d us)",
+                        cam_num, effective_fps, frame_duration_us)
 
         # Recording manager
         self.recording_manager = CameraRecordingManager(
             camera_id=cam_num,
             resolution=(args.width, args.height),
-            fps=float(args.fps),
+            fps=effective_fps,
+            enable_csv_logging=self.overlay_config.get('enable_csv_timing_log', True),
         )
 
         # Create async loops
         self.capture_loop = CameraCaptureLoop(cam_num, self.picam2)
-        self.collator_loop = CameraCollatorLoop(cam_num, float(args.fps), self.capture_loop)
+        self.collator_loop = CameraCollatorLoop(cam_num, effective_fps, self.capture_loop)
         self.processor = CameraProcessor(
             cam_num,
             args,
@@ -98,7 +114,7 @@ class CameraHandler:
             'allow_partial': False,
             'discovery_timeout': 5.0,
             'discovery_retry': 3.0,
-            'output_dir': 'recordings/cameras',
+            'output_dir': 'recordings',
             'session_prefix': 'session',
             # Overlay settings
             'font_scale_base': 0.6,
@@ -136,8 +152,11 @@ class CameraHandler:
             'show_recording_info': True,
             'show_recording_filename': True,
             'show_controls': True,
+            'show_frame_number': True,
             'scale_mode': 'auto',
             'manual_scale_factor': 3.0,
+            # Recording settings
+            'enable_csv_timing_log': True,
         }
 
         if not config_path.exists():
@@ -207,10 +226,19 @@ class CameraHandler:
         while self._running:
             await asyncio.sleep(0.1)
 
-    def start_recording(self):
-        """Start recording."""
+    def start_recording(self, session_dir: Optional[Path] = None):
+        """Start recording. If session_dir provided, use it and store for this session."""
         if self.recording:
             return
+
+        # If session_dir provided, store it for this session (first recording creates session)
+        if session_dir:
+            self.session_dir = session_dir
+            self.processor.session_dir = session_dir  # Update processor too
+
+        if not self.session_dir:
+            raise ValueError("No session directory available for recording")
+
         self.recording_manager.start_recording(self.session_dir)
         if self.recording_manager.video_path:
             self.logger.info("Recording to %s", self.recording_manager.video_path)

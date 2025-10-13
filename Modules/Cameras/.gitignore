@@ -1,0 +1,42 @@
+# Temporary files from development tools
+*.tmp.*
+*.swp
+*.bak
+*~
+.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# Recordings and outputs (keep recordings separate from code)
+recordings/
+snapshots/
+test_outputs/
+
+# CSV and log files
+*.csv
+*.log
+
+# Video files
+*.mp4
+*.avi
+*.mkv
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/

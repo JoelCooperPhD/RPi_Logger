@@ -120,19 +120,35 @@ class CameraProcessor:
                 metadata = frame_data['metadata']
                 capture_time = frame_data['capture_time']
                 capture_monotonic = frame_data.get('capture_monotonic')
+                sensor_timestamp_ns = frame_data.get('sensor_timestamp_ns')
                 hardware_fps = frame_data.get('hardware_fps', 0.0)
                 collated_frame_num = frame_data['collated_frame_num']
-                collator_is_duplicate = frame_data.get('is_duplicate', False)
 
-                # Get sequence number
-                sequence = None
+                # Get frame number from hardware timing (most accurate)
+                hardware_frame_number = None
+                software_frame_index = None
+                dropped_since_last = None
+
                 if metadata:
-                    sequence = metadata.get("Sequence")
-                    if sequence is not None:
-                        try:
-                            sequence = int(sequence)
-                        except (TypeError, ValueError):
-                            sequence = None
+                    # Debug: Log available metadata keys on first few frames
+                    if collated_frame_num <= 3:
+                        self.logger.info("Frame %d metadata keys: %s", collated_frame_num, list(metadata.keys()))
+
+                    # Primary: Use HardwareFrameNumber (calculated from SensorTimestamp deltas)
+                    hardware_frame_number = metadata.get("HardwareFrameNumber")
+                    if hardware_frame_number is not None:
+                        if collated_frame_num <= 3:
+                            self.logger.info("Frame %d: Using HardwareFrameNumber=%d (timestamp-based)",
+                                           collated_frame_num, hardware_frame_number)
+
+                    # Also get software frame index for reference
+                    software_frame_index = metadata.get("CaptureFrameIndex")
+
+                    # Get pre-calculated dropped frame count from capture loop
+                    dropped_since_last = metadata.get("DroppedSinceLast")
+                    if dropped_since_last is not None and dropped_since_last > 0 and collated_frame_num <= 10:
+                        self.logger.info("Frame %d: Hardware detected %d dropped frames (timestamp gap)",
+                                       collated_frame_num, dropped_since_last)
 
                 # Gather stats for overlay (fast, no blocking)
                 capture_fps = self.capture_loop.get_fps()
@@ -150,36 +166,32 @@ class CameraProcessor:
 
                 # 3. Add frame number overlay to FULL-RES frame (IN EXECUTOR - non-blocking)
                 # This ensures the overlay appears in both recording and preview
-                # Use functools.partial to bind arguments for executor
+                # Use hardware_frame_number for the overlay (most accurate, timestamp-based)
                 overlay_fn = functools.partial(
                     self._add_overlays_wrapper,
                     frame_bgr,
                     hardware_fps,
                     collation_fps,
                     captured_frames,
-                    collated_frames,
+                    hardware_frame_number if hardware_frame_number is not None else collated_frames,  # Use hardware frame number
                     float(self.args.fps),
                     self.recording_manager.is_recording,
                     self.recording_manager.video_path.name if self.recording_manager.video_path else None,
                     self.recording_manager.written_frames,
-                    self.session_dir.name,
+                    self.session_dir.name if self.session_dir else "no_session",
                 )
                 frame_with_overlay = await loop.run_in_executor(None, overlay_fn)
 
                 # 4. Submit to recorder (if recording) - WITH frame number overlay
                 # Fire-and-forget: don't await, keep processor moving
                 if self.recording_manager.is_recording:
-                    # Build metadata for recorder
+                    # Build metadata for recorder (minimal - only essential fields)
                     frame_metadata = FrameTimingMetadata(
-                        capture_monotonic=capture_monotonic,
-                        capture_unix=capture_time if capture_time else None,
-                        camera_frame_index=sequence,
-                        display_frame_index=collated_frame_num,
-                        dropped_frames_total=None,
-                        duplicates_total=None,
-                        available_camera_fps=capture_fps,
-                        requested_fps=float(self.args.fps),
-                        collator_is_duplicate=collator_is_duplicate,
+                        sensor_timestamp_ns=sensor_timestamp_ns,  # ESSENTIAL: Hardware timestamp
+                        dropped_since_last=dropped_since_last,  # ESSENTIAL: Drop detection
+                        display_frame_index=hardware_frame_number if hardware_frame_number is not None else collated_frame_num,  # ESSENTIAL: Frame number
+                        camera_frame_index=hardware_frame_number,  # DIAGNOSTIC: For logging
+                        software_frame_index=software_frame_index,  # DIAGNOSTIC: For logging
                     )
 
                     # Submit frame without blocking processor (fire-and-forget)

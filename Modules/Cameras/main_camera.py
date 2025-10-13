@@ -65,7 +65,7 @@ def parse_args(argv: Optional[list[str]] = None):
     default_allow_partial = get_config_bool('allow_partial', False)
     default_discovery_timeout = get_config_float('discovery_timeout', 5.0)
     default_discovery_retry = get_config_float('discovery_retry', 3.0)
-    default_output = Path(get_config_str('output_dir', 'recordings/cameras'))
+    default_output = Path(get_config_str('output_dir', 'recordings'))
     default_session_prefix = get_config_str('session_prefix', 'session')
 
     parser = argparse.ArgumentParser(description="Multi-camera recorder with preview and overlays")
