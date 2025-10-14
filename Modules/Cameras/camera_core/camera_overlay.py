@@ -85,4 +85,28 @@ class CameraOverlay:
             cv2.LINE_AA
         )
 
+        # Draw recording indicator (red circle in upper right corner)
+        if is_recording:
+            # Get frame dimensions
+            frame_height, frame_width = frame.shape[:2]
+
+            # Position: upper right corner with margin
+            margin_right = cfg.get('rec_indicator_margin_right', 20)
+            margin_top = cfg.get('rec_indicator_margin_top', 20)
+            radius = cfg.get('rec_indicator_radius', 6)
+
+            # Calculate center position for the circle
+            center_x = frame_width - margin_right
+            center_y = margin_top
+
+            # Draw red circle (BGR: red = (0, 0, 255))
+            cv2.circle(
+                frame,
+                (center_x, center_y),
+                radius,
+                (0, 0, 255),  # Red color in BGR
+                -1,  # Filled circle
+                cv2.LINE_AA
+            )
+
         return frame
