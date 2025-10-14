@@ -8,6 +8,7 @@ Uses an asyncio queue for efficient async logging.
 
 import asyncio
 import logging
+import os
 import time
 from pathlib import Path
 from typing import NamedTuple, Optional
@@ -59,6 +60,7 @@ class CSVLogger:
         # Drop tracking
         self._accumulated_drops = 0
         self._total_hardware_drops = 0
+        self._queue_overflow_drops = 0
 
     def start(self) -> None:
         """Start CSV logger (synchronous initialization, async background task)"""
@@ -77,6 +79,7 @@ class CSVLogger:
             self._running = True
             self._accumulated_drops = 0
             self._total_hardware_drops = 0
+            self._queue_overflow_drops = 0
 
             # Start background task for async logging
             try:
@@ -116,13 +119,19 @@ class CSVLogger:
         self._task = None
         self._queue = None
 
-        # Close file
+        # Close file with final sync for durability
         if self._file is not None:
             self._file.flush()
+            os.fsync(self._file.fileno())
             self._file.close()
             self._file = None
 
-        logger.debug("Camera %d CSV logger stopped", self.camera_id)
+        # Report any queue overflow drops
+        if self._queue_overflow_drops > 0:
+            logger.warning("Camera %d CSV logger stopped with %d entries lost due to queue overflow",
+                         self.camera_id, self._queue_overflow_drops)
+        else:
+            logger.debug("Camera %d CSV logger stopped", self.camera_id)
 
     def log_frame(self, frame_number: int, metadata: FrameTimingMetadata) -> None:
         """
@@ -151,7 +160,11 @@ class CSVLogger:
             self._queue.put_nowait(entry)
         except asyncio.QueueFull:
             # Drop CSV entry if queue full (preserves video recording)
-            pass
+            self._queue_overflow_drops += 1
+            # Log warning periodically (every 10 drops) to avoid log spam
+            if self._queue_overflow_drops % 10 == 1:
+                logger.warning("Camera %d CSV queue full, dropped %d entries so far (queue size=%d)",
+                             self.camera_id, self._queue_overflow_drops, self.queue_size)
 
     async def _logger_loop(self) -> None:
         """
@@ -174,18 +187,29 @@ class CSVLogger:
             # Write entry asynchronously
             await self._write_entry_async(entry, loop)
 
-            # Batch flush
+            # Batch flush with fsync for durability
             csv_write_counter += 1
             if csv_write_counter >= self.flush_interval:
                 if self._file is not None:
-                    await loop.run_in_executor(None, self._file.flush)
+                    await loop.run_in_executor(None, self._flush_and_sync)
                 csv_write_counter = 0
 
-        # Final flush
+        # Final flush with fsync
         if self._file is not None:
-            await loop.run_in_executor(None, self._file.flush)
+            await loop.run_in_executor(None, self._flush_and_sync)
 
         logger.debug("Camera %d CSV logger loop exited", self.camera_id)
+
+    def _flush_and_sync(self) -> None:
+        """
+        Flush file buffer and sync to disk for durability.
+
+        This ensures data survives power loss by writing through OS buffers to disk.
+        Called from executor thread to avoid blocking async loop.
+        """
+        if self._file is not None:
+            self._file.flush()
+            os.fsync(self._file.fileno())
 
     async def _write_entry_async(self, entry: CSVLogEntry, loop) -> None:
         """

@@ -163,6 +163,8 @@ class CameraRecordingManager:
         self._encoder.stop()
 
         # Stop CSV logging (track task for proper cleanup)
+        # NOTE: Keep _csv_logger reference until stop task completes to prevent
+        # orphaning frames that arrive during shutdown
         if self._csv_logger is not None:
             # Schedule async stop and track the task
             try:
@@ -170,8 +172,7 @@ class CameraRecordingManager:
                 self._csv_stop_task = asyncio.create_task(self._csv_logger.stop())
             except RuntimeError:
                 # No event loop - logger will be cleaned up by GC
-                pass
-            self._csv_logger = None
+                self._csv_logger = None
 
         # Convert .h264 to .mp4 for better compatibility (if enabled)
         # Run asynchronously to avoid blocking
@@ -215,6 +216,8 @@ class CameraRecordingManager:
                 logger.warning("Error waiting for CSV logger stop: %s", e)
             finally:
                 self._csv_stop_task = None
+                # Now safe to null the logger reference
+                self._csv_logger = None
 
     async def _async_remux(self, h264_path: Path, mp4_path_resolved: Path, mp4_path: Path) -> None:
         """
