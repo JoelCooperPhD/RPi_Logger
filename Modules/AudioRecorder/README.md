@@ -1,154 +1,399 @@
 # Audio Recorder Module
 
-Multi-microphone audio recording system for Raspberry Pi with real-time device monitoring and USB hot-plug support.
+A professional multi-microphone audio recording system for Raspberry Pi with master-slave architecture, USB hot-plug support, and programmatic control.
 
 ## Features
 
-- **Multi-device recording**: Record from multiple USB audio devices simultaneously with independent streams
-- **Hot-plug support**: Automatic detection and handling of USB audio device connections/disconnections
-- **Auto-selection**: Newly detected devices are automatically selected for recording (configurable)
-- **Auto-recording**: Optional automatic recording start when devices are attached
-- **Device removal handling**: Automatically stops recording and removes disconnected devices
-- **Real-time monitoring**: Live feedback with recording duration and active device count
-- **Async architecture**: High-performance async/await implementation with sounddevice
-- **Session management**: Organized output with timestamped experiment folders
-- **Interactive controls**: Keyboard shortcuts for device selection and recording control
-- **Concurrent file I/O**: Asynchronous file saving with thread pool executors for optimal performance
+🎙️ **Multi-Device Support**: Simultaneous recording from multiple USB audio devices (tested with multiple USB microphones)
+🎵 **High-Quality Recording**: 16-bit PCM WAV encoding with configurable sample rates (8-192 kHz)
+🔌 **USB Hot-Plug**: Automatic detection and handling of device connections/disconnections
+🔄 **Master-Slave Architecture**: Command-driven operation via JSON protocol
+🖱️ **Interactive Controls**: Standalone mode with keyboard shortcuts (q=quit, r=record, s=status)
+⚙️ **Flexible Configuration**: Multiple sample rates, auto-selection, and output options
+🛡️ **Signal Handling**: Graceful shutdown with proper resource cleanup
+📁 **Session Management**: Organized timestamped output folders
+
+## Hardware Requirements
+
+- **Raspberry Pi 5** (or compatible Raspberry Pi models)
+- **USB Audio Input Devices** (tested with multiple USB microphones)
+- **Fast Storage** (Class 10+ SD card or USB 3.0 storage recommended)
+- **Operating System**: Raspberry Pi OS Bullseye or later
 
 ## Quick Start
 
-### Installation
+> **Automatic device detection:** The system automatically detects all connected USB audio input devices regardless of port or count. No configuration needed - just connect your microphones and start recording!
 
-This module uses `uv` for package management. From the project root:
+### Standalone Mode (Interactive)
 
 ```bash
-uv sync
-```
-
-### Basic Usage
-
-**Interactive Mode** (default):
-```bash
+# Start audio system with default settings (48 kHz sample rate)
 uv run main_audio.py
+
+# CD quality recording (44.1 kHz)
+uv run main_audio.py --sample-rate 44100
+
+# Custom output directory
+uv run main_audio.py --output-dir recordings/my_session
+
+# High-resolution audio (96 kHz)
+uv run main_audio.py --sample-rate 96000
+
+# Auto-start recording immediately on startup
+uv run main_audio.py --auto-start-recording
+
+# Monitor logs in real-time (in another terminal)
+tail -f recordings/experiment_*/session.log
 ```
 
-**With Custom Settings**:
-```bash
-uv run main_audio.py --output-dir recordings/my_session --sample-rate 48000
-```
-
-**Auto-Recording Mode** (starts recording automatically when devices are detected):
-```bash
-uv run main_audio.py --auto-record-on-attach
-```
-
-**Manual Device Selection** (disable auto-selection of new devices):
-```bash
-uv run main_audio.py --no-auto-select-new
-```
-
-## Interactive Controls
-
-When running in interactive mode:
-
-- `[r]` - Start/Stop recording from selected devices
-- `[1-9]` - Toggle device selection (by device ID 1-9)
-- `[s]` - Refresh and show current device selection status
-- `[q]` - Quit program (stops recording if active)
-- `[Ctrl+C]` - Force quit
-
-**Recording Feedback:**
-- Real-time duration display while recording
-- Status updates every ~2 seconds showing active device count
-- Automatic device busy/error notifications
-
-## Command-Line Options
+### Slave Mode (Programmatic Control)
 
 ```bash
-uv run main_audio.py --help
+# Start in slave mode for master control
+uv run main_audio.py --mode slave
 ```
 
-Key arguments:
-- `--output-dir` - Output directory for recordings (default: `recordings/audio`)
-- `--sample-rate` - Sample rate in Hz (default: 48000)
-- `--session-prefix` - Prefix for experiment folders (default: "experiment")
-- `--auto-record-on-attach` - Auto-start recording when devices are detected
-- `--no-auto-select-new` - Disable automatic selection of new devices
-- `--log-level` - Logging level (DEBUG, INFO, WARNING, ERROR)
-- `--log-file` - Log file path (optional)
+### Headless Mode
+
+```bash
+# Unattended continuous recording
+uv run main_audio.py --mode headless --auto-start-recording
+```
+
+## Usage Modes
+
+### Standalone Mode Controls
+
+**With Console:**
+- **`r`** + Enter: Toggle recording on/off
+- **`s`** + Enter: Show device status
+- **`1-9`** + Enter: Toggle device selection (device ID)
+- **`q`** + Enter: Quit application
+- **Ctrl+C**: Also quits gracefully
+
+### Slave Mode Commands
+
+Send JSON commands via stdin when running in `--mode slave`:
+
+```json
+{"command": "start_recording"}
+{"command": "stop_recording"}
+{"command": "get_status"}
+{"command": "toggle_device", "device_id": 2, "enabled": true}
+{"command": "quit"}
+```
+
+**Command Responses:**
+All commands return JSON status messages on stdout with format:
+```json
+{
+  "type": "status",
+  "status": "recording_started|recording_stopped|status_report|error|...",
+  "timestamp": "ISO-8601 timestamp",
+  "data": { /* command-specific data */ }
+}
+```
+
+## Configuration
+
+### Configuration File (config.txt)
+
+The `config.txt` file allows you to set default values for system settings without passing CLI arguments. Settings include:
+
+**Recording Settings:**
+- `sample_rate` - Recording sample rate (8000-192000 Hz)
+- `auto_start_recording` - Automatically start recording on startup (true/false)
+- `auto_select_new` - Auto-select newly detected devices (true/false)
+- `output_dir`, `session_prefix` - Output configuration
+
+**Logging Settings:**
+- `log_level` - Python logging verbosity (debug, info, warning, error, critical)
+- `console_output` - Also print logs to console (true/false, default: false)
+
+**Advanced Settings:**
+- `discovery_timeout` - Device discovery timeout (seconds)
+- `discovery_retry` - Retry interval after failure (seconds)
+
+> **Note**: CLI arguments always override config.txt values. Edit `config.txt` to change defaults.
+
+> **Logging Behavior**: All output is captured in `session.log`. ANSI color codes are automatically stripped for clean formatting. With `--console`, Python logging also writes to console. Use `tail -f recordings/experiment_*/session.log` to monitor logs in real-time.
+
+### CLI Arguments
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--sample-rate` | 48000 | Recording sample rate in Hz (8000-192000) |
+| `--output-dir` | `recordings` | Output directory for session folders |
+| `--mode` | interactive | Execution mode (`interactive`, `slave`, `headless`) |
+| `--session-prefix` | experiment | Prefix for generated session folders |
+| `--auto-start-recording` | False | Automatically start recording on startup |
+| `--no-auto-start-recording` | - | Wait for manual recording command (default) |
+| `--auto-select-new` | True | Auto-select newly detected devices (default) |
+| `--no-auto-select-new` | - | Disable automatic device selection |
+| `--console` | False | Also log to console (in addition to file) |
+| `--no-console` | - | Log to file only (no console output, default) |
+| `--log-level` | info | Python logging verbosity (debug/info/warning/error/critical) |
+| `--discovery-timeout` | 5.0 | Device discovery timeout (seconds) |
+| `--discovery-retry` | 3.0 | Retry interval after device failure (seconds) |
+
+**Sample Rate Presets:**
+- 8000 Hz - Phone quality
+- 16000 Hz - Wide-band speech
+- 22050 Hz - Low quality music
+- 44100 Hz - CD quality
+- 48000 Hz - Professional audio (default)
+- 96000 Hz - High-resolution audio
+- 192000 Hz - Ultra high-resolution
+
+> **Note**: Most settings can also be configured in `config.txt` to avoid passing CLI arguments. CLI arguments override config file values.
 
 ## File Structure
 
 ```
 AudioRecorder/
-├── main_audio.py           # Main multi-microphone recorder
-├── README.md               # This file
-├── examples/               # Example scripts and compatibility shims
-│   └── audio_monitor_fast.py
-├── docs/                   # Additional documentation
-└── data/                   # Default recordings output (auto-created)
+├── main_audio.py                    # Main multi-microphone system entry point
+├── README.md                        # This documentation
+├── config.txt                       # System configuration (sample rate, logging settings)
+├── audio_core/                      # Core audio system modules
+│   ├── audio_handler.py             # Single device coordinator
+│   ├── audio_system.py              # Multi-device system with interactive/slave/headless modes
+│   ├── audio_supervisor.py          # Async supervisor with retry logic
+│   ├── audio_utils.py               # Utilities (device discovery, config helpers)
+│   ├── constants.py                 # System constants
+│   ├── recording/                   # Recording subsystem (modular design)
+│   │   ├── manager.py               # Recording coordinator (public API)
+│   │   └── __init__.py              # Recording module exports
+│   ├── commands/                    # JSON command protocol
+│   │   ├── command_handler.py       # Command processing
+│   │   ├── command_protocol.py      # Command definitions
+│   │   └── __init__.py              # Command exports
+│   ├── config/                      # Configuration management
+│   │   ├── config_loader.py         # Config file loading
+│   │   └── __init__.py              # Config exports
+│   ├── modes/                       # Operation modes
+│   │   ├── base_mode.py             # Base mode class
+│   │   ├── interactive_mode.py      # Interactive mode with keyboard controls
+│   │   ├── slave_mode.py            # JSON command-driven mode
+│   │   ├── headless_mode.py         # Background recording mode
+│   │   └── __init__.py              # Mode exports
+│   └── __init__.py                  # Package exports
+└── examples/                        # Example scripts
+    └── audio_monitor_fast.py        # Legacy compatibility shim
 ```
 
-## Output Format
+## Session Output
 
-Recordings are saved in timestamped experiment folders:
+Each runtime spawns a dedicated session folder inside the configured `--output-dir` directory:
+
+**Directory Structure:**
+```
+recordings/
+└── experiment_YYYYMMDD_HHMMSS/
+    ├── session.log                                    # System log file
+    ├── mic2_USB_Audio_Device_rec001_HHMMSS.wav      # Device 2 recording
+    ├── mic5_Blue_Microphones_rec001_HHMMSS.wav      # Device 5 recording
+    └── mic8_Logitech_Webcam_rec001_HHMMSS.wav       # Device 8 recording
+```
+
+**Log File:**
+- `session.log` — Complete system log for the session
+  - **All output captured:** Python logging + system messages
+  - All audio system events, errors, and status messages
+  - Paired with recordings for easy troubleshooting
+  - Log level configurable via `log_level` in config.txt or `--log-level` CLI argument
+  - Console output disabled by default (logs to file only)
+  - Use `tail -f session.log` to monitor logs in real-time
+
+**Audio Files:**
+- `mic{N}_DeviceName_rec{NNN}_TIMESTAMP.wav` — 16-bit PCM WAV recordings
+  - Mono recording per device
+  - Sample rate as configured (default: 48 kHz)
+  - Filename includes device ID, device name, recording count, and timestamp
+  - Professional audio quality suitable for analysis and archival
+
+## Architecture
+
+### System Overview
+
+The audio system uses an **async architecture** for optimal performance:
 
 ```
-recordings/audio/
-└── experiment_20250925_151702/
-    ├── mic2_USB_Audio_Device_rec001_151702.wav
-    └── mic5_Blue_Microphones_rec001_151702.wav
+USB Audio Devices (configurable 8-192 kHz)
+    ↓
+AudioHandler (per device) → manages individual device streams
+    ↓
+AudioSystem → coordinates multiple devices
+    ├→ Device Discovery → automatic USB device detection
+    ├→ Recording Manager → modular recording subsystem
+    │   └→ WAV Encoder → 16-bit PCM encoding
+    └→ Mode Handler → interactive/slave/headless
 ```
 
-Files are named: `mic{ID}_{DeviceName}_rec{Number}_{Timestamp}.wav`
+**Key Features:**
+- **Flexible Sample Rates**: Supports 8 kHz to 192 kHz (hardware dependent)
+- **Async Architecture**: Fully async/await patterns with sounddevice library
+- **Zero-Copy Pipeline**: Direct buffer access for minimal overhead
+- **Modular Recording**: Recording subsystem split into focused components
+- **USB Hot-Plug**: Real-time device detection via /proc/asound (5ms polling)
 
-## Technical Details
+### Standalone Mode (Interactive)
+- **With Console**:
+  - Keyboard controls (r/s/1-9/q)
+  - Real-time status display
+  - USB device monitoring with automatic refresh
+  - Direct device control
+  - Lower CPU usage than headless
 
-- **Audio Format**: 16-bit PCM WAV, mono per device
-- **Default Sample Rate**: 48 kHz (configurable)
-- **Block Size**: 1024 samples per callback
-- **Architecture**: Asyncio-based with sounddevice library
-- **Device Detection**: Uses `/proc/asound/cards` for ultra-fast USB detection (~5ms polling)
-- **Concurrency**: Thread pool executors for audio processing and file I/O, async event loop for device management
-- **Auto-Selection**: First newly detected device is automatically selected when enabled (default)
-- **Device Removal**: Automatically deselects removed devices and stops recording to maintain data consistency
-- **Recording Feedback**: Asynchronous queue-based status updates with ~2-second intervals
+### Slave Mode
+- **Without Console** (default):
+  - No terminal interface (pure headless operation)
+  - JSON command protocol via stdin/stdout
+  - Real-time status reporting to master process
+- Signal handling for graceful shutdown (SIGTERM, SIGINT)
+
+### Headless Mode
+- Continuous recording without interaction (auto-starts)
+- Minimal CPU overhead
+- Suitable for long-running background recording
+- Can be combined with auto-device-selection for unattended operation
+
+## Performance Characteristics
+
+- **Low Latency**: <5ms device detection polling
+- **Efficient I/O**: Async file operations with thread pool executors
+- **Minimal CPU Usage**: Hardware-dependent, typically <5% per device at 48 kHz
+- **USB Hot-Plug**: Ultra-fast detection via `/proc/asound/cards` (~5ms polling)
+- **Concurrent Recording**: Multiple devices recorded in parallel with independent buffers
+- **Auto-Recovery**: Automatic device discovery retry on failure
 
 ## Dependencies
 
-Core dependencies (managed by uv):
-- `sounddevice` - Audio I/O
-- `numpy` - Audio data processing
-- `aiofiles` - Async file operations
-- `cli_utils` - Shared CLI utilities (from parent project)
+- **sounddevice**: Audio I/O
+- **numpy**: Audio data processing
+- **aiofiles**: Async file operations
+- **cli_utils**: Shared CLI utilities (from parent project)
 
-## Examples
-
-See `examples/` directory for:
-- `audio_monitor_fast.py` - Compatibility shim for legacy code
+All dependencies are managed via `uv` package manager.
 
 ## Troubleshooting
 
-**No devices detected:**
-- Check USB connections
-- Verify devices appear in `arecord -l`
-- Ensure user has audio permissions (add to `audio` group)
+### Common Issues
 
-**Recording fails to start:**
-- Kill any existing audio processes: `pkill -f main_audio`
-- Check device isn't locked by another application
-- Verify sample rate compatibility with your hardware
+1. **No devices detected:**
+   - Check USB connections
+   - Verify devices appear in `arecord -l`
+   - Ensure user has audio permissions (add to `audio` group)
 
-**Import errors:**
-- Always use `uv run` instead of direct Python execution
-- Ensure you've run `uv sync` to install dependencies
+2. **Recording fails to start:**
+   - Kill existing processes: `pkill -f main_audio`
+   - Check device isn't locked by another application
+   - Verify sample rate compatibility with your hardware
+
+3. **Import Errors:**
+   - Always use `uv run` instead of direct Python execution
+   - Ensure you've run `uv sync` to install dependencies
+   - Verify PYTHONPATH includes project root
+
+4. **Permission Issues:**
+   - Add user to audio group: `sudo usermod -a -G audio $USER`
+   - Log out and back in for group changes to take effect
+
+### Hardware Setup
+
+1. Connect USB audio devices to Raspberry Pi USB ports
+2. Verify device detection: `arecord -l`
+3. Use fast storage for recording (USB 3.0 recommended for multiple high-resolution streams)
+4. Ensure adequate power supply (multiple USB devices may require powered hub)
+
+## Examples
+
+### Basic Recording Session
+
+```bash
+# Start interactive mode with default settings (48 kHz)
+uv run main_audio.py
+
+# Controls:
+# Press 'r' + Enter to start/stop recording
+# Press 's' + Enter to show device status
+# Press '1-9' + Enter to toggle device selection
+# Press 'q' + Enter to quit
+```
+
+### Programmatic Control
+
+```python
+import subprocess
+import json
+import time
+import select
+
+# Start audio system in slave mode
+proc = subprocess.Popen(
+    ["uv", "run", "main_audio.py", "--mode", "slave"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,  # Merge stderr to stdout
+    text=True,
+    bufsize=0  # Unbuffered
+)
+
+def read_json_response(proc, timeout=5.0):
+    """Helper to read JSON response, skipping non-JSON lines."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if select.select([proc.stdout], [], [], 0.1)[0]:
+            line = proc.stdout.readline()
+            if line and line.startswith('{'):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    pass
+    return None
+
+# Wait for system to be ready
+print("Waiting for initialization...")
+while True:
+    msg = read_json_response(proc)
+    if msg and msg.get('status') == 'ready':
+        print("System ready!")
+        break
+
+# Send start recording command
+proc.stdin.write(json.dumps({"command": "start_recording"}) + "\n")
+proc.stdin.flush()
+status = read_json_response(proc, timeout=10.0)  # Device init can take time
+print(f"Recording started: {status.get('status')}")
+
+# Record for 10 seconds
+time.sleep(10)
+
+# Stop recording
+proc.stdin.write(json.dumps({"command": "stop_recording"}) + "\n")
+proc.stdin.flush()
+status = read_json_response(proc)
+print(f"Recording stopped: {status.get('status')}")
+
+# Get status
+proc.stdin.write(json.dumps({"command": "get_status"}) + "\n")
+proc.stdin.flush()
+status = read_json_response(proc)
+print(f"System status: {status}")
+
+# Cleanup
+proc.stdin.write(json.dumps({"command": "quit"}) + "\n")
+proc.stdin.flush()
+proc.wait(timeout=5)
+```
+
+> **Note**: Device initialization can take several seconds on first `start_recording`. The example includes appropriate timeouts to handle this.
 
 ## Related Modules
 
-- `../Cameras/` - Camera recording module with similar architecture
+- `../Cameras/` - Camera recording module with parallel architecture
 - `../EyeTracker/` - Eye tracking module
 - `../../cli_utils.py` - Shared CLI argument parsing and utilities
 
-## License
+## Support
 
-Part of the RPi_Logger project.
+For issues and questions, refer to the main project documentation in `/CLAUDE.md`.

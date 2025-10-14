@@ -1,0 +1,54 @@
+################################################################################
+# AUDIO RECORDING SYSTEM CONFIGURATION
+################################################################################
+# Edit values below and restart the application for changes to take effect
+#
+# QUICK REFERENCE:
+#
+#   Sample Rates:
+#     8000   = 8 kHz (Phone quality)
+#     16000  = 16 kHz (Wide-band speech)
+#     22050  = 22.05 kHz (Low quality music)
+#     44100  = 44.1 kHz (CD quality)
+#     48000  = 48 kHz (Professional audio, default)
+#     96000  = 96 kHz (High-resolution audio)
+#     192000 = 192 kHz (Ultra high-resolution)
+#
+# NOTE: System automatically detects all USB audio input devices
+################################################################################
+
+
+################################################################################
+# RECORDING SETTINGS
+################################################################################
+
+# Sample rate (Hz)
+sample_rate = 48000
+
+# Output files
+output_dir = recordings
+session_prefix = experiment
+
+# Auto-start recording
+auto_start_recording = false # Automatically start recording on startup (true/false)
+
+# Auto-select new devices
+auto_select_new = true # Automatically select newly detected input devices (true/false)
+
+
+################################################################################
+# LOGGING
+################################################################################
+
+# Log file: output_dir/experiment_YYYYMMDD_HHMMSS/session.log
+log_level = info             # Python log level (debug/info/warning/error/critical)
+console_output = false       # Also print to console (true/false)
+
+
+################################################################################
+# ADVANCED
+################################################################################
+
+# Device discovery
+discovery_timeout = 5.0      # Maximum time to wait for devices (seconds)
+discovery_retry = 3.0        # Retry interval after device failure (seconds)
