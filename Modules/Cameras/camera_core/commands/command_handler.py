@@ -16,8 +16,40 @@ if TYPE_CHECKING:
     from ..camera_system import CameraSystem
 
 from .command_protocol import StatusMessage
+from ..constants import MAX_ERROR_MESSAGE_LENGTH
 
 logger = logging.getLogger("CommandHandler")
+
+
+def sanitize_error_message(error: Exception) -> str:
+    """
+    Sanitize error message to prevent information leakage.
+
+    Removes file paths and other sensitive information from error messages
+    before sending to master in slave mode.
+
+    Args:
+        error: Exception to sanitize
+
+    Returns:
+        Sanitized error message safe to send externally
+    """
+    import re
+
+    msg = str(error)
+
+    # Remove absolute paths (anything starting with / or drive letter on Windows)
+    msg = re.sub(r'/[^\s]*', '[path]', msg)
+    msg = re.sub(r'[A-Z]:\\[^\s]*', '[path]', msg)
+
+    # Remove anything that looks like a file path
+    msg = re.sub(r'\.\.?/[^\s]*', '[path]', msg)
+
+    # Truncate long messages
+    if len(msg) > MAX_ERROR_MESSAGE_LENGTH:
+        msg = msg[:MAX_ERROR_MESSAGE_LENGTH - 3] + '...'
+
+    return msg
 
 
 class CommandHandler:
@@ -59,7 +91,10 @@ class CommandHandler:
                 StatusMessage.send("error", {"message": f"Unknown command: {cmd}"})
 
         except Exception as e:
-            StatusMessage.send("error", {"message": str(e)})
+            # Sanitize error message before sending to master
+            safe_message = sanitize_error_message(e)
+            StatusMessage.send("error", {"message": safe_message})
+            # Full error logged locally for debugging
             self.logger.error("Command error: %s", e, exc_info=True)
 
     def _handle_start_recording(self) -> None:
@@ -73,7 +108,7 @@ class CommandHandler:
                 "recording_started",
                 {
                     "session": self.system.session_label,
-                    "files": [str(cam.recorder) for cam in self.system.cameras if cam.recorder],
+                    "files": [str(cam.recording_manager.video_path) for cam in self.system.cameras if cam.recording_manager.video_path],
                 },
             )
         else:
@@ -90,9 +125,9 @@ class CommandHandler:
                 {
                     "session": self.system.session_label,
                     "files": [
-                        str(cam.last_recording)
+                        str(cam.recording_manager.video_path)
                         for cam in self.system.cameras
-                        if cam.last_recording is not None
+                        if cam.recording_manager.video_path is not None
                     ],
                 },
             )
@@ -122,10 +157,9 @@ class CommandHandler:
                     "cam_num": cam.cam_num,
                     "recording": cam.recording,
                     "capture_fps": round(cam.capture_loop.get_fps(), 2),
-                    "collation_fps": round(cam.collator_loop.get_fps(), 2),
+                    "processing_fps": round(cam.processor.fps_tracker.get_fps(), 2),
                     "captured_frames": cam.capture_loop.get_frame_count(),
-                    "collated_frames": cam.collator_loop.get_frame_count(),
-                    "duplicated_frames": cam.recording_manager.duplicated_frames,
+                    "processed_frames": cam.processor.processed_frames,
                     "recorded_frames": cam.recording_manager.written_frames,
                     "output": str(cam.recording_manager.video_path) if cam.recording_manager.video_path else None,
                 } for cam in self.system.cameras

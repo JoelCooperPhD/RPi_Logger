@@ -12,11 +12,13 @@ from typing import Optional
 import numpy as np
 from picamera2 import Picamera2
 
-# Handle relative import for both module and standalone use
-try:
-    from .camera_utils import RollingFPS
-except ImportError:
-    from camera_utils import RollingFPS
+from .camera_utils import RollingFPS
+from .constants import (
+    FRAME_DURATION_MIN_US,
+    FRAME_DURATION_MAX_US,
+    CAPTURE_SLEEP_INTERVAL,
+    FRAME_LOG_COUNT,
+)
 
 logger = logging.getLogger("CameraCapture")
 
@@ -95,22 +97,33 @@ class CameraCaptureLoop:
                 hardware_fps = 0.0
                 if 'FrameDuration' in metadata:
                     frame_duration_us = metadata['FrameDuration']
-                    if frame_duration_us > 0:
+                    # Validate frame duration to prevent overflow and detect hardware issues
+                    if FRAME_DURATION_MIN_US <= frame_duration_us <= FRAME_DURATION_MAX_US:
                         hardware_fps = 1000000.0 / frame_duration_us
                         self.camera_hardware_fps = hardware_fps
+                        # Safe conversion: max value is FRAME_DURATION_MAX_US * 1000 = 10^10 (fits in int64)
                         self.expected_frame_interval_ns = int(frame_duration_us * 1000)
-                        if self.captured_frames < 3:
+                        if self.captured_frames < FRAME_LOG_COUNT:
                             self.logger.info(
                                 "Frame %d: FrameDuration=%d us, expected_interval=%d ns (%.2f ms)",
                                 self.captured_frames, frame_duration_us, self.expected_frame_interval_ns,
                                 self.expected_frame_interval_ns / 1_000_000
                             )
+                    elif frame_duration_us > 0:
+                        self.logger.warning(
+                            "Frame %d: Invalid FrameDuration=%d us (outside range %d-%d)",
+                            self.captured_frames, frame_duration_us,
+                            FRAME_DURATION_MIN_US, FRAME_DURATION_MAX_US
+                        )
 
                 sensor_timestamp_ns = metadata.get('SensorTimestamp')
 
                 # Calculate hardware frame number using timestamp deltas for accurate drop detection
                 dropped_since_last = 0
                 if sensor_timestamp_ns is not None:
+                    # Only perform drop detection if both prerequisites are met:
+                    # 1. We have a previous timestamp to compare against
+                    # 2. We know the expected frame interval
                     if self.last_sensor_timestamp_ns is not None and self.expected_frame_interval_ns is not None:
                         delta_ns = sensor_timestamp_ns - self.last_sensor_timestamp_ns
                         intervals_passed = round(delta_ns / self.expected_frame_interval_ns)
@@ -125,15 +138,20 @@ class CameraCaptureLoop:
 
                         self.hardware_frame_number += intervals_passed
                     else:
-                        self.hardware_frame_number = 0
-                        if self.captured_frames < 3:
-                            self.logger.info(
-                                "Frame %d: First frame with timestamp, hw_frame_num=0, last_ts=%s, expected_interval=%s",
-                                self.captured_frames, self.last_sensor_timestamp_ns, self.expected_frame_interval_ns
-                            )
+                        # First frame with valid timestamp - initialize tracking
+                        # Don't increment hardware_frame_number yet, wait for second frame
+                        if self.last_sensor_timestamp_ns is None:
+                            self.hardware_frame_number = 0
+                            if self.captured_frames < 3:
+                                self.logger.info(
+                                    "Frame %d: First frame with timestamp, hw_frame_num=0, expected_interval=%s",
+                                    self.captured_frames, self.expected_frame_interval_ns
+                                )
 
+                    # Always update last_sensor_timestamp_ns when we have valid data
                     self.last_sensor_timestamp_ns = sensor_timestamp_ns
                 else:
+                    # Fallback: use software counter if no hardware timestamp available
                     self.hardware_frame_number = self.captured_frames
                     if self.captured_frames < 3:
                         self.logger.warning("Frame %d: No SensorTimestamp in metadata!", self.captured_frames)

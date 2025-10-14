@@ -18,6 +18,7 @@ from picamera2 import Picamera2
 from .camera_handler import CameraHandler
 from .commands import StatusMessage
 from .modes import InteractiveMode, SlaveMode, HeadlessMode
+from .constants import THREAD_JOIN_TIMEOUT_SECONDS
 
 logger = logging.getLogger("CameraSystem")
 
@@ -225,9 +226,10 @@ class CameraSystem:
             cleanup_threads.append(thread)
 
         for i, thread in enumerate(cleanup_threads):
-            thread.join(timeout=3.0)
+            thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
             if thread.is_alive():
-                self.logger.warning("Camera %d cleanup did not finish within 3 seconds", i)
+                self.logger.warning("Camera %d cleanup did not finish within %d seconds",
+                                  i, THREAD_JOIN_TIMEOUT_SECONDS)
 
         self.cameras.clear()
         self.initialized = False

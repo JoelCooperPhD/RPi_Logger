@@ -64,9 +64,6 @@ class CameraConfig:
             height: Resolution height
         """
         try:
-            import sys
-            from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
             from cli_utils import RESOLUTION_TO_PRESET, RESOLUTION_PRESETS
 
             resolution_tuple = (width, height)
@@ -79,6 +76,6 @@ class CameraConfig:
                 )
             else:
                 logger.info("Camera %d using custom resolution: %dx%d", camera_id, width, height)
-        except Exception:
-            # Silently fail if cli_utils not available
-            pass
+        except ImportError:
+            # cli_utils not in path - just log basic info
+            logger.info("Camera %d using resolution: %dx%d", camera_id, width, height)

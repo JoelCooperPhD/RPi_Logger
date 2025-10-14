@@ -29,6 +29,7 @@ from .recording import CameraRecordingManager
 from .camera_capture_loop import CameraCaptureLoop
 from .camera_processor import CameraProcessor
 from .config import ConfigLoader, CameraConfig
+from .constants import DEFAULT_EXECUTOR_WORKERS, CLEANUP_TIMEOUT_SECONDS
 
 logger = logging.getLogger("CameraHandler")
 
@@ -152,7 +153,7 @@ class CameraHandler:
                         t.start()
                         self._threads.add(t)
 
-            executor = DaemonThreadPoolExecutor(max_workers=4)
+            executor = DaemonThreadPoolExecutor(max_workers=DEFAULT_EXECUTOR_WORKERS)
             self._loop.set_default_executor(executor)
 
             self._loop_task = self._loop.create_task(self._run_all_loops())
@@ -257,9 +258,9 @@ class CameraHandler:
         self._running = False
 
         if hasattr(self, '_loop_thread') and self._loop_thread.is_alive():
-            self._loop_thread.join(timeout=2.0)
+            self._loop_thread.join(timeout=CLEANUP_TIMEOUT_SECONDS)
             if self._loop_thread.is_alive():
-                self.logger.warning("Async loop thread did not finish within 2 seconds")
+                self.logger.warning("Async loop thread did not finish within %d seconds", CLEANUP_TIMEOUT_SECONDS)
 
         try:
             self.picam2.stop_preview()

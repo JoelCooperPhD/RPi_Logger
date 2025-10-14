@@ -13,24 +13,62 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Add parent directories to path for imports
-_SCRIPT_DIR = Path(__file__).resolve().parent
-_REPO_ROOT = _SCRIPT_DIR.parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
-from cli_utils import (
-    add_common_cli_arguments,
-    configure_logging,
-    ensure_directory,
-    parse_resolution,
-    positive_float,
-    positive_int,
-)
+# Import from parent modules - assumes proper PYTHONPATH or package installation
+try:
+    from cli_utils import (
+        add_common_cli_arguments,
+        configure_logging,
+        ensure_directory,
+        parse_resolution,
+        positive_float,
+        positive_int,
+    )
+except ImportError as e:
+    print(f"ERROR: Cannot import cli_utils. Ensure PYTHONPATH includes project root or install package.", file=sys.stderr)
+    print(f"  Add to PYTHONPATH: export PYTHONPATH=/home/rs-pi-2/Development/RPi_Logger:$PYTHONPATH", file=sys.stderr)
+    print(f"  Or install package: cd /home/rs-pi-2/Development/RPi_Logger && pip install -e .", file=sys.stderr)
+    sys.exit(1)
 # Note: camera_core import is delayed until after stderr/stdout redirection
 # This ensures libcamera output is captured in the log file
 
 logger = logging.getLogger("CameraMain")
+
+
+def sanitize_path_component(name: str) -> str:
+    """
+    Sanitize a path component to prevent directory traversal attacks.
+
+    Removes or replaces dangerous characters like '/', '\\', '..', etc.
+
+    Args:
+        name: Path component to sanitize
+
+    Returns:
+        Sanitized path component safe for use in file paths
+    """
+    import re
+
+    # Remove null bytes
+    name = name.replace('\0', '')
+
+    # Remove path separators and parent directory references
+    # Replace with underscores to maintain readability
+    name = name.replace('/', '_').replace('\\', '_')
+    name = name.replace('..', '__')
+
+    # Remove other potentially dangerous characters
+    # Keep only alphanumeric, dash, underscore, and dot
+    name = re.sub(r'[^a-zA-Z0-9_\-.]', '_', name)
+
+    # Ensure it doesn't start with a dot (hidden file)
+    if name.startswith('.'):
+        name = '_' + name[1:]
+
+    # Ensure non-empty
+    if not name or name.isspace():
+        name = 'session'
+
+    return name
 
 
 def parse_args(argv: Optional[list[str]] = None):
@@ -273,9 +311,23 @@ async def main(argv: Optional[list[str]] = None) -> None:
     import datetime
     import os
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    prefix = args.session_prefix.rstrip("_")
+
+    # Sanitize session prefix to prevent path traversal attacks
+    prefix = sanitize_path_component(args.session_prefix).rstrip("_")
     session_name = f"{prefix}_{timestamp}" if prefix else timestamp
     session_dir = args.output_dir / session_name
+
+    # Validate that session_dir is actually within output_dir (prevent path traversal)
+    try:
+        session_dir_resolved = session_dir.resolve()
+        output_dir_resolved = args.output_dir.resolve()
+        if not str(session_dir_resolved).startswith(str(output_dir_resolved)):
+            logger.error("Security violation: session directory escapes output directory")
+            raise ValueError("Invalid session directory path")
+    except (OSError, ValueError) as e:
+        logger.error("Failed to validate session directory: %s", e)
+        raise
+
     session_dir.mkdir(parents=True, exist_ok=True)
 
     # Configure logging to session directory
@@ -322,9 +374,15 @@ async def main(argv: Optional[list[str]] = None) -> None:
     supervisor = CameraSupervisor(args)
     loop = asyncio.get_running_loop()
 
+    # Signal handler that properly schedules shutdown task
+    def signal_handler():
+        """Handle shutdown signals by scheduling shutdown task."""
+        if not supervisor.shutdown_event.is_set():
+            asyncio.create_task(supervisor.shutdown())
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(supervisor.shutdown()))
+            loop.add_signal_handler(sig, signal_handler)
 
     try:
         await supervisor.run()

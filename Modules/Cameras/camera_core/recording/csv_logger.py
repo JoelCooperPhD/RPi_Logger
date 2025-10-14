@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from ..camera_utils import FrameTimingMetadata
+from ..constants import CSV_FLUSH_INTERVAL_FRAMES, CSV_QUEUE_SIZE, CSV_LOGGER_STOP_TIMEOUT_SECONDS, FRAME_LOG_COUNT
 
 logger = logging.getLogger("CSVLogger")
 
@@ -39,7 +40,13 @@ class CSVLogger:
         queue_size: Maximum queue size
     """
 
-    def __init__(self, camera_id: int, csv_path: Path, flush_interval: int = 60, queue_size: int = 300):
+    def __init__(
+        self,
+        camera_id: int,
+        csv_path: Path,
+        flush_interval: int = CSV_FLUSH_INTERVAL_FRAMES,
+        queue_size: int = CSV_QUEUE_SIZE
+    ):
         self.camera_id = camera_id
         self.csv_path = csv_path
         self.flush_interval = flush_interval
@@ -61,25 +68,35 @@ class CSVLogger:
         if self._thread is not None:
             raise RuntimeError("CSV logger already started")
 
-        # Open CSV file
-        self._file = open(self.csv_path, "w", encoding="utf-8", buffering=8192)
-        self._file.write(
-            "frame_number,write_time_unix,sensor_timestamp_ns,dropped_since_last,total_hardware_drops\n"
-        )
+        try:
+            # Open CSV file
+            self._file = open(self.csv_path, "w", encoding="utf-8", buffering=8192)
+            self._file.write(
+                "frame_number,write_time_unix,sensor_timestamp_ns,dropped_since_last,total_hardware_drops\n"
+            )
 
-        # Create queue and thread
-        self._queue = queue.Queue(maxsize=self.queue_size)
-        self._stop_event.clear()
-        self._accumulated_drops = 0
-        self._total_hardware_drops = 0
+            # Create queue and thread
+            self._queue = queue.Queue(maxsize=self.queue_size)
+            self._stop_event.clear()
+            self._accumulated_drops = 0
+            self._total_hardware_drops = 0
 
-        self._thread = threading.Thread(
-            target=self._logger_loop,
-            name=f"Cam{self.camera_id}-csv",
-            daemon=True
-        )
-        self._thread.start()
-        logger.debug("Camera %d CSV logger started: %s", self.camera_id, self.csv_path)
+            self._thread = threading.Thread(
+                target=self._logger_loop,
+                name=f"Cam{self.camera_id}-csv",
+                daemon=True
+            )
+            self._thread.start()
+            logger.debug("Camera %d CSV logger started: %s", self.camera_id, self.csv_path)
+        except Exception:
+            # Cleanup file handle on failure
+            if self._file is not None:
+                try:
+                    self._file.close()
+                except Exception:
+                    pass
+                self._file = None
+            raise
 
     def stop(self) -> None:
         """Stop CSV logger thread and close file"""
@@ -97,7 +114,7 @@ class CSVLogger:
 
         # Wait for thread to finish
         if self._thread.is_alive():
-            self._thread.join(timeout=5.0)
+            self._thread.join(timeout=CSV_LOGGER_STOP_TIMEOUT_SECONDS)
 
         self._thread = None
         self._queue = None
@@ -196,7 +213,7 @@ class CSVLogger:
                 self._accumulated_drops = 0
 
         # Debug: Log first few frames and any drops
-        if entry.frame_number <= 5 or (dropped_since_last is not None and dropped_since_last > 0):
+        if entry.frame_number <= FRAME_LOG_COUNT or (dropped_since_last is not None and dropped_since_last > 0):
             logger.info("Frame %d: hardware_frame_number=%s, software_frame_index=%s, dropped=%s, total=%s",
                        entry.frame_number,
                        entry.metadata.camera_frame_index,

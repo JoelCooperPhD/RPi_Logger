@@ -16,6 +16,7 @@ from typing import Optional
 import numpy as np
 
 from ..camera_utils import FrameTimingMetadata
+from ..constants import DEFAULT_BITRATE_BPS, FPS_MIN, FPS_MAX, FFMPEG_TIMEOUT_SECONDS
 from .csv_logger import CSVLogger
 from .encoder import H264EncoderWrapper
 from .overlay import FrameOverlayHandler
@@ -51,7 +52,7 @@ class CameraRecordingManager:
         picam2,
         resolution: tuple[int, int],
         fps: float,
-        bitrate: int = 10_000_000,
+        bitrate: int = DEFAULT_BITRATE_BPS,
         enable_csv_logging: bool = True,
         auto_remux: bool = True,
         enable_overlay: bool = True,
@@ -162,19 +163,35 @@ class CameraRecordingManager:
         if self.auto_remux and self.video_path and self.video_path.exists():
             mp4_path = self.video_path.with_suffix('.mp4')
             try:
+                # Validate inputs before calling ffmpeg
+                if not (FPS_MIN <= self.fps <= FPS_MAX):
+                    logger.warning("Invalid FPS %.2f for ffmpeg (must be %0.1f-%0.1f), skipping remux",
+                                 self.fps, FPS_MIN, FPS_MAX)
+                    return
+
+                # Resolve paths to absolute to prevent confusion
+                h264_path = self.video_path.resolve()
+                mp4_path_resolved = mp4_path.resolve()
+
                 # Use ffmpeg to remux H.264 to MP4 container with correct FPS
+                # Note: Using list arguments (not shell=True) prevents shell injection
                 subprocess.run([
                     'ffmpeg', '-y',
-                    '-r', str(self.fps),  # Input framerate
-                    '-i', str(self.video_path),
+                    '-r', str(self.fps),  # Input framerate (validated above)
+                    '-i', str(h264_path),  # Absolute path
                     '-c:v', 'copy',  # Copy video stream (no re-encoding)
-                    str(mp4_path)
-                ], check=True, capture_output=True)
+                    str(mp4_path_resolved)  # Absolute path
+                ], check=True, capture_output=True, timeout=FFMPEG_TIMEOUT_SECONDS)
 
                 # Remove original .h264 file
                 self.video_path.unlink()
                 self.video_path = mp4_path
                 logger.info("Camera %d recording saved (MP4): %s", self.camera_id, self.video_path)
+            except subprocess.TimeoutExpired:
+                logger.warning("ffmpeg conversion timed out for camera %d. Keeping .h264 file.",
+                             self.camera_id)
+                if self.video_path:
+                    logger.info("Camera %d recording saved (H.264): %s", self.camera_id, self.video_path)
             except Exception as e:
                 logger.warning("Failed to convert .h264 to .mp4 for camera %d: %s. Keeping .h264 file.",
                              self.camera_id, e)

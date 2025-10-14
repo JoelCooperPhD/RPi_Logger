@@ -7,6 +7,7 @@ Uses MappedArray for zero-copy direct buffer access.
 """
 
 import logging
+import threading
 from typing import Callable, Optional
 
 import cv2
@@ -34,10 +35,12 @@ class FrameOverlayHandler:
         self.enable_overlay = enable_overlay
         self._frame_count = 0
         self._is_recording = False
+        self._count_lock = threading.Lock()  # Protect frame counter from race conditions
 
     def reset_frame_count(self) -> None:
         """Reset frame counter (called when starting recording)"""
-        self._frame_count = 0
+        with self._count_lock:
+            self._frame_count = 0
 
     def set_recording(self, is_recording: bool) -> None:
         """Update recording state (affects which streams get overlay)"""
@@ -45,7 +48,8 @@ class FrameOverlayHandler:
 
     def get_frame_count(self) -> int:
         """Get current frame count"""
-        return self._frame_count
+        with self._count_lock:
+            return self._frame_count
 
     def create_callback(self) -> Callable:
         """
@@ -74,8 +78,10 @@ class FrameOverlayHandler:
                 return request
 
             try:
-                # Increment frame count
-                self._frame_count += 1
+                # Increment frame count (thread-safe)
+                with self._count_lock:
+                    self._frame_count += 1
+                    current_frame_num = self._frame_count
 
                 # Get overlay configuration
                 font_scale = self.overlay_config.get('font_scale_base', 0.6)
@@ -90,7 +96,7 @@ class FrameOverlayHandler:
                 margin_left = self.overlay_config.get('margin_left', 10)
                 line_start_y = self.overlay_config.get('line_start_y', 30)
 
-                frame_text = f"Frame: {self._frame_count}"
+                frame_text = f"Frame: {current_frame_num}"
 
                 # Add overlay to MAIN stream (for recording) when encoder is running
                 if self._is_recording:
@@ -107,7 +113,7 @@ class FrameOverlayHandler:
                                 cv2.LINE_AA
                             )
                     except Exception as e:
-                        if self._frame_count <= 3:
+                        if current_frame_num <= 3:
                             logger.warning("Camera %d: Could not overlay on main stream: %s",
                                          self.camera_id, e)
 
