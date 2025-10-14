@@ -5,6 +5,7 @@ Command handler for camera system.
 Processes commands received from master in slave mode.
 """
 
+import asyncio
 import datetime
 import logging
 from pathlib import Path
@@ -65,7 +66,7 @@ class CommandHandler:
         self.system = camera_system
         self.logger = logging.getLogger("CommandHandler")
 
-    def handle_command(self, command_data: dict) -> None:
+    async def handle_command(self, command_data: dict) -> None:
         """
         Handle command from master.
 
@@ -80,7 +81,7 @@ class CommandHandler:
             elif cmd == "stop_recording":
                 self._handle_stop_recording()
             elif cmd == "take_snapshot":
-                self._handle_take_snapshot()
+                await self._handle_take_snapshot()
             elif cmd == "get_status":
                 self._handle_get_status()
             elif cmd == "toggle_preview":
@@ -134,17 +135,44 @@ class CommandHandler:
         else:
             StatusMessage.send("error", {"message": "Not recording"})
 
-    def _handle_take_snapshot(self) -> None:
-        """Handle take_snapshot command."""
+    async def _handle_take_snapshot(self) -> None:
+        """Handle take_snapshot command (async)."""
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filenames = []
         session_dir = self.system._ensure_session_dir()
+
+        # Collect frames first (fast)
+        frames_to_save = []
         for i, cam in enumerate(self.system.cameras):
             frame = cam.update_preview_cache()
             if frame is not None:
                 filename = session_dir / f"snapshot_cam{i}_{ts}.jpg"
-                cv2.imwrite(str(filename), frame)
-                filenames.append(str(filename))
+                frames_to_save.append((str(filename), frame.copy()))  # Copy to avoid race conditions
+
+        # Save all frames concurrently using executor (non-blocking)
+        loop = asyncio.get_event_loop()
+
+        async def save_frame(filename: str, frame) -> tuple[str, bool]:
+            """Save a single frame asynchronously."""
+            try:
+                await loop.run_in_executor(None, cv2.imwrite, filename, frame)
+                self.logger.info("Saved snapshot %s", filename)
+                return (filename, True)
+            except Exception as e:
+                self.logger.error("Failed to save snapshot %s: %s", filename, e)
+                return (filename, False)
+
+        # Run all saves concurrently with timeout
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*[save_frame(fn, fr) for fn, fr in frames_to_save]),
+                timeout=5.0
+            )
+            # Collect successfully saved filenames
+            filenames = [fn for fn, success in results if success]
+        except asyncio.TimeoutError:
+            self.logger.error("Snapshot saving timed out")
+            filenames = []
+
         StatusMessage.send("snapshot_taken", {"files": filenames})
 
     def _handle_get_status(self) -> None:

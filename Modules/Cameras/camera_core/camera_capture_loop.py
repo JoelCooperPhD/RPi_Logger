@@ -52,6 +52,11 @@ class CameraCaptureLoop:
         self.latest_hardware_fps: float = 0.0
         self._frame_lock = asyncio.Lock()
 
+        # Event-driven coordination (eliminates polling)
+        # This event is set when a new frame is captured
+        # Processor waits on this event instead of polling
+        self._frame_ready_event = asyncio.Event()
+
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -82,11 +87,22 @@ class CameraCaptureLoop:
         Uses dual-stream config so preview doesn't interfere with H.264 recording.
         """
         self.logger.info("Entering tight capture loop (using lores stream)")
+        self.logger.info("Camera %d capture loop started, _running=%s", self.camera_id, self._running)
 
         while self._running:
             try:
                 loop = asyncio.get_event_loop()
-                request = await loop.run_in_executor(None, self.picam2.capture_request)
+                # Add timeout to prevent indefinite blocking if camera hangs
+                # 5-second timeout is reasonable for camera hardware recovery
+                try:
+                    request = await asyncio.wait_for(
+                        loop.run_in_executor(None, self.picam2.capture_request),
+                        timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.error("Camera capture timed out after 5 seconds (hardware may be hung)")
+                    await asyncio.sleep(1.0)  # Brief pause before retry
+                    continue
 
                 raw_frame = request.make_array("lores")
                 metadata = request.get_metadata()
@@ -178,6 +194,12 @@ class CameraCaptureLoop:
                     self.latest_sensor_timestamp_ns = sensor_timestamp_ns
                     self.latest_hardware_fps = hardware_fps
 
+                # Signal that a new frame is ready (event-driven coordination)
+                # This wakes up any task waiting in wait_for_frame()
+                if self.captured_frames <= 3:
+                    self.logger.info("Frame %d: Setting frame_ready_event", self.captured_frames - 1)
+                self._frame_ready_event.set()
+
             except asyncio.CancelledError:
                 break
             except RuntimeError as exc:
@@ -195,7 +217,45 @@ class CameraCaptureLoop:
         self.logger.info("Exited tight capture loop")
 
     async def get_latest_frame(self):
-        """Get latest frame with metadata and timing info."""
+        """Get latest frame with metadata and timing info (polling mode - deprecated)."""
+        async with self._frame_lock:
+            return (self.latest_frame, self.latest_metadata, self.latest_capture_time,
+                    self.latest_capture_monotonic, self.latest_sensor_timestamp_ns, self.latest_hardware_fps)
+
+    async def wait_for_frame(self, timeout: float = 10.0):
+        """
+        Wait for a new frame (event-driven, zero-overhead).
+
+        This method blocks until a new frame is captured, eliminating the need
+        for polling loops. This is the preferred method for frame consumption.
+
+        Args:
+            timeout: Maximum time to wait for a frame (seconds). Default 10s.
+
+        Returns:
+            Tuple: (frame, metadata, capture_time, capture_monotonic, sensor_timestamp_ns, hardware_fps)
+
+        Raises:
+            asyncio.TimeoutError: If no frame received within timeout period
+
+        Performance:
+        - No CPU waste from polling
+        - Immediate response to new frames (no polling delay)
+        - Typical overhead: < 1μs per frame vs ~1ms polling delay
+        """
+        # Wait for the event with timeout (blocks until new frame captured)
+        try:
+            await asyncio.wait_for(self._frame_ready_event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            self.logger.error("Timeout waiting for frame (no frames captured in %s seconds)", timeout)
+            raise
+
+        # Clear event for next frame
+        # Must be done AFTER wait returns and BEFORE getting frame data
+        # This ensures we don't miss events between clearing and next wait
+        self._frame_ready_event.clear()
+
+        # Get frame data atomically
         async with self._frame_lock:
             return (self.latest_frame, self.latest_metadata, self.latest_capture_time,
                     self.latest_capture_monotonic, self.latest_sensor_timestamp_ns, self.latest_hardware_fps)

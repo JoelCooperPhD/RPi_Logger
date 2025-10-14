@@ -59,6 +59,31 @@ class CameraProcessor:
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
+        # Track background tasks for proper cleanup
+        self._background_tasks: set[asyncio.Task] = set()
+
+    async def _submit_frame_metadata_async(self, frame, metadata) -> None:
+        """
+        Async wrapper for submitting frame metadata to recording manager.
+
+        This prevents blocking the processor loop while ensuring errors are logged.
+        Uses run_in_executor for the synchronous submit_frame call.
+
+        Args:
+            frame: Frame data (typically None for hardware encoding)
+            metadata: Frame timing metadata
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                self.recording_manager.submit_frame,
+                frame,
+                metadata
+            )
+        except Exception as exc:
+            self.logger.error("Error submitting frame metadata: %s", exc)
+
     def _add_overlays_wrapper(self, frame, capture_fps, collation_fps, captured_frames,
                               collated_frames, requested_fps, is_recording, recording_filename,
                               recorded_frames, session_name):
@@ -85,7 +110,7 @@ class CameraProcessor:
         self.logger.info("Camera processor started")
 
     async def stop(self):
-        """Stop the processor."""
+        """Stop the processor and wait for background tasks."""
         if not self._running:
             return
         self._running = False
@@ -95,41 +120,68 @@ class CameraProcessor:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+        # Wait for background tasks to complete (with timeout)
+        if self._background_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._background_tasks, return_exceptions=True),
+                    timeout=2.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Background tasks did not complete within 2 seconds")
+            self._background_tasks.clear()
+
         self.logger.info("Camera processor stopped")
 
     async def _processing_loop(self):
         """
-        PROCESSING LOOP
+        PROCESSING LOOP (Event-driven, zero-overhead)
 
         Orchestrates: capture → overlay → recorder → display
         (Frame number overlay rendered once at full-res, appears in both recording and preview)
 
-        Polls capture loop directly for new frames (simplified architecture).
+        Event-driven architecture: waits for new frames from capture loop.
+        No polling, no wasted CPU cycles. Immediate response to new frames.
+
         ALL blocking operations (cv2.cvtColor, overlay rendering) are moved to
         executor threads to prevent blocking the async event loop and causing stuttering.
+
+        Performance:
+        - Zero CPU waste (no polling)
+        - Immediate frame processing (no 1ms polling delay)
+        - 100% useful iterations (vs 3% with polling at 30 FPS)
         """
-        self.logger.info("Entering processing loop (direct capture polling)")
+        self.logger.info("Entering processing loop (event-driven, zero-overhead)")
         loop = asyncio.get_event_loop()
-        last_frame_ref = None  # Track last frame to detect new frames
+
+        # Log first few frame waits for debugging
+        log_waits = 3
 
         while self._running:
             try:
-                # 1. Poll capture loop for new frame (1ms polling interval)
-                await asyncio.sleep(0.001)
+                # 1. Wait for new frame from capture loop (event-driven, blocks until ready)
+                # This replaces the polling loop entirely
+                if self.processed_frames < log_waits:
+                    self.logger.info("Frame %d: Waiting for frame from capture loop...", self.processed_frames)
 
-                # Get latest frame from capture loop
-                raw_frame, metadata, capture_time, capture_monotonic, sensor_timestamp_ns, _ = await self.capture_loop.get_latest_frame()
+                try:
+                    raw_frame, metadata, capture_time, capture_monotonic, sensor_timestamp_ns, _ = await self.capture_loop.wait_for_frame()
 
-                # Skip if no frame available yet
+                    if self.processed_frames < log_waits:
+                        self.logger.info("Frame %d: Received frame from capture loop", self.processed_frames)
+                except asyncio.TimeoutError:
+                    # No frame received within timeout - capture loop may be hung
+                    # Log warning and continue waiting
+                    self.logger.warning("No frame received from capture loop (10s timeout)")
+                    continue
+
+                # Skip if no frame available (should not happen with event-driven approach)
                 if raw_frame is None:
+                    self.logger.warning("Received None frame from capture loop")
                     continue
 
-                # Skip if same frame as last time (wait for new frame)
-                if raw_frame is last_frame_ref:
-                    continue
-
-                # NEW FRAME - process it
-                last_frame_ref = raw_frame
+                # NEW FRAME - process it immediately
                 self.processed_frames += 1
                 self.fps_tracker.add_frame(time.time())
 
@@ -204,13 +256,13 @@ class CameraProcessor:
                         software_frame_index=software_frame_index,  # DIAGNOSTIC: For logging
                     )
 
-                    # Submit metadata only (no frame pixels) - fire-and-forget
-                    loop.run_in_executor(
-                        None,
-                        self.recording_manager.submit_frame,
-                        None,  # No frame pixels - encoder handles recording
-                        frame_metadata
+                    # Submit metadata only (no frame pixels) - non-blocking with error handling
+                    # Track task for proper cleanup
+                    task = asyncio.create_task(
+                        self._submit_frame_metadata_async(None, frame_metadata)
                     )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
                 # 5. Use frame directly - already at preview size from lores stream
                 # No resize needed! Hardware ISP already scaled to preview resolution

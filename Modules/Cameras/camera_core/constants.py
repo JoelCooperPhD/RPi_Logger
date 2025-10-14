@@ -30,7 +30,8 @@ CSV_FLUSH_INTERVAL_FRAMES = 60
 CSV_QUEUE_SIZE = 300
 
 # Polling intervals (seconds)
-PROCESSOR_POLL_INTERVAL = 0.001  # 1ms
+# NOTE: PROCESSOR_POLL_INTERVAL is deprecated - processor now uses event-driven coordination
+PROCESSOR_POLL_INTERVAL = 0.001  # 1ms (DEPRECATED - kept for reference)
 CAPTURE_SLEEP_INTERVAL = 0.1  # 100ms on error
 
 # Error message sanitization

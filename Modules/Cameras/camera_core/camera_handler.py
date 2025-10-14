@@ -110,109 +110,23 @@ class CameraHandler:
             self.session_dir
         )
 
-        # Event loop task
-        self._loop_task: Optional[asyncio.Task] = None
+        # Event loop tasks
+        self._capture_task: Optional[asyncio.Task] = None
+        self._processor_task: Optional[asyncio.Task] = None
         self._running = False
 
-    def start_loops(self):
-        """Start all async loops in a background thread."""
+    async def start_loops(self):
+        """Start all async loops in the current event loop."""
         if self._running:
             return
 
         self._running = True
-        self._loop = None
 
-        # Run event loop in thread
-        import threading
+        # Start capture and processor loops as tasks in current event loop
+        self._capture_task = asyncio.create_task(self.capture_loop.start())
+        self._processor_task = asyncio.create_task(self.processor.start())
 
-        def run_loops():
-            self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
-
-            # Use custom executor with daemon threads to prevent atexit hangs
-            from concurrent.futures import ThreadPoolExecutor
-            from concurrent.futures.thread import _worker
-            import threading
-            import weakref
-
-            class DaemonThreadPoolExecutor(ThreadPoolExecutor):
-                def _adjust_thread_count(self):
-                    def weakref_cb(_, q=self._work_queue):
-                        q.put(None)
-
-                    num_threads = len(self._threads)
-                    if num_threads < self._max_workers:
-                        thread_name = f'{self._thread_name_prefix or self}_{num_threads}'
-                        t = threading.Thread(
-                            name=thread_name,
-                            target=_worker,
-                            args=(weakref.ref(self, weakref_cb), self._work_queue,
-                                  self._initializer, self._initargs),
-                            daemon=True
-                        )
-                        t.start()
-                        self._threads.add(t)
-
-            executor = DaemonThreadPoolExecutor(max_workers=DEFAULT_EXECUTOR_WORKERS)
-            self._loop.set_default_executor(executor)
-
-            self._loop_task = self._loop.create_task(self._run_all_loops())
-            try:
-                self._loop.run_until_complete(self._loop_task)
-            except asyncio.CancelledError:
-                self.logger.debug("Loop task cancelled")
-            except Exception as e:
-                self.logger.error("Loop error: %s", e)
-            finally:
-                try:
-                    pending = asyncio.all_tasks(self._loop)
-                    for task in pending:
-                        task.cancel()
-                    if pending:
-                        try:
-                            self._loop.run_until_complete(
-                                asyncio.wait_for(
-                                    asyncio.gather(*pending, return_exceptions=True),
-                                    timeout=1.0
-                                )
-                            )
-                        except (asyncio.TimeoutError, Exception):
-                            pass
-                except Exception:
-                    pass
-
-                try:
-                    executor = self._loop._default_executor
-                    if executor is not None:
-                        executor.shutdown(wait=False, cancel_futures=True)
-                except Exception:
-                    pass
-
-                try:
-                    self._loop.close()
-                except Exception:
-                    pass
-                self._loop = None
-
-        self._loop_thread = threading.Thread(target=run_loops, daemon=False)
-        self._loop_thread.start()
         self.logger.info("Started all async loops")
-
-    async def _run_all_loops(self):
-        await self.capture_loop.start()
-        await self.processor.start()
-
-        try:
-            while self._running:
-                await asyncio.sleep(0.1)
-        finally:
-            self.logger.debug("Stopping async loops...")
-            await asyncio.gather(
-                self.capture_loop.stop(),
-                self.processor.stop(),
-                return_exceptions=True
-            )
-            self.logger.debug("All async loops stopped")
 
     def start_recording(self, session_dir: Optional[Path] = None):
         if self.recording:
@@ -244,11 +158,11 @@ class CameraHandler:
     def update_preview_cache(self):
         return self.processor.get_display_frame()
 
-    def cleanup(self):
+    async def cleanup(self):
         """Clean up resources: recording → camera → loops → close."""
         if self.recording:
             self.stop_recording()
-            self.recording_manager.cleanup()
+            await self.recording_manager.cleanup()
 
         try:
             self.picam2.stop()
@@ -257,10 +171,33 @@ class CameraHandler:
 
         self._running = False
 
-        if hasattr(self, '_loop_thread') and self._loop_thread.is_alive():
-            self._loop_thread.join(timeout=CLEANUP_TIMEOUT_SECONDS)
-            if self._loop_thread.is_alive():
-                self.logger.warning("Async loop thread did not finish within %d seconds", CLEANUP_TIMEOUT_SECONDS)
+        # Stop async loops gracefully
+        try:
+            await asyncio.gather(
+                self.capture_loop.stop(),
+                self.processor.stop(),
+                return_exceptions=True
+            )
+        except Exception as e:
+            self.logger.debug("Error stopping loops: %s", e)
+
+        # Cancel tasks if still running
+        tasks = []
+        if self._capture_task and not self._capture_task.done():
+            self._capture_task.cancel()
+            tasks.append(self._capture_task)
+        if self._processor_task and not self._processor_task.done():
+            self._processor_task.cancel()
+            tasks.append(self._processor_task)
+
+        if tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=CLEANUP_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Task cancellation did not complete within %d seconds", CLEANUP_TIMEOUT_SECONDS)
 
         try:
             self.picam2.stop_preview()

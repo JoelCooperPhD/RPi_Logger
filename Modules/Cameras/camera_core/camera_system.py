@@ -4,11 +4,10 @@ Multi-camera system coordinator.
 Manages multiple cameras and delegates to appropriate operational mode.
 """
 
+import asyncio
 import datetime
 import logging
-import signal
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -43,7 +42,7 @@ class CameraSystem:
         self.auto_start_recording = getattr(args, "auto_start_recording", False)
         self.session_prefix = getattr(args, "session_prefix", "session")
         self.command_thread = None
-        self.shutdown_event = threading.Event()
+        self.shutdown_event = asyncio.Event()
         self.device_timeout = getattr(args, "discovery_timeout", 5)
         self.initialized = False
 
@@ -66,10 +65,8 @@ class CameraSystem:
         # Frame streaming for UI preview (used by slave mode)
         self.preview_enabled = []  # Will be populated dynamically based on detected cameras
 
-        # Setup signal handlers
-        if threading.current_thread() is threading.main_thread():
-            signal.signal(signal.SIGTERM, self._signal_handler)
-            signal.signal(signal.SIGINT, self._signal_handler)
+        # Signal handlers are set up in main.py using asyncio signal handlers
+        # No need to set them up here
 
         # Device will be initialized in run() method after signal handlers are ready
         if self.slave_mode:
@@ -79,7 +76,7 @@ class CameraSystem:
         """Return the session directory (created at initialization)."""
         return self.session_dir
 
-    def _initialize_cameras(self):
+    async def _initialize_cameras(self):
         """Initialize cameras with timeout and graceful handling"""
         self.logger.info("Searching for cameras (timeout: %ds)...", self.device_timeout)
 
@@ -88,10 +85,13 @@ class CameraSystem:
 
         self.initialized = False
 
+        loop = asyncio.get_event_loop()
+
         # Try to detect cameras with timeout
         while time.time() - start_time < self.device_timeout:
             try:
-                cam_infos = Picamera2.global_camera_info()
+                # Wrap blocking camera detection in executor
+                cam_infos = await loop.run_in_executor(None, Picamera2.global_camera_info)
                 if cam_infos:
                     break
             except Exception as e:
@@ -101,7 +101,7 @@ class CameraSystem:
             if self.shutdown_event.is_set():
                 raise KeyboardInterrupt("Device discovery cancelled")
 
-            time.sleep(0.5)  # Brief pause between attempts
+            await asyncio.sleep(0.5)  # Brief pause between attempts
 
         # Log found cameras
         for i, info in enumerate(cam_infos):
@@ -139,7 +139,7 @@ class CameraSystem:
             # Just pass output_dir to handlers, they'll use session_dir when recording starts
             for i in range(num_cameras):
                 handler = CameraHandler(cam_infos[i], i, self.args, None)  # Pass None for session_dir
-                handler.start_loops()  # Start async capture/collator/processor loops
+                await handler.start_loops()  # Start async capture/collator/processor loops
                 self.cameras.append(handler)
                 self.preview_enabled.append(True)  # Enable preview for this camera by default
 
@@ -157,25 +157,17 @@ class CameraSystem:
                 StatusMessage.send("error", {"message": f"Camera initialization failed: {e}"})
             raise
 
-    def _signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
-        self.logger.info("Received signal %d, shutting down...", signum)
-        self.running = False
-        self.shutdown_event.set()
-        if self.slave_mode:
-            StatusMessage.send("shutdown", {"signal": signum})
-
     # Compatibility methods for mode classes (kept for backward compatibility with StatusMessage)
     def send_status(self, status_type, data=None):
         """Send status message to master (if in slave mode) - delegates to StatusMessage"""
         if self.slave_mode:
             StatusMessage.send(status_type, data)
 
-    def run(self):
+    async def run(self):
         """Main run method - chooses mode based on configuration and delegates"""
         try:
             # Initialize cameras now that signal handlers are set up
-            self._initialize_cameras()
+            await self._initialize_cameras()
 
             # Create and run appropriate mode
             if self.slave_mode:
@@ -185,7 +177,7 @@ class CameraSystem:
             else:
                 mode = InteractiveMode(self)
 
-            mode.run()
+            await mode.run()
 
         except KeyboardInterrupt:
             self.logger.info("Camera system cancelled by user")
@@ -200,7 +192,7 @@ class CameraSystem:
                 StatusMessage.send("error", {"message": f"Unexpected error: {e}"})
             raise
 
-    def cleanup(self):
+    async def cleanup(self):
         """Clean up all camera resources."""
         self.running = False
         self.shutdown_event.set()
@@ -213,28 +205,17 @@ class CameraSystem:
                     self.logger.debug("Error stopping recording on camera %d: %s", cam.cam_num, e)
             self.recording = False
 
-        cleanup_threads = []
-        for cam in self.cameras:
-            def cleanup_camera(camera):
-                try:
-                    camera.cleanup()
-                except Exception as e:
-                    self.logger.debug("Error cleaning up camera %d: %s", camera.cam_num, e)
-
-            thread = threading.Thread(target=cleanup_camera, args=(cam,), daemon=False)
-            thread.start()
-            cleanup_threads.append(thread)
-
-        for i, thread in enumerate(cleanup_threads):
-            thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
-            if thread.is_alive():
-                self.logger.warning("Camera %d cleanup did not finish within %d seconds",
-                                  i, THREAD_JOIN_TIMEOUT_SECONDS)
+        # Clean up all cameras concurrently
+        if self.cameras:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*[cam.cleanup() for cam in self.cameras], return_exceptions=True),
+                    timeout=THREAD_JOIN_TIMEOUT_SECONDS
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Camera cleanup did not finish within %d seconds", THREAD_JOIN_TIMEOUT_SECONDS)
 
         self.cameras.clear()
         self.initialized = False
-
-        if self.command_thread and self.command_thread.is_alive():
-            self.command_thread.join(timeout=0.5)
 
         self.logger.info("Cleanup completed")

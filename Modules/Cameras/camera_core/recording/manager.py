@@ -6,9 +6,9 @@ Main public interface for camera recording operations.
 Uses picamera2 H264Encoder for hardware-accelerated encoding.
 """
 
+import asyncio
 import datetime
 import logging
-import subprocess
 import threading
 from pathlib import Path
 from typing import Optional
@@ -79,6 +79,9 @@ class CameraRecordingManager:
         self._latest_lock = threading.Lock()
         self._written_frames = 0
 
+        # Task tracking for proper cleanup
+        self._csv_stop_task: Optional[asyncio.Task] = None
+
         # Register overlay callback immediately (works for both preview and recording)
         self.picam2.post_callback = self._overlay.create_callback()
         logger.info("Camera %d: Registered overlay callback", camera_id)
@@ -125,7 +128,12 @@ class CameraRecordingManager:
         # Start CSV logger if enabled
         if self.enable_csv_logging:
             self._csv_logger = CSVLogger(self.camera_id, self.frame_timing_path)
-            self._csv_logger.start()
+            try:
+                self._csv_logger.start()
+            except RuntimeError as e:
+                # No event loop - skip CSV logging
+                logger.warning("Failed to start CSV logger: %s, disabling CSV logging", e)
+                self._csv_logger = None
 
         # Start hardware-accelerated recording
         try:
@@ -154,55 +162,99 @@ class CameraRecordingManager:
         # Stop hardware encoder (critical: do this immediately)
         self._encoder.stop()
 
-        # Stop CSV logging
+        # Stop CSV logging (track task for proper cleanup)
         if self._csv_logger is not None:
-            self._csv_logger.stop()
+            # Schedule async stop and track the task
+            try:
+                loop = asyncio.get_running_loop()
+                self._csv_stop_task = asyncio.create_task(self._csv_logger.stop())
+            except RuntimeError:
+                # No event loop - logger will be cleaned up by GC
+                pass
             self._csv_logger = None
 
         # Convert .h264 to .mp4 for better compatibility (if enabled)
+        # Run asynchronously to avoid blocking
         if self.auto_remux and self.video_path and self.video_path.exists():
             mp4_path = self.video_path.with_suffix('.mp4')
+
+            # Validate inputs before calling ffmpeg
+            if not (FPS_MIN <= self.fps <= FPS_MAX):
+                logger.warning("Invalid FPS %.2f for ffmpeg (must be %0.1f-%0.1f), skipping remux",
+                             self.fps, FPS_MIN, FPS_MAX)
+                return
+
+            # Resolve paths to absolute to prevent confusion
+            h264_path = self.video_path.resolve()
+            mp4_path_resolved = mp4_path.resolve()
+
+            # Try to schedule async remux, fall back gracefully if no event loop
             try:
-                # Validate inputs before calling ffmpeg
-                if not (FPS_MIN <= self.fps <= FPS_MAX):
-                    logger.warning("Invalid FPS %.2f for ffmpeg (must be %0.1f-%0.1f), skipping remux",
-                                 self.fps, FPS_MIN, FPS_MAX)
-                    return
-
-                # Resolve paths to absolute to prevent confusion
-                h264_path = self.video_path.resolve()
-                mp4_path_resolved = mp4_path.resolve()
-
-                # Use ffmpeg to remux H.264 to MP4 container with correct FPS
-                # Note: Using list arguments (not shell=True) prevents shell injection
-                subprocess.run([
-                    'ffmpeg', '-y',
-                    '-r', str(self.fps),  # Input framerate (validated above)
-                    '-i', str(h264_path),  # Absolute path
-                    '-c:v', 'copy',  # Copy video stream (no re-encoding)
-                    str(mp4_path_resolved)  # Absolute path
-                ], check=True, capture_output=True, timeout=FFMPEG_TIMEOUT_SECONDS)
-
-                # Remove original .h264 file
-                self.video_path.unlink()
-                self.video_path = mp4_path
-                logger.info("Camera %d recording saved (MP4): %s", self.camera_id, self.video_path)
-            except subprocess.TimeoutExpired:
-                logger.warning("ffmpeg conversion timed out for camera %d. Keeping .h264 file.",
-                             self.camera_id)
-                if self.video_path:
-                    logger.info("Camera %d recording saved (H.264): %s", self.camera_id, self.video_path)
-            except Exception as e:
-                logger.warning("Failed to convert .h264 to .mp4 for camera %d: %s. Keeping .h264 file.",
-                             self.camera_id, e)
+                loop = asyncio.get_running_loop()
+                asyncio.create_task(self._async_remux(h264_path, mp4_path_resolved, mp4_path))
+            except RuntimeError:
+                # No event loop - log .h264 file and skip remux
+                # This shouldn't happen in normal operation since camera runs in async context
+                logger.warning("No event loop available for ffmpeg remux, keeping .h264 file")
                 if self.video_path:
                     logger.info("Camera %d recording saved (H.264): %s", self.camera_id, self.video_path)
         elif self.video_path:
             logger.info("Camera %d recording saved (H.264): %s", self.camera_id, self.video_path)
 
-    def cleanup(self) -> None:
-        """Clean up recording resources"""
+    async def cleanup(self) -> None:
+        """Clean up recording resources (async to await CSV logger stop)"""
         self.stop_recording()
+
+        # Wait for CSV logger to finish closing (with timeout)
+        if self._csv_stop_task is not None:
+            try:
+                await asyncio.wait_for(self._csv_stop_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                logger.warning("CSV logger stop task timed out after 2 seconds")
+            except Exception as e:
+                logger.warning("Error waiting for CSV logger stop: %s", e)
+            finally:
+                self._csv_stop_task = None
+
+    async def _async_remux(self, h264_path: Path, mp4_path_resolved: Path, mp4_path: Path) -> None:
+        """
+        Asynchronously convert .h264 to .mp4 using ffmpeg.
+
+        Args:
+            h264_path: Source .h264 file path
+            mp4_path_resolved: Resolved destination .mp4 file path
+            mp4_path: Destination .mp4 file path (for updating self.video_path)
+        """
+        try:
+            # Run ffmpeg as async subprocess
+            process = await asyncio.create_subprocess_exec(
+                'ffmpeg', '-y',
+                '-r', str(self.fps),
+                '-i', str(h264_path),
+                '-c:v', 'copy',
+                str(mp4_path_resolved),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            # Wait for completion with timeout
+            await asyncio.wait_for(process.wait(), timeout=FFMPEG_TIMEOUT_SECONDS)
+
+            # Remove original .h264 file
+            h264_path.unlink()
+            self.video_path = mp4_path
+            logger.info("Camera %d recording saved (MP4): %s", self.camera_id, self.video_path)
+
+        except asyncio.TimeoutError:
+            logger.warning("ffmpeg conversion timed out for camera %d. Keeping .h264 file.",
+                         self.camera_id)
+            if self.video_path:
+                logger.info("Camera %d recording saved (H.264): %s", self.camera_id, self.video_path)
+        except Exception as e:
+            logger.warning("Failed to convert .h264 to .mp4 for camera %d: %s. Keeping .h264 file.",
+                         self.camera_id, e)
+            if self.video_path:
+                logger.info("Camera %d recording saved (H.264): %s", self.camera_id, self.video_path)
 
     def submit_frame(self, frame: Optional[np.ndarray], metadata: FrameTimingMetadata) -> None:
         """

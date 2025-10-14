@@ -24,14 +24,12 @@ class CameraSupervisor:
         self.system: Optional[CameraSystem] = None
 
     async def run(self) -> None:
-        loop = asyncio.get_running_loop()
-
         while not self.shutdown_event.is_set():
             system = CameraSystem(self.args)
             self.system = system
 
             try:
-                await loop.run_in_executor(None, system.run)
+                await system.run()
             except CameraInitializationError:
                 if self.shutdown_event.is_set():
                     break
@@ -52,7 +50,7 @@ class CameraSupervisor:
                 continue
             finally:
                 try:
-                    system.cleanup()
+                    await system.cleanup()
                 except Exception as exc:  # pragma: no cover - defensive
                     self.logger.error("Camera cleanup failed: %s", exc)
                 self.system = None
@@ -70,5 +68,3 @@ class CameraSupervisor:
         system = self.system
         if system:
             system.shutdown_event.set()
-            if system.command_thread and system.command_thread.is_alive():
-                system.command_thread.join(timeout=1.0)
