@@ -139,7 +139,7 @@ class CameraSystem:
             # Just pass output_dir to handlers, they'll use session_dir when recording starts
             for i in range(num_cameras):
                 handler = CameraHandler(cam_infos[i], i, self.args, None)  # Pass None for session_dir
-                await handler.start_loops()  # Start async capture/collator/processor loops
+                await handler.start_loops()  # Start async capture/processor loops
                 self.cameras.append(handler)
                 self.preview_enabled.append(True)  # Enable preview for this camera by default
 

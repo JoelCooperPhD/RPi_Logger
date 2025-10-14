@@ -157,6 +157,7 @@ The `config.txt` file allows you to set default values for system settings witho
 | `--no-preview` | - | Disable preview window (headless operation) |
 | `--console` | False | Also log to console (in addition to file) |
 | `--no-console` | - | Log to file only (no console output, default) |
+| `--log-level` | info | Python logging verbosity (debug/info/warning/error/critical) |
 | `--libcamera-log-level` | WARN | libcamera verbosity (DEBUG/INFO/WARN/ERROR/FATAL) |
 
 **Resolution Presets (0-7) for IMX296 camera:**
