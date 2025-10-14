@@ -177,8 +177,8 @@ AudioRecorder/
 │   │   ├── headless_mode.py         # Background recording mode
 │   │   └── __init__.py              # Mode exports
 │   └── __init__.py                  # Package exports
-└── examples/                        # Example scripts
-    └── audio_monitor_fast.py        # Legacy compatibility shim
+└── recordings/                      # Session recordings (auto-created)
+    └── experiment_YYYYMMDD_HHMMSS/  # Timestamped session directories
 ```
 
 ## Session Output
