@@ -22,9 +22,14 @@ try:
         parse_resolution,
         positive_float,
         positive_int,
+        get_config_int,
+        get_config_float,
+        get_config_bool,
+        get_config_str,
     )
+    from Modules.base import redirect_stderr_stdout, setup_session_from_args
 except ImportError as e:
-    print(f"ERROR: Cannot import cli_utils. Ensure PYTHONPATH includes project root or install package.", file=sys.stderr)
+    print(f"ERROR: Cannot import required modules. Ensure PYTHONPATH includes project root or install package.", file=sys.stderr)
     print(f"  Add to PYTHONPATH: export PYTHONPATH=/home/rs-pi-2/Development/RPi_Logger:$PYTHONPATH", file=sys.stderr)
     print(f"  Or install package: cd /home/rs-pi-2/Development/RPi_Logger && pip install -e .", file=sys.stderr)
     sys.exit(1)
@@ -34,90 +39,34 @@ except ImportError as e:
 logger = logging.getLogger("CameraMain")
 
 
-def sanitize_path_component(name: str) -> str:
-    """
-    Sanitize a path component to prevent directory traversal attacks.
-
-    Removes or replaces dangerous characters like '/', '\\', '..', etc.
-
-    Args:
-        name: Path component to sanitize
-
-    Returns:
-        Sanitized path component safe for use in file paths
-    """
-    import re
-
-    # Remove null bytes
-    name = name.replace('\0', '')
-
-    # Remove path separators and parent directory references
-    # Replace with underscores to maintain readability
-    name = name.replace('/', '_').replace('\\', '_')
-    name = name.replace('..', '__')
-
-    # Remove other potentially dangerous characters
-    # Keep only alphanumeric, dash, underscore, and dot
-    name = re.sub(r'[^a-zA-Z0-9_\-.]', '_', name)
-
-    # Ensure it doesn't start with a dot (hidden file)
-    if name.startswith('.'):
-        name = '_' + name[1:]
-
-    # Ensure non-empty
-    if not name or name.isspace():
-        name = 'session'
-
-    return name
-
-
 def parse_args(argv: Optional[list[str]] = None):
     # Load config file first (import here to avoid loading picamera2 early)
     from camera_core import load_config_file
     config = load_config_file()
 
-    # Get defaults from config file or use hardcoded defaults
-    def get_config_int(key, default):
-        return int(config.get(key, default)) if key in config else default
-
-    def get_config_float(key, default):
-        return float(config.get(key, default)) if key in config else default
-
-    def get_config_bool(key, default):
-        if key in config:
-            value = config[key]
-            # If already a boolean (parsed by config loader), return it
-            if isinstance(value, bool):
-                return value
-            # Otherwise parse from string
-            return str(value).lower() in ('true', '1', 'yes', 'on')
-        return default
-
-    def get_config_str(key, default):
-        return config.get(key, default)
-
     # Apply config defaults
-    # Handle resolution preset from config (must be number 0-5)
+    # Handle resolution preset from config (must be number 0-7)
     from cli_utils import parse_resolution as parse_res_helper
-    resolution_preset_str = get_config_str('resolution_preset', '0')
+    resolution_preset_str = get_config_str(config, 'resolution_preset', '0')
     default_resolution = parse_res_helper(resolution_preset_str)
 
-    preview_preset_str = get_config_str('preview_preset', '5')
+    preview_preset_str = get_config_str(config, 'preview_preset', '6')
     default_preview = parse_res_helper(preview_preset_str)
-    default_fps = get_config_float('target_fps', 30.0)
-    default_output = Path(get_config_str('output_dir', 'recordings'))
-    default_session_prefix = get_config_str('session_prefix', 'session')
-    default_show_preview = get_config_bool('show_preview', True)
-    default_auto_start_recording = get_config_bool('auto_start_recording', False)
-    default_console_output = get_config_bool('console_output', False)
-    default_libcamera_log_level = get_config_str('libcamera_log_level', 'WARN').upper()
+    default_fps = get_config_float(config, 'target_fps', 30.0)
+    default_output = Path(get_config_str(config, 'output_dir', 'recordings'))
+    default_session_prefix = get_config_str(config, 'session_prefix', 'session')
+    default_show_preview = get_config_bool(config, 'show_preview', True)
+    default_auto_start_recording = get_config_bool(config, 'auto_start_recording', False)
+    default_console_output = get_config_bool(config, 'console_output', False)
+    default_libcamera_log_level = get_config_str(config, 'libcamera_log_level', 'WARN').upper()
+    default_gui_start_minimized = get_config_bool(config, 'gui_start_minimized', True)
 
     parser = argparse.ArgumentParser(description="Multi-camera recorder with preview and overlays")
     add_common_cli_arguments(
         parser,
         default_output=default_output,
-        allowed_modes=("interactive", "headless", "slave"),
-        default_mode="interactive",
+        allowed_modes=("gui", "headless"),
+        default_mode="gui",
     )
 
     from cli_utils import get_resolution_preset_help
@@ -208,8 +157,45 @@ def parse_args(argv: Optional[list[str]] = None):
         help="libcamera logging verbosity (default: WARN for clean logs)",
     )
 
+    # GUI startup size control
+    gui_size_group = parser.add_mutually_exclusive_group()
+    gui_size_group.add_argument(
+        "--gui-minimized",
+        dest="gui_start_minimized",
+        action="store_true",
+        default=default_gui_start_minimized,
+        help="Start GUI with minimal window size (default from config)",
+    )
+    gui_size_group.add_argument(
+        "--gui-fullsize",
+        dest="gui_start_minimized",
+        action="store_false",
+        help="Start GUI at capture resolution",
+    )
+
+    # Parent process communication control
+    parser.add_argument(
+        "--enable-commands",
+        dest="enable_commands",
+        action="store_true",
+        default=False,
+        help="Enable JSON command interface for parent process control (auto-detected if stdin is piped)",
+    )
+
+    # Window geometry control (for GUI mode)
+    parser.add_argument(
+        "--window-geometry",
+        dest="window_geometry",
+        type=str,
+        default=None,
+        help="Window position and size (format: WIDTHxHEIGHT+X+Y, e.g., 800x600+100+50)",
+    )
+
+    # Legacy compatibility flags (hidden from help)
     parser.add_argument("--slave", dest="mode", action="store_const", const="slave", help=argparse.SUPPRESS)
     parser.add_argument("--headless", dest="mode", action="store_const", const="headless", help=argparse.SUPPRESS)
+    parser.add_argument("--tkinter", dest="mode", action="store_const", const="gui", help=argparse.SUPPRESS)
+    parser.add_argument("--interactive", dest="mode", action="store_const", const="gui", help=argparse.SUPPRESS)
 
     args = parser.parse_args(argv)
 
@@ -227,135 +213,43 @@ def parse_args(argv: Optional[list[str]] = None):
     return args
 
 
-class AnsiStripWriter:
-    """
-    File wrapper that strips ANSI escape codes before writing.
-    This cleans up colored output from C libraries (libcamera).
-    Optimized to only run regex if ANSI codes are detected.
-    """
-    def __init__(self, file_obj):
-        self.file = file_obj
-        # ANSI escape sequence pattern
-        import re
-        self.ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-
-    def write(self, data):
-        # Fast path: only strip if ANSI codes are present
-        # Most Python logging doesn't contain ANSI codes
-        if '\x1B' in data:
-            clean_data = self.ansi_escape.sub('', data)
-            return self.file.write(clean_data)
-        else:
-            # No ANSI codes, write directly
-            return self.file.write(data)
-
-    def flush(self):
-        return self.file.flush()
-
-    def fileno(self):
-        return self.file.fileno()
-
-
-def redirect_stderr_stdout(log_file_path: Path):
-    """
-    Redirect stderr and stdout to log file at the OS level.
-
-    This captures ALL output including:
-    - Python logging
-    - Python print() statements
-    - C/C++ library output (libcamera, Qt, OpenCV)
-
-    ANSI color codes are stripped for clean log output.
-
-    Args:
-        log_file_path: Path to log file
-
-    Returns:
-        Original stdout file object for user-facing messages
-    """
-    import os
-    import sys
-
-    # Preserve original stdout for user-facing messages
-    # We need to duplicate the file descriptor before redirecting
-    original_stdout_fd = os.dup(sys.stdout.fileno())
-    original_stdout = os.fdopen(original_stdout_fd, 'w', buffering=1)
-
-    # Open log file in append mode
-    log_file = open(log_file_path, 'a', buffering=1)
-
-    # Wrap with ANSI stripper
-    clean_log = AnsiStripWriter(log_file)
-
-    # Get file descriptor from underlying file
-    log_fd = log_file.fileno()
-
-    # Redirect stderr and stdout file descriptors to log file
-    # This captures everything, including C library output
-    os.dup2(log_fd, sys.stderr.fileno())
-    os.dup2(log_fd, sys.stdout.fileno())
-
-    # Replace Python's stderr/stdout with ANSI-stripping wrappers
-    # These will clean up colored output from libcamera
-    sys.stderr = clean_log
-    sys.stdout = clean_log
-
-    return original_stdout
-
-
 async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
     args.output_dir = ensure_directory(args.output_dir)
 
-    # Create session directory for logging and recordings
-    import datetime
-    import os
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # Sanitize session prefix to prevent path traversal attacks
-    prefix = sanitize_path_component(args.session_prefix).rstrip("_")
-    session_name = f"{prefix}_{timestamp}" if prefix else timestamp
-    session_dir = args.output_dir / session_name
-
-    # Validate that session_dir is actually within output_dir (prevent path traversal)
-    try:
-        session_dir_resolved = session_dir.resolve()
-        output_dir_resolved = args.output_dir.resolve()
-        if not str(session_dir_resolved).startswith(str(output_dir_resolved)):
-            logger.error("Security violation: session directory escapes output directory")
-            raise ValueError("Invalid session directory path")
-    except (OSError, ValueError) as e:
-        logger.error("Failed to validate session directory: %s", e)
-        raise
-
-    session_dir.mkdir(parents=True, exist_ok=True)
-
-    # Configure logging to session directory
-    log_file = session_dir / "session.log"
+    # Setup session directory and logging using shared utilities
+    session_dir, session_name, log_file, is_command_mode = setup_session_from_args(
+        args,
+        module_name='camera',
+        default_prefix='session'
+    )
 
     # Set environment variables to control libcamera output
     # Do this BEFORE importing picamera2/libcamera
+    import os
     libcam_level = args.libcamera_log_level
     os.environ['LIBCAMERA_LOG_LEVELS'] = f'Camera:{libcam_level},RPI:{libcam_level},IPAProxy:{libcam_level}'
     os.environ['LIBCAMERA_LOG_FILE'] = 'syslog'  # Disable libcamera's separate log file
-    # Note: We don't set NO_COLOR because we strip ANSI codes anyway
 
     # Redirect stderr/stdout to log file BEFORE configuring logging or importing picamera2
-    # This captures ALL output:
-    # - Python logging
-    # - C/C++ library output (libcamera, Qt, OpenCV)
-    # ANSI color codes are automatically stripped
-    # Returns original stdout for user-facing messages
+    # Returns original stdout for user-facing messages and parent process communication
     original_stdout = redirect_stderr_stdout(log_file)
+
+    # Configure StatusMessage to use original stdout if in command mode
+    # This must be done BEFORE any imports that might send status messages
+    if is_command_mode:
+        from logger_core.commands import StatusMessage
+        StatusMessage.configure(original_stdout)
 
     # Now configure Python logging
     # If console_output is True, Python logging will ALSO write to console (via StreamHandler)
     # Note: C library output (libcamera, Qt) always goes to log file only
     configure_logging(args.log_level, str(log_file), console_output=args.console_output)
 
-    # Store session_dir and console_stdout in args so CameraSystem can use them
+    # Store session_dir and stdout streams in args so CameraSystem can use them
     args.session_dir = session_dir
-    args.console_stdout = original_stdout
+    args.console_stdout = original_stdout  # For console messages
+    args.command_stdout = original_stdout  # For parent process communication
 
     logger.info("=" * 60)
     logger.info("Camera System Starting")

@@ -208,3 +208,71 @@ def ensure_directory(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
+
+# Config file parsing helpers
+def get_config_int(config: dict, key: str, default: int) -> int:
+    """
+    Get integer value from config dictionary.
+
+    Args:
+        config: Configuration dictionary
+        key: Configuration key
+        default: Default value if key not present
+
+    Returns:
+        Integer value from config or default
+    """
+    return int(config.get(key, default)) if key in config else default
+
+
+def get_config_float(config: dict, key: str, default: float) -> float:
+    """
+    Get float value from config dictionary.
+
+    Args:
+        config: Configuration dictionary
+        key: Configuration key
+        default: Default value if key not present
+
+    Returns:
+        Float value from config or default
+    """
+    return float(config.get(key, default)) if key in config else default
+
+
+def get_config_bool(config: dict, key: str, default: bool) -> bool:
+    """
+    Get boolean value from config dictionary.
+
+    Args:
+        config: Configuration dictionary
+        key: Configuration key
+        default: Default value if key not present
+
+    Returns:
+        Boolean value from config or default
+    """
+    if key in config:
+        value = config[key]
+        # If already a boolean (parsed by config loader), return it
+        if isinstance(value, bool):
+            return value
+        # Otherwise parse from string
+        return str(value).lower() in ('true', '1', 'yes', 'on')
+    return default
+
+
+def get_config_str(config: dict, key: str, default: str) -> str:
+    """
+    Get string value from config dictionary.
+
+    Args:
+        config: Configuration dictionary
+        key: Configuration key
+        default: Default value if key not present
+
+    Returns:
+        String value from config or default
+    """
+    return config.get(key, default)
+

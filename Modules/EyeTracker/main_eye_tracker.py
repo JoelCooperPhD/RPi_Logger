@@ -1,176 +1,267 @@
 #!/usr/bin/env python3
-"""Async launcher for the refactored gaze tracker module.
-
-This entry point focuses on discoverability, robust diagnostics, and retries. It
-configures logging, validates CLI arguments, and will loop until a connection is
-established (respecting the configured retry policy) before handing control to
-``GazeTracker``.
 """
-
-from __future__ import annotations
+Eye tracking system with master-slave architecture.
+Entry point for tracker system with CLI argument parsing.
+"""
 
 import argparse
 import asyncio
+import contextlib
+import datetime
 import logging
+import os
+import re
+import signal
 import sys
-import time
 from pathlib import Path
 from typing import Optional
 
-from cli_utils import (
-    add_common_cli_arguments,
-    configure_logging,
-    parse_resolution,
-    positive_float,
-    positive_int,
-)
-from config import Config
-from gaze_tracker import GazeTracker
+# Import from parent modules - assumes proper PYTHONPATH or package installation
+try:
+    from cli_utils import (
+        add_common_cli_arguments,
+        configure_logging,
+        ensure_directory,
+        parse_resolution,
+        positive_float,
+        positive_int,
+        get_config_int,
+        get_config_float,
+        get_config_bool,
+        get_config_str,
+    )
+    from Modules.base import redirect_stderr_stdout, setup_session_from_args
+except ImportError as e:
+    print(f"ERROR: Cannot import required modules. Ensure PYTHONPATH includes project root or install package.", file=sys.stderr)
+    print(f"  Add to PYTHONPATH: export PYTHONPATH=/home/rs-pi-2/Development/RPi_Logger:$PYTHONPATH", file=sys.stderr)
+    print(f"  Or install package: cd /home/rs-pi-2/Development/RPi_Logger && pip install -e .", file=sys.stderr)
+    sys.exit(1)
 
-SUPPRESSED_LOGGERS = ["pupil_labs", "aiortsp", "websockets", "aiohttp"]
-
-
-async def run_with_retries(config: Config, max_retries: int, retry_delay: float) -> int:
-    """Attempt to connect/run the tracker with retry + diagnostics."""
-
-    logger = logging.getLogger("eye_tracker.launcher")
-    infinite_retries = max_retries < 0
-    attempt = 0
-
-    while True:
-        attempt += 1
-        tracker = GazeTracker(config)
-        start = time.perf_counter()
-        run_completed = False
-
-        logger.info("Starting connection attempt %d", attempt)
-        logger.debug("Tracker configuration: %s", config)
-
-        try:
-            try:
-                connected = await tracker.connect()
-            except Exception as exc:  # pragma: no cover - defensive logging
-                logger.exception("Connection attempt %d raised an error", attempt)
-                connected = False
-
-            if connected:
-                elapsed = time.perf_counter() - start
-                logger.info("Device connected successfully in %.2fs", elapsed)
-
-                await tracker.run()
-                run_completed = True
-                logger.info("Gaze tracker run finished cleanly")
-                return 0
-
-            logger.warning("Connection attempt %d failed to find a device", attempt)
-
-        finally:
-            if not run_completed:
-                await tracker.cleanup()
-
-        if not infinite_retries and attempt >= max_retries + 1:
-            logger.error(
-                "Exhausted %d connection attempt(s) without success",
-                max_retries + 1,
-            )
-            return 1
-
-        logger.info("Retrying in %.1fs (attempt %d)", retry_delay, attempt + 1)
-        await asyncio.sleep(retry_delay)
+logger = logging.getLogger("TrackerMain")
 
 
-async def main(argv: Optional[list[str]] = None) -> int:
-    """CLI entry point that orchestrates logging, parsing, and retries."""
+def parse_args(argv: Optional[list[str]] = None):
+    """Parse command line arguments with config file defaults."""
+    # Load config file first
+    from tracker_core import load_config_file
+    config = load_config_file()
 
-    parser = argparse.ArgumentParser(description="Refactored Async Gaze Tracker")
+    # Apply config defaults
+    default_width = get_config_int(config, 'resolution_width', 1280)
+    default_height = get_config_int(config, 'resolution_height', 720)
+    default_resolution = (default_width, default_height)
+    default_fps = get_config_float(config, 'target_fps', 5.0)
+    default_output = Path(get_config_str(config, 'output_dir', 'recordings'))
+    default_session_prefix = get_config_str(config, 'session_prefix', 'tracking')
+    default_preview_width = get_config_int(config, 'preview_width', 640)
+    default_auto_start_recording = get_config_bool(config, 'auto_start_recording', False)
+    default_console_output = get_config_bool(config, 'console_output', False)
+    default_discovery_timeout = get_config_float(config, 'discovery_timeout', 5.0)
+    default_discovery_retry = get_config_float(config, 'discovery_retry', 3.0)
+    default_gui_start_minimized = get_config_bool(config, 'gui_start_minimized', True)
+    default_gui_preview_update_hz = get_config_int(config, 'gui_preview_update_hz', 10)
+
+    parser = argparse.ArgumentParser(description="Eye tracking system with Pupil Labs integration")
     add_common_cli_arguments(
         parser,
-        default_output=Path("eye_tracking_data"),
-        allowed_modes=("headless",),
-        default_mode="headless",
+        default_output=default_output,
+        allowed_modes=("gui", "headless"),
+        default_mode="gui",
     )
+
     parser.add_argument(
         "--target-fps",
         dest="target_fps",
         type=positive_float,
-        default=5.0,
-        help="Target processing FPS",
+        default=default_fps,
+        help="Target processing FPS (1-120)",
     )
-    parser.add_argument(
-        "--fps",
-        dest="target_fps",
-        type=positive_float,
-        help=argparse.SUPPRESS,
-    )
+
     parser.add_argument(
         "--resolution",
         type=parse_resolution,
-        default=(1280, 720),
-        help="Scene video resolution as WIDTHxHEIGHT",
+        default=default_resolution,
+        help="Scene video resolution (WIDTHxHEIGHT)",
     )
-    parser.add_argument(
-        "--output",
-        dest="output_dir",
-        type=Path,
-        help=argparse.SUPPRESS,
-    )
+
     parser.add_argument(
         "--preview-width",
         type=positive_int,
-        default=640,
-        help="Width of the preview window (maintains aspect ratio)",
+        default=default_preview_width,
+        help="Preview window width in pixels",
     )
+
     parser.add_argument(
-        "--display-width",
-        dest="preview_width",
-        type=positive_int,
-        help=argparse.SUPPRESS,
+        "--session-prefix",
+        type=str,
+        default=default_session_prefix,
+        help="Prefix for generated recording sessions",
     )
-    parser.add_argument(
-        "--max-retries",
-        type=int,
-        default=3,
-        help="Number of additional connection attempts (-1 for infinite)",
+
+    # Recording control
+    recording_group = parser.add_mutually_exclusive_group()
+    recording_group.add_argument(
+        "--auto-start-recording",
+        dest="auto_start_recording",
+        action="store_true",
+        default=default_auto_start_recording,
+        help="Automatically start recording on startup",
     )
+    recording_group.add_argument(
+        "--no-auto-start-recording",
+        dest="auto_start_recording",
+        action="store_false",
+        help="Wait for manual recording command (default)",
+    )
+
+    # Logging control
+    console_group = parser.add_mutually_exclusive_group()
+    console_group.add_argument(
+        "--console",
+        dest="console_output",
+        action="store_true",
+        default=default_console_output,
+        help="Also log to console (in addition to file)",
+    )
+    console_group.add_argument(
+        "--no-console",
+        dest="console_output",
+        action="store_false",
+        help="Log to file only (no console output)",
+    )
+
+    # Discovery settings
     parser.add_argument(
-        "--retry-delay",
+        "--discovery-timeout",
         type=positive_float,
-        default=5.0,
-        help="Seconds to wait between connection attempts",
+        default=default_discovery_timeout,
+        help="Device discovery timeout (seconds)",
     )
+    parser.add_argument(
+        "--discovery-retry",
+        type=positive_float,
+        default=default_discovery_retry,
+        help="Device discovery retry interval (seconds)",
+    )
+
+    # GUI startup size control
+    gui_size_group = parser.add_mutually_exclusive_group()
+    gui_size_group.add_argument(
+        "--gui-minimized",
+        dest="gui_start_minimized",
+        action="store_true",
+        default=default_gui_start_minimized,
+        help="Start GUI with minimal window size (default from config)",
+    )
+    gui_size_group.add_argument(
+        "--gui-fullsize",
+        dest="gui_start_minimized",
+        action="store_false",
+        help="Start GUI at capture resolution",
+    )
+
+    # GUI update rates
+    parser.add_argument(
+        "--gui-preview-update-hz",
+        dest="gui_preview_update_hz",
+        type=positive_int,
+        default=default_gui_preview_update_hz,
+        help="GUI preview update rate in Hz (1-30)",
+    )
+
+    # Parent process communication control
+    parser.add_argument(
+        "--enable-commands",
+        dest="enable_commands",
+        action="store_true",
+        default=False,
+        help="Enable JSON command interface for parent process control (auto-detected if stdin is piped)",
+    )
+
+    # Window geometry control (for GUI mode)
+    parser.add_argument(
+        "--window-geometry",
+        dest="window_geometry",
+        type=str,
+        default=None,
+        help="Window position and size (format: WIDTHxHEIGHT+X+Y, e.g., 800x600+100+50)",
+    )
+
+    # Legacy compatibility flags (hidden from help)
+    parser.add_argument("--slave", dest="mode", action="store_const", const="slave", help=argparse.SUPPRESS)
+    parser.add_argument("--tkinter", dest="mode", action="store_const", const="gui", help=argparse.SUPPRESS)
 
     args = parser.parse_args(argv)
 
-    configure_logging(args.log_level, args.log_file, suppressed_loggers=SUPPRESSED_LOGGERS)
-    logger = logging.getLogger("eye_tracker.main")
-    logger.debug("Parsed CLI arguments: %s", args)
+    args.width, args.height = args.resolution
 
-    width, height = args.resolution
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    return args
 
-    config = Config(
-        fps=args.target_fps,
-        resolution=(width, height),
-        output_dir=str(args.output_dir),
-        display_width=args.preview_width,
+
+async def main(argv: Optional[list[str]] = None) -> None:
+    args = parse_args(argv)
+    args.output_dir = ensure_directory(args.output_dir)
+
+    # Setup session directory and logging using shared utilities
+    session_dir, session_name, log_file, is_command_mode = setup_session_from_args(
+        args,
+        module_name='eyetracker',
+        default_prefix='tracking'
     )
 
-    logger.info(
-        "Starting gaze tracker with resolution %dx%d @ %.1f FPS (max retries: %s)",
-        width,
-        height,
-        args.target_fps,
-        "infinite" if args.max_retries < 0 else args.max_retries,
-    )
+    # Redirect stderr/stdout to log file BEFORE configuring logging
+    # Returns original stdout for user-facing messages and parent process communication
+    original_stdout = redirect_stderr_stdout(log_file)
 
-    exit_code = await run_with_retries(config, args.max_retries, args.retry_delay)
-    logger.debug("Exiting with code %s", exit_code)
-    return exit_code
+    # Configure StatusMessage to use original stdout if in command mode
+    # This must be done BEFORE any imports that might send status messages
+    if is_command_mode:
+        from logger_core.commands import StatusMessage
+        StatusMessage.configure(original_stdout)
+
+    # Now configure Python logging
+    configure_logging(args.log_level, str(log_file), console_output=args.console_output)
+
+    # Store session_dir and stdout streams in args so TrackerSystem can use them
+    args.session_dir = session_dir
+    args.console_stdout = original_stdout  # For console messages
+    args.command_stdout = original_stdout  # For parent process communication
+
+    logger.info("=" * 60)
+    logger.info("Eye Tracker System Starting")
+    logger.info("=" * 60)
+    logger.info("Session: %s", session_name)
+    logger.info("Log file: %s", log_file)
+    logger.info("Mode: %s", args.mode)
+    logger.info("Target FPS: %.1f", args.target_fps)
+    logger.info("Resolution: %dx%d", args.width, args.height)
+    logger.info("Console output: %s", args.console_output)
+    logger.info("=" * 60)
+
+    # Import TrackerSupervisor AFTER stderr/stdout redirection
+    from tracker_core import TrackerSupervisor
+
+    supervisor = TrackerSupervisor(args)
+    loop = asyncio.get_running_loop()
+
+    # Signal handler that properly schedules shutdown task
+    def signal_handler():
+        """Handle shutdown signals by scheduling shutdown task."""
+        if not supervisor.shutdown_event.is_set():
+            asyncio.create_task(supervisor.shutdown())
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, signal_handler)
+
+    try:
+        await supervisor.run()
+    finally:
+        await supervisor.shutdown()
+        logger.info("=" * 60)
+        logger.info("Eye Tracker System Stopped")
+        logger.info("=" * 60)
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(asyncio.run(main()))
-    except KeyboardInterrupt:
-        print("\nInterrupted")
-        sys.exit(130)
+    asyncio.run(main())

@@ -7,100 +7,39 @@ Processes commands received from master in slave mode.
 
 import asyncio
 import datetime
-import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict
 
 import cv2
 
 if TYPE_CHECKING:
     from ..camera_system import CameraSystem
 
-from .command_protocol import StatusMessage
-from ..constants import MAX_ERROR_MESSAGE_LENGTH
-
-logger = logging.getLogger("CommandHandler")
+from logger_core.commands import BaseCommandHandler, StatusMessage
+from Modules.base import sanitize_error_message
 
 
-def sanitize_error_message(error: Exception) -> str:
-    """
-    Sanitize error message to prevent information leakage.
-
-    Removes file paths and other sensitive information from error messages
-    before sending to master in slave mode.
-
-    Args:
-        error: Exception to sanitize
-
-    Returns:
-        Sanitized error message safe to send externally
-    """
-    import re
-
-    msg = str(error)
-
-    # Remove absolute paths (anything starting with / or drive letter on Windows)
-    msg = re.sub(r'/[^\s]*', '[path]', msg)
-    msg = re.sub(r'[A-Z]:\\[^\s]*', '[path]', msg)
-
-    # Remove anything that looks like a file path
-    msg = re.sub(r'\.\.?/[^\s]*', '[path]', msg)
-
-    # Truncate long messages
-    if len(msg) > MAX_ERROR_MESSAGE_LENGTH:
-        msg = msg[:MAX_ERROR_MESSAGE_LENGTH - 3] + '...'
-
-    return msg
+# Note: sanitize_error_message now imported from Modules.base.io_utils
+# (removed duplicate implementation)
 
 
-class CommandHandler:
+class CommandHandler(BaseCommandHandler):
     """Handles command execution for camera system."""
 
-    def __init__(self, camera_system: 'CameraSystem'):
+    def __init__(self, camera_system: 'CameraSystem', gui=None):
         """
         Initialize command handler.
 
         Args:
             camera_system: Reference to CameraSystem instance
+            gui: Optional reference to TkinterGUI instance (for get_geometry)
         """
-        self.system = camera_system
-        self.logger = logging.getLogger("CommandHandler")
+        super().__init__(camera_system)
+        self.gui = gui
 
-    async def handle_command(self, command_data: dict) -> None:
-        """
-        Handle command from master.
-
-        Args:
-            command_data: Parsed command dict from JSON
-        """
-        try:
-            cmd = command_data.get("command")
-
-            if cmd == "start_recording":
-                self._handle_start_recording()
-            elif cmd == "stop_recording":
-                self._handle_stop_recording()
-            elif cmd == "take_snapshot":
-                await self._handle_take_snapshot()
-            elif cmd == "get_status":
-                self._handle_get_status()
-            elif cmd == "toggle_preview":
-                self._handle_toggle_preview(command_data)
-            elif cmd == "quit":
-                self._handle_quit()
-            else:
-                StatusMessage.send("error", {"message": f"Unknown command: {cmd}"})
-
-        except Exception as e:
-            # Sanitize error message before sending to master
-            safe_message = sanitize_error_message(e)
-            StatusMessage.send("error", {"message": safe_message})
-            # Full error logged locally for debugging
-            self.logger.error("Command error: %s", e, exc_info=True)
-
-    def _handle_start_recording(self) -> None:
+    async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
         """Handle start_recording command."""
-        if not self.system.recording:
+        if self._check_recording_state(should_be_recording=False):
             session_dir = self.system._ensure_session_dir()
             for cam in self.system.cameras:
                 cam.start_recording(session_dir)
@@ -109,15 +48,17 @@ class CommandHandler:
                 "recording_started",
                 {
                     "session": self.system.session_label,
-                    "files": [str(cam.recording_manager.video_path) for cam in self.system.cameras if cam.recording_manager.video_path],
+                    "files": [
+                        str(cam.recording_manager.video_path)
+                        for cam in self.system.cameras
+                        if cam.recording_manager.video_path
+                    ],
                 },
             )
-        else:
-            StatusMessage.send("error", {"message": "Already recording"})
 
-    def _handle_stop_recording(self) -> None:
+    async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
         """Handle stop_recording command."""
-        if self.system.recording:
+        if self._check_recording_state(should_be_recording=True):
             for cam in self.system.cameras:
                 cam.stop_recording()
             self.system.recording = False
@@ -132,10 +73,8 @@ class CommandHandler:
                     ],
                 },
             )
-        else:
-            StatusMessage.send("error", {"message": "Not recording"})
 
-    async def _handle_take_snapshot(self) -> None:
+    async def handle_take_snapshot(self, command_data: Dict[str, Any]) -> None:
         """Handle take_snapshot command (async)."""
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         session_dir = self.system._ensure_session_dir()
@@ -175,7 +114,7 @@ class CommandHandler:
 
         StatusMessage.send("snapshot_taken", {"files": filenames})
 
-    def _handle_get_status(self) -> None:
+    async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
         """Handle get_status command."""
         status_data = {
             "recording": self.system.recording,
@@ -195,22 +134,50 @@ class CommandHandler:
         }
         StatusMessage.send("status_report", status_data)
 
-    def _handle_toggle_preview(self, command_data: dict) -> None:
-        """Handle toggle_preview command."""
-        cam_num = command_data.get("camera_id", 0)
-        enabled = command_data.get("enabled", True)
-
-        if 0 <= cam_num < len(self.system.preview_enabled):
-            self.system.preview_enabled[cam_num] = enabled
-            StatusMessage.send(
-                "preview_toggled",
-                {"camera_id": cam_num, "enabled": enabled},
-            )
+    async def handle_get_geometry(self, command_data: Dict[str, Any]) -> None:
+        """Handle get_geometry command - report current window geometry to parent."""
+        if self.gui and hasattr(self.gui, 'root'):
+            try:
+                # Get current window geometry
+                geometry_str = self.gui.root.geometry()  # Returns "WIDTHxHEIGHT+X+Y"
+                parts = geometry_str.replace('+', 'x').replace('-', 'x-').split('x')
+                if len(parts) >= 4:
+                    width = int(parts[0])
+                    height = int(parts[1])
+                    x = int(parts[2])
+                    y = int(parts[3])
+                    StatusMessage.send("geometry_changed", {
+                        "width": width,
+                        "height": height,
+                        "x": x,
+                        "y": y
+                    })
+                    self.logger.debug("Sent geometry to parent: %dx%d+%d+%d", width, height, x, y)
+                else:
+                    StatusMessage.send("error", {"message": "Failed to parse window geometry"})
+            except Exception as e:
+                error_msg = sanitize_error_message(str(e))
+                StatusMessage.send("error", {"message": f"Failed to get geometry: {error_msg}"})
+                self.logger.error("Failed to get geometry: %s", e)
         else:
-            StatusMessage.send("error", {"message": f"Invalid camera_id: {cam_num}"})
+            # No GUI available - send a warning but don't fail
+            self.logger.debug("No GUI available for get_geometry command")
 
-    def _handle_quit(self) -> None:
-        """Handle quit command."""
-        self.system.running = False
-        self.system.shutdown_event.set()
-        StatusMessage.send("quitting")
+    async def handle_custom_command(self, command: str, command_data: Dict[str, Any]) -> bool:
+        """Handle camera-specific custom commands."""
+        if command == "toggle_preview":
+            cam_num = command_data.get("camera_id", 0)
+            enabled = command_data.get("enabled", True)
+
+            if 0 <= cam_num < len(self.system.preview_enabled):
+                self.system.preview_enabled[cam_num] = enabled
+                StatusMessage.send(
+                    "preview_toggled",
+                    {"camera_id": cam_num, "enabled": enabled},
+                )
+                return True
+            else:
+                StatusMessage.send("error", {"message": f"Invalid camera_id: {cam_num}"})
+                return True
+
+        return False  # Not handled

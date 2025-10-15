@@ -5,18 +5,18 @@ Manages multiple cameras and delegates to appropriate operational mode.
 """
 
 import asyncio
-import datetime
 import logging
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 from picamera2 import Picamera2
 
+from Modules.base import BaseSystem
 from .camera_handler import CameraHandler
 from .commands import StatusMessage
-from .modes import InteractiveMode, SlaveMode, HeadlessMode
+from .modes import GUIMode, SlaveMode, HeadlessMode
 from .constants import THREAD_JOIN_TIMEOUT_SECONDS
 
 logger = logging.getLogger("CameraSystem")
@@ -26,57 +26,33 @@ class CameraInitializationError(RuntimeError):
     """Raised when cameras cannot be initialised."""
 
 
-class CameraSystem:
-    """Multi-camera system with interactive, slave, and headless modes."""
+class CameraSystem(BaseSystem):
+    """Multi-camera system with GUI and headless modes."""
 
     def __init__(self, args):
-        self.logger = logging.getLogger("CameraSystem")
+        # Initialize base system (handles common initialization)
+        super().__init__(args)
+
+        # Camera-specific configuration
         self.cameras = []
-        self.running = False
-        self.recording = False
-        self.args = args
-        self.mode = getattr(args, "mode", "interactive")
-        self.slave_mode = self.mode == "slave"
-        self.headless_mode = self.mode == "headless"
         self.show_preview = getattr(args, "show_preview", True)
         self.auto_start_recording = getattr(args, "auto_start_recording", False)
-        self.session_prefix = getattr(args, "session_prefix", "session")
         self.command_thread = None
-        self.shutdown_event = asyncio.Event()
-        self.device_timeout = getattr(args, "discovery_timeout", 5)
-        self.initialized = False
 
-        # Get console stdout for user-facing messages (falls back to sys.stdout if not available)
-        self.console = getattr(args, "console_stdout", sys.stdout)
-
-        # Session directory is created in main() and passed via args
-        self.session_dir = getattr(args, "session_dir", None)
-        if self.session_dir is None:
-            # Fallback: create session directory if not provided
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            prefix = self.session_prefix.rstrip("_")
-            session_name = f"{prefix}_{timestamp}" if prefix else timestamp
-            base = Path(self.args.output_dir)
-            self.session_dir = base / session_name
-            self.session_dir.mkdir(parents=True, exist_ok=True)
-        self.session_label = self.session_dir.name
-        self.logger.info("Session directory: %s", self.session_dir)
+        # Auto-detect parent communication mode
+        # If stdin is not a TTY (i.e., it's a pipe), enable command mode for GUI
+        self.enable_gui_commands = getattr(args, "enable_commands", False) or (
+            self.gui_mode and not sys.stdin.isatty()
+        )
 
         # Frame streaming for UI preview (used by slave mode)
         self.preview_enabled = []  # Will be populated dynamically based on detected cameras
-
-        # Signal handlers are set up in main.py using asyncio signal handlers
-        # No need to set them up here
-
-        # Device will be initialized in run() method after signal handlers are ready
-        if self.slave_mode:
-            StatusMessage.send("initializing", {"device": "cameras"})
 
     def _ensure_session_dir(self) -> Path:
         """Return the session directory (created at initialization)."""
         return self.session_dir
 
-    async def _initialize_cameras(self):
+    async def _initialize_devices(self) -> None:
         """Initialize cameras with timeout and graceful handling"""
         self.logger.info("Searching for cameras (timeout: %ds)...", self.device_timeout)
 
@@ -144,7 +120,9 @@ class CameraSystem:
                 self.preview_enabled.append(True)  # Enable preview for this camera by default
 
             self.logger.info("Successfully initialized %d camera(s)", len(self.cameras))
-            if self.slave_mode:
+
+            # Send initialized status if parent communication is enabled
+            if self.slave_mode or self.enable_gui_commands:
                 StatusMessage.send(
                     "initialized",
                     {"cameras": len(self.cameras), "session": self.session_label},
@@ -157,40 +135,28 @@ class CameraSystem:
                 StatusMessage.send("error", {"message": f"Camera initialization failed: {e}"})
             raise
 
+    def _create_mode_instance(self, mode_name: str) -> Any:
+        """
+        Create mode instance based on mode name.
+
+        Args:
+            mode_name: Mode name ('gui', 'headless', 'slave')
+
+        Returns:
+            Mode instance (SlaveMode, HeadlessMode, or GUIMode)
+        """
+        if mode_name == "slave":
+            return SlaveMode(self)
+        elif mode_name == "headless":
+            return HeadlessMode(self)
+        else:  # gui or any other mode defaults to GUI
+            return GUIMode(self, enable_commands=self.enable_gui_commands)
+
     # Compatibility methods for mode classes (kept for backward compatibility with StatusMessage)
     def send_status(self, status_type, data=None):
         """Send status message to master (if in slave mode) - delegates to StatusMessage"""
         if self.slave_mode:
             StatusMessage.send(status_type, data)
-
-    async def run(self):
-        """Main run method - chooses mode based on configuration and delegates"""
-        try:
-            # Initialize cameras now that signal handlers are set up
-            await self._initialize_cameras()
-
-            # Create and run appropriate mode
-            if self.slave_mode:
-                mode = SlaveMode(self)
-            elif self.headless_mode:
-                mode = HeadlessMode(self)
-            else:
-                mode = InteractiveMode(self)
-
-            await mode.run()
-
-        except KeyboardInterrupt:
-            self.logger.info("Camera system cancelled by user")
-            if self.slave_mode:
-                StatusMessage.send("error", {"message": "Cancelled by user"})
-            raise
-        except CameraInitializationError:
-            raise
-        except Exception as e:
-            self.logger.error("Unexpected error in run: %s", e)
-            if self.slave_mode:
-                StatusMessage.send("error", {"message": f"Unexpected error: {e}"})
-            raise
 
     async def cleanup(self):
         """Clean up all camera resources."""

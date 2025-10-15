@@ -13,7 +13,7 @@ from .audio_supervisor import AudioSupervisor
 # Modular components
 from .config import ConfigLoader, load_config_file
 from .commands import CommandHandler, CommandMessage, StatusMessage
-from .modes import BaseMode, InteractiveMode, SlaveMode, HeadlessMode
+from .modes import BaseMode, SlaveMode, HeadlessMode, GUIMode
 
 __all__ = [
     # Utilities
@@ -37,7 +37,7 @@ __all__ = [
 
     # Modes
     'BaseMode',
-    'InteractiveMode',
     'SlaveMode',
     'HeadlessMode',
+    'GUIMode',
 ]

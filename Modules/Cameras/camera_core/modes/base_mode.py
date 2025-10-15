@@ -5,15 +5,14 @@ Base mode for camera system operations.
 Provides shared functionality for all operational modes.
 """
 
-import logging
-import time
 from typing import TYPE_CHECKING
+from Modules.base.modes import BaseMode as CoreBaseMode
 
 if TYPE_CHECKING:
     from ..camera_system import CameraSystem
 
 
-class BaseMode:
+class BaseMode(CoreBaseMode):
     """Base class for camera system operational modes."""
 
     def __init__(self, camera_system: 'CameraSystem'):
@@ -23,17 +22,7 @@ class BaseMode:
         Args:
             camera_system: Reference to CameraSystem instance
         """
-        self.system = camera_system
-        self.logger = logging.getLogger(f"{self.__class__.__name__}")
-
-    def run(self) -> None:
-        """
-        Run the mode (implement in subclasses).
-
-        Raises:
-            NotImplementedError: If not implemented by subclass
-        """
-        raise NotImplementedError("Subclasses must implement run()")
+        super().__init__(camera_system)
 
     def start_recording_all(self) -> None:
         """Start recording on all cameras."""
@@ -60,7 +49,3 @@ class BaseMode:
             List of preview frames (may contain None for unavailable cameras)
         """
         return [cam.update_preview_cache() for cam in self.system.cameras]
-
-    def is_running(self) -> bool:
-        """Check if system is still running."""
-        return self.system.running and not self.system.shutdown_event.is_set()

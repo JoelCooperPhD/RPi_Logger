@@ -24,8 +24,7 @@ from typing import Optional
 import cv2
 
 from .camera_utils import FrameTimingMetadata, RollingFPS
-from .camera_overlay import CameraOverlay
-from .camera_display import CameraDisplay
+from .display import FrameCache, CameraOverlay
 
 logger = logging.getLogger("CameraProcessor")
 
@@ -49,7 +48,7 @@ class CameraProcessor:
 
         # Create overlay renderer and display manager
         self.overlay = CameraOverlay(camera_id, overlay_config)
-        self.display = CameraDisplay(camera_id)
+        self.display = FrameCache(camera_id)
 
         # FPS tracking
         self.fps_tracker = RollingFPS(window_seconds=5.0)
@@ -57,6 +56,7 @@ class CameraProcessor:
 
         # Control
         self._running = False
+        self._paused = False  # Pause state for CPU saving
         self._task: Optional[asyncio.Task] = None
 
         # Track background tasks for proper cleanup
@@ -134,6 +134,21 @@ class CameraProcessor:
 
         self.logger.info("Camera processor stopped")
 
+    async def pause(self):
+        """
+        Pause the processor loop (idles but keeps task alive).
+        Saves CPU by skipping frame processing, overlays, and display updates.
+        """
+        if not self._paused:
+            self._paused = True
+            self.logger.info("Camera %d processor paused (CPU saving mode)", self.camera_id)
+
+    async def resume(self):
+        """Resume the processor loop."""
+        if self._paused:
+            self._paused = False
+            self.logger.info("Camera %d processor resumed", self.camera_id)
+
     async def _processing_loop(self):
         """
         PROCESSING LOOP (Event-driven, zero-overhead)
@@ -160,6 +175,11 @@ class CameraProcessor:
 
         while self._running:
             try:
+                # Check pause state - idle if paused (no CPU usage)
+                if self._paused:
+                    await asyncio.sleep(0.1)  # Idle sleep, minimal CPU
+                    continue
+
                 # 1. Wait for new frame from capture loop (event-driven, blocks until ready)
                 # This replaces the polling loop entirely
                 if self.processed_frames < log_waits:

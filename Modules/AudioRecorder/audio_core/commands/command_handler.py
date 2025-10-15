@@ -8,63 +8,29 @@ Processes JSON commands and dispatches to appropriate handlers.
 import logging
 from typing import TYPE_CHECKING, Dict, Any
 
-from .command_protocol import StatusMessage
+from logger_core.commands import BaseCommandHandler, StatusMessage
 
 if TYPE_CHECKING:
     from ..audio_system import AudioSystem
 
-logger = logging.getLogger("CommandHandler")
 
-
-class CommandHandler:
+class CommandHandler(BaseCommandHandler):
     """Handles commands for audio recording system in slave mode."""
 
-    def __init__(self, audio_system: 'AudioSystem'):
+    def __init__(self, audio_system: 'AudioSystem', gui=None):
         """
         Initialize command handler.
 
         Args:
             audio_system: Audio system instance to control
+            gui: Optional reference to GUI window (for get_geometry)
         """
-        self.system = audio_system
-        self.logger = logging.getLogger("CommandHandler")
+        super().__init__(audio_system)
+        self.gui = gui
 
-    async def handle_command(self, command_data: Dict[str, Any]) -> None:
-        """
-        Handle incoming command from master.
-
-        Args:
-            command_data: Parsed command dictionary
-        """
-        command = command_data.get("command", "")
-        self.logger.debug("Received command: %s", command)
-
-        try:
-            if command == "start_recording":
-                await self._handle_start_recording()
-            elif command == "stop_recording":
-                await self._handle_stop_recording()
-            elif command == "get_status":
-                await self._handle_get_status()
-            elif command == "toggle_device":
-                device_id = command_data.get("device_id")
-                enabled = command_data.get("enabled", True)
-                await self._handle_toggle_device(device_id, enabled)
-            elif command == "quit":
-                await self._handle_quit()
-            else:
-                StatusMessage.send("error", {"message": f"Unknown command: {command}"})
-                self.logger.warning("Unknown command: %s", command)
-
-        except Exception as e:
-            error_msg = f"Command '{command}' failed: {e}"
-            StatusMessage.send("error", {"message": error_msg})
-            self.logger.error(error_msg)
-
-    async def _handle_start_recording(self) -> None:
+    async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
         """Handle start_recording command."""
-        if self.system.recording:
-            StatusMessage.send("error", {"message": "Already recording"})
+        if not self._check_recording_state(should_be_recording=False):
             return
 
         success = self.system.start_recording()
@@ -78,10 +44,9 @@ class CommandHandler:
         else:
             StatusMessage.send("error", {"message": "Failed to start recording"})
 
-    async def _handle_stop_recording(self) -> None:
+    async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
         """Handle stop_recording command."""
-        if not self.system.recording:
-            StatusMessage.send("error", {"message": "Not recording"})
+        if not self._check_recording_state(should_be_recording=True):
             return
 
         await self.system.stop_recording()
@@ -90,7 +55,7 @@ class CommandHandler:
         })
         self.logger.info("Recording stopped")
 
-    async def _handle_get_status(self) -> None:
+    async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
         """Handle get_status command."""
         status_data = {
             "recording": self.system.recording,
@@ -103,17 +68,57 @@ class CommandHandler:
         StatusMessage.send("status_report", status_data)
         self.logger.debug("Status report sent")
 
-    async def _handle_toggle_device(self, device_id: int, enabled: bool) -> None:
+    async def handle_get_geometry(self, command_data: Dict[str, Any]) -> None:
+        """Handle get_geometry command - report current window geometry to parent."""
+        if self.gui and hasattr(self.gui, 'window') and self.gui.window:
+            try:
+                # Get current window geometry
+                geometry_str = self.gui.window.geometry()  # Returns "WIDTHxHEIGHT+X+Y"
+                parts = geometry_str.replace('+', 'x').replace('-', 'x-').split('x')
+                if len(parts) >= 4:
+                    width = int(parts[0])
+                    height = int(parts[1])
+                    x = int(parts[2])
+                    y = int(parts[3])
+                    StatusMessage.send("geometry_changed", {
+                        "width": width,
+                        "height": height,
+                        "x": x,
+                        "y": y
+                    })
+                    self.logger.debug("Sent geometry to parent: %dx%d+%d+%d", width, height, x, y)
+                else:
+                    StatusMessage.send("error", {"message": "Failed to parse window geometry"})
+            except Exception as e:
+                StatusMessage.send("error", {"message": f"Failed to get geometry: {str(e)}"})
+                self.logger.error("Failed to get geometry: %s", e)
+        else:
+            # No GUI available - send a warning but don't fail
+            self.logger.debug("No GUI available for get_geometry command")
+
+    async def handle_custom_command(self, command: str, command_data: Dict[str, Any]) -> bool:
+        """Handle audio-specific custom commands."""
+        if command == "toggle_device":
+            device_id = command_data.get("device_id")
+            enabled = command_data.get("enabled", True)
+            return await self._handle_toggle_device(device_id, enabled)
+
+        return False  # Not handled
+
+    async def _handle_toggle_device(self, device_id: int, enabled: bool) -> bool:
         """
         Handle toggle_device command.
 
         Args:
             device_id: Audio device ID to toggle
             enabled: True to enable, False to disable
+
+        Returns:
+            True (command was handled)
         """
         if device_id is None:
             StatusMessage.send("error", {"message": "device_id required"})
-            return
+            return True
 
         if enabled:
             success = self.system.select_device(device_id)
@@ -131,8 +136,4 @@ class CommandHandler:
         else:
             StatusMessage.send("error", {"message": f"Failed to toggle device {device_id}"})
 
-    async def _handle_quit(self) -> None:
-        """Handle quit command."""
-        StatusMessage.send("shutting_down", {})
-        self.logger.info("Quit command received")
-        self.system.shutdown_event.set()
+        return True

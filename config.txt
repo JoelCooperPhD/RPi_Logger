@@ -1,0 +1,98 @@
+################################################################################
+# MASTER LOGGER CONFIGURATION
+################################################################################
+# Edit values below and restart the application for changes to take effect
+#
+# OVERVIEW:
+#   The master logger discovers and orchestrates multiple logging modules
+#   (Cameras, AudioRecorder, EyeTracker) through a unified interface.
+#
+#   All module data is saved in a centralized location with organized
+#   subdirectories for each module.
+################################################################################
+
+
+################################################################################
+# SESSION SETTINGS
+################################################################################
+
+# Data directory (all module outputs saved here)
+data_dir = data
+
+# Session prefix (creates: data/session_YYYYMMDD_HHMMSS/)
+session_prefix = session
+
+
+################################################################################
+# LOGGING
+################################################################################
+
+# Master log file: data/session_YYYYMMDD_HHMMSS/master.log
+log_level = info              # Python log level (debug/info/warning/error/critical)
+console_output = false        # Also print to console (true/false)
+
+
+################################################################################
+# UI SETTINGS
+################################################################################
+
+# UI update rate (Hz)
+ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
+
+# Window position and size (saved automatically on window close)
+window_x = 1051
+window_y = 26
+window_width = 960
+window_height = 986
+
+
+################################################################################
+# MODULE DISCOVERY
+################################################################################
+
+# Modules directory (relative to this file)
+# Auto-discovered from: ./Modules/
+# Each module must have:
+#   - main_*.py entry point
+#   - Support for --mode slave
+#   - JSON command protocol
+
+
+################################################################################
+# USAGE NOTES
+################################################################################
+
+# 1. Module Selection:
+#    - Check modules you want to use in the UI
+#    - Click "Start Modules" to initialize selected modules
+#    - Each module will create a subdirectory in the session folder
+#
+# 2. Recording Control:
+#    - "Start Recording" begins recording on all active modules
+#    - "Stop Recording" stops recording (modules remain active)
+#    - "Stop All Modules" shuts down all modules
+#
+# 3. Session Organization:
+#    data/
+#    └── session_20251014_120000/     # Session directory (master creates)
+#        ├── master.log               # Master logger log
+#        ├── Camera/                  # Camera module directory
+#        │   ├── camera.log           # Module log file
+#        │   └── recordings/          # Recordings directly here
+#        │       ├── video_cam0_*.h264
+#        │       └── ...
+#        ├── Audio/                   # Audio module directory
+#        │   ├── audio.log            # Module log file
+#        │   └── recordings/          # Recordings directly here
+#        │       ├── mic_0_*.wav
+#        │       └── ...
+#        └── EyeTracker/              # Eye tracker directory
+#            ├── eyetracker.log       # Module log file
+#            └── recordings/          # Recordings directly here
+#                ├── gaze_*.csv
+#                └── ...
+#
+# 4. Module Communication:
+#    - Master launches modules with: --mode gui --output-dir {session_dir}/ModuleName/ --enable-commands
+#    - JSON protocol over stdin/stdout for commands and status
+#    - Each module runs independently and can be stopped individually

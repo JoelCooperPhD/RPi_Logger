@@ -5,18 +5,15 @@ Manages multiple audio devices and delegates to appropriate operational mode.
 """
 
 import asyncio
-import datetime
 import logging
-import sys
 import time
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List
 
+from Modules.base import BaseSystem
 from .audio_handler import AudioHandler
 from .audio_utils import DeviceDiscovery
 from .commands import StatusMessage
-from .modes import InteractiveMode, SlaveMode, HeadlessMode
-from .constants import DEVICE_DISCOVERY_TIMEOUT
+from .modes import SlaveMode, HeadlessMode, GUIMode
 
 logger = logging.getLogger("AudioSystem")
 
@@ -25,56 +22,35 @@ class AudioInitializationError(RuntimeError):
     """Raised when audio devices cannot be initialized."""
 
 
-class AudioSystem:
-    """Multi-device audio system with interactive, slave, and headless modes."""
+class AudioSystem(BaseSystem):
+    """Multi-device audio system with GUI and headless modes."""
 
     def __init__(self, args):
-        self.logger = logging.getLogger("AudioSystem")
-        self.handlers: List[AudioHandler] = []
-        self.active_handlers: Dict[int, AudioHandler] = {}
-        self.running = False
-        self.recording = False
-        self.recording_count = 0
-        self.args = args
-        self.mode = getattr(args, "mode", "interactive")
-        self.slave_mode = self.mode == "slave"
-        self.headless_mode = self.mode == "headless"
+        # Initialize base system (handles common initialization)
+        super().__init__(args)
+
+        # Audio-specific configuration
         self.sample_rate = getattr(args, "sample_rate", 48000)
-        self.session_prefix = getattr(args, "session_prefix", "experiment")
         self.auto_select_new = getattr(args, "auto_select_new", True)
         self.auto_start_recording = getattr(args, "auto_start_recording", False)
-        self.shutdown_event = asyncio.Event()
-        self.device_timeout = DEVICE_DISCOVERY_TIMEOUT
-        self.initialized = False
+        self.recording_count = 0
 
-        # Device management
+        # Auto-detect parent communication mode
+        # If stdin is not a TTY (i.e., it's a pipe), enable command mode for GUI
+        import sys
+        self.enable_gui_commands = getattr(args, "enable_commands", False) or (
+            self.gui_mode and not sys.stdin.isatty()
+        )
+
+        # Audio device management
+        self.handlers: List[AudioHandler] = []
+        self.active_handlers: Dict[int, AudioHandler] = {}
         self.available_devices: Dict[int, dict] = {}
         self.selected_devices: set = set()
         self._known_devices: set = set()
 
-        # Get console stdout for user-facing messages
-        self.console = getattr(args, "console_stdout", sys.stdout)
-
-        # Session directory is created in main() and passed via args
-        self.session_dir = getattr(args, "session_dir", None)
-        if self.session_dir is None:
-            # Fallback: create session directory if not provided
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            prefix = self.session_prefix.rstrip("_")
-            session_name = f"{prefix}_{timestamp}" if prefix else timestamp
-            base = Path(self.args.output_dir)
-            self.session_dir = base / session_name
-            self.session_dir.mkdir(parents=True, exist_ok=True)
-        self.session_label = self.session_dir.name
-        self.logger.info("Session directory: %s", self.session_dir)
-
         # Feedback queue for device status messages
         self.feedback_queue = asyncio.Queue()
-
-        # Signal handlers are set up in main.py using asyncio signal handlers
-
-        if self.slave_mode:
-            StatusMessage.send("initializing", {"device": "audio"})
 
     async def _initialize_devices(self) -> None:
         """Initialize audio devices with timeout and graceful handling."""
@@ -120,7 +96,9 @@ class AudioSystem:
             self.logger.info("Auto-selected device %d", first_device)
 
         self.logger.info("Audio device discovery complete: %d devices available", len(self.available_devices))
-        if self.slave_mode:
+
+        # Send initialized status if parent communication is enabled
+        if self.slave_mode or self.enable_gui_commands:
             StatusMessage.send(
                 "initialized",
                 {"devices": len(self.available_devices), "session": self.session_label}
@@ -245,34 +223,22 @@ class AudioSystem:
         self.logger.info("Recording stopped")
         return True
 
-    async def run(self) -> None:
-        """Main run method - chooses mode based on configuration and delegates."""
-        try:
-            # Initialize devices now that signal handlers are set up
-            await self._initialize_devices()
+    def _create_mode_instance(self, mode_name: str) -> Any:
+        """
+        Create mode instance based on mode name.
 
-            # Create and run appropriate mode
-            if self.slave_mode:
-                mode = SlaveMode(self)
-            elif self.headless_mode:
-                mode = HeadlessMode(self)
-            else:
-                mode = InteractiveMode(self)
+        Args:
+            mode_name: Mode name ('gui', 'headless', 'slave')
 
-            await mode.run()
-
-        except KeyboardInterrupt:
-            self.logger.info("Audio system cancelled by user")
-            if self.slave_mode:
-                StatusMessage.send("error", {"message": "Cancelled by user"})
-            raise
-        except AudioInitializationError:
-            raise
-        except Exception as e:
-            self.logger.error("Unexpected error in run: %s", e)
-            if self.slave_mode:
-                StatusMessage.send("error", {"message": f"Unexpected error: {e}"})
-            raise
+        Returns:
+            Mode instance (SlaveMode, HeadlessMode, or GUIMode)
+        """
+        if mode_name == "slave":
+            return SlaveMode(self)
+        elif mode_name == "headless":
+            return HeadlessMode(self)
+        else:  # gui or any other mode defaults to GUI
+            return GUIMode(self, enable_commands=self.enable_gui_commands)
 
     async def cleanup(self) -> None:
         """Clean up all audio resources."""

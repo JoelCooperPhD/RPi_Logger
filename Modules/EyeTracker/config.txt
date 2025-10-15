@@ -1,0 +1,89 @@
+################################################################################
+# EYE TRACKER SYSTEM CONFIGURATION
+################################################################################
+# Edit values below and restart the application for changes to take effect
+#
+# QUICK REFERENCE:
+#
+#   Target FPS: 1-120 (recommended: 5-30 for eye tracking)
+#   Common FPS: 30=high quality, 10=balanced, 5=low CPU (default)
+#
+#   Resolution: WIDTHxHEIGHT (e.g., 1280x720)
+#   Common: 1920x1080 (Full HD), 1280x720 (HD 720p), 640x480 (VGA)
+#
+#   Preview Width: 320-1920 pixels (maintains aspect ratio)
+#   Common: 640 (default), 480 (low CPU), 1280 (high quality)
+#
+# NOTE: System automatically discovers Pupil Labs eye tracker devices
+################################################################################
+
+
+################################################################################
+# RECORDING SETTINGS
+################################################################################
+
+# Frame rate (1-120 fps, recommended: 5-30)
+target_fps = 5.0
+
+# Scene video resolution (WIDTHxHEIGHT)
+resolution_width = 1280
+resolution_height = 720
+
+# Output files
+output_dir = recordings
+session_prefix = tracking
+
+# Auto-start recording
+auto_start_recording = false # Automatically start recording on startup (true/false)
+
+
+################################################################################
+# DISPLAY & PREVIEW
+################################################################################
+
+# Preview window
+preview_width = 640          # Preview window width in pixels (maintains aspect ratio)
+
+
+################################################################################
+# GUI SETTINGS (GUI Mode)
+################################################################################
+
+# GUI window startup size
+gui_start_minimized = true   # Start with minimal window size (true/false)
+                             # If false, window starts at capture resolution
+
+# Update rates (Hz)
+gui_preview_update_hz = 10   # Preview frame rate (1-30 Hz, higher = smoother but more CPU)
+
+
+################################################################################
+# LOGGING
+################################################################################
+
+# Log file: output_dir/tracking_YYYYMMDD_HHMMSS/session.log
+log_level = info             # Python log level (debug/info/warning/error/critical)
+console_output = false       # Also print to console (true/false)
+
+
+################################################################################
+# ADVANCED
+################################################################################
+
+# Device discovery
+discovery_timeout = 5.0      # Maximum time to wait for device (seconds)
+discovery_retry = 3.0        # Retry interval after device failure (seconds)
+
+
+################################################################################
+# WINDOW MANAGEMENT (Master Logger Integration)
+################################################################################
+
+# Auto-start this module when master logger starts
+enabled = false
+
+# Window position and size (saved automatically on window close)
+window_x = 2342
+window_y = 32
+window_width = 627
+window_height = 450

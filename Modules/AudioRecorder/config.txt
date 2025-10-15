@@ -52,3 +52,17 @@ console_output = false       # Also print to console (true/false)
 # Device discovery
 discovery_timeout = 5.0      # Maximum time to wait for devices (seconds)
 discovery_retry = 3.0        # Retry interval after device failure (seconds)
+
+
+################################################################################
+# WINDOW MANAGEMENT (Master Logger Integration)
+################################################################################
+
+# Auto-start this module when master logger starts
+enabled = false
+
+# Window position and size (saved automatically on window close)
+window_x = 2015
+window_y = 31
+window_width = 325
+window_height = 976

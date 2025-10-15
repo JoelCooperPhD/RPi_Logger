@@ -14,10 +14,20 @@ from .camera_handler import CameraHandler
 from .camera_system import CameraSystem, CameraInitializationError
 from .camera_supervisor import CameraSupervisor
 
-# New modular components
+# Configuration
 from .config import ConfigLoader, load_config_file, CameraConfig
+
+# Commands
 from .commands import CommandHandler, CommandMessage, StatusMessage
-from .modes import BaseMode, InteractiveMode, SlaveMode, HeadlessMode
+
+# Operational Modes
+from .modes import BaseMode, GUIMode, SlaveMode, HeadlessMode
+
+# User Interfaces
+from .interfaces import TkinterGUI
+
+# Display Utilities
+from .display import FrameCache, CameraOverlay
 
 __all__ = [
     # Utilities
@@ -43,7 +53,14 @@ __all__ = [
 
     # Modes
     'BaseMode',
-    'InteractiveMode',
+    'GUIMode',
     'SlaveMode',
     'HeadlessMode',
+
+    # Interfaces
+    'TkinterGUI',
+
+    # Display
+    'FrameCache',
+    'CameraOverlay',
 ]

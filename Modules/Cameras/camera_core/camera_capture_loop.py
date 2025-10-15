@@ -58,6 +58,7 @@ class CameraCaptureLoop:
         self._frame_ready_event = asyncio.Event()
 
         self._running = False
+        self._paused = False  # Pause state for CPU saving
         self._task: Optional[asyncio.Task] = None
 
     async def start(self):
@@ -81,6 +82,21 @@ class CameraCaptureLoop:
                 pass
         self.logger.info("Camera capture loop stopped")
 
+    async def pause(self):
+        """
+        Pause the capture loop (idles but keeps task alive).
+        Saves CPU by not polling hardware.
+        """
+        if not self._paused:
+            self._paused = True
+            self.logger.info("Camera %d capture loop paused (CPU saving mode)", self.camera_id)
+
+    async def resume(self):
+        """Resume the capture loop."""
+        if self._paused:
+            self._paused = False
+            self.logger.info("Camera %d capture loop resumed", self.camera_id)
+
     async def _capture_loop(self):
         """
         Capture loop using lores stream for preview.
@@ -91,6 +107,11 @@ class CameraCaptureLoop:
 
         while self._running:
             try:
+                # Check pause state - idle if paused (no CPU usage)
+                if self._paused:
+                    await asyncio.sleep(0.1)  # Idle sleep, minimal CPU
+                    continue
+
                 loop = asyncio.get_event_loop()
                 # Add timeout to prevent indefinite blocking if camera hangs
                 # 5-second timeout is reasonable for camera hardware recovery

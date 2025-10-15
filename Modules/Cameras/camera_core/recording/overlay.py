@@ -96,7 +96,7 @@ class FrameOverlayHandler:
                 margin_left = self.overlay_config.get('margin_left', 10)
                 line_start_y = self.overlay_config.get('line_start_y', 30)
 
-                frame_text = f"Frame: {current_frame_num}"
+                frame_text = f"{current_frame_num}"
 
                 # Add overlay to MAIN stream (for recording) when encoder is running
                 if self._is_recording:

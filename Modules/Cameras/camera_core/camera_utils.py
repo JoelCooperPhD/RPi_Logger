@@ -6,10 +6,11 @@ Includes FPS tracking, timing metadata, and configuration loading.
 
 import time
 import logging
-from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+from Modules.base import RollingFPS
 
 logger = logging.getLogger("CameraUtils")
 
@@ -51,31 +52,8 @@ def load_config_file() -> dict:
     return config
 
 
-class RollingFPS:
-    """Calculate FPS using a rolling window."""
-
-    def __init__(self, window_seconds: float = 5.0):
-        self.window_seconds = window_seconds
-        self.frame_timestamps: deque[float] = deque()
-
-    def add_frame(self, timestamp: Optional[float] = None) -> None:
-        if timestamp is None:
-            timestamp = time.time()
-        self.frame_timestamps.append(timestamp)
-        cutoff = timestamp - self.window_seconds
-        while self.frame_timestamps and self.frame_timestamps[0] < cutoff:
-            self.frame_timestamps.popleft()
-
-    def get_fps(self) -> float:
-        if len(self.frame_timestamps) < 2:
-            return 0.0
-        timespan = self.frame_timestamps[-1] - self.frame_timestamps[0]
-        if timespan <= 0:
-            return 0.0
-        return (len(self.frame_timestamps) - 1) / timespan
-
-    def reset(self) -> None:
-        self.frame_timestamps.clear()
+# Note: RollingFPS is now imported from Modules.base.utils
+# (removed duplicate implementation)
 
 
 @dataclass(slots=True)
