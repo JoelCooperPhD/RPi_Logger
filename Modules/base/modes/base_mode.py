@@ -52,8 +52,13 @@ class BaseMode(ABC):
         Returns:
             True if system is running and not shutting down, False otherwise
         """
-        return (
-            getattr(self.system, 'running', True) and
-            not getattr(self.system, 'shutdown_event', None) or
-            not self.system.shutdown_event.is_set()
-        )
+        # Check if running flag is True
+        if not getattr(self.system, 'running', True):
+            return False
+
+        # Check if shutdown event exists and is set
+        shutdown_event = getattr(self.system, 'shutdown_event', None)
+        if shutdown_event is not None and shutdown_event.is_set():
+            return False
+
+        return True

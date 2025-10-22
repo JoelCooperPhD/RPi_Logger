@@ -21,14 +21,16 @@ class BaseCommandHandler(ABC):
     to handle module-specific commands.
     """
 
-    def __init__(self, system: Any):
+    def __init__(self, system: Any, gui: Optional[Any] = None):
         """
         Initialize command handler.
 
         Args:
             system: Reference to module system (CameraSystem, AudioSystem, etc.)
+            gui: Optional reference to GUI instance (for get_geometry)
         """
         self.system = system
+        self.gui = gui
         self.logger = logging.getLogger(f"{self.__class__.__name__}")
 
     async def handle_command(self, command_data: Dict[str, Any]) -> bool:
@@ -120,15 +122,63 @@ class BaseCommandHandler(ABC):
 
     async def handle_get_geometry(self, command_data: Dict[str, Any]) -> None:
         """
-        Handle get_geometry command.
+        Handle get_geometry command - report current window geometry to parent.
 
-        Default implementation does nothing (modules without GUI don't need geometry).
-        Override in modules that have GUI windows.
+        Default implementation handles tkinter windows (root or window attributes).
+        Modules without GUI can leave this as is (no-op if gui not available).
 
         Args:
             command_data: Command parameters
         """
-        self.logger.debug("get_geometry command received (no GUI available)")
+        if not self.gui:
+            self.logger.debug("get_geometry command received (no GUI available)")
+            return
+
+        # Try to find the window object (could be root, window, etc.)
+        window = None
+        if hasattr(self.gui, 'root'):
+            window = self.gui.root
+        elif hasattr(self.gui, 'window'):
+            window = self.gui.window
+        else:
+            self.logger.debug("GUI does not have 'root' or 'window' attribute")
+            return
+
+        if not window:
+            self.logger.debug("GUI window not available")
+            return
+
+        try:
+            # Get current window geometry (tkinter format: "WIDTHxHEIGHT+X+Y")
+            geometry_str = window.geometry()
+            parts = geometry_str.replace('+', 'x').replace('-', 'x-').split('x')
+
+            if len(parts) >= 4:
+                width = int(parts[0])
+                height = int(parts[1])
+                x = int(parts[2])
+                y = int(parts[3])
+
+                StatusMessage.send("geometry_changed", {
+                    "width": width,
+                    "height": height,
+                    "x": x,
+                    "y": y
+                })
+                self.logger.debug("Sent geometry to parent: %dx%d+%d+%d", width, height, x, y)
+            else:
+                StatusMessage.send("error", {"message": "Failed to parse window geometry"})
+
+        except Exception as e:
+            # Import sanitize_error_message if available, otherwise use str()
+            try:
+                from Modules.base import sanitize_error_message
+                error_msg = sanitize_error_message(str(e))
+            except ImportError:
+                error_msg = str(e)
+
+            StatusMessage.send("error", {"message": f"Failed to get geometry: {error_msg}"})
+            self.logger.error("Failed to get geometry: %s", e)
 
     async def handle_take_snapshot(self, command_data: Dict[str, Any]) -> None:
         """

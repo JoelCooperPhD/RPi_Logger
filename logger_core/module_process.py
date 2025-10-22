@@ -98,8 +98,9 @@ class ModuleProcess:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
             # Build command
-            # Use uv run if available, otherwise fall back to python3
-            uv_path = self._find_uv()
+            # Use venv python to respect pyvenv.cfg (e.g., system-site-packages for libcamera)
+            # Fall back to sys.executable if no venv found
+            venv_python = self._find_venv_python()
             base_args = [
                 "--mode", "gui",  # Use GUI mode with Tkinter interface
                 "--output-dir", str(self.output_dir),
@@ -115,8 +116,8 @@ class ModuleProcess:
                     "--window-geometry", self.window_geometry.to_geometry_string()
                 ])
 
-            if uv_path:
-                cmd = [uv_path, "run", str(self.module_info.entry_point)] + base_args
+            if venv_python:
+                cmd = [venv_python, str(self.module_info.entry_point)] + base_args
             else:
                 cmd = [sys.executable, str(self.module_info.entry_point)] + base_args
 
@@ -158,6 +159,24 @@ class ModuleProcess:
             self.state = ModuleState.ERROR
             self.error_message = str(e)
             return False
+
+    def _find_venv_python(self) -> Optional[str]:
+        """
+        Find the virtual environment's Python executable.
+
+        This ensures we use the venv python which respects pyvenv.cfg settings
+        like include-system-site-packages (needed for libcamera on Raspberry Pi).
+
+        Returns:
+            Path to venv python if found, None otherwise
+        """
+        # Try .venv in project root
+        project_root = self.module_info.directory.parent.parent
+        venv_python = project_root / ".venv" / "bin" / "python"
+        if venv_python.exists():
+            return str(venv_python)
+
+        return None
 
     def _find_uv(self) -> Optional[str]:
         """Find uv executable."""

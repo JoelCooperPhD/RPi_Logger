@@ -246,6 +246,20 @@ async def main(argv: Optional[list[str]] = None) -> None:
     # Note: C library output (libcamera, Qt) always goes to log file only
     configure_logging(args.log_level, str(log_file), console_output=args.console_output)
 
+    # Install global exception hooks to catch and log any unhandled exceptions
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        """Global exception handler to log uncaught exceptions."""
+        if issubclass(exc_type, KeyboardInterrupt):
+            # Call default handler for KeyboardInterrupt
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.critical(
+            "Uncaught exception",
+            exc_info=(exc_type, exc_value, exc_traceback)
+        )
+
+    sys.excepthook = handle_exception
+
     # Store session_dir and stdout streams in args so CameraSystem can use them
     args.session_dir = session_dir
     args.console_stdout = original_stdout  # For console messages
@@ -268,6 +282,18 @@ async def main(argv: Optional[list[str]] = None) -> None:
     supervisor = CameraSupervisor(args)
     loop = asyncio.get_running_loop()
 
+    # Install asyncio exception handler
+    def handle_asyncio_exception(loop, context):
+        """Handle exceptions from asyncio tasks."""
+        exception = context.get('exception')
+        message = context.get('message', 'Unhandled asyncio exception')
+        if exception:
+            logger.exception(f"Asyncio exception: {message}", exc_info=exception)
+        else:
+            logger.error(f"Asyncio error: {message}, context: {context}")
+
+    loop.set_exception_handler(handle_asyncio_exception)
+
     # Signal handler that properly schedules shutdown task
     def signal_handler():
         """Handle shutdown signals by scheduling shutdown task."""
@@ -280,6 +306,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     try:
         await supervisor.run()
+    except Exception as e:
+        logger.exception("Unhandled exception in main: %s", e)
+        raise  # Re-raise to preserve exit code
     finally:
         await supervisor.shutdown()
         logger.info("=" * 60)

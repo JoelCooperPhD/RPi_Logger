@@ -25,8 +25,7 @@ class CommandHandler(BaseCommandHandler):
             audio_system: Audio system instance to control
             gui: Optional reference to GUI window (for get_geometry)
         """
-        super().__init__(audio_system)
-        self.gui = gui
+        super().__init__(audio_system, gui=gui)
 
     async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
         """Handle start_recording command."""
@@ -67,34 +66,6 @@ class CommandHandler(BaseCommandHandler):
         }
         StatusMessage.send("status_report", status_data)
         self.logger.debug("Status report sent")
-
-    async def handle_get_geometry(self, command_data: Dict[str, Any]) -> None:
-        """Handle get_geometry command - report current window geometry to parent."""
-        if self.gui and hasattr(self.gui, 'window') and self.gui.window:
-            try:
-                # Get current window geometry
-                geometry_str = self.gui.window.geometry()  # Returns "WIDTHxHEIGHT+X+Y"
-                parts = geometry_str.replace('+', 'x').replace('-', 'x-').split('x')
-                if len(parts) >= 4:
-                    width = int(parts[0])
-                    height = int(parts[1])
-                    x = int(parts[2])
-                    y = int(parts[3])
-                    StatusMessage.send("geometry_changed", {
-                        "width": width,
-                        "height": height,
-                        "x": x,
-                        "y": y
-                    })
-                    self.logger.debug("Sent geometry to parent: %dx%d+%d+%d", width, height, x, y)
-                else:
-                    StatusMessage.send("error", {"message": "Failed to parse window geometry"})
-            except Exception as e:
-                StatusMessage.send("error", {"message": f"Failed to get geometry: {str(e)}"})
-                self.logger.error("Failed to get geometry: %s", e)
-        else:
-            # No GUI available - send a warning but don't fail
-            self.logger.debug("No GUI available for get_geometry command")
 
     async def handle_custom_command(self, command: str, command_data: Dict[str, Any]) -> bool:
         """Handle audio-specific custom commands."""

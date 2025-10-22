@@ -8,6 +8,7 @@ Matches the layout and structure of the cameras module GUI.
 
 import asyncio
 import logging
+import re
 import subprocess
 import sys
 import tkinter as tk
@@ -119,6 +120,25 @@ class GUIMode(BaseMode):
         self.level_meters: Dict[int, AudioLevelMeter] = {}
         self.audio_processes: Dict[int, asyncio.subprocess.Process] = {}
         self.audio_sample_rate = 8000  # Capture at 8kHz for visualization
+
+        # Background task tracking for error monitoring
+        self.background_tasks: List[asyncio.Task] = []
+
+    def _task_done_callback(self, task: asyncio.Task) -> None:
+        """
+        Callback for background tasks to log exceptions.
+
+        Args:
+            task: Completed asyncio task
+        """
+        try:
+            # This will raise if the task failed with an exception
+            task.result()
+        except asyncio.CancelledError:
+            # Normal cancellation, don't log
+            pass
+        except Exception as e:
+            self.logger.exception("Background task failed: %s", e)
 
     def _create_window(self):
         """Create and configure the main tkinter window."""
@@ -615,16 +635,13 @@ class GUIMode(BaseMode):
         except Exception:
             pass
 
-        # Set shutdown flags
+        # Set shutdown flags - the async cleanup in run() will handle destruction
         self.system.running = False
         self.system.shutdown_event.set()
 
-        # Quit tkinter
-        if self.window:
-            try:
-                self.window.quit()
-            except Exception as e:
-                self.logger.debug("Error quitting tkinter: %s", e)
+        # Note: Don't call window.quit() here - we're using async update() pattern
+        # not mainloop(), so quit() doesn't work properly. The finally block
+        # in run() will handle proper window destruction.
 
     def _toggle_meter_visibility(self):
         """Toggle level meters visibility."""
@@ -705,12 +722,33 @@ class GUIMode(BaseMode):
         if device_id in self.audio_processes:
             return
 
+        # Get device info to extract ALSA device name
+        device_info = self.system.available_devices.get(device_id)
+        if not device_info:
+            self.logger.error("Device %d not found in available devices", device_id)
+            return
+
+        # Extract ALSA device name from device name
+        # Device names look like "USB Microphoner: Audio (hw:2,0)"
+        # We need to extract "hw:2,0" from the parentheses
+        device_name = device_info['name']
+        alsa_match = re.search(r'\(([^)]+)\)$', device_name)
+        if alsa_match:
+            alsa_device = alsa_match.group(1)
+        else:
+            # Fallback: try using the device_id directly (might not work)
+            alsa_device = f'hw:{device_id}'
+            self.logger.warning(
+                "Could not extract ALSA device from name '%s', using fallback '%s'",
+                device_name, alsa_device
+            )
+
         try:
             # Start arecord to capture audio data
             # Use a lower sample rate for visualization (8kHz is plenty for level meter)
             cmd = [
                 'arecord',
-                '-D', f'hw:{device_id}',
+                '-D', alsa_device,
                 '-f', 'S16_LE',
                 '-r', '8000',
                 '-c', '1',
@@ -721,16 +759,44 @@ class GUIMode(BaseMode):
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL
+                stderr=asyncio.subprocess.PIPE  # Capture errors for logging
             )
             self.audio_processes[device_id] = process
-            self.logger.info("Started audio capture for device %d", device_id)
 
-            # Start capture loop for this device
-            asyncio.create_task(self._audio_capture_loop_for_device(device_id))
+            # Give the process a moment to start and verify it's running
+            await asyncio.sleep(0.1)
+
+            # Check if process failed immediately
+            if process.returncode is not None:
+                # Process failed to start
+                try:
+                    stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=0.5)
+                    error_msg = stderr_data.decode().strip() if stderr_data else "Unknown error"
+                    self.logger.error(
+                        "arecord failed to start for device %d (exit code %d): %s",
+                        device_id, process.returncode, error_msg
+                    )
+                except Exception:
+                    self.logger.error(
+                        "arecord failed to start for device %d (exit code %d)",
+                        device_id, process.returncode
+                    )
+                # Remove from tracking
+                del self.audio_processes[device_id]
+                return
+
+            self.logger.info("Started audio capture for device %d (pid: %s)", device_id, process.pid)
+
+            # Start capture loop for this device with exception tracking
+            task = asyncio.create_task(self._audio_capture_loop_for_device(device_id))
+            task.add_done_callback(self._task_done_callback)
+            self.background_tasks.append(task)
 
         except Exception as e:
             self.logger.error("Failed to start audio capture for device %d: %s", device_id, e)
+            # Clean up if process was added
+            if device_id in self.audio_processes:
+                del self.audio_processes[device_id]
 
     async def _stop_audio_capture_for_device(self, device_id: int):
         """Stop capturing audio for a specific device.
@@ -774,7 +840,17 @@ class GUIMode(BaseMode):
             chunk_samples = int(self.audio_sample_rate * chunk_duration)
             chunk_bytes = chunk_samples * 2
 
-            data = await process.stdout.read(chunk_bytes)
+            # Add timeout to prevent blocking during shutdown
+            # Give it 2x the chunk duration plus some margin (300ms)
+            try:
+                data = await asyncio.wait_for(
+                    process.stdout.read(chunk_bytes),
+                    timeout=0.3
+                )
+            except asyncio.TimeoutError:
+                # Timeout during read - likely shutting down or process stalled
+                self.logger.debug("Audio read timeout for device %d", device_id)
+                return
 
             if data and device_id in self.level_meters:
                 # Get current timestamp
@@ -790,7 +866,7 @@ class GUIMode(BaseMode):
                 self.level_meters[device_id].add_samples(normalized, timestamp)
 
         except Exception as e:
-            self.logger.error("Error reading audio data for device %d: %s", device_id, e)
+            self.logger.debug("Error reading audio data for device %d: %s", device_id, e)
 
     async def _audio_capture_loop_for_device(self, device_id: int):
         """Audio capture loop for a specific device - reads audio data continuously.
@@ -805,6 +881,24 @@ class GUIMode(BaseMode):
             except Exception as e:
                 self.logger.error("Audio capture loop error for device %d: %s", device_id, e)
                 await asyncio.sleep(0.1)
+
+        # Check if process failed and log stderr
+        if device_id in self.audio_processes:
+            process = self.audio_processes[device_id]
+            if process.returncode and process.returncode != 0:
+                try:
+                    stderr_data = await asyncio.wait_for(process.stderr.read(), timeout=0.5)
+                    if stderr_data:
+                        self.logger.error(
+                            "arecord error for device %d (exit code %d): %s",
+                            device_id,
+                            process.returncode,
+                            stderr_data.decode().strip()
+                        )
+                except asyncio.TimeoutError:
+                    self.logger.error("arecord failed for device %d (exit code %d)", device_id, process.returncode)
+                except Exception as e:
+                    self.logger.debug("Error reading stderr for device %d: %s", device_id, e)
 
     async def _display_update_loop(self):
         """Display update loop - refreshes all level meters at lower frequency."""
@@ -1106,7 +1200,18 @@ class GUIMode(BaseMode):
             if self.command_task:
                 tasks.append(self.command_task)
 
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Log any exceptions from tasks
+            task_names = ['GUI', 'Update Loop', 'Display Loop', 'Command Listener']
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    task_name = task_names[i] if i < len(task_names) else f"Task {i}"
+                    self.logger.exception(
+                        "%s task failed with exception: %s",
+                        task_name, result,
+                        exc_info=result
+                    )
 
         finally:
             # Cancel tasks
@@ -1127,11 +1232,23 @@ class GUIMode(BaseMode):
                 pending.append(self.command_task)
 
             if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
+                results = await asyncio.gather(*pending, return_exceptions=True)
+                # Log unexpected exceptions (CancelledError is expected here)
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+                        self.logger.exception(
+                            "Task cleanup failed with exception: %s",
+                            result,
+                            exc_info=result
+                        )
 
-            # Stop all audio capture processes
-            for device_id in list(self.audio_processes.keys()):
-                await self._stop_audio_capture_for_device(device_id)
+            # Stop all audio capture processes in parallel for faster shutdown
+            if self.audio_processes:
+                stop_tasks = [
+                    self._stop_audio_capture_for_device(device_id)
+                    for device_id in list(self.audio_processes.keys())
+                ]
+                await asyncio.gather(*stop_tasks, return_exceptions=True)
 
             if self.system.recording:
                 await self.system.stop_recording()
@@ -1139,7 +1256,7 @@ class GUIMode(BaseMode):
             if self.window:
                 try:
                     self.window.destroy()
-                except:
-                    pass
+                except Exception as e:
+                    self.logger.debug("Error destroying window: %s", e)
 
             self.logger.info("GUI mode ended")

@@ -1,72 +1,154 @@
 #!/usr/bin/env python3
 """
-GUI mode - interactive graphical interface with async integration.
+Base GUI Mode - Abstract base class for GUI modes with async integration.
 
-Provides a comprehensive tkinter GUI for camera control while running
-cameras in async background tasks.
-
-Supports two operation modes:
-1. Standalone: User interacts directly with GUI
-2. Parent-controlled: Parent process sends commands via stdin/stdout
+Provides common functionality for:
+- Async tkinter event loop integration
+- Parent process command communication (stdin/stdout)
+- Preview update loops
+- GUI state synchronization
 """
 
 import asyncio
 import logging
 import sys
-from typing import TYPE_CHECKING, Optional
-
-from .base_mode import BaseMode
-from ..interfaces.gui import TkinterGUI
-from ..commands import CommandHandler, CommandMessage, StatusMessage
+from abc import ABC, abstractmethod
+from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..camera_system import CameraSystem
+    import tkinter as tk
+
+from .base_mode import BaseMode
+from logger_core.commands import BaseCommandHandler, CommandMessage, StatusMessage
 
 
-logger = logging.getLogger("GUIMode")
-
-
-class GUIMode(BaseMode):
+class BaseGUIMode(BaseMode, ABC):
     """
-    Tkinter GUI mode with async camera integration.
+    Abstract base class for GUI modes with async tkinter integration.
 
-    Can run standalone or with parent process communication via stdin/stdout.
+    Provides common async patterns for:
+    - Running tkinter GUI in async context
+    - Listening for commands from parent process
+    - Updating preview displays
+    - Synchronizing GUI state with command execution
+
+    Subclasses must implement:
+    - create_gui() - Create and configure GUI window
+    - create_command_handler() - Create command handler instance
+    - Additional hooks for module-specific behavior
     """
 
-    def __init__(self, camera_system: 'CameraSystem', enable_commands: bool = False):
-        super().__init__(camera_system)
-        self.gui: TkinterGUI = None
-        self.preview_task = None
+    def __init__(self, system: Any, enable_commands: bool = False):
+        """
+        Initialize base GUI mode.
+
+        Args:
+            system: Reference to module system instance
+            enable_commands: Enable parent command communication via stdin/stdout
+        """
+        super().__init__(system)
         self.enable_commands = enable_commands
-        self.command_handler = None  # Will be initialized after GUI is created
-        self.command_task = None
+        self.gui: Optional[Any] = None
+        self.command_handler: Optional[BaseCommandHandler] = None
+        self.command_task: Optional[asyncio.Task] = None
+        self.preview_task: Optional[asyncio.Task] = None
+
+    @abstractmethod
+    def create_gui(self) -> Any:
+        """
+        Create and configure GUI window.
+
+        Subclasses must implement this to create their specific GUI.
+
+        Returns:
+            GUI instance (typically with 'root' or 'window' attribute)
+        """
+        pass
+
+    @abstractmethod
+    def create_command_handler(self, gui: Any) -> BaseCommandHandler:
+        """
+        Create command handler instance for this module.
+
+        Args:
+            gui: GUI instance (for get_geometry support)
+
+        Returns:
+            Module-specific command handler
+        """
+        pass
+
+    def get_preview_update_interval(self) -> float:
+        """
+        Get preview update interval in seconds.
+
+        Override to customize preview update frequency.
+        Default: 0.1 seconds (10 Hz)
+
+        Returns:
+            Update interval in seconds
+        """
+        return 0.1
+
+    async def update_preview(self) -> None:
+        """
+        Update preview display(s).
+
+        Override this to implement module-specific preview updates.
+        Called periodically by preview update loop.
+
+        Default implementation does nothing.
+        """
+        pass
+
+    def sync_recording_state(self) -> None:
+        """
+        Synchronize GUI to reflect current recording state.
+
+        Override this to update GUI elements when recording state changes.
+        Called after start_recording and stop_recording commands.
+
+        Default implementation does nothing.
+        """
+        pass
+
+    def get_gui_window(self) -> Optional[Any]:
+        """
+        Get the main tkinter window object.
+
+        Tries to find window via common attribute names (root, window).
+        Override if your GUI uses a different attribute name.
+
+        Returns:
+            Tkinter window object, or None if not found
+        """
+        if self.gui:
+            if hasattr(self.gui, 'root'):
+                return self.gui.root
+            elif hasattr(self.gui, 'window'):
+                return self.gui.window
+        return None
 
     async def run(self) -> None:
-        """Run GUI mode with async camera system."""
-        if not self.system.cameras:
-            self.logger.error("No cameras available for GUI mode")
-            return
+        """
+        Run GUI mode with async system.
 
+        Main entry point for GUI mode operation.
+        Orchestrates GUI creation, command listening, and preview updates.
+        """
         self.system.running = True
 
         # Create GUI
-        self.gui = TkinterGUI(self.system, self.system.args)
+        self.gui = self.create_gui()
 
-        # Create preview canvases after cameras are initialized
-        self.gui.create_preview_canvases()
-
-        # Initialize command handler with GUI reference (needed for get_geometry)
+        # Initialize command handler with GUI reference
         if self.enable_commands:
-            self.command_handler = CommandHandler(self.system, gui=self.gui)
+            self.command_handler = self.create_command_handler(self.gui)
             self.logger.info("Starting GUI mode with parent command support")
         else:
             self.logger.info("Starting GUI mode (standalone)")
 
-        # Auto-start recording if enabled
-        if self.system.auto_start_recording:
-            self.gui._start_recording()
-
-        # Start preview update task
+        # Start preview update task (if module implements it)
         self.preview_task = asyncio.create_task(self._preview_update_loop())
 
         # Start command listener if parent communication enabled
@@ -84,18 +166,7 @@ class GUIMode(BaseMode):
             if self.command_task:
                 tasks.append(self.command_task)
 
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            # Log any exceptions from tasks
-            task_names = ['GUI', 'Preview Loop', 'Command Listener']
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    task_name = task_names[i] if i < len(task_names) else f"Task {i}"
-                    self.logger.exception(
-                        "%s task failed with exception: %s",
-                        task_name, result,
-                        exc_info=result
-                    )
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         finally:
             # Cancel preview task
@@ -114,30 +185,29 @@ class GUIMode(BaseMode):
                 pending.append(self.command_task)
 
             if pending:
-                results = await asyncio.gather(*pending, return_exceptions=True)
-                # Log unexpected exceptions (CancelledError is expected here)
-                for i, result in enumerate(results):
-                    if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
-                        self.logger.exception(
-                            "Task cleanup failed with exception: %s",
-                            result,
-                            exc_info=result
-                        )
+                await asyncio.gather(*pending, return_exceptions=True)
 
-    async def _run_gui_async(self):
+    async def _run_gui_async(self) -> None:
         """
         Run tkinter GUI in async context.
 
-        Uses asyncio-friendly approach to run tkinter mainloop.
+        Uses asyncio-friendly approach to run tkinter mainloop
+        by calling update() periodically instead of blocking mainloop().
         """
-        loop = asyncio.get_event_loop()
+        import tkinter as tk
 
-        # Run tkinter updates in small chunks to allow async operations
+        loop = asyncio.get_event_loop()
+        window = self.get_gui_window()
+
+        if not window:
+            self.logger.error("No GUI window available")
+            return
+
         def update_gui():
             """Update GUI and schedule next update."""
             try:
-                if self.gui.root.winfo_exists():
-                    self.gui.root.update()
+                if window.winfo_exists():
+                    window.update()
                     # Schedule next update
                     if self.system.running:
                         loop.call_later(0.01, update_gui)  # 100 Hz GUI updates
@@ -151,9 +221,8 @@ class GUIMode(BaseMode):
                 self.logger.error("GUI update error: %s", e)
                 self.system.running = False
 
-        # Start GUI update loop
-        import tkinter as tk
         try:
+            # Start GUI update loop
             loop.call_soon(update_gui)
 
             # Wait for shutdown
@@ -163,23 +232,30 @@ class GUIMode(BaseMode):
             # Destroy GUI
             if self.gui:
                 try:
-                    self.gui.destroy()
+                    if hasattr(self.gui, 'destroy'):
+                        self.gui.destroy()
+                    elif window:
+                        window.destroy()
                 except Exception as e:
                     self.logger.debug("Error destroying GUI: %s", e)
 
-    async def _preview_update_loop(self):
+    async def _preview_update_loop(self) -> None:
         """
-        Async loop to update camera preview displays.
+        Async loop to update preview displays.
 
-        Updates at ~10 FPS to reduce GUI overhead.
+        Calls module-specific update_preview() at configured interval.
         """
+        interval = self.get_preview_update_interval()
+        window = self.get_gui_window()
+
         while self.is_running():
             try:
-                # Update previews in GUI (thread-safe via tkinter after())
-                if self.gui and self.gui.root.winfo_exists():
-                    self.gui.root.after(0, self.gui.update_preview_frames)
+                # Update preview via module-specific implementation
+                if window and window.winfo_exists():
+                    # Schedule on main thread via tkinter
+                    window.after(0, lambda: asyncio.create_task(self.update_preview()))
 
-                await asyncio.sleep(0.1)  # 10 Hz preview rate
+                await asyncio.sleep(interval)
             except Exception as e:
                 self.logger.debug("Preview update error: %s", e)
                 break
@@ -248,7 +324,7 @@ class GUIMode(BaseMode):
         """
         Handle command and sync GUI state.
 
-        This wraps the standard command handler and ensures the GUI
+        Wraps the standard command handler and ensures the GUI
         reflects changes made by commands from parent process.
 
         Args:
@@ -257,6 +333,10 @@ class GUIMode(BaseMode):
         Returns:
             True to continue, False to shutdown (quit command received)
         """
+        if not self.command_handler:
+            self.logger.error("No command handler available")
+            return True
+
         cmd = command_data.get("command")
 
         # Execute command via standard handler (returns False for quit command)
@@ -266,44 +346,11 @@ class GUIMode(BaseMode):
             # Quit command received - trigger shutdown
             return False
 
-        # Sync GUI state after command execution (thread-safe via root.after)
-        if self.gui and self.gui.root.winfo_exists():
-            if cmd == "start_recording":
-                # Ensure GUI reflects recording state
-                self.gui.root.after(0, self._sync_gui_recording_state)
-            elif cmd == "stop_recording":
-                # Ensure GUI reflects stopped state
-                self.gui.root.after(0, self._sync_gui_recording_state)
+        # Sync GUI state after command execution (thread-safe via window.after)
+        window = self.get_gui_window()
+        if window and window.winfo_exists():
+            if cmd in ("start_recording", "stop_recording"):
+                # Ensure GUI reflects recording state changes
+                window.after(0, self.sync_recording_state)
 
         return True
-
-    def _sync_gui_recording_state(self):
-        """
-        Sync GUI to reflect current recording state.
-
-        Called from command handler to update GUI when parent
-        sends start/stop commands.
-        """
-        if not self.gui:
-            return
-
-        if self.system.recording:
-            # Update window title to show recording
-            self.gui.root.title(f"Camera System - ⬤ RECORDING - Session: {self.system.session_label}")
-
-            # Disable camera toggles during recording (safety)
-            for i in range(len(self.system.cameras)):
-                try:
-                    self.gui.view_menu.entryconfig(f"Camera {i}", state='disabled')
-                except Exception:
-                    pass
-        else:
-            # Update window title to default
-            self.gui.root.title("Camera System")
-
-            # Re-enable camera toggles after recording
-            for i in range(len(self.system.cameras)):
-                try:
-                    self.gui.view_menu.entryconfig(f"Camera {i}", state='normal')
-                except Exception:
-                    pass

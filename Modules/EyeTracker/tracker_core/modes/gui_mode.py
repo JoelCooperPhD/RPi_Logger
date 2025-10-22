@@ -103,7 +103,15 @@ class GUIMode(BaseMode):
                 tasks_to_wait.append(self.command_task)
 
             if tasks_to_wait:
-                await asyncio.gather(*tasks_to_wait, return_exceptions=True)
+                results = await asyncio.gather(*tasks_to_wait, return_exceptions=True)
+                # Log unexpected exceptions (CancelledError is expected here)
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+                        self.logger.exception(
+                            "Task cleanup failed with exception: %s",
+                            result,
+                            exc_info=result
+                        )
 
     async def _auto_start_recording(self):
         """Auto-start recording after streams are ready."""

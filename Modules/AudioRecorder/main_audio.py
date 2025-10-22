@@ -56,6 +56,12 @@ def parse_args(argv: Optional[list[str]] = None):
     default_discovery_timeout = get_config_float(config, 'discovery_timeout', 5.0)
     default_discovery_retry = get_config_float(config, 'discovery_retry', 3.0)
 
+    # Window geometry defaults (for GUI mode)
+    default_window_x = get_config_int(config, 'window_x', None)
+    default_window_y = get_config_int(config, 'window_y', None)
+    default_window_width = get_config_int(config, 'window_width', None)
+    default_window_height = get_config_int(config, 'window_height', None)
+
     parser = argparse.ArgumentParser(description="Multi-microphone audio recorder")
     add_common_cli_arguments(
         parser,
@@ -165,6 +171,13 @@ def parse_args(argv: Optional[list[str]] = None):
 
     args = parser.parse_args(argv)
 
+    # Apply window geometry from config if not provided via --window-geometry
+    # and if all geometry values are present in config
+    if not args.window_geometry:
+        if all(v is not None for v in [default_window_x, default_window_y,
+                                       default_window_width, default_window_height]):
+            args.window_geometry = f"{default_window_width}x{default_window_height}+{default_window_x}+{default_window_y}"
+
     return args
 
 
@@ -194,6 +207,20 @@ async def main(argv: Optional[list[str]] = None) -> None:
     # If console_output is True, Python logging will ALSO write to console (via StreamHandler)
     configure_logging(args.log_level, str(log_file), console_output=args.console_output)
 
+    # Install global exception hooks to catch and log any unhandled exceptions
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        """Global exception handler to log uncaught exceptions."""
+        if issubclass(exc_type, KeyboardInterrupt):
+            # Call default handler for KeyboardInterrupt
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.critical(
+            "Uncaught exception",
+            exc_info=(exc_type, exc_value, exc_traceback)
+        )
+
+    sys.excepthook = handle_exception
+
     # Store session_dir and stdout streams in args so AudioSystem can use them
     args.session_dir = session_dir
     args.console_stdout = original_stdout  # For console messages
@@ -216,6 +243,18 @@ async def main(argv: Optional[list[str]] = None) -> None:
     supervisor = AudioSupervisor(args)
     loop = asyncio.get_running_loop()
 
+    # Install asyncio exception handler
+    def handle_asyncio_exception(loop, context):
+        """Handle exceptions from asyncio tasks."""
+        exception = context.get('exception')
+        message = context.get('message', 'Unhandled asyncio exception')
+        if exception:
+            logger.exception(f"Asyncio exception: {message}", exc_info=exception)
+        else:
+            logger.error(f"Asyncio error: {message}, context: {context}")
+
+    loop.set_exception_handler(handle_asyncio_exception)
+
     # Track shutdown state to prevent race conditions
     shutdown_in_progress = False
 
@@ -233,6 +272,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     try:
         await supervisor.run()
+    except Exception as e:
+        logger.exception("Unhandled exception in main: %s", e)
+        raise  # Re-raise to preserve exit code
     finally:
         # Only shutdown if not already shutting down
         if not supervisor.shutdown_event.is_set():
