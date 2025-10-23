@@ -19,9 +19,8 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def __init__(self, notes_system: 'NotesSystem', args):
         self.system = notes_system
         self.args = args
-        self.root = tk.Tk()
-        self.root.title("NoteTaker")
 
+        # Initialize module-specific attributes before GUI framework
         self.status_label: Optional[tk.Label] = None
         self.elapsed_time_label: Optional[tk.Label] = None
         self.note_count_label: Optional[tk.Label] = None
@@ -29,20 +28,21 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.note_entry: Optional[tk.Text] = None
         self.add_note_button: Optional[tk.Button] = None
         self.note_history: Optional[scrolledtext.ScrolledText] = None
-
         self.note_history_visible_var: Optional[tk.BooleanVar] = None
 
-        self.initialize_window_geometry(600, 500)
+        # Use template method for GUI initialization
+        self.initialize_gui_framework(
+            title="NoteTaker",
+            default_width=600,
+            default_height=500,
+            menu_bar_kwargs={'include_sources': False}  # No Sources menu needed
+        )
 
-        self.create_menu_bar(include_sources=False)  # From TkinterMenuBase (no Sources menu needed)
-        self._create_widgets()
-
-
+        # Setup keyboard shortcuts after widgets are created
         self._setup_keyboard_shortcuts()
 
-        logger.info("NoteTaker GUI initialized")
-
     def set_close_handler(self, handler):
+        """Allow external code to override the window close handler"""
         self.root.protocol("WM_DELETE_WINDOW", handler)
 
     def populate_module_menus(self):

@@ -147,6 +147,15 @@ class BaseCommandHandler(ABC):
         return False  # Not handled
 
     def _check_recording_state(self, should_be_recording: bool) -> bool:
+        """
+        Check if the system is in the expected recording state.
+
+        Args:
+            should_be_recording: True if system should be recording, False otherwise
+
+        Returns:
+            True if state matches expectation, False otherwise (and sends error status)
+        """
         is_recording = getattr(self.system, 'recording', False)
 
         if should_be_recording and not is_recording:
@@ -157,3 +166,61 @@ class BaseCommandHandler(ABC):
             return False
 
         return True
+
+    async def _handle_recording_action(
+        self,
+        action: str,
+        callback: Any,
+        extra_data: Optional[Dict[str, Any]] = None,
+        is_async: bool = True
+    ) -> None:
+        """
+        Standardized handler for recording start/stop actions.
+
+        This method encapsulates the common pattern:
+        1. Check recording state
+        2. Execute the action callback
+        3. Send success/error status message
+
+        Args:
+            action: 'start' or 'stop' (used for status messages)
+            callback: The function/method to call for the action
+            extra_data: Optional additional data to include in success status
+            is_async: True if callback is async, False if sync
+
+        Example usage in subclass:
+            async def handle_start_recording(self, command_data):
+                await self._handle_recording_action(
+                    'start',
+                    lambda: self.system.start_recording(),
+                    extra_data={'cameras': len(self.system.cameras)}
+                )
+        """
+        # Determine expected state based on action
+        should_be_recording = (action == 'stop')
+
+        if not self._check_recording_state(should_be_recording):
+            return
+
+        try:
+            # Execute the callback
+            if is_async:
+                result = await callback()
+            else:
+                result = callback()
+
+            # Send success status
+            status_name = f"recording_{action}ed"
+            data = extra_data.copy() if extra_data else {}
+
+            # Include result in data if it's a dict
+            if isinstance(result, dict):
+                data.update(result)
+
+            StatusMessage.send(status_name, data)
+            self.logger.info("Recording %s successfully", action)
+
+        except Exception as e:
+            error_msg = f"Failed to {action} recording: {str(e)}"
+            StatusMessage.send("error", {"message": error_msg})
+            self.logger.error(error_msg, exc_info=True)

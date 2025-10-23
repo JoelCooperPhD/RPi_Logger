@@ -3,13 +3,13 @@ from typing import Type
 
 from Modules.base import BaseSupervisor
 from .tracker_system import TrackerSystem, TrackerInitializationError
-from .constants import DEVICE_DISCOVERY_RETRY
+from .constants import DEVICE_DISCOVERY_RETRY_SECONDS
 
 
 class TrackerSupervisor(BaseSupervisor[TrackerSystem, TrackerInitializationError]):
 
     def __init__(self, args):
-        super().__init__(args, default_retry_interval=DEVICE_DISCOVERY_RETRY)
+        super().__init__(args, default_retry_interval=DEVICE_DISCOVERY_RETRY_SECONDS)
 
     def create_system(self) -> TrackerSystem:
         return TrackerSystem(self.args)

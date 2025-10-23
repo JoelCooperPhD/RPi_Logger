@@ -46,7 +46,10 @@ class BaseGUIMode(BaseMode, ABC):
             return
 
         try:
+            # Check multiple recording state attributes for compatibility
             is_recording = getattr(self.system, 'recording', False)
+            if not is_recording and hasattr(self.system, 'recording_manager'):
+                is_recording = getattr(self.system.recording_manager, 'is_recording', False)
 
             module_name = self.get_module_display_name()
 
@@ -61,8 +64,23 @@ class BaseGUIMode(BaseMode, ABC):
 
             window.title(title)
 
+            # Call hook for module-specific UI updates
+            self._on_recording_state_changed(is_recording)
+
         except Exception as e:
             self.logger.debug("Error updating window title: %s", e)
+
+    def _on_recording_state_changed(self, is_recording: bool) -> None:
+        """
+        Hook method for module-specific UI updates when recording state changes.
+
+        Override this method in subclasses to add custom UI behavior during
+        recording state transitions (e.g., disabling menu items, changing colors).
+
+        Args:
+            is_recording: True if currently recording, False otherwise
+        """
+        pass
 
     def get_module_display_name(self) -> str:
         system_name = self.system.__class__.__name__

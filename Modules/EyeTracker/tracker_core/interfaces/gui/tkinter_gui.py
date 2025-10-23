@@ -20,21 +20,18 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def __init__(self, tracker_system: 'TrackerSystem', args):
         self.system = tracker_system
         self.args = args
-        self.root = tk.Tk()
-        self.root.title("Eye Tracker")
 
-        self.initialize_window_geometry(800, 600)
-
+        # Initialize module-specific attributes before GUI framework
         self.preview_canvas: Optional[tk.Canvas] = None
         self.preview_image_ref = None  # Keep reference to prevent GC
 
-        self.create_menu_bar(include_sources=False)  # From TkinterMenuBase (no Sources menu needed)
-        self._create_widgets()
-
-
-        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
-
-        logger.info("GUI initialized")
+        # Use template method for GUI initialization
+        self.initialize_gui_framework(
+            title="Eye Tracker",
+            default_width=800,
+            default_height=600,
+            menu_bar_kwargs={'include_sources': False}  # No Sources menu needed
+        )
 
     def populate_module_menus(self):
         self.add_recording_action("📷 Snapshot", self._take_snapshot, separator_before=True)
