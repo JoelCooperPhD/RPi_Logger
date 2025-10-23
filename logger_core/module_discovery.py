@@ -1,4 +1,5 @@
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -34,6 +35,11 @@ def extract_module_name_from_entry(entry_point: Path) -> Optional[str]:
     return title_case
 
 
+async def validate_module_structure_async(module_dir: Path, entry_point: Path) -> bool:
+    """Async version of validate_module_structure."""
+    return await asyncio.to_thread(validate_module_structure, module_dir, entry_point)
+
+
 def validate_module_structure(module_dir: Path, entry_point: Path) -> bool:
     if not entry_point.is_file():
         logger.warning("Entry point not found: %s", entry_point)
@@ -57,6 +63,11 @@ def validate_module_structure(module_dir: Path, entry_point: Path) -> bool:
     return True
 
 
+async def load_module_config_async(module_dir: Path) -> Optional[dict]:
+    """Async version of load_module_config."""
+    return await asyncio.to_thread(load_module_config, module_dir)
+
+
 def load_module_config(module_dir: Path) -> Optional[dict]:
     config_path = module_dir / "config.txt"
     if not config_path.exists():
@@ -77,6 +88,11 @@ def load_module_config(module_dir: Path) -> Optional[dict]:
         return None
 
     return config
+
+
+async def discover_modules_async(modules_dir: Path = None) -> List[ModuleInfo]:
+    """Async version of discover_modules."""
+    return await asyncio.to_thread(discover_modules, modules_dir)
 
 
 def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
