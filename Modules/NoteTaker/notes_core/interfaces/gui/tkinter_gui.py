@@ -157,10 +157,13 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             logger.warning("Cannot add empty note")
             return
 
-        if self.system.add_note(note_text):
+        asyncio.create_task(self._add_note_async(note_text))
+
+    async def _add_note_async(self, note_text: str):
+        if await self.system.add_note(note_text):
             self.note_entry.delete("1.0", tk.END)
 
-            self._refresh_note_history()
+            await self._refresh_note_history()
 
             self._update_note_count()
 
@@ -168,11 +171,11 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         else:
             logger.error("Failed to add note")
 
-    def _refresh_note_history(self):
+    async def _refresh_note_history(self):
         if not self.note_history or not self.system.notes_handler:
             return
 
-        notes = self.system.notes_handler.get_all_notes()
+        notes = await self.system.notes_handler.get_all_notes()
 
         self.note_history.config(state=tk.NORMAL)
         self.note_history.delete("1.0", tk.END)
