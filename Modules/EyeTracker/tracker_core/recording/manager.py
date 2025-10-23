@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Any, TextIO
 
+import aiofiles
 import cv2
 import numpy as np
 
@@ -49,7 +50,7 @@ class RecordingManager:
     def __init__(self, config: Config, *, use_ffmpeg: bool = True):
         self.config = config
         self.recording = False
-        self.ffmpeg_process: Optional[subprocess.Popen] = None
+        self.ffmpeg_process: Optional[asyncio.subprocess.Process] = None
         self.recording_filename: Optional[str] = None
         self.gaze_filename: Optional[str] = None
         self.frame_timing_filename: Optional[str] = None
@@ -141,10 +142,10 @@ class RecordingManager:
                     self.recording_filename,
                 ]
 
-                self.ffmpeg_process = subprocess.Popen(
-                    ffmpeg_cmd,
-                    stdin=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
+                self.ffmpeg_process = await asyncio.create_subprocess_exec(
+                    *ffmpeg_cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
                 )
             else:
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -157,22 +158,29 @@ class RecordingManager:
                 if not self._opencv_writer.isOpened():
                     raise RuntimeError("Failed to start OpenCV video writer")
 
-            self._gaze_file = open(self.gaze_filename, "w", encoding="utf-8")
-            self._gaze_file.write("timestamp,x,y,worn\n")
-            self._frame_timing_file = open(self.frame_timing_filename, "w", encoding="utf-8")
-            self._frame_timing_file.write(
+            # Open and initialize CSV files using asyncio.to_thread to avoid blocking
+            self._gaze_file = await asyncio.to_thread(open, self.gaze_filename, "w", encoding="utf-8")
+            await asyncio.to_thread(self._gaze_file.write, "timestamp,x,y,worn\n")
+
+            self._frame_timing_file = await asyncio.to_thread(open, self.frame_timing_filename, "w", encoding="utf-8")
+            await asyncio.to_thread(
+                self._frame_timing_file.write,
                 "frame_number,write_time_unix,write_time_iso,expected_delta,actual_delta,delta_error,"
                 "queue_delay,capture_latency,write_duration,queue_backlog_after,camera_frame_index,"
                 "display_frame_index,camera_timestamp_unix,camera_timestamp_diff,gaze_timestamp_unix,"
                 "gaze_timestamp_diff,available_camera_fps,dropped_frames_total,duplicates_total,is_duplicate\n"
             )
-            self._imu_file = open(self.imu_filename, "w", encoding="utf-8")
-            self._imu_file.write(
+
+            self._imu_file = await asyncio.to_thread(open, self.imu_filename, "w", encoding="utf-8")
+            await asyncio.to_thread(
+                self._imu_file.write,
                 "timestamp,timestamp_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,"
                 "quat_w,quat_x,quat_y,quat_z,temperature\n"
             )
-            self._event_file = open(self.events_filename, "w", encoding="utf-8")
-            self._event_file.write(
+
+            self._event_file = await asyncio.to_thread(open, self.events_filename, "w", encoding="utf-8")
+            await asyncio.to_thread(
+                self._event_file.write,
                 "timestamp,timestamp_ns,event_type,event_subtype,confidence,duration,payload\n"
             )
 
@@ -299,7 +307,10 @@ class RecordingManager:
         if self.ffmpeg_process:
             try:
                 self.ffmpeg_process.stdin.close()
-                self.ffmpeg_process.wait(timeout=5)
+                await asyncio.wait_for(self.ffmpeg_process.wait(), timeout=5)
+            except asyncio.TimeoutError:  # pragma: no cover - defensive
+                self.ffmpeg_process.terminate()
+                await asyncio.wait_for(self.ffmpeg_process.wait(), timeout=2)
             except Exception:  # pragma: no cover - defensive
                 self.ffmpeg_process.terminate()
             finally:
@@ -359,31 +370,31 @@ class RecordingManager:
 
         if self._gaze_file:
             try:
-                self._gaze_file.flush()
+                await asyncio.to_thread(self._gaze_file.flush)
             finally:
-                self._gaze_file.close()
+                await asyncio.to_thread(self._gaze_file.close)
                 self._gaze_file = None
             logger.info("Gaze data saved: %s", self.gaze_filename)
 
         if self._frame_timing_file:
-            self._frame_timing_file.flush()
-            self._frame_timing_file.close()
+            await asyncio.to_thread(self._frame_timing_file.flush)
+            await asyncio.to_thread(self._frame_timing_file.close)
             self._frame_timing_file = None
             logger.info("Frame timing saved: %s", self.frame_timing_filename)
 
         if self._imu_file:
             try:
-                self._imu_file.flush()
+                await asyncio.to_thread(self._imu_file.flush)
             finally:
-                self._imu_file.close()
+                await asyncio.to_thread(self._imu_file.close)
                 self._imu_file = None
             logger.info("IMU data saved: %s", self.imu_filename)
 
         if self._event_file:
             try:
-                self._event_file.flush()
+                await asyncio.to_thread(self._event_file.flush)
             finally:
-                self._event_file.close()
+                await asyncio.to_thread(self._event_file.close)
                 self._event_file = None
             logger.info("Eye events saved: %s", self.events_filename)
 
@@ -606,7 +617,7 @@ class RecordingManager:
                 self._write_frame_impl(queued.frame)
 
             write_end_monotonic = time.perf_counter()
-            self._log_frame_timing(queued, write_time_unix, write_start_monotonic, write_end_monotonic, backlog_after)
+            await self._log_frame_timing(queued, write_time_unix, write_start_monotonic, write_end_monotonic, backlog_after)
 
     def _write_frame_impl(self, frame: np.ndarray) -> None:
         w, h = self.config.resolution
@@ -616,7 +627,7 @@ class RecordingManager:
         frame_data = np.ascontiguousarray(frame)
 
         if self.use_ffmpeg:
-            if not self.ffmpeg_process or self.ffmpeg_process.poll() is not None:
+            if not self.ffmpeg_process or self.ffmpeg_process.returncode is not None:
                 return
             try:
                 self.ffmpeg_process.stdin.write(frame_data.tobytes())
@@ -758,7 +769,7 @@ class RecordingManager:
             if not is_duplicate:
                 self._latest_frame = None
 
-    def _log_frame_timing(
+    async def _log_frame_timing(
         self,
         queued: _QueuedFrame,
         write_time_unix: float,
@@ -815,5 +826,6 @@ class RecordingManager:
             f"{1 if queued.metadata.is_duplicate else 0}\n"
         )
 
-        self._frame_timing_file.write(row)
-        self._frame_timing_file.flush()
+        # Offload blocking file I/O to thread pool
+        await asyncio.to_thread(self._frame_timing_file.write, row)
+        await asyncio.to_thread(self._frame_timing_file.flush)
