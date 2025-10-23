@@ -21,29 +21,25 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def __init__(self, audio_system: 'AudioSystem', args):
         self.system = audio_system
         self.args = args
-        self.root = tk.Tk()
-        self.root.title("Audio System")
 
+        # Initialize module-specific attributes before GUI framework
         self.meter_container: Optional[ttk.Frame] = None
         self.level_canvases: Dict[int, tk.Canvas] = {}  # One canvas per device
         self.log_text: Optional[scrolledtext.ScrolledText] = None
         self.log_handler = None
-
         self.device_active_vars: Dict[int, tk.BooleanVar] = {}
-
         self.level_meters: Dict[int, AudioLevelMeter] = {}
-
         self.recording_start_time: Optional[datetime] = None
 
-        self.initialize_window_geometry(600, 400)
-
-        self.create_menu_bar()  # From TkinterMenuBase
-        self._create_widgets()
-
-
-        logger.info("Audio GUI initialized")
+        # Use template method for GUI initialization
+        self.initialize_gui_framework(
+            title="Audio System",
+            default_width=600,
+            default_height=400
+        )
 
     def set_close_handler(self, handler):
+        """Allow external code to override the window close handler"""
         self.root.protocol("WM_DELETE_WINDOW", handler)
 
     def populate_module_menus(self):

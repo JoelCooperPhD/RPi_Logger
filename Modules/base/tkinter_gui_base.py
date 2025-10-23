@@ -1,7 +1,7 @@
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     import tkinter as tk
@@ -15,6 +15,66 @@ class TkinterGUIBase:
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
         return self.root.geometry()
+
+    def initialize_gui_framework(
+        self,
+        title: str,
+        default_width: int,
+        default_height: int,
+        on_closing_callback: Optional[callable] = None,
+        menu_bar_kwargs: Optional[dict] = None
+    ):
+        """
+        Template method for GUI initialization.
+
+        Consolidates common initialization pattern across all modules:
+        1. Create Tk root window
+        2. Set window title
+        3. Initialize window geometry
+        4. Create menu bar (if TkinterMenuBase is mixed in)
+        5. Create widgets (calls _create_widgets() - subclass implements)
+        6. Set window close protocol
+
+        Args:
+            title: Window title
+            default_width: Default window width in pixels
+            default_height: Default window height in pixels
+            on_closing_callback: Callback for window close event (defaults to _on_closing)
+            menu_bar_kwargs: Optional kwargs to pass to create_menu_bar()
+        """
+        import tkinter as tk
+
+        if not hasattr(self, 'args'):
+            raise AttributeError("GUI requires 'self.args' attribute to be set before calling initialize_gui_framework()")
+
+        # Step 1: Create root window
+        self.root = tk.Tk()
+
+        # Step 2: Set window title
+        self.root.title(title)
+
+        # Step 3: Initialize window geometry
+        self.initialize_window_geometry(default_width, default_height)
+
+        # Step 4: Create menu bar (if available from TkinterMenuBase)
+        if hasattr(self, 'create_menu_bar'):
+            kwargs = menu_bar_kwargs or {}
+            self.create_menu_bar(**kwargs)
+
+        # Step 5: Create module-specific widgets (subclass implements this)
+        if hasattr(self, '_create_widgets'):
+            self._create_widgets()
+        else:
+            logger.warning("GUI subclass should implement _create_widgets() method")
+
+        # Step 6: Set window close protocol
+        callback = on_closing_callback or (self._on_closing if hasattr(self, '_on_closing') else None)
+        if callback:
+            self.root.protocol("WM_DELETE_WINDOW", callback)
+        else:
+            logger.warning("No window close callback provided")
+
+        logger.info("GUI framework initialized: %s", title)
 
     def initialize_window_geometry(self, default_width: int, default_height: int):
         if not hasattr(self, 'root'):

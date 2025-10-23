@@ -38,9 +38,6 @@ class GUIMode(BaseGUIMode):
         if self.gui and self.gui.root.winfo_exists():
             self.gui.update_preview_frames()
 
-    def sync_recording_state(self) -> None:
-        self._sync_gui_recording_state()
-
     async def on_devices_connected(self) -> None:
         if self.gui and self.gui.root.winfo_exists():
             self.gui.create_preview_canvases()
@@ -52,24 +49,18 @@ class GUIMode(BaseGUIMode):
     async def cleanup(self) -> None:
         pass
 
-    def _sync_gui_recording_state(self):
+    def _on_recording_state_changed(self, is_recording: bool) -> None:
+        """
+        Disable/enable camera toggle menu items based on recording state.
+        Camera selection should not change during recording.
+        """
         if not self.gui:
             return
 
-        if self.system.recording:
-            self.gui.root.title(f"Camera System - ⬤ RECORDING - Session: {self.system.session_label}")
+        state = 'disabled' if is_recording else 'normal'
 
-            for i in range(len(self.system.cameras)):
-                try:
-                    self.gui.view_menu.entryconfig(f"Camera {i}", state='disabled')
-                except Exception:
-                    pass
-        else:
-            self.gui.root.title("Camera System")
-
-            # Re-enable camera toggles after recording
-            for i in range(len(self.system.cameras)):
-                try:
-                    self.gui.view_menu.entryconfig(f"Camera {i}", state='normal')
-                except Exception:
-                    pass
+        for i in range(len(self.system.cameras)):
+            try:
+                self.gui.view_menu.entryconfig(f"Camera {i}", state=state)
+            except Exception:
+                pass

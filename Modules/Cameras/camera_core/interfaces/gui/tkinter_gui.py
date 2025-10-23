@@ -21,24 +21,19 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def __init__(self, camera_system: 'CameraSystem', args):
         self.system = camera_system
         self.args = args
-        self.root = tk.Tk()
-        self.root.title("Camera System")
 
-        self.initialize_window_geometry(800, 600)
-
+        # Initialize module-specific attributes before GUI framework
         self.preview_canvases: list[tk.Canvas] = []
         self.preview_image_refs: list = []  # Keep references to prevent GC
-
         self.camera_active_vars: list[tk.BooleanVar] = []
         self.camera_active_menu_items: list = []  # Menu checkboxes for camera toggles
 
-        self.create_menu_bar()  # From TkinterMenuBase
-        self._create_widgets()
-
-
-        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
-
-        logger.info("GUI initialized")
+        # Use template method for GUI initialization
+        self.initialize_gui_framework(
+            title="Camera System",
+            default_width=800,
+            default_height=600
+        )
 
     def populate_module_menus(self):
         self.add_recording_action("📷 Snapshot", self._take_snapshot, separator_before=True)
