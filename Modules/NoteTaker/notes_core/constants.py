@@ -1,3 +1,8 @@
+# Import shared constants from base module
+from Modules.base.constants import (
+    CLEANUP_TIMEOUT_SECONDS,
+    MAX_ERROR_MESSAGE_LENGTH,
+)
 
 MODULE_NAME = "NoteTaker"
 MODULE_DESCRIPTION = "Timestamped note-taking module for car logging sessions"

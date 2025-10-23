@@ -2,7 +2,6 @@
 from .camera_utils import (
     RollingFPS,
     FrameTimingMetadata,
-    load_config_file as load_config_file_legacy,
 )
 from .recording import CameraRecordingManager
 from .camera_handler import CameraHandler
