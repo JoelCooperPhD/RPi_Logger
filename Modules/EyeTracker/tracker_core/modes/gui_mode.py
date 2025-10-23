@@ -73,9 +73,6 @@ class GUIMode(BaseGUIMode):
     def get_preview_update_interval(self) -> float:
         return 1.0 / getattr(self.system.args, 'gui_preview_update_hz', 10)
 
-    def sync_recording_state(self) -> None:
-        self._sync_gui_recording_state()
-
     async def cleanup(self) -> None:
         if self.tracker_task and not self.tracker_task.done():
             self.tracker_task.cancel()
@@ -83,12 +80,3 @@ class GUIMode(BaseGUIMode):
                 await self.tracker_task
             except asyncio.CancelledError:
                 pass
-
-    def _sync_gui_recording_state(self):
-        if not self.gui:
-            return
-
-        if self.system.recording_manager.is_recording:
-            self.gui.root.title("Eye Tracker - ⬤ RECORDING")
-        else:
-            self.gui.root.title("Eye Tracker")
