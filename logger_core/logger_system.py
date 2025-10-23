@@ -539,15 +539,19 @@ class LoggerSystem:
                 return True
 
             state_file = Path(__file__).parent.parent / "data" / "running_modules.json"
-            state_file.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(state_file.parent.mkdir, parents=True, exist_ok=True)
 
             state = {
                 'timestamp': datetime.datetime.now().isoformat(),
                 'running_modules': running_modules,
             }
 
-            with open(state_file, 'w') as f:
-                json.dump(state, f, indent=2)
+            # Offload JSON file write to thread pool to avoid blocking
+            def write_json():
+                with open(state_file, 'w') as f:
+                    json.dump(state, f, indent=2)
+
+            await asyncio.to_thread(write_json)
 
             self.logger.info("Saved running modules state: %s", running_modules)
             return True
