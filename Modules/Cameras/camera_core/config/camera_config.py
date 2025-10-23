@@ -1,31 +1,13 @@
-#!/usr/bin/env python3
-"""
-Camera-specific configuration helpers.
-
-Utilities for camera setup and configuration validation.
-"""
 
 import logging
 
-logger = logging.getLogger("CameraConfig")
+logger = logging.getLogger(__name__)
 
 
 class CameraConfig:
-    """Camera configuration utilities."""
 
     @staticmethod
     def validate_fps(requested_fps: float, min_fps: float = 1.0, max_fps: float = 60.0) -> float:
-        """
-        Validate and clamp FPS to hardware limits.
-
-        Args:
-            requested_fps: Desired FPS
-            min_fps: Minimum supported FPS
-            max_fps: Maximum supported FPS (IMX296: 60 FPS at 1456x1088)
-
-        Returns:
-            Clamped FPS value within valid range
-        """
         if requested_fps > max_fps:
             logger.warning(
                 "Requested FPS (%.1f) exceeds hardware limit (%.1f). Capping at %.1f FPS.",
@@ -42,27 +24,10 @@ class CameraConfig:
 
     @staticmethod
     def calculate_frame_duration_us(fps: float) -> int:
-        """
-        Calculate frame duration in microseconds for given FPS.
-
-        Args:
-            fps: Frames per second
-
-        Returns:
-            Frame duration in microseconds
-        """
         return int(1e6 / fps)
 
     @staticmethod
     def log_resolution_info(camera_id: int, width: int, height: int):
-        """
-        Log resolution preset information if available.
-
-        Args:
-            camera_id: Camera ID
-            width: Resolution width
-            height: Resolution height
-        """
         try:
             from cli_utils import RESOLUTION_TO_PRESET, RESOLUTION_PRESETS
 
@@ -77,5 +42,4 @@ class CameraConfig:
             else:
                 logger.info("Camera %d using custom resolution: %dx%d", camera_id, width, height)
         except ImportError:
-            # cli_utils not in path - just log basic info
             logger.info("Camera %d using resolution: %dx%d", camera_id, width, height)

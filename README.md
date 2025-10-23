@@ -4,13 +4,22 @@ A master orchestrator for managing multiple logging modules with a unified inter
 
 ## Overview
 
-The Master Logger discovers, launches, and controls multiple logging modules (Cameras, AudioRecorder, EyeTracker) through a centralized system with:
+The Master Logger discovers, launches, and controls multiple logging modules (Cameras, AudioRecorder, EyeTracker, NoteTaker) through a centralized system with:
 
 - **Dynamic Module Discovery**: Automatically finds all modules in `Modules/` directory
 - **Unified Interface**: Tkinter GUI with module selection checkboxes
 - **Centralized Data**: All module outputs saved in organized session directories
 - **Process Orchestration**: Manages module subprocesses via JSON command protocol
 - **Async Architecture**: Pure asyncio design for efficient concurrency
+
+## Available Modules
+
+- **Cameras** - Multi-camera video recording with synchronized capture and overlay support
+- **AudioRecorder** - Multi-channel audio recording with configurable sample rates
+- **EyeTracker** - Pupil Labs eye tracking integration with gaze data and scene video
+- **NoteTaker** - Timestamped note-taking interface for annotating sessions in real-time
+
+Each module can run standalone with GUI or be controlled through the master logger.
 
 ## Quick Start
 
@@ -20,13 +29,19 @@ python3 main_logger.py
 
 # Or with custom settings
 python3 main_logger.py --data-dir ~/my_data --session-prefix experiment
+
+# Run individual modules standalone
+python3 Modules/Cameras/main_camera.py --mode gui
+python3 Modules/AudioRecorder/main_audio.py --mode gui
+python3 Modules/EyeTracker/main_eye_tracker.py --mode gui
+python3 Modules/NoteTaker/main_notes.py --mode gui
 ```
 
 ## Usage Workflow
 
 1. **Launch and Select Modules**
    - Launch `main_logger.py`
-   - **Check a module to immediately launch it** (Cameras, AudioRecorder, EyeTracker)
+   - **Check a module to immediately launch it** (Cameras, AudioRecorder, EyeTracker, NoteTaker)
    - **Uncheck a module to immediately stop it**
    - Status indicators show module state in real-time
 
@@ -59,12 +74,43 @@ data/
     │   └── experiment_*/
     │       ├── session.log
     │       └── *.wav files
-    └── EyeTracker/             # Eye tracker output
-        └── tracking_*/
+    ├── EyeTracker/             # Eye tracker output
+    │   └── tracking_*/
+    │       ├── session.log
+    │       ├── gaze_*.csv
+    │       └── scene_video.mp4
+    └── NoteTaker/              # Note taking output
+        └── notes_*/
             ├── session.log
-            ├── gaze_*.csv
-            └── scene_video.mp4
+            └── notes.csv
 ```
+
+## Module Details
+
+### Cameras Module
+- Supports multiple simultaneous camera streams
+- Configurable resolution, framerate, and encoding
+- Real-time preview with overlay information
+- Synchronized capture across all cameras
+
+### AudioRecorder Module
+- Multi-channel audio recording
+- Configurable sample rates and bit depths
+- Real-time level monitoring
+- Support for multiple audio devices
+
+### EyeTracker Module
+- Integration with Pupil Labs eye tracking hardware
+- Real-time gaze tracking and pupil detection
+- Scene camera video recording
+- CSV export of gaze data with timestamps
+
+### NoteTaker Module
+- Timestamped note-taking during sessions
+- Text entry with automatic timestamp recording
+- CSV export of all notes with precise timestamps
+- View note history during recording
+- Useful for annotating events or observations during data collection
 
 ## Configuration
 
@@ -131,8 +177,16 @@ ModuleProcess (per module)
     ↓
 Subprocess (module in slave mode)
     ↓
-Module Core (camera_core, audio_core, tracker_core)
+Module Core (camera_core, audio_core, tracker_core, notes_core)
+    ↓
+Shared Base Utilities (Modules/base/)
+    - BaseSystem, BaseSupervisor
+    - TkinterGuiBase, TkinterMenuBase
+    - RecordingMixin, AsyncUtils
+    - ConfigLoader, SessionUtils
 ```
+
+All modules share common functionality through the base utilities, ensuring consistent behavior across the system.
 
 ## Module Status Indicators
 

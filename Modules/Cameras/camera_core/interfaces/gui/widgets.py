@@ -1,30 +1,11 @@
-#!/usr/bin/env python3
-"""
-Custom tkinter widgets for camera GUI.
-
-Provides reusable components like status indicators and camera panels.
-"""
 
 import tkinter as tk
 from tkinter import ttk
 
 
 class StatusIndicator(tk.Canvas):
-    """
-    Colored status indicator dot.
-
-    Shows green for active, red for inactive, yellow for warning.
-    """
 
     def __init__(self, parent, size=12, **kwargs):
-        """
-        Initialize status indicator.
-
-        Args:
-            parent: Parent widget
-            size: Diameter of indicator dot in pixels
-            **kwargs: Additional canvas options
-        """
         super().__init__(parent, width=size, height=size,
                         highlightthickness=0, **kwargs)
         self.size = size
@@ -32,12 +13,6 @@ class StatusIndicator(tk.Canvas):
                                          fill='gray', outline='darkgray')
 
     def set_status(self, status: str):
-        """
-        Set indicator color based on status.
-
-        Args:
-            status: 'active' (green), 'inactive' (gray), 'warning' (yellow), 'error' (red)
-        """
         color_map = {
             'active': '#4CAF50',      # Green
             'inactive': '#9E9E9E',    # Gray
@@ -51,8 +26,6 @@ class StatusIndicator(tk.Canvas):
 
     @staticmethod
     def _darken_color(hex_color: str) -> str:
-        """Darken a hex color for outline."""
-        # Simple darkening by reducing RGB values
         rgb = int(hex_color[1:], 16)
         r = max(0, ((rgb >> 16) & 0xFF) - 40)
         g = max(0, ((rgb >> 8) & 0xFF) - 40)
@@ -61,25 +34,11 @@ class StatusIndicator(tk.Canvas):
 
 
 class CameraStatsPanel(ttk.LabelFrame):
-    """
-    Panel displaying statistics for a single camera.
-
-    Shows FPS, frame counts, recording status.
-    """
 
     def __init__(self, parent, camera_num: int, **kwargs):
-        """
-        Initialize camera statistics panel.
-
-        Args:
-            parent: Parent widget
-            camera_num: Camera number/ID
-            **kwargs: Additional labelframe options
-        """
         super().__init__(parent, text=f"Camera {camera_num}", **kwargs)
         self.camera_num = camera_num
 
-        # Status indicator
         status_frame = ttk.Frame(self)
         status_frame.grid(row=0, column=0, columnspan=2, sticky='w', padx=5, pady=2)
 
@@ -89,7 +48,6 @@ class CameraStatsPanel(ttk.LabelFrame):
         self.status_label = ttk.Label(status_frame, text="Initializing...")
         self.status_label.pack(side='left')
 
-        # Statistics labels
         ttk.Label(self, text="Capture:").grid(row=1, column=0, sticky='w', padx=5)
         self.capture_fps_label = ttk.Label(self, text="0.0 FPS")
         self.capture_fps_label.grid(row=1, column=1, sticky='w')
@@ -107,14 +65,6 @@ class CameraStatsPanel(ttk.LabelFrame):
         self.recording_label.grid(row=4, column=1, sticky='w')
 
     def update_stats(self, stats: dict):
-        """
-        Update displayed statistics.
-
-        Args:
-            stats: Dictionary with keys: capture_fps, processing_fps,
-                   captured_frames, processed_frames, recording, output
-        """
-        # Update status indicator
         if stats.get('recording', False):
             self.status_indicator.set_status('recording')
             self.status_label.config(text="Recording")
@@ -122,25 +72,20 @@ class CameraStatsPanel(ttk.LabelFrame):
             self.status_indicator.set_status('active')
             self.status_label.config(text="Active")
 
-        # Update FPS
         capture_fps = stats.get('capture_fps', 0.0)
         self.capture_fps_label.config(text=f"{capture_fps:.1f} FPS")
 
         processing_fps = stats.get('processing_fps', 0.0)
         self.processing_fps_label.config(text=f"{processing_fps:.1f} FPS")
 
-        # Update frame counts
         captured = stats.get('captured_frames', 0)
         processed = stats.get('processed_frames', 0)
         self.frames_label.config(text=f"{processed:,} / {captured:,}")
 
-        # Update recording status
         output = stats.get('output')
         if output:
-            # Show just filename, not full path
             from pathlib import Path
             filename = Path(output).name
-            # Truncate if too long
             if len(filename) > 30:
                 filename = filename[:27] + "..."
             self.recording_label.config(text=filename)
@@ -149,22 +94,10 @@ class CameraStatsPanel(ttk.LabelFrame):
 
 
 class ScrollableLogWidget(tk.Frame):
-    """
-    Scrollable text widget for displaying log messages.
-    """
 
     def __init__(self, parent, height=5, **kwargs):
-        """
-        Initialize scrollable log widget.
-
-        Args:
-            parent: Parent widget
-            height: Height in lines
-            **kwargs: Additional frame options
-        """
         super().__init__(parent, **kwargs)
 
-        # Create text widget with scrollbar
         self.text = tk.Text(self, height=height, wrap='word', state='disabled',
                            bg='#f5f5f5', font=('Courier', 9))
         scrollbar = ttk.Scrollbar(self, orient='vertical', command=self.text.yview)
@@ -173,27 +106,18 @@ class ScrollableLogWidget(tk.Frame):
         self.text.pack(side='left', fill='both', expand=True)
         scrollbar.pack(side='right', fill='y')
 
-        # Configure tags for different log levels
         self.text.tag_config('info', foreground='#1976D2')
         self.text.tag_config('warning', foreground='#F57C00')
         self.text.tag_config('error', foreground='#D32F2F')
         self.text.tag_config('success', foreground='#388E3C')
 
     def append(self, message: str, level: str = 'info'):
-        """
-        Append a message to the log.
-
-        Args:
-            message: Message text
-            level: Log level ('info', 'warning', 'error', 'success')
-        """
         self.text.config(state='normal')
         self.text.insert('end', f"> {message}\n", level)
         self.text.see('end')  # Auto-scroll to bottom
         self.text.config(state='disabled')
 
     def clear(self):
-        """Clear all log messages."""
         self.text.config(state='normal')
         self.text.delete('1.0', 'end')
         self.text.config(state='disabled')

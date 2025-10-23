@@ -33,7 +33,7 @@ resolution_preset = 0
 target_fps = 30.0
 
 # Output files
-output_dir = recordings
+output_dir = data
 session_prefix = session
 
 # Auto-start recording
@@ -101,7 +101,7 @@ enable_csv_timing_log = true # Save per-frame timing data for analysis
 enabled = false
 
 # Window position and size (saved automatically on window close)
-window_x = 2344
-window_y = 542
-window_width = 624
-window_height = 466
+window_x = 2002
+window_y = 29
+window_width = 953
+window_height = 405

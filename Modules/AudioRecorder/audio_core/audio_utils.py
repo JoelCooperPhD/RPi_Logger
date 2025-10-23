@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Utility functions and classes for audio recording system.
-
-Provides device discovery, configuration helpers, and shared utilities.
-"""
 
 import asyncio
 import logging
@@ -13,22 +7,14 @@ from typing import Any, Dict, Optional
 import aiofiles
 import sounddevice as sd
 
-logger = logging.getLogger("AudioUtils")
+logger = logging.getLogger(__name__)
 
 
 class DeviceDiscovery:
-    """Audio device discovery and management."""
 
     @staticmethod
     async def get_audio_input_devices() -> Dict[int, Dict[str, Any]]:
-        """
-        Get all available audio input devices (async, non-blocking).
-
-        Returns:
-            Dictionary mapping device ID to device info
-        """
         def _query_devices():
-            """Query devices in thread pool to avoid blocking."""
             try:
                 devices = sd.query_devices()
                 input_devices = {}
@@ -46,17 +32,10 @@ class DeviceDiscovery:
                 logger.error("Error querying audio devices: %s", e)
                 return {}
 
-        # Run blocking sounddevice query in thread pool
         return await asyncio.to_thread(_query_devices)
 
     @staticmethod
     async def get_usb_audio_devices() -> Dict[str, str]:
-        """
-        Ultra-fast USB audio device check using /proc/asound.
-
-        Returns:
-            Dictionary mapping card identifier to card name
-        """
         devices = {}
         cards_path = Path('/proc/asound/cards')
 
@@ -84,17 +63,6 @@ class DeviceDiscovery:
 
     @staticmethod
     def validate_sample_rate(sample_rate: int, min_rate: int = 8000, max_rate: int = 192000) -> int:
-        """
-        Validate and clamp sample rate to valid range.
-
-        Args:
-            sample_rate: Requested sample rate
-            min_rate: Minimum allowed sample rate
-            max_rate: Maximum allowed sample rate
-
-        Returns:
-            Valid sample rate
-        """
         if sample_rate < min_rate:
             logger.warning("Sample rate %d too low, using %d", sample_rate, min_rate)
             return min_rate

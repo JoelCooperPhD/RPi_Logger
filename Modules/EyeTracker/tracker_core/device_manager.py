@@ -1,9 +1,5 @@
-#!/usr/bin/env python3
-"""
-Device Manager for Gaze Tracker
-Handles connection to and management of eye tracker device.
-"""
 
+import asyncio
 import logging
 from typing import Optional
 from pupil_labs.realtime_api.discovery import discover_devices
@@ -13,7 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 class DeviceManager:
-    """Manages connection to eye tracker device"""
 
     def __init__(self):
         self.device: Optional[Device] = None
@@ -21,19 +16,15 @@ class DeviceManager:
         self.device_port: Optional[int] = None
 
     async def connect(self) -> bool:
-        """Connect to eye tracker using async discovery"""
         logger.info("Searching for eye tracker device...")
 
         try:
-            # Discover devices
             async for device_info in discover_devices(timeout_seconds=5.0):
                 logger.info(f"Found device: {device_info.name}")
 
-                # Store connection info
                 self.device_ip = device_info.addresses[0]
                 self.device_port = device_info.port
 
-                # Create device for control operations
                 self.device = Device.from_discovered_device(device_info)
 
                 logger.info(f"Connected to device at {self.device_ip}:{self.device_port}")
@@ -42,12 +33,14 @@ class DeviceManager:
             logger.error("No devices found")
             return False
 
+        except asyncio.CancelledError:
+            logger.debug("Device discovery cancelled")
+            return False
         except Exception as e:
             logger.error(f"Connection failed: {e}")
             return False
 
     def get_stream_urls(self) -> dict[str, str]:
-        """Return RTSP endpoints for all available realtime streams."""
         if not self.device_ip:
             raise RuntimeError("No device connected")
 
@@ -63,11 +56,9 @@ class DeviceManager:
 
     @property
     def is_connected(self) -> bool:
-        """Check if device is connected"""
         return self.device is not None and self.device_ip is not None
 
     async def cleanup(self):
-        """Clean up device connection"""
         if self.device:
             try:
                 await self.device.close()

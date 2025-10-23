@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Single audio device handler.
-
-Manages recording from a single audio input device with async architecture.
-"""
 
 import asyncio
 import logging
@@ -22,21 +16,12 @@ from .constants import (
     STREAM_STOP_TIMEOUT_SECONDS,
 )
 
-logger = logging.getLogger("AudioHandler")
+logger = logging.getLogger(__name__)
 
 
 class AudioHandler:
-    """Handles individual audio device with recording capabilities."""
 
     def __init__(self, device_id: int, device_info: dict, sample_rate: int):
-        """
-        Initialize audio handler.
-
-        Args:
-            device_id: Audio device ID
-            device_info: Device information dictionary
-            sample_rate: Recording sample rate in Hz
-        """
         self.logger = logging.getLogger(f"AudioDevice{device_id}")
         self.device_id = device_id
         self.device_info = device_info
@@ -44,39 +29,25 @@ class AudioHandler:
         self.sample_rate = sample_rate
         self.recording = False
 
-        # Audio stream
         self.stream: Optional[sd.InputStream] = None
 
-        # Recording manager
         self.recording_manager = AudioRecordingManager(
             device_id=device_id,
             device_name=self.device_name,
             sample_rate=sample_rate
         )
 
-        # Feedback tracking
         self.feedback_queue: Optional[asyncio.Queue] = None
         self.frames_since_feedback = 0
 
         self.logger.info("Initialized device %d: %s", device_id, self.device_name)
 
     def _audio_callback(self, indata: np.ndarray, frames: int, time_info, status: sd.CallbackFlags) -> None:
-        """
-        Audio input callback from sounddevice.
-
-        Args:
-            indata: Input audio data
-            frames: Number of frames
-            time_info: Timing information (dict with input_buffer_adc_time, etc.)
-            status: Stream status flags
-        """
         if not self.recording:
             return
 
-        # Add audio chunk to recording manager
         self.recording_manager.add_audio_chunk(indata)
 
-        # Send feedback periodically
         self.frames_since_feedback += frames
         if self.frames_since_feedback >= (self.sample_rate * FEEDBACK_INTERVAL_SECONDS):
             self.frames_since_feedback = 0
@@ -86,7 +57,6 @@ class AudioHandler:
                 except asyncio.QueueFull:
                     pass
 
-        # Report stream errors
         if status:
             if self.feedback_queue:
                 try:
@@ -95,15 +65,6 @@ class AudioHandler:
                     pass
 
     def start_stream(self, feedback_queue: Optional[asyncio.Queue] = None) -> bool:
-        """
-        Start audio input stream.
-
-        Args:
-            feedback_queue: Optional queue for status messages
-
-        Returns:
-            True if stream started successfully
-        """
         if self.stream is not None:
             self.logger.warning("Stream already running")
             return False
@@ -129,12 +90,6 @@ class AudioHandler:
             return False
 
     def start_recording(self) -> bool:
-        """
-        Start recording audio.
-
-        Returns:
-            True if recording started successfully
-        """
         if self.recording:
             self.logger.warning("Already recording")
             return False
@@ -146,35 +101,27 @@ class AudioHandler:
         self.recording_manager.start_recording()
         self.recording = True
         self.frames_since_feedback = 0
-        self.logger.info("Recording started")
+        self.logger.info("=" * 80)
+        self.logger.info("========== RECORDING STARTED: Device %d ==========", self.device_id)
+        self.logger.info("=" * 80)
         return True
 
     async def stop_recording(self, session_dir: Path, recording_count: int) -> Optional[Path]:
-        """
-        Stop recording and save file.
-
-        Args:
-            session_dir: Directory to save recording
-            recording_count: Recording sequence number
-
-        Returns:
-            Path to saved file
-        """
         if not self.recording:
             return None
 
         self.recording = False
         audio_path = await self.recording_manager.stop_recording(session_dir, recording_count)
-        self.logger.info("Recording stopped")
+        self.logger.info("=" * 80)
+        self.logger.info("========== RECORDING STOPPED: Device %d ==========", self.device_id)
+        self.logger.info("=" * 80)
         return audio_path
 
     async def cleanup(self) -> None:
-        """Clean up audio device resources (async, non-blocking)."""
         if self.recording:
             self.recording = False
 
         if self.stream:
-            # Run potentially blocking stream operations in thread pool
             def _close_stream():
                 try:
                     self.stream.stop()

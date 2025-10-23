@@ -1,6 +1,3 @@
-"""
-Operation modes for eye tracker system.
-"""
 
 from .base_mode import BaseMode
 from .gui_mode import GUIMode

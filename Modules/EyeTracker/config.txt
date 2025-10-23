@@ -30,7 +30,7 @@ resolution_width = 1280
 resolution_height = 720
 
 # Output files
-output_dir = recordings
+output_dir = data
 session_prefix = tracking
 
 # Auto-start recording
@@ -83,7 +83,7 @@ discovery_retry = 3.0        # Retry interval after device failure (seconds)
 enabled = false
 
 # Window position and size (saved automatically on window close)
-window_x = 2342
-window_y = 32
-window_width = 627
-window_height = 450
+window_x = 1986
+window_y = 495
+window_width = 962
+window_height = 278

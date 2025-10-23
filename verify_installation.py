@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-"""Verify that all dependencies and refactored code work correctly."""
 
 import sys
 
@@ -8,7 +6,6 @@ print("RPi Logger - Installation Verification")
 print("="*70)
 print()
 
-# Test 1: Third-party packages
 print("1. Testing third-party packages...")
 try:
     import cv2
@@ -29,7 +26,6 @@ except ImportError as e:
     print(f"   ✗ Failed: {e}")
     sys.exit(1)
 
-# Test 2: Pupil Labs API
 print()
 print("2. Testing Pupil Labs API...")
 try:
@@ -40,7 +36,6 @@ except ImportError as e:
     print(f"   ✗ Failed: {e}")
     sys.exit(1)
 
-# Test 3: Base classes (refactored code)
 print()
 print("3. Testing refactored base classes...")
 try:
@@ -58,7 +53,6 @@ except ImportError as e:
     print(f"   ✗ Failed: {e}")
     sys.exit(1)
 
-# Test 4: Audio module
 print()
 print("4. Testing Audio module...")
 try:
@@ -70,7 +64,6 @@ except ImportError as e:
     print(f"   ✗ Failed: {e}")
     sys.exit(1)
 
-# Test 5: EyeTracker module
 print()
 print("5. Testing EyeTracker module...")
 try:
@@ -82,7 +75,6 @@ except ImportError as e:
     print(f"   ✗ Failed: {e}")
     sys.exit(1)
 
-# Test 6: Camera module (may fail without libcamera)
 print()
 print("6. Testing Camera module...")
 try:
@@ -102,7 +94,6 @@ except Exception as e:
     print(f"   ⚠ Camera module check: {e}")
     print("     Note: Camera module requires Raspberry Pi hardware")
 
-# Test 7: Logger core
 print()
 print("7. Testing logger core...")
 try:

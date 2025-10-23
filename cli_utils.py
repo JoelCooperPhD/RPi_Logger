@@ -1,11 +1,14 @@
-"""Shared helpers for building consistent CLI entry points."""
-
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
 import logging
+import signal
+import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Any, Iterable, Optional, Sequence, Tuple
 
 
 LOG_LEVELS: dict[str, int] = {
@@ -23,21 +26,9 @@ def configure_logging(
     *,
     suppressed_loggers: Iterable[str] = (),
     fmt: str = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    datefmt: str = "%H:%M:%S",
+    datefmt: str = "%Y-%m-%d %H:%M:%S",
     console_output: bool = True,
 ) -> None:
-    """
-    Configure root logging with optional file output.
-
-    Args:
-        level_name: Logging level (debug, info, warning, error, critical)
-        log_file: Optional path to write logs to file
-        suppressed_loggers: Logger names to suppress (set to ERROR level)
-        fmt: Log message format
-        datefmt: Date/time format
-        console_output: If True, also log to console. If False, only log to file.
-    """
-
     level = LOG_LEVELS.get(level_name.lower())
     if level is None:
         valid = ", ".join(sorted(LOG_LEVELS))
@@ -52,17 +43,20 @@ def configure_logging(
 
     formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
 
-    # Add console handler if requested
     if console_output:
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)
         root.addHandler(stream_handler)
 
-    # Add file handler if log_file specified
     if log_file:
         log_file_path = Path(log_file) if not isinstance(log_file, Path) else log_file
         log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file_path, encoding="utf-8")
+        file_handler = RotatingFileHandler(
+            log_file_path,
+            maxBytes=20 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8"
+        )
         file_handler.setFormatter(formatter)
         root.addHandler(file_handler)
 
@@ -77,9 +71,15 @@ def add_common_cli_arguments(
     allowed_modes: Optional[Sequence[str]] = None,
     default_mode: Optional[str] = None,
     include_config: bool = False,
+    include_session_prefix: bool = True,
+    default_session_prefix: str = "session",
+    include_console_control: bool = True,
+    default_console_output: bool = False,
+    include_auto_recording: bool = True,
+    default_auto_start_recording: bool = False,
+    include_parent_control: bool = True,
+    include_window_geometry: bool = True,
 ) -> None:
-    """Inject shared CLI arguments for recorder modules."""
-
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -118,10 +118,66 @@ def add_common_cli_arguments(
             help="Execution mode",
         )
 
+    if include_session_prefix:
+        parser.add_argument(
+            "--session-prefix",
+            type=str,
+            default=default_session_prefix,
+            help="Prefix for generated session directories",
+        )
 
-# IMX296 supported resolution presets (sensor native: 1456x1088)
+    if include_console_control:
+        console_group = parser.add_mutually_exclusive_group()
+        console_group.add_argument(
+            "--console",
+            dest="console_output",
+            action="store_true",
+            default=default_console_output,
+            help="Also log to console (in addition to file)",
+        )
+        console_group.add_argument(
+            "--no-console",
+            dest="console_output",
+            action="store_false",
+            help="Log to file only (no console output)",
+        )
+
+    if include_auto_recording:
+        recording_group = parser.add_mutually_exclusive_group()
+        recording_group.add_argument(
+            "--auto-start-recording",
+            dest="auto_start_recording",
+            action="store_true",
+            default=default_auto_start_recording,
+            help="Automatically start recording on startup",
+        )
+        recording_group.add_argument(
+            "--no-auto-start-recording",
+            dest="auto_start_recording",
+            action="store_false",
+            help="Wait for manual recording command (default)",
+        )
+
+    if include_parent_control:
+        parser.add_argument(
+            "--enable-commands",
+            dest="enable_commands",
+            action="store_true",
+            default=False,
+            help="Enable JSON command interface for parent process control (auto-detected if stdin is piped)",
+        )
+
+    if include_window_geometry:
+        parser.add_argument(
+            "--window-geometry",
+            dest="window_geometry",
+            type=str,
+            default=None,
+            help="Window position and size (format: WIDTHxHEIGHT+X+Y, e.g., 800x600+100+50)",
+        )
+
+
 RESOLUTION_PRESETS = {
-    # Preset number/name: (width, height, description, aspect_ratio)
     0: (1456, 1088, "Native - Full sensor resolution", "4:3"),
     1: (1280, 960, "SXGA - Slight downscale, minimal crop", "4:3"),
     2: (1280, 720, "HD 720p - Standard HD", "16:9"),
@@ -132,12 +188,10 @@ RESOLUTION_PRESETS = {
     7: (320, 240, "QVGA - Ultra minimal preview", "4:3"),
 }
 
-# Create reverse lookup: (width, height) -> preset number
 RESOLUTION_TO_PRESET = {(w, h): num for num, (w, h, _, _) in RESOLUTION_PRESETS.items()}
 
 
 def get_resolution_preset_help() -> str:
-    """Generate help text for resolution presets."""
     lines = ["Available resolution presets:"]
     for num, (w, h, desc, aspect) in RESOLUTION_PRESETS.items():
         lines.append(f"  {num}: {w}x{h} - {desc} ({aspect})")
@@ -145,18 +199,6 @@ def get_resolution_preset_help() -> str:
 
 
 def parse_resolution(value: str) -> Tuple[int, int]:
-    """
-    Parse resolution from preset number (0-5 only).
-
-    Args:
-        value: A preset number (0-5)
-
-    Returns:
-        (width, height) tuple
-
-    Raises:
-        argparse.ArgumentTypeError: If value is invalid
-    """
     try:
         preset_num = int(value)
     except ValueError as exc:
@@ -177,8 +219,6 @@ def parse_resolution(value: str) -> Tuple[int, int]:
 
 
 def positive_int(value: str) -> int:
-    """Ensure CLI integer parameters are strictly positive."""
-
     try:
         parsed = int(value)
     except ValueError as exc:
@@ -190,8 +230,6 @@ def positive_int(value: str) -> int:
 
 
 def positive_float(value: str) -> float:
-    """Ensure CLI floating point parameters are strictly positive."""
-
     try:
         parsed = float(value)
     except ValueError as exc:
@@ -203,76 +241,143 @@ def positive_float(value: str) -> float:
 
 
 def ensure_directory(path: Path) -> Path:
-    """Create the path if missing and return it for convenience."""
-
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-# Config file parsing helpers
 def get_config_int(config: dict, key: str, default: int) -> int:
-    """
-    Get integer value from config dictionary.
-
-    Args:
-        config: Configuration dictionary
-        key: Configuration key
-        default: Default value if key not present
-
-    Returns:
-        Integer value from config or default
-    """
     return int(config.get(key, default)) if key in config else default
 
 
 def get_config_float(config: dict, key: str, default: float) -> float:
-    """
-    Get float value from config dictionary.
-
-    Args:
-        config: Configuration dictionary
-        key: Configuration key
-        default: Default value if key not present
-
-    Returns:
-        Float value from config or default
-    """
     return float(config.get(key, default)) if key in config else default
 
 
 def get_config_bool(config: dict, key: str, default: bool) -> bool:
-    """
-    Get boolean value from config dictionary.
-
-    Args:
-        config: Configuration dictionary
-        key: Configuration key
-        default: Default value if key not present
-
-    Returns:
-        Boolean value from config or default
-    """
     if key in config:
         value = config[key]
-        # If already a boolean (parsed by config loader), return it
         if isinstance(value, bool):
             return value
-        # Otherwise parse from string
         return str(value).lower() in ('true', '1', 'yes', 'on')
     return default
 
 
 def get_config_str(config: dict, key: str, default: str) -> str:
-    """
-    Get string value from config dictionary.
-
-    Args:
-        config: Configuration dictionary
-        key: Configuration key
-        default: Default value if key not present
-
-    Returns:
-        String value from config or default
-    """
     return config.get(key, default)
+
+
+def setup_module_logging(
+    args: Any,
+    module_name: str,
+    default_prefix: str = 'session'
+) -> Tuple[str, Path, bool]:
+    # Import here to avoid circular dependencies
+    from Modules.base import setup_session_from_args, redirect_stderr_stdout
+
+    session_dir, session_name, log_file, is_command_mode = setup_session_from_args(
+        args,
+        module_name=module_name,
+        default_prefix=default_prefix
+    )
+
+    # Redirect stderr/stdout to log file BEFORE configuring logging
+    original_stdout = redirect_stderr_stdout(log_file)
+
+    # This must be done BEFORE any imports that might send status messages
+    if is_command_mode:
+        from logger_core.commands import StatusMessage
+        StatusMessage.configure(original_stdout)
+
+    configure_logging(args.log_level, str(log_file), console_output=args.console_output)
+
+    args.session_dir = session_dir
+    args.console_stdout = original_stdout
+    args.command_stdout = original_stdout
+
+    return session_name, log_file, is_command_mode
+
+
+def install_exception_handlers(
+    logger: logging.Logger,
+    loop: Optional[asyncio.AbstractEventLoop] = None
+) -> None:
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+        logger.critical(
+            "Uncaught exception",
+            exc_info=(exc_type, exc_value, exc_traceback)
+        )
+
+    sys.excepthook = handle_exception
+
+    if loop is not None:
+        def handle_asyncio_exception(loop, context):
+            exception = context.get('exception')
+            message = context.get('message', 'Unhandled asyncio exception')
+            if exception:
+                logger.exception(f"Asyncio exception: {message}", exc_info=exception)
+            else:
+                logger.error(f"Asyncio error: {message}, context: {context}")
+
+        loop.set_exception_handler(handle_asyncio_exception)
+
+
+def install_signal_handlers(
+    supervisor: Any,
+    loop: asyncio.AbstractEventLoop,
+    track_shutdown_state: bool = False
+) -> None:
+    if track_shutdown_state:
+        # Track shutdown state to prevent race conditions (used by Audio module)
+        shutdown_in_progress = False
+
+        def signal_handler():
+            nonlocal shutdown_in_progress
+            if not supervisor.shutdown_event.is_set() and not shutdown_in_progress:
+                shutdown_in_progress = True
+                asyncio.create_task(supervisor.shutdown())
+    else:
+        def signal_handler():
+            if not supervisor.shutdown_event.is_set():
+                asyncio.create_task(supervisor.shutdown())
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, signal_handler)
+
+
+def log_module_startup(
+    logger: logging.Logger,
+    session_name: str,
+    log_file: Path,
+    args: Any,
+    module_name: str = "MODULE",
+    **extra_info
+) -> None:
+    logger.info("=" * 80)
+    logger.info(f"========== {module_name.upper()} SYSTEM SESSION START ==========")
+    logger.info("=" * 80)
+    logger.info("Session: %s", session_name)
+    logger.info("Log file: %s", log_file)
+    logger.info("Mode: %s", args.mode)
+
+    for key, value in extra_info.items():
+        display_key = key.replace('_', ' ').title()
+        logger.info("%s: %s", display_key, value)
+
+    if hasattr(args, 'console_output'):
+        logger.info("Console output: %s", args.console_output)
+
+    logger.info("=" * 80)
+
+
+def log_module_shutdown(
+    logger: logging.Logger,
+    module_name: str = "MODULE"
+) -> None:
+    logger.info("=" * 60)
+    logger.info(f"{module_name.title()} System Stopped")
+    logger.info("=" * 60)
 

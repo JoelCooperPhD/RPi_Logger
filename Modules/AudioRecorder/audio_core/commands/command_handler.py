@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Command handler for audio recording system.
-
-Processes JSON commands and dispatches to appropriate handlers.
-"""
 
 import logging
 from typing import TYPE_CHECKING, Dict, Any
@@ -15,24 +9,15 @@ if TYPE_CHECKING:
 
 
 class CommandHandler(BaseCommandHandler):
-    """Handles commands for audio recording system in slave mode."""
 
     def __init__(self, audio_system: 'AudioSystem', gui=None):
-        """
-        Initialize command handler.
-
-        Args:
-            audio_system: Audio system instance to control
-            gui: Optional reference to GUI window (for get_geometry)
-        """
         super().__init__(audio_system, gui=gui)
 
     async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
-        """Handle start_recording command."""
         if not self._check_recording_state(should_be_recording=False):
             return
 
-        success = self.system.start_recording()
+        success = await self.system.start_recording()
         if success:
             device_count = len(self.system.active_handlers)
             StatusMessage.send("recording_started", {
@@ -44,7 +29,6 @@ class CommandHandler(BaseCommandHandler):
             StatusMessage.send("error", {"message": "Failed to start recording"})
 
     async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
-        """Handle stop_recording command."""
         if not self._check_recording_state(should_be_recording=True):
             return
 
@@ -55,7 +39,6 @@ class CommandHandler(BaseCommandHandler):
         self.logger.info("Recording stopped")
 
     async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
-        """Handle get_status command."""
         status_data = {
             "recording": self.system.recording,
             "recording_count": self.system.recording_count,
@@ -68,7 +51,6 @@ class CommandHandler(BaseCommandHandler):
         self.logger.debug("Status report sent")
 
     async def handle_custom_command(self, command: str, command_data: Dict[str, Any]) -> bool:
-        """Handle audio-specific custom commands."""
         if command == "toggle_device":
             device_id = command_data.get("device_id")
             enabled = command_data.get("enabled", True)
@@ -77,16 +59,6 @@ class CommandHandler(BaseCommandHandler):
         return False  # Not handled
 
     async def _handle_toggle_device(self, device_id: int, enabled: bool) -> bool:
-        """
-        Handle toggle_device command.
-
-        Args:
-            device_id: Audio device ID to toggle
-            enabled: True to enable, False to disable
-
-        Returns:
-            True (command was handled)
-        """
         if device_id is None:
             StatusMessage.send("error", {"message": "device_id required"})
             return True

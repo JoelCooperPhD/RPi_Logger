@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Stream Handler for Gaze Tracker
-Handles video and gaze data streaming from eye tracker device.
-"""
 
 import asyncio
 import contextlib
@@ -25,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class FramePacket:
-    """Container for a scene frame and associated timing metadata."""
 
     image: np.ndarray
     received_monotonic: float
@@ -34,7 +28,6 @@ class FramePacket:
 
 
 class StreamHandler:
-    """Handles streaming of video and gaze data"""
 
     def __init__(self):
         self.running = False
@@ -56,7 +49,6 @@ class StreamHandler:
         self._event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
 
     def _update_running_flag(self) -> None:
-        """Update the aggregate running flag based on individual streams."""
         self.running = any(
             (
                 self._video_task_active,
@@ -74,7 +66,6 @@ class StreamHandler:
         imu_url: Optional[str] = None,
         events_url: Optional[str] = None,
     ):
-        """Start video and gaze streaming tasks"""
         if self.running:
             return
 
@@ -90,7 +81,6 @@ class StreamHandler:
         if events_url:
             logger.info(f"Events URL: {events_url}")
 
-        # Create streaming tasks
         self.tasks = [
             asyncio.create_task(self._stream_video_frames(video_url), name="video-stream"),
             asyncio.create_task(self._stream_gaze_data(gaze_url), name="gaze-stream"),
@@ -108,14 +98,12 @@ class StreamHandler:
         return self.tasks
 
     async def stop_streaming(self):
-        """Stop streaming tasks"""
         self._video_task_active = False
         self._gaze_task_active = False
         self._imu_task_active = False
         self._event_task_active = False
         self._update_running_flag()
 
-        # Cancel all tasks
         for task in self.tasks:
             if not task.done():
                 task.cancel()
@@ -126,7 +114,6 @@ class StreamHandler:
         self._drain_queues()
 
     async def _stream_video_frames(self, video_url: str):
-        """Continuously stream video frames using correct API"""
         logger.info("Starting video stream...")
 
         frame_count = 0
@@ -143,7 +130,6 @@ class StreamHandler:
 
                 if frame:
                     try:
-                        # Use the API-provided BGR buffer to preserve color information
                         pixel_data = frame.bgr_buffer()
 
                         if pixel_data is not None:
@@ -164,10 +150,8 @@ class StreamHandler:
                                 logger.info(f"Frame shape: {pixel_data.shape}")
                                 logger.info(f"Frame dtype: {pixel_data.dtype}")
 
-                                # Check if it's grayscale or color
                                 if len(pixel_data.shape) == 3:
                                     logger.info(f"Color channels: {pixel_data.shape[2]}")
-                                    # Sample pixel to see values
                                     if pixel_data.shape[0] > 100 and pixel_data.shape[1] > 100:
                                         sample = pixel_data[100, 100]
                                         logger.info(f"Sample pixel: {sample}")
@@ -195,7 +179,6 @@ class StreamHandler:
             self._update_running_flag()
 
     async def _stream_gaze_data(self, gaze_url: str):
-        """Continuously stream gaze data using correct API"""
         logger.info("Starting gaze stream...")
 
         gaze_count = 0
@@ -227,7 +210,6 @@ class StreamHandler:
             self._update_running_flag()
 
     async def _stream_imu_data(self, imu_url: str):
-        """Continuously stream IMU samples."""
         logger.info("Starting IMU stream...")
 
         imu_count = 0
@@ -261,7 +243,6 @@ class StreamHandler:
             self._update_running_flag()
 
     async def _stream_eye_events(self, events_url: str):
-        """Continuously stream eye event samples."""
         logger.info("Starting eye events stream...")
 
         event_count = 0
@@ -295,48 +276,37 @@ class StreamHandler:
             self._update_running_flag()
 
     def get_latest_frame(self) -> Optional[np.ndarray]:
-        """Get the latest video frame"""
         return self.last_frame
 
     def get_latest_frame_packet(self) -> Optional[FramePacket]:
-        """Get the latest frame packet with timing metadata."""
         return self._last_frame_packet
 
     def get_latest_gaze(self) -> Optional[Any]:
-        """Get the latest gaze data"""
         return self.last_gaze
 
     def get_latest_imu(self) -> Optional[Any]:
-        """Get the latest IMU sample."""
         return self.last_imu
 
     def get_latest_event(self) -> Optional[Any]:
-        """Get the latest eye event sample."""
         return self.last_event
 
     def get_camera_fps(self) -> float:
-        """Get rolling camera FPS over the last 5 seconds"""
         return self.camera_fps_tracker.get_fps()
 
     async def next_frame(self, timeout: Optional[float] = None) -> Optional[FramePacket]:
-        """Return the next queued frame packet, or ``None`` on timeout."""
         return await self._dequeue_with_timeout(self._frame_queue, timeout)
 
     async def next_gaze(self, timeout: Optional[float] = None) -> Optional[Any]:
-        """Return the next queued gaze sample, or ``None`` on timeout."""
         return await self._dequeue_with_timeout(self._gaze_queue, timeout)
 
     async def next_imu(self, timeout: Optional[float] = None) -> Optional[Any]:
-        """Return the next queued IMU sample, or ``None`` on timeout."""
         return await self._dequeue_with_timeout(self._imu_queue, timeout)
 
     async def next_event(self, timeout: Optional[float] = None) -> Optional[Any]:
-        """Return the next queued eye event, or ``None`` on timeout."""
         return await self._dequeue_with_timeout(self._event_queue, timeout)
 
     @staticmethod
     def _enqueue_latest(queue: asyncio.Queue, item: Any) -> None:
-        """Drop the oldest entry when the queue is full, then enqueue."""
         try:
             queue.put_nowait(item)
         except asyncio.QueueFull:

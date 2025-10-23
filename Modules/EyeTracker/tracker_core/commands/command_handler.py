@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Command handler for eye tracker system.
-
-Processes JSON commands from master and dispatches to appropriate handlers.
-"""
 
 import logging
 from typing import TYPE_CHECKING, Dict, Any
@@ -15,27 +9,17 @@ if TYPE_CHECKING:
 
 
 class CommandHandler(BaseCommandHandler):
-    """Handles JSON commands for the eye tracker system."""
 
     def __init__(self, system: 'TrackerSystem', gui=None):
-        """
-        Initialize command handler.
-
-        Args:
-            system: Reference to TrackerSystem instance
-            gui: Optional reference to TkinterGUI instance (for get_geometry)
-        """
         super().__init__(system, gui=gui)
 
     async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
-        """Handle start_recording command."""
         if not self._check_recording_state(should_be_recording=False):
             return
 
         try:
-            # Start recording via recording manager
             if hasattr(self.system, 'recording_manager'):
-                self.system.recording_manager.start_recording()
+                await self.system.recording_manager.start_recording()
                 self.system.recording = True
                 self.logger.info("Recording started")
                 StatusMessage.send("recording_started", {
@@ -54,14 +38,12 @@ class CommandHandler(BaseCommandHandler):
             })
 
     async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
-        """Handle stop_recording command."""
         if not self._check_recording_state(should_be_recording=True):
             return
 
         try:
-            # Stop recording via recording manager
             if hasattr(self.system, 'recording_manager'):
-                self.system.recording_manager.stop_recording()
+                await self.system.recording_manager.stop_recording()
                 self.system.recording = False
                 self.logger.info("Recording stopped")
                 StatusMessage.send("recording_stopped", {})
@@ -78,7 +60,6 @@ class CommandHandler(BaseCommandHandler):
             })
 
     async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
-        """Handle get_status command."""
         try:
             status_data = {
                 "running": self.system.running,

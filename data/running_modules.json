@@ -1,8 +1,9 @@
 {
-  "timestamp": "2025-10-22T09:56:48.048578",
+  "timestamp": "2025-10-22T19:00:33.578390",
   "running_modules": [
     "Camera",
-    "EyeTracker",
-    "Audio"
+    "Audio",
+    "Notes",
+    "EyeTracker"
   ]
 }

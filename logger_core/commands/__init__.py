@@ -1,9 +1,3 @@
-"""
-Command Protocol Package
-
-JSON command protocol for master-module communication.
-Provides base classes for command handling and slave mode operation.
-"""
 
 from .command_protocol import CommandMessage, StatusMessage, StatusType
 from .base_handler import BaseCommandHandler

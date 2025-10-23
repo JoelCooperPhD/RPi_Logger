@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Headless mode - continuous recording without UI.
-
-Starts recording immediately and runs until interrupted.
-"""
 
 import asyncio
 from typing import TYPE_CHECKING
@@ -15,13 +9,11 @@ if TYPE_CHECKING:
 
 
 class HeadlessMode(BaseMode):
-    """Non-interactive mode that records continuously."""
 
     def __init__(self, camera_system: 'CameraSystem'):
         super().__init__(camera_system)
 
     async def run(self) -> None:
-        """Run headless mode - start recording and maintain until shutdown."""
         self.system.running = True
         self.logger.info("Headless mode: starting continuous recording")
 
@@ -32,7 +24,6 @@ class HeadlessMode(BaseMode):
 
         try:
             while self.is_running():
-                # Keep cameras active by updating preview cache
                 for cam in self.system.cameras:
                     cam.update_preview_cache()
                 # Minimal sleep to prevent CPU spinning

@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Recording Manager for Gaze Tracker
-Handles video recording using FFmpeg and logs frame timing diagnostics.
-"""
 
 from __future__ import annotations
 
@@ -22,7 +17,6 @@ from typing import Optional, Any, TextIO
 import cv2
 import numpy as np
 
-# Import TrackerConfig from parent package
 from ..config.tracker_config import TrackerConfig as Config
 
 logger = logging.getLogger(__name__)
@@ -30,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class FrameTimingMetadata:
-    """Metadata captured for each frame write used in frame timing diagnostics."""
 
     capture_monotonic: Optional[float] = None
     capture_unix: Optional[float] = None
@@ -52,7 +45,6 @@ class _QueuedFrame:
 
 
 class RecordingManager:
-    """Manages video recording functionality"""
 
     def __init__(self, config: Config, *, use_ffmpeg: bool = True):
         self.config = config
@@ -102,14 +94,12 @@ class RecordingManager:
         self._current_experiment_label: Optional[str] = None
 
     async def toggle_recording(self):
-        """Toggle recording on/off"""
         if self.recording:
             await self.stop_recording()
         else:
             await self.start_recording()
 
     async def start_recording(self):
-        """Start FFmpeg recording"""
         if self.recording:
             return
 
@@ -220,7 +210,6 @@ class RecordingManager:
             await self._handle_start_failure()
 
     def start_experiment(self, label: Optional[str] = None) -> Path:
-        """Create a new experiment directory under the output root."""
         if self.recording:
             raise RuntimeError("Stop the active recording before starting a new experiment")
 
@@ -302,7 +291,6 @@ class RecordingManager:
         self.recording = False
 
     async def stop_recording(self):
-        """Stop FFmpeg recording"""
         if not self.recording and self.ffmpeg_process is None and self._gaze_file is None:
             return
 
@@ -413,18 +401,15 @@ class RecordingManager:
             logger.info("Recording saved: %s", self.recording_filename)
 
     def write_frame(self, frame: np.ndarray, metadata: Optional[FrameTimingMetadata] = None):
-        """Update the latest frame available for timed recording"""
         if not self.recording:
             return
 
-        # Store the latest frame and metadata - timer loop will use this
         self._latest_frame = frame.copy()  # Make a copy to avoid race conditions
         metadata = metadata or FrameTimingMetadata(requested_fps=self.config.fps)
         metadata.is_duplicate = False  # This is a new frame
         self._latest_frame_metadata = metadata
 
     def write_gaze_sample(self, gaze: Optional[Any]):
-        """Write gaze data sample to CSV if recording."""
         if not self.recording or self._gaze_file is None or gaze is None:
             return
 
@@ -450,7 +435,6 @@ class RecordingManager:
             self._enqueue_csv_line(self._gaze_queue, self._gaze_file, line)
 
     def write_imu_sample(self, imu: Optional[Any]):
-        """Write IMU sample (gyro/accel/orientation) to CSV if recording."""
         if not self.recording or self._imu_file is None or imu is None:
             return
 
@@ -474,7 +458,6 @@ class RecordingManager:
         self._enqueue_csv_line(self._imu_queue, self._imu_file, line)
 
     def write_event_sample(self, event: Optional[Any]):
-        """Write eye event sample (fixation/saccade/blink) to CSV if recording."""
         if not self.recording or self._event_file is None or event is None:
             return
 
@@ -510,7 +493,6 @@ class RecordingManager:
         return str(value)
 
     def _extract_components(self, source: Any, preferred_attr_order: tuple[str, ...], expected_len: int) -> list[str]:
-        """Return stringified vector components preserving attribute ordering when possible."""
         blanks = [""] * expected_len
         if source is None:
             return blanks
@@ -541,7 +523,6 @@ class RecordingManager:
         return blanks
 
     def _event_payload_as_json(self, event: Any) -> str:
-        """Serialize event attributes as JSON for traceability."""
         if event is None:
             return ""
 
@@ -593,21 +574,17 @@ class RecordingManager:
 
     @property
     def is_recording(self) -> bool:
-        """Check if currently recording"""
         return self.recording
 
     @property
     def skipped_frames(self) -> int:
-        """Get count of frames skipped due to FPS throttling"""
         return self._skipped_frames
 
     @property
     def duplicated_frames(self) -> int:
-        """Get count of frames duplicated for exact timing"""
         return self._duplicated_frames
 
     async def cleanup(self):
-        """Clean up recording resources"""
         await self.stop_recording()
 
     async def _frame_writer_loop(self) -> None:
@@ -705,7 +682,6 @@ class RecordingManager:
         file_obj.flush()
 
     async def _frame_timer_loop(self) -> None:
-        """Timer-based frame writing loop that ensures exact FPS and video duration"""
         if self.config.fps <= 0:
             return
 
@@ -726,7 +702,6 @@ class RecordingManager:
 
             current_time = time.perf_counter()
 
-            # Wait until it's time for the next frame
             if next_frame_time > current_time:
                 sleep_time = next_frame_time - current_time
                 await asyncio.sleep(sleep_time)
@@ -735,36 +710,30 @@ class RecordingManager:
                 if next_frame_time is None:
                     break
 
-            # Get the frame to write (latest or duplicate last)
             frame_to_write = None
             is_duplicate = False
             write_time_unix = time.time()
 
             if self._latest_frame is not None:
-                # New frame available
                 frame_to_write = self._latest_frame.copy()
                 metadata = self._latest_frame_metadata
                 last_frame_used = frame_to_write
             elif last_frame_used is not None:
-                # No new frame - duplicate the last one
                 frame_to_write = last_frame_used.copy()
                 metadata = FrameTimingMetadata(
                     capture_monotonic=None,  # This is a duplicate, no new capture time
                     capture_unix=None,       # This is a duplicate, no new capture time
                     requested_fps=self.config.fps,
                     is_duplicate=True,
-                    # Copy other metadata that might be relevant
                     camera_frame_index=getattr(self._latest_frame_metadata, 'camera_frame_index', None) if self._latest_frame_metadata else None,
                 )
                 is_duplicate = True
                 self._duplicated_frames += 1
             else:
-                # No frame available at all - skip this time slot
                 self._skipped_frames += 1
                 self._next_frame_time += frame_interval
                 continue
 
-            # Queue the frame for writing
             if metadata is None:
                 metadata = FrameTimingMetadata(requested_fps=self.config.fps)
             queued = _QueuedFrame(
@@ -780,7 +749,6 @@ class RecordingManager:
                     _ = frame_queue.get_nowait()
                 frame_queue.put_nowait(queued)
 
-            # Advance to next frame time (exact intervals)
             next_frame_time = self._next_frame_time
             if next_frame_time is None:
                 break

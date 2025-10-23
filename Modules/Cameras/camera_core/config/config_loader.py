@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Configuration file loader for camera module.
-
-Uses unified ConfigLoader from base module.
-"""
 
 import logging
 from pathlib import Path
@@ -11,12 +5,10 @@ from typing import Dict, Any
 
 from Modules.base import ConfigLoader as BaseConfigLoader
 
-logger = logging.getLogger("ConfigLoader")
+logger = logging.getLogger(__name__)
 
 
-# Default configuration values for camera module
 DEFAULT_OVERLAY_CONFIG = {
-    # Camera settings
     'resolution_preset': 0,
     'resolution_width': 1920,
     'resolution_height': 1080,
@@ -34,7 +26,6 @@ DEFAULT_OVERLAY_CONFIG = {
     'show_preview': True,
     'console_output': False,
     'libcamera_log_level': 'WARN',
-    # Overlay settings
     'font_scale_base': 0.6,
     'thickness_base': 2,
     'font_type': 'SIMPLEX',
@@ -73,47 +64,22 @@ DEFAULT_OVERLAY_CONFIG = {
     'show_frame_number': True,
     'scale_mode': 'auto',
     'manual_scale_factor': 3.0,
-    # Recording settings
     'enable_csv_timing_log': True,
     'disable_mp4_conversion': True,
 }
 
 
 class ConfigLoader:
-    """
-    Camera configuration loader (wrapper for unified ConfigLoader).
-
-    Maintains backward compatibility with existing code.
-    """
 
     DEFAULT_OVERLAY_CONFIG = DEFAULT_OVERLAY_CONFIG
 
     @staticmethod
     def load_overlay_config(config_path: Path) -> Dict[str, Any]:
-        """
-        Load overlay configuration from file.
-
-        Args:
-            config_path: Path to config.txt file
-
-        Returns:
-            Dictionary with configuration values
-        """
         return BaseConfigLoader.load(config_path, defaults=DEFAULT_OVERLAY_CONFIG)
 
 
 def load_config_file(config_path: str = None) -> Dict[str, Any]:
-    """
-    Load configuration file from standard location.
-
-    Args:
-        config_path: Optional path to config file (defaults to ../config.txt)
-
-    Returns:
-        Dictionary with configuration values
-    """
     if config_path is None:
-        # Default: look for config.txt two directories up (from camera_core/config/ to Cameras/)
         config_path = Path(__file__).parents[2] / "config.txt"
     else:
         config_path = Path(config_path)

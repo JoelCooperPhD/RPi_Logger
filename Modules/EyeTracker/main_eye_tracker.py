@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Eye tracking system with master-slave architecture.
-Entry point for tracker system with CLI argument parsing.
-"""
 
 import argparse
 import asyncio
@@ -16,11 +11,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Import from parent modules - assumes proper PYTHONPATH or package installation
 try:
     from cli_utils import (
         add_common_cli_arguments,
-        configure_logging,
         ensure_directory,
         parse_resolution,
         positive_float,
@@ -29,8 +22,12 @@ try:
         get_config_float,
         get_config_bool,
         get_config_str,
+        setup_module_logging,
+        install_exception_handlers,
+        install_signal_handlers,
+        log_module_startup,
+        log_module_shutdown,
     )
-    from Modules.base import redirect_stderr_stdout, setup_session_from_args
 except ImportError as e:
     print(f"ERROR: Cannot import required modules. Ensure PYTHONPATH includes project root or install package.", file=sys.stderr)
     print(f"  Add to PYTHONPATH: export PYTHONPATH=/home/rs-pi-2/Development/RPi_Logger:$PYTHONPATH", file=sys.stderr)
@@ -41,12 +38,9 @@ logger = logging.getLogger("TrackerMain")
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    """Parse command line arguments with config file defaults."""
-    # Load config file first
     from tracker_core import load_config_file
     config = load_config_file()
 
-    # Apply config defaults
     default_width = get_config_int(config, 'resolution_width', 1280)
     default_height = get_config_int(config, 'resolution_height', 720)
     default_resolution = (default_width, default_height)
@@ -67,6 +61,9 @@ def parse_args(argv: Optional[list[str]] = None):
         default_output=default_output,
         allowed_modes=("gui", "headless"),
         default_mode="gui",
+        default_session_prefix=default_session_prefix,
+        default_console_output=default_console_output,
+        default_auto_start_recording=default_auto_start_recording,
     )
 
     parser.add_argument(
@@ -92,46 +89,6 @@ def parse_args(argv: Optional[list[str]] = None):
     )
 
     parser.add_argument(
-        "--session-prefix",
-        type=str,
-        default=default_session_prefix,
-        help="Prefix for generated recording sessions",
-    )
-
-    # Recording control
-    recording_group = parser.add_mutually_exclusive_group()
-    recording_group.add_argument(
-        "--auto-start-recording",
-        dest="auto_start_recording",
-        action="store_true",
-        default=default_auto_start_recording,
-        help="Automatically start recording on startup",
-    )
-    recording_group.add_argument(
-        "--no-auto-start-recording",
-        dest="auto_start_recording",
-        action="store_false",
-        help="Wait for manual recording command (default)",
-    )
-
-    # Logging control
-    console_group = parser.add_mutually_exclusive_group()
-    console_group.add_argument(
-        "--console",
-        dest="console_output",
-        action="store_true",
-        default=default_console_output,
-        help="Also log to console (in addition to file)",
-    )
-    console_group.add_argument(
-        "--no-console",
-        dest="console_output",
-        action="store_false",
-        help="Log to file only (no console output)",
-    )
-
-    # Discovery settings
-    parser.add_argument(
         "--discovery-timeout",
         type=positive_float,
         default=default_discovery_timeout,
@@ -144,7 +101,6 @@ def parse_args(argv: Optional[list[str]] = None):
         help="Device discovery retry interval (seconds)",
     )
 
-    # GUI startup size control
     gui_size_group = parser.add_mutually_exclusive_group()
     gui_size_group.add_argument(
         "--gui-minimized",
@@ -160,7 +116,6 @@ def parse_args(argv: Optional[list[str]] = None):
         help="Start GUI at capture resolution",
     )
 
-    # GUI update rates
     parser.add_argument(
         "--gui-preview-update-hz",
         dest="gui_preview_update_hz",
@@ -169,31 +124,15 @@ def parse_args(argv: Optional[list[str]] = None):
         help="GUI preview update rate in Hz (1-30)",
     )
 
-    # Parent process communication control
-    parser.add_argument(
-        "--enable-commands",
-        dest="enable_commands",
-        action="store_true",
-        default=False,
-        help="Enable JSON command interface for parent process control (auto-detected if stdin is piped)",
-    )
-
-    # Window geometry control (for GUI mode)
-    parser.add_argument(
-        "--window-geometry",
-        dest="window_geometry",
-        type=str,
-        default=None,
-        help="Window position and size (format: WIDTHxHEIGHT+X+Y, e.g., 800x600+100+50)",
-    )
-
-    # Legacy compatibility flags (hidden from help)
     parser.add_argument("--slave", dest="mode", action="store_const", const="slave", help=argparse.SUPPRESS)
     parser.add_argument("--tkinter", dest="mode", action="store_const", const="gui", help=argparse.SUPPRESS)
 
     args = parser.parse_args(argv)
 
     args.width, args.height = args.resolution
+
+    from Modules.base import load_window_geometry_from_config
+    args.window_geometry = load_window_geometry_from_config(config, args.window_geometry)
 
     return args
 
@@ -202,55 +141,21 @@ async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
     args.output_dir = ensure_directory(args.output_dir)
 
-    # Setup session directory and logging using shared utilities
-    session_dir, session_name, log_file, is_command_mode = setup_session_from_args(
+    session_name, log_file, is_command_mode = setup_module_logging(
         args,
         module_name='eyetracker',
         default_prefix='tracking'
     )
 
-    # Redirect stderr/stdout to log file BEFORE configuring logging
-    # Returns original stdout for user-facing messages and parent process communication
-    original_stdout = redirect_stderr_stdout(log_file)
-
-    # Configure StatusMessage to use original stdout if in command mode
-    # This must be done BEFORE any imports that might send status messages
-    if is_command_mode:
-        from logger_core.commands import StatusMessage
-        StatusMessage.configure(original_stdout)
-
-    # Now configure Python logging
-    configure_logging(args.log_level, str(log_file), console_output=args.console_output)
-
-    # Install global exception hooks to catch and log any unhandled exceptions
-    def handle_exception(exc_type, exc_value, exc_traceback):
-        """Global exception handler to log uncaught exceptions."""
-        if issubclass(exc_type, KeyboardInterrupt):
-            # Call default handler for KeyboardInterrupt
-            sys.__excepthook__(exc_type, exc_value, exc_traceback)
-            return
-        logger.critical(
-            "Uncaught exception",
-            exc_info=(exc_type, exc_value, exc_traceback)
-        )
-
-    sys.excepthook = handle_exception
-
-    # Store session_dir and stdout streams in args so TrackerSystem can use them
-    args.session_dir = session_dir
-    args.console_stdout = original_stdout  # For console messages
-    args.command_stdout = original_stdout  # For parent process communication
-
-    logger.info("=" * 60)
-    logger.info("Eye Tracker System Starting")
-    logger.info("=" * 60)
-    logger.info("Session: %s", session_name)
-    logger.info("Log file: %s", log_file)
-    logger.info("Mode: %s", args.mode)
-    logger.info("Target FPS: %.1f", args.target_fps)
-    logger.info("Resolution: %dx%d", args.width, args.height)
-    logger.info("Console output: %s", args.console_output)
-    logger.info("=" * 60)
+    log_module_startup(
+        logger,
+        session_name,
+        log_file,
+        args,
+        module_name="Eye Tracker",
+        target_fps=f"{args.target_fps:.1f}",
+        resolution=f"{args.width}x{args.height}",
+    )
 
     # Import TrackerSupervisor AFTER stderr/stdout redirection
     from tracker_core import TrackerSupervisor
@@ -258,27 +163,8 @@ async def main(argv: Optional[list[str]] = None) -> None:
     supervisor = TrackerSupervisor(args)
     loop = asyncio.get_running_loop()
 
-    # Install asyncio exception handler
-    def handle_asyncio_exception(loop, context):
-        """Handle exceptions from asyncio tasks."""
-        exception = context.get('exception')
-        message = context.get('message', 'Unhandled asyncio exception')
-        if exception:
-            logger.exception(f"Asyncio exception: {message}", exc_info=exception)
-        else:
-            logger.error(f"Asyncio error: {message}, context: {context}")
-
-    loop.set_exception_handler(handle_asyncio_exception)
-
-    # Signal handler that properly schedules shutdown task
-    def signal_handler():
-        """Handle shutdown signals by scheduling shutdown task."""
-        if not supervisor.shutdown_event.is_set():
-            asyncio.create_task(supervisor.shutdown())
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(sig, signal_handler)
+    install_exception_handlers(logger, loop)
+    install_signal_handlers(supervisor, loop)
 
     try:
         await supervisor.run()
@@ -287,9 +173,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
         raise  # Re-raise to preserve exit code
     finally:
         await supervisor.shutdown()
-        logger.info("=" * 60)
-        logger.info("Eye Tracker System Stopped")
-        logger.info("=" * 60)
+        log_module_shutdown(logger, "Eye Tracker")
 
 
 if __name__ == "__main__":

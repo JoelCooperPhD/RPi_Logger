@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-"""
-Base System - Abstract base class for module systems.
-
-Provides common functionality for:
-- System initialization
-- Mode selection and execution
-- Session management
-- Shutdown handling
-- Device discovery patterns
-"""
 
 import asyncio
 import logging
@@ -18,21 +7,16 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-class BaseSystem(ABC):
-    """
-    Abstract base class for module systems.
+class ModuleInitializationError(RuntimeError):
+    pass
 
-    Provides common patterns for initialization, mode management,
-    and shutdown handling. Subclasses implement device-specific logic.
-    """
+
+class BaseSystem(ABC):
+
+    # When True, device initialization is deferred until after GUI is created
+    DEFER_DEVICE_INIT_IN_GUI = False
 
     def __init__(self, args: Any):
-        """
-        Initialize base system.
-
-        Args:
-            args: Parsed command line arguments
-        """
         self.args = args
         self.logger = logging.getLogger(self.__class__.__name__)
         self.running = False
@@ -40,68 +24,37 @@ class BaseSystem(ABC):
         self.shutdown_event = asyncio.Event()
         self.initialized = False
 
-        # Mode configuration
         self.mode = getattr(args, "mode", "gui")
         self.slave_mode = self.mode == "slave"
         self.headless_mode = self.mode == "headless"
         self.gui_mode = self.mode == "gui"
 
-        # Session management
+        self.enable_gui_commands = getattr(args, "enable_commands", False) or (
+            self.gui_mode and not sys.stdin.isatty()
+        )
+
         self.session_dir: Optional[Path] = getattr(args, "session_dir", None)
         if self.session_dir:
             self.session_label = self.session_dir.name
             self.logger.info("Session directory: %s", self.session_dir)
 
-        # Console output (for user-facing messages in slave mode)
         self.console = getattr(args, "console_stdout", sys.stdout)
 
-        # Device discovery settings
         self.device_timeout = getattr(args, "discovery_timeout", 5.0)
 
     @abstractmethod
     async def _initialize_devices(self) -> None:
-        """
-        Initialize devices/hardware.
-
-        Subclasses must implement device-specific initialization logic.
-        This should:
-        - Discover available devices
-        - Perform timeout-based retry
-        - Set self.initialized = True on success
-        - Raise InitializationError on failure
-
-        Raises:
-            InitializationError: If devices cannot be initialized
-        """
         pass
 
     @abstractmethod
     def _create_mode_instance(self, mode_name: str) -> Any:
-        """
-        Create mode instance based on mode name.
-
-        Subclasses must implement mode creation logic.
-
-        Args:
-            mode_name: Mode name ('gui', 'headless', 'slave')
-
-        Returns:
-            Mode instance
-        """
         pass
 
     async def run(self) -> None:
-        """
-        Main run method - delegates to appropriate mode.
-
-        This is the main entry point for the system.
-        It handles initialization, mode selection, and execution.
-        """
         try:
-            # Initialize devices
-            await self._initialize_devices()
+            if not (self.DEFER_DEVICE_INIT_IN_GUI and self.gui_mode):
+                await self._initialize_devices()
 
-            # Create and run appropriate mode
             mode_instance = self._create_mode_instance(self.mode)
             await mode_instance.run()
 
@@ -116,29 +69,19 @@ class BaseSystem(ABC):
                 self._send_slave_error(f"Unexpected error: {e}")
             raise
 
+    async def start_recording(self) -> bool:
+        self.logger.warning("%s does not implement start_recording", self.__class__.__name__)
+        return False
+
+    async def stop_recording(self) -> bool:
+        self.logger.warning("%s does not implement stop_recording", self.__class__.__name__)
+        return False
+
     @abstractmethod
     async def cleanup(self) -> None:
-        """
-        Clean up system resources.
-
-        Subclasses must implement cleanup logic for their devices/handlers.
-        This should:
-        - Stop any recording
-        - Release device resources
-        - Set self.running = False
-        - Set self.initialized = False
-        """
         pass
 
     def _send_slave_error(self, message: str) -> None:
-        """
-        Send error message in slave mode.
-
-        Helper method to send error status messages.
-
-        Args:
-            message: Error message to send
-        """
         try:
             from logger_core.commands import StatusMessage
             StatusMessage.send("error", {"message": message})
@@ -146,15 +89,6 @@ class BaseSystem(ABC):
             self.logger.warning("Cannot send slave error - StatusMessage not available")
 
     def _send_slave_status(self, status: str, data: Optional[dict] = None) -> None:
-        """
-        Send status message in slave mode.
-
-        Helper method to send status messages.
-
-        Args:
-            status: Status type
-            data: Optional status data
-        """
         if self.slave_mode:
             try:
                 from logger_core.commands import StatusMessage

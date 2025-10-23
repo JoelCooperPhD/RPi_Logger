@@ -1,6 +1,3 @@
-"""
-GUI interfaces for eye tracker system.
-"""
 
 from .tkinter_gui import TkinterGUI
 

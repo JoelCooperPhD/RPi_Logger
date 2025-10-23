@@ -1,7 +1,3 @@
-#!/usr/bin/env python3
-"""
-Slave mode for eye tracker - JSON command-driven operation.
-"""
 
 import asyncio
 import logging
@@ -18,27 +14,17 @@ logger = logging.getLogger(__name__)
 
 
 class SlaveMode(BaseSlaveMode, BaseMode):
-    """Slave mode - JSON command protocol via stdin/stdout."""
 
     def __init__(self, tracker_system: 'TrackerSystem'):
-        """Initialize slave mode."""
-        # Initialize both base classes
         BaseSlaveMode.__init__(self, tracker_system)
         BaseMode.__init__(self, tracker_system)
 
     def create_command_handler(self) -> BaseCommandHandler:
-        """Create tracker-specific command handler."""
         return CommandHandler(self.system)
 
     async def _main_loop(self) -> None:
-        """
-        Main tracker loop.
-
-        Runs the gaze tracker in parallel with command processing.
-        """
         from ..gaze_tracker import GazeTracker
 
-        # Use existing GazeTracker with system's config
         tracker = GazeTracker(
             self.system.config,
             device_manager=self.system.device_manager,
@@ -47,7 +33,6 @@ class SlaveMode(BaseSlaveMode, BaseMode):
             recording_manager=self.system.recording_manager
         )
 
-        # Run tracker until shutdown
         try:
             await tracker.run()
         except Exception as e:
@@ -55,5 +40,4 @@ class SlaveMode(BaseSlaveMode, BaseMode):
             StatusMessage.send("error", {"message": f"Tracker error: {str(e)[:100]}"})
 
     async def _on_ready(self) -> None:
-        """Send ready status when initialized."""
         StatusMessage.send("initialized", {"message": "Eye tracker slave mode ready"})

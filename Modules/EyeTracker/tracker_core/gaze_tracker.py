@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Main Gaze Tracker Class
-Orchestrates all components for gaze tracking functionality.
-"""
 
 import asyncio
 import time
@@ -18,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 class GazeTracker:
-    """Main gaze tracker orchestration class"""
 
     def __init__(
         self,
@@ -34,28 +28,23 @@ class GazeTracker:
         self.running = False
         self.display_enabled = display_enabled  # Controls OpenCV window display
 
-        # Stats
         self.frame_count = 0
         self.start_time = None
         self.no_frame_timeouts = 0  # When no frames available from stream
         self.dropped_frames = 0
         self.last_camera_frame_count = 0
 
-        # Latest display frame for GUI access
         self._latest_display_frame = None
 
-        # Components
         self.device_manager = device_manager or DeviceManager()
         self.stream_handler = stream_handler or StreamHandler()
         self.frame_processor = frame_processor or FrameProcessor(config)
         self.recording_manager = recording_manager or RecordingManager(config)
 
     async def connect(self) -> bool:
-        """Connect to eye tracker device"""
         return await self.device_manager.connect()
 
     async def run(self):
-        """Main processing loop"""
         if not self.device_manager.is_connected:
             logger.error("No device connected")
             return
@@ -63,7 +52,6 @@ class GazeTracker:
         self.running = True
         self.start_time = time.time()
 
-        # Create OpenCV window only if display is enabled (standalone mode)
         if self.display_enabled:
             self.frame_processor.create_window()
             logger.info("Starting gaze tracker - Press Q to quit, R to toggle recording")
@@ -80,10 +68,8 @@ class GazeTracker:
                 else:
                     logger.info("Experiment directory ready: %s", experiment_dir)
 
-            # Get RTSP URLs
             stream_urls = self.device_manager.get_stream_urls()
 
-            # Start streaming
             stream_tasks = await self.stream_handler.start_streaming(
                 stream_urls["video"],
                 stream_urls["gaze"],
@@ -91,7 +77,6 @@ class GazeTracker:
                 events_url=stream_urls.get("events"),
             ) or []
 
-            # Create frame processing task
             frame_task = asyncio.create_task(self._process_frames(), name="frame-processor")
 
             try:
@@ -109,7 +94,6 @@ class GazeTracker:
             await self.cleanup()
 
     async def _process_frames(self):
-        """Process frames at target FPS without blocking the event loop."""
         frame_interval = 1.0 / self.config.fps
         fps_int = max(int(self.config.fps), 1)
         next_frame_deadline = time.perf_counter()
@@ -146,7 +130,6 @@ class GazeTracker:
                 self.last_camera_frame_count = current_camera_frames
 
                 # Use sync processing in GUI mode to avoid cv2/Tkinter threading conflicts
-                # Async in standalone mode for better performance
                 if self.display_enabled:
                     processed_frame = await self.frame_processor.process_frame_async(raw_frame)
                 else:
@@ -178,7 +161,6 @@ class GazeTracker:
                     self.recording_manager.write_event_sample(next_event)
 
                 # Use sync processing in GUI mode to avoid cv2/Tkinter threading conflicts
-                # Async in standalone mode for better performance
                 if self.display_enabled:
                     display_frame = await self.frame_processor.add_overlays_async(
                         processed_frame,
@@ -210,7 +192,6 @@ class GazeTracker:
                     )
                     await asyncio.sleep(0)  # Yield to event loop
 
-                # Store latest display frame for GUI access
                 self._latest_display_frame = display_frame
 
                 if self.recording_manager.is_recording:
@@ -228,7 +209,6 @@ class GazeTracker:
                     self.recording_manager.write_frame(display_frame, metadata=frame_metadata)
                     self.recording_manager.write_gaze_sample(latest_gaze)
 
-                # Only display frames and check keyboard if display is enabled (standalone mode)
                 if self.display_enabled:
                     self.frame_processor.display_frame(display_frame)
 
@@ -253,19 +233,14 @@ class GazeTracker:
                     break
 
     async def cleanup(self):
-        """Clean up all resources"""
         logger.info("Cleaning up...")
 
-        # Stop processing
         self.running = False
 
-        # Stop streaming
         await self.stream_handler.stop_streaming()
 
-        # Stop recording
         await self.recording_manager.cleanup()
 
-        # Close device
         await self.device_manager.cleanup()
 
         # Close OpenCV windows

@@ -1,7 +1,3 @@
-#!/usr/bin/env python3
-"""
-Operational modes for audio recording system.
-"""
 
 from .base_mode import BaseMode
 from .slave_mode import SlaveMode

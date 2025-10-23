@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Audio recording manager.
-
-Coordinates recording for a single audio device.
-"""
 
 import asyncio
 import logging
@@ -16,21 +10,12 @@ import numpy as np
 
 from ..constants import AUDIO_BIT_DEPTH, AUDIO_CHANNELS_MONO, CLEANUP_TIMEOUT_SECONDS, MAX_AUDIO_BUFFER_CHUNKS
 
-logger = logging.getLogger("AudioRecordingManager")
+logger = logging.getLogger(__name__)
 
 
 class AudioRecordingManager:
-    """Manages recording for a single audio device."""
 
     def __init__(self, device_id: int, device_name: str, sample_rate: int):
-        """
-        Initialize recording manager.
-
-        Args:
-            device_id: Audio device ID
-            device_name: Human-readable device name
-            sample_rate: Recording sample rate in Hz
-        """
         self.logger = logging.getLogger(f"AudioRecorder{device_id}")
         self.device_id = device_id
         self.device_name = device_name
@@ -41,7 +26,6 @@ class AudioRecordingManager:
         self.audio_path: Optional[Path] = None
 
     def start_recording(self) -> None:
-        """Start recording (prepare buffers)."""
         if self.recording:
             return
 
@@ -51,12 +35,6 @@ class AudioRecordingManager:
         self.logger.debug("Recording started (buffers prepared)")
 
     def add_audio_chunk(self, audio_chunk: np.ndarray) -> None:
-        """
-        Add audio chunk to recording buffer with overflow protection.
-
-        Args:
-            audio_chunk: Audio data array
-        """
         if not self.recording:
             return
 
@@ -73,16 +51,6 @@ class AudioRecordingManager:
             )
 
     async def stop_recording(self, session_dir: Path, recording_count: int) -> Optional[Path]:
-        """
-        Stop recording and save to file (async, non-blocking).
-
-        Args:
-            session_dir: Directory to save recording
-            recording_count: Recording sequence number
-
-        Returns:
-            Path to saved file, or None if failed
-        """
         if not self.recording:
             return None
 
@@ -92,23 +60,18 @@ class AudioRecordingManager:
             self.logger.warning("No audio data to save")
             return None
 
-        # Generate filename
         timestamp = datetime.now().strftime("%H%M%S")
         safe_device_name = self.device_name.replace(' ', '_').replace(':', '')
         filename = f"mic{self.device_id}_{safe_device_name}_rec{recording_count:03d}_{timestamp}.wav"
         self.audio_path = session_dir / filename
 
-        # Process audio data in thread pool using modern asyncio.to_thread
         def prepare_audio_data():
-            """Concatenate and convert audio data to int16."""
             audio_array = np.concatenate(self.audio_data)
             return (audio_array * 32767).astype(np.int16)
 
         audio_int16 = await asyncio.to_thread(prepare_audio_data)
 
-        # Write WAV file in thread pool
         def write_wav_file():
-            """Write WAV file to disk."""
             with wave.open(str(self.audio_path), 'wb') as wf:
                 wf.setnchannels(AUDIO_CHANNELS_MONO)
                 wf.setsampwidth(AUDIO_BIT_DEPTH // 8)
@@ -125,7 +88,6 @@ class AudioRecordingManager:
             return None
 
     async def cleanup(self) -> None:
-        """Clean up recording resources."""
         self.recording = False
         self.audio_data.clear()
         self.frames_recorded = 0

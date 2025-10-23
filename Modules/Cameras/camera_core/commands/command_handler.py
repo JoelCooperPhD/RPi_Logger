@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Command handler for camera system.
-
-Processes commands received from master in slave mode.
-"""
 
 import asyncio
 import datetime
@@ -19,24 +13,14 @@ from logger_core.commands import BaseCommandHandler, StatusMessage
 
 
 class CommandHandler(BaseCommandHandler):
-    """Handles command execution for camera system."""
 
     def __init__(self, camera_system: 'CameraSystem', gui=None):
-        """
-        Initialize command handler.
-
-        Args:
-            camera_system: Reference to CameraSystem instance
-            gui: Optional reference to TkinterGUI instance (for get_geometry)
-        """
         super().__init__(camera_system, gui=gui)
 
     async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
-        """Handle start_recording command."""
         if self._check_recording_state(should_be_recording=False):
             session_dir = self.system._ensure_session_dir()
-            for cam in self.system.cameras:
-                cam.start_recording(session_dir)
+            await asyncio.gather(*[cam.start_recording(session_dir) for cam in self.system.cameras])
             self.system.recording = True
             StatusMessage.send(
                 "recording_started",
@@ -51,10 +35,8 @@ class CommandHandler(BaseCommandHandler):
             )
 
     async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
-        """Handle stop_recording command."""
         if self._check_recording_state(should_be_recording=True):
-            for cam in self.system.cameras:
-                cam.stop_recording()
+            await asyncio.gather(*[cam.stop_recording() for cam in self.system.cameras])
             self.system.recording = False
             StatusMessage.send(
                 "recording_stopped",
@@ -69,11 +51,9 @@ class CommandHandler(BaseCommandHandler):
             )
 
     async def handle_take_snapshot(self, command_data: Dict[str, Any]) -> None:
-        """Handle take_snapshot command (async)."""
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         session_dir = self.system._ensure_session_dir()
 
-        # Collect frames first (fast)
         frames_to_save = []
         for i, cam in enumerate(self.system.cameras):
             frame = cam.update_preview_cache()
@@ -81,11 +61,9 @@ class CommandHandler(BaseCommandHandler):
                 filename = session_dir / f"snapshot_cam{i}_{ts}.jpg"
                 frames_to_save.append((str(filename), frame.copy()))  # Copy to avoid race conditions
 
-        # Save all frames concurrently using executor (non-blocking)
         loop = asyncio.get_event_loop()
 
         async def save_frame(filename: str, frame) -> tuple[str, bool]:
-            """Save a single frame asynchronously."""
             try:
                 await loop.run_in_executor(None, cv2.imwrite, filename, frame)
                 self.logger.info("Saved snapshot %s", filename)
@@ -94,13 +72,11 @@ class CommandHandler(BaseCommandHandler):
                 self.logger.error("Failed to save snapshot %s: %s", filename, e)
                 return (filename, False)
 
-        # Run all saves concurrently with timeout
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(*[save_frame(fn, fr) for fn, fr in frames_to_save]),
                 timeout=5.0
             )
-            # Collect successfully saved filenames
             filenames = [fn for fn, success in results if success]
         except asyncio.TimeoutError:
             self.logger.error("Snapshot saving timed out")
@@ -109,7 +85,6 @@ class CommandHandler(BaseCommandHandler):
         StatusMessage.send("snapshot_taken", {"files": filenames})
 
     async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
-        """Handle get_status command."""
         status_data = {
             "recording": self.system.recording,
             "session": self.system.session_label,
@@ -129,7 +104,6 @@ class CommandHandler(BaseCommandHandler):
         StatusMessage.send("status_report", status_data)
 
     async def handle_custom_command(self, command: str, command_data: Dict[str, Any]) -> bool:
-        """Handle camera-specific custom commands."""
         if command == "toggle_preview":
             cam_num = command_data.get("camera_id", 0)
             enabled = command_data.get("enabled", True)
