@@ -102,6 +102,51 @@ class ConfigLoader:
         return value
 
     @staticmethod
+    def load_module_config(
+        calling_file: str,
+        config_filename: str = "config.txt",
+        defaults: Optional[Dict[str, Any]] = None,
+        strict: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Load a module's config file relative to the calling file's location.
+
+        This helper allows modules to load their config.txt without hardcoding paths.
+        The calling file should be __file__ from the caller's context.
+
+        Example usage from Modules/Camera/camera_core/config/config_loader.py:
+            config = ConfigLoader.load_module_config(__file__)
+
+        Args:
+            calling_file: The __file__ variable from the caller (used to locate module root)
+            config_filename: Name of the config file (default: "config.txt")
+            defaults: Optional default values
+            strict: If True, only keys in defaults are accepted
+
+        Returns:
+            Dict containing config values
+        """
+        # Navigate up from calling_file to find module root (where config.txt lives)
+        # Typical structure: Modules/ModuleName/module_core/config/config_loader.py
+        # We need to go up 3 levels to Modules/ModuleName/
+        calling_path = Path(calling_file)
+
+        # Go up until we find a directory containing config_filename
+        # or until we've gone up 5 levels (safety limit)
+        search_path = calling_path.parent
+        for _ in range(5):
+            config_path = search_path / config_filename
+            if config_path.exists():
+                return ConfigLoader.load(config_path, defaults, strict)
+            search_path = search_path.parent
+
+        # If not found, try 3 levels up (standard module structure)
+        module_root = calling_path.parent.parent.parent
+        config_path = module_root / config_filename
+
+        return ConfigLoader.load(config_path, defaults, strict)
+
+    @staticmethod
     def update_config_values(config_path: Path, updates: Dict[str, Any]) -> bool:
         if not config_path.exists():
             logger.warning("Config file not found at %s, cannot update", config_path)
