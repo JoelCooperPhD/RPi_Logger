@@ -24,8 +24,6 @@ DEFAULT_BITRATE_BPS = 10_000_000  # 10 Mbps
 CSV_FLUSH_INTERVAL_FRAMES = 60
 CSV_QUEUE_SIZE = 300
 
-# NOTE: PROCESSOR_POLL_INTERVAL is deprecated - processor now uses event-driven coordination
-PROCESSOR_POLL_INTERVAL = 0.001  # 1ms (DEPRECATED - kept for reference)
 CAPTURE_SLEEP_INTERVAL = 0.1  # 100ms on error
 
 FRAME_LOG_COUNT = 3  # Log first N frames for debugging
