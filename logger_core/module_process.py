@@ -374,7 +374,7 @@ class ModuleProcess:
             config_path = self.module_info.config_path
             if config_path:
                 config_manager = get_config_manager()
-                success = config_manager.write_config(config_path, {'enabled': enabled})
+                success = await config_manager.write_config_async(config_path, {'enabled': enabled})
                 if success:
                     self.logger.info("Updated enabled state to %s in config", enabled)
                 else:

@@ -1,8 +1,10 @@
 
+import asyncio
 import logging
-import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+import aiofiles
 
 logger = logging.getLogger("ConfigManager")
 
@@ -10,9 +12,25 @@ logger = logging.getLogger("ConfigManager")
 class ConfigManager:
 
     def __init__(self):
-        self.lock = threading.Lock()
+        self.lock = asyncio.Lock()
 
     def read_config(self, config_path: Path) -> Dict[str, str]:
+        """Synchronous wrapper for read_config_async. Use in non-async contexts."""
+        try:
+            # Try to get the running event loop
+            loop = asyncio.get_running_loop()
+            # We're in an async context but called sync method - use asyncio.to_thread
+            # This shouldn't happen in well-designed code, but provides a fallback
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self._read_config_sync, config_path)
+                return future.result()
+        except RuntimeError:
+            # No event loop running - we're in a pure sync context
+            return self._read_config_sync(config_path)
+
+    def _read_config_sync(self, config_path: Path) -> Dict[str, str]:
+        """Pure synchronous implementation for config reading."""
         config = {}
 
         if not config_path.exists():
@@ -46,15 +64,115 @@ class ConfigManager:
 
         return config
 
+    async def read_config_async(self, config_path: Path) -> Dict[str, str]:
+        """Async version for use in async contexts."""
+        config = {}
+
+        if not await asyncio.to_thread(config_path.exists):
+            logger.debug("Config file not found: %s", config_path)
+            return config
+
+        try:
+            async with aiofiles.open(config_path, 'r', encoding='utf-8') as f:
+                async for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+
+                        # Remove inline comments (anything after #)
+                        if '#' in value:
+                            value = value.split('#')[0].strip()
+
+                        if value.startswith('"') and value.endswith('"'):
+                            value = value[1:-1]
+                        elif value.startswith("'") and value.endswith("'"):
+                            value = value[1:-1]
+
+                        config[key] = value
+
+        except Exception as e:
+            logger.error("Failed to read config %s: %s", config_path, e)
+
+        return config
+
     def write_config(self, config_path: Path, updates: Dict[str, Any]) -> bool:
+        """Synchronous wrapper for write_config_async. Use in non-async contexts."""
+        try:
+            # Try to get the running event loop
+            loop = asyncio.get_running_loop()
+            # We're in an async context but called sync method - use thread pool
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self._write_config_sync, config_path, updates)
+                return future.result()
+        except RuntimeError:
+            # No event loop running - we're in a pure sync context
+            return self._write_config_sync(config_path, updates)
+
+    def _write_config_sync(self, config_path: Path, updates: Dict[str, Any]) -> bool:
+        """Pure synchronous implementation for config writing."""
         if not config_path.exists():
             logger.error("Config file not found: %s", config_path)
             return False
 
-        with self.lock:
+        # Use a simple lock for sync version (not the asyncio lock)
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+
+            updated_keys = set()
+
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if not stripped or stripped.startswith('#'):
+                    continue
+
+                if '=' in stripped:
+                    key = stripped.split('=')[0].strip()
+                    if key in updates:
+                        value = updates[key]
+                        if isinstance(value, bool):
+                            value_str = str(value).lower()
+                        else:
+                            value_str = str(value)
+
+                        indent = len(line) - len(line.lstrip())
+                        lines[i] = ' ' * indent + f"{key} = {value_str}\n"
+                        updated_keys.add(key)
+
+            for key, value in updates.items():
+                if key not in updated_keys:
+                    if isinstance(value, bool):
+                        value_str = str(value).lower()
+                    else:
+                        value_str = str(value)
+                    lines.append(f"{key} = {value_str}\n")
+                    logger.info("Added new config key: %s = %s", key, value_str)
+
+            with open(config_path, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+
+            logger.debug("Updated config file: %s (%d keys)", config_path, len(updates))
+            return True
+
+        except Exception as e:
+            logger.error("Failed to write config %s: %s", config_path, e, exc_info=True)
+            return False
+
+    async def write_config_async(self, config_path: Path, updates: Dict[str, Any]) -> bool:
+        """Async version for use in async contexts."""
+        if not await asyncio.to_thread(config_path.exists):
+            logger.error("Config file not found: %s", config_path)
+            return False
+
+        async with self.lock:
             try:
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
+                async with aiofiles.open(config_path, 'r', encoding='utf-8') as f:
+                    lines = await f.readlines()
 
                 updated_keys = set()
 
@@ -85,8 +203,8 @@ class ConfigManager:
                         lines.append(f"{key} = {value_str}\n")
                         logger.info("Added new config key: %s = %s", key, value_str)
 
-                with open(config_path, 'w', encoding='utf-8') as f:
-                    f.writelines(lines)
+                async with aiofiles.open(config_path, 'w', encoding='utf-8') as f:
+                    await f.writelines(lines)
 
                 logger.debug("Updated config file: %s (%d keys)", config_path, len(updates))
                 return True

@@ -1,4 +1,5 @@
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -7,6 +8,15 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigLoader:
+
+    @staticmethod
+    async def load_async(
+        config_path: Path,
+        defaults: Optional[Dict[str, Any]] = None,
+        strict: bool = False
+    ) -> Dict[str, Any]:
+        """Async version of load() using asyncio.to_thread for file I/O."""
+        return await asyncio.to_thread(ConfigLoader.load, config_path, defaults, strict)
 
     @staticmethod
     def load(
@@ -145,6 +155,11 @@ class ConfigLoader:
         config_path = module_root / config_filename
 
         return ConfigLoader.load(config_path, defaults, strict)
+
+    @staticmethod
+    async def update_config_values_async(config_path: Path, updates: Dict[str, Any]) -> bool:
+        """Async version of update_config_values() using asyncio.to_thread for file I/O."""
+        return await asyncio.to_thread(ConfigLoader.update_config_values, config_path, updates)
 
     @staticmethod
     def update_config_values(config_path: Path, updates: Dict[str, Any]) -> bool:
