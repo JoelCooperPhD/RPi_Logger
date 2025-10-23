@@ -14,3 +14,6 @@ CLEANUP_TIMEOUT_SECONDS = 2.0            # Timeout for cleanup operations
 
 # Error message formatting
 MAX_ERROR_MESSAGE_LENGTH = 200           # Maximum length for error messages
+
+# Polling intervals
+KEYBOARD_POLL_INTERVAL = 0.001           # 1ms for keyboard input polling
