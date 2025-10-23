@@ -56,7 +56,7 @@ class NotesSystem(BaseSystem, RecordingStateMixin):
             return False
 
         try:
-            if self.notes_handler.start_recording():
+            if await self.notes_handler.start_recording():
                 self.recording = True
                 logger.info("Note recording started")
                 return True
@@ -87,7 +87,7 @@ class NotesSystem(BaseSystem, RecordingStateMixin):
             logger.error("Exception stopping recording: %s", e, exc_info=True)
             return False
 
-    def add_note(self, note_text: str) -> bool:
+    async def add_note(self, note_text: str) -> bool:
         if not self.initialized or not self.notes_handler:
             logger.error("Cannot add note - system not initialized")
             return False
@@ -96,7 +96,7 @@ class NotesSystem(BaseSystem, RecordingStateMixin):
             logger.warning("Cannot add note - recording not active")
             return False
 
-        result = self.notes_handler.add_note(note_text)
+        result = await self.notes_handler.add_note(note_text)
         return result is not None
 
     async def cleanup(self) -> None:
