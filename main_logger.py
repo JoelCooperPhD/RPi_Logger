@@ -117,8 +117,6 @@ async def main(argv: Optional[list[str]] = None) -> None:
     """
     args = parse_args(argv)
 
-    args.data_dir.mkdir(parents=True, exist_ok=True)
-
     ensure_directories()
 
     configure_logging(args.log_level, MASTER_LOG_FILE, console_output=args.console_output)

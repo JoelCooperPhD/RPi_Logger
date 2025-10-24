@@ -94,7 +94,7 @@ class CameraHandler:
 
         self.logger.info("Started all async loops")
 
-    async def start_recording(self, session_dir: Optional[Path] = None):
+    async def start_recording(self, session_dir: Optional[Path] = None, trial_number: int = 1):
         if self.recording:
             return
 
@@ -105,7 +105,7 @@ class CameraHandler:
         if not self.session_dir:
             raise ValueError("No session directory available for recording")
 
-        await self.recording_manager.start_recording(self.session_dir)
+        await self.recording_manager.start_recording(self.session_dir, trial_number)
         if self.recording_manager.video_path:
             self.logger.info("Recording to %s", self.recording_manager.video_path)
         self.recording = True

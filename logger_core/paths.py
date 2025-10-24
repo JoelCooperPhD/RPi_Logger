@@ -18,9 +18,8 @@ CONFIG_PATH = PROJECT_ROOT / "config.txt"
 LOGS_DIR = PROJECT_ROOT / "logs"
 MASTER_LOG_FILE = LOGS_DIR / "master.log"
 
-# Data directories
-DATA_DIR = PROJECT_ROOT / "data"
-STATE_FILE = DATA_DIR / "running_modules.json"
+# Application state
+STATE_FILE = PROJECT_ROOT / "running_modules.json"
 
 # Module directories
 MODULES_DIR = PROJECT_ROOT / "Modules"
@@ -38,7 +37,6 @@ def ensure_directories() -> None:
     directories are present.
     """
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 __all__ = [
@@ -46,7 +44,6 @@ __all__ = [
     'CONFIG_PATH',
     'LOGS_DIR',
     'MASTER_LOG_FILE',
-    'DATA_DIR',
     'STATE_FILE',
     'MODULES_DIR',
     'UI_DIR',

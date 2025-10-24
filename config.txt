@@ -16,8 +16,8 @@
 # SESSION SETTINGS
 ################################################################################
 
-# Data directory for master logs and temporary files
-# Module data is saved to user-selected location, not here
+# Data directory (legacy parameter - not used for actual data storage)
+# All data is saved to user-selected location via UI dialog
 data_dir = data
 
 # Session prefix (creates: session_YYYYMMDD_HHMMSS/ in user-selected location)
@@ -25,14 +25,14 @@ session_prefix = session
 
 # Last used session directory (automatically updated when user selects location via UI)
 # This is where session data and recordings are actually saved
-last_session_dir = /home/rs-pi-2/Desktop
+last_session_dir = /home/rs-pi-2/Desktop/LoggerData
 
 
 ################################################################################
 # LOGGING
 ################################################################################
 
-# Master log file: data/logs/master_YYYYMMDD_HHMMSS.log
+# Master log file: logs/master.log
 log_level = info              # Python log level (debug/info/warning/error/critical)
 console_output = false        # Also print to console (true/false)
 
@@ -101,7 +101,7 @@ window_height = 277
 #                ├── gaze_*.csv
 #                └── ...
 #
-#    Master logger logs go to: data/logs/master_YYYYMMDD_HHMMSS.log
+#    Master logger logs go to: logs/master.log
 #
 # 4. Module Communication:
 #    - Master launches modules with: --mode gui --output-dir {session_dir}/ModuleName/ --enable-commands
