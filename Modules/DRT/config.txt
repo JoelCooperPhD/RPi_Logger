@@ -1,4 +1,4 @@
-enabled = false
+enabled = true
 window_geometry = 800x600+100+100
 device_vid = 9114
 device_pid = 32798

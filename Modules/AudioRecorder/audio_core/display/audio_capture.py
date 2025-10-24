@@ -100,16 +100,26 @@ class AudioCaptureManager:
     async def stop_capture_for_device(self, device_id: int):
         if device_id in self.audio_processes:
             process = self.audio_processes[device_id]
+
+            # Remove from dict first to stop the background capture loop
+            del self.audio_processes[device_id]
+            logger.debug("Removed device %d from audio_processes, stopping capture loop", device_id)
+
+            # Give the capture loop time to exit
+            await asyncio.sleep(0.1)
+
             try:
                 process.terminate()
+                logger.debug("Terminated arecord process for device %d, waiting for exit", device_id)
                 await asyncio.wait_for(process.wait(), timeout=2.0)
+                logger.info("Stopped audio capture for device %d", device_id)
             except asyncio.TimeoutError:
+                logger.warning("Process for device %d didn't exit after terminate, killing", device_id)
                 process.kill()
+                await asyncio.sleep(0.1)
+                logger.info("Killed audio capture for device %d", device_id)
             except Exception as e:
                 logger.error("Error stopping audio capture for device %d: %s", device_id, e)
-            finally:
-                del self.audio_processes[device_id]
-                logger.info("Stopped audio capture for device %d", device_id)
 
     async def _read_audio_data_for_device(self, device_id: int):
         if device_id not in self.audio_processes:
