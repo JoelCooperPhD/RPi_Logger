@@ -42,7 +42,11 @@ class LoggerSystem:
         self.event_logger: Optional[EventLogger] = None
 
         self._discover_modules()
-        self._load_enabled_modules()
+        # Note: Call async_init() after construction to complete async initialization
+
+    async def async_init(self) -> None:
+        """Complete async initialization. Must be called after construction."""
+        await self._load_enabled_modules()
 
     def _discover_modules(self) -> None:
         self.logger.info("Discovering modules...")
@@ -51,19 +55,25 @@ class LoggerSystem:
                         len(self.available_modules),
                         [m.name for m in self.available_modules])
 
-    def _load_enabled_modules(self) -> None:
+    async def _load_enabled_modules(self) -> None:
+        """Load enabled modules asynchronously, avoiding blocking I/O."""
         self.selected_modules.clear()
 
         running_modules_from_last_session = None
 
         if STATE_FILE.exists():
             try:
-                with open(STATE_FILE, 'r') as f:
-                    state = json.load(f)
-                    running_modules_from_last_session = set(state.get('running_modules', []))
-                    self.logger.info("Loaded running modules from last session: %s", running_modules_from_last_session)
-                    # Delete the state file after reading it (one-time use)
-                    STATE_FILE.unlink()
+                # Wrap blocking I/O in thread pool
+                def read_state():
+                    with open(STATE_FILE, 'r') as f:
+                        return json.load(f)
+
+                state = await asyncio.to_thread(read_state)
+                running_modules_from_last_session = set(state.get('running_modules', []))
+                self.logger.info("Loaded running modules from last session: %s", running_modules_from_last_session)
+
+                # Delete the state file after reading it (one-time use)
+                await asyncio.to_thread(STATE_FILE.unlink)
             except Exception as e:
                 self.logger.error("Failed to load running modules state: %s", e)
 
@@ -81,7 +91,8 @@ class LoggerSystem:
                     self.logger.debug("Module %s has no config, defaulting to enabled", module_info.name)
                     continue
 
-                config = self.config_manager.read_config(module_info.config_path)
+                # Use async config reading to avoid blocking
+                config = await self.config_manager.read_config_async(module_info.config_path)
                 enabled = self.config_manager.get_bool(config, 'enabled', default=True)
 
                 if enabled:
