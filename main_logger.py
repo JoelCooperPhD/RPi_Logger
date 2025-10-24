@@ -8,65 +8,24 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from logger_core import LoggerSystem
+from logger_core import LoggerSystem, get_shutdown_coordinator
 from logger_core.ui import MainWindow
+from logger_core.paths import CONFIG_PATH, LOGS_DIR, MASTER_LOG_FILE, ensure_directories
+from logger_core.config_manager import get_config_manager
 
 
 logger = logging.getLogger(__name__)
 
 
-def load_config_file(config_path: Path = None) -> dict:
-    if config_path is None:
-        config_path = Path(__file__).parent / "config.txt"
-
-    config = {}
-
-    if not config_path.exists():
-        return config
-
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    key = key.strip()
-                    value = value.strip()
-
-                    if '#' in value:
-                        value = value.split('#')[0].strip()
-
-                    if value.startswith('"') and value.endswith('"'):
-                        value = value[1:-1]
-                    elif value.startswith("'") and value.endswith("'"):
-                        value = value[1:-1]
-                    config[key] = value
-    except Exception as e:
-        logger.warning("Failed to load config from %s: %s", config_path, e)
-
-    return config
-
-
 def parse_args(argv: Optional[list[str]] = None):
-    config = load_config_file()
+    """Parse command-line arguments with config file defaults."""
+    config_manager = get_config_manager()
+    config = config_manager.read_config(CONFIG_PATH)
 
-    def get_config_str(key, default):
-        return config.get(key, default)
-
-    def get_config_bool(key, default):
-        if key in config:
-            value = config[key]
-            if isinstance(value, bool):
-                return value
-            return str(value).lower() in ('true', '1', 'yes', 'on')
-        return default
-
-    default_data_dir = Path(get_config_str('data_dir', 'data'))
-    default_session_prefix = get_config_str('session_prefix', 'session')
-    default_log_level = get_config_str('log_level', 'info')
-    default_console_output = get_config_bool('console_output', True)
+    default_data_dir = Path(config_manager.get_str(config, 'data_dir', default='data'))
+    default_session_prefix = config_manager.get_str(config, 'session_prefix', default='session')
+    default_log_level = config_manager.get_str(config, 'log_level', default='info')
+    default_console_output = config_manager.get_bool(config, 'console_output', default=True)
 
     parser = argparse.ArgumentParser(
         description="RPi Logger - Master logging orchestrator for multiple modules"
@@ -141,21 +100,34 @@ def configure_logging(log_level: str, log_file: Path, console_output: bool = Tru
 
 
 async def main(argv: Optional[list[str]] = None) -> None:
+    """
+    Main entry point for the RPi Logger system.
+
+    Shutdown Sequence:
+    1. User triggers shutdown via signal (Ctrl+C), UI button, or exception
+    2. ShutdownCoordinator.initiate_shutdown() is called with source identifier
+    3. Coordinator executes registered cleanup callbacks in order:
+       a. cleanup_logger_system() - Stops all modules, saves geometry
+       b. cleanup_ui() - Closes main window
+    4. Finally block ensures shutdown completes
+    5. Logs shutdown message and exits
+
+    The ShutdownCoordinator ensures shutdown happens exactly once, regardless
+    of how many times it's triggered, preventing race conditions.
+    """
     args = parse_args(argv)
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
 
-    logs_dir = Path(__file__).parent / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    ensure_directories()
 
-    log_file = logs_dir / "master.log"
-    configure_logging(args.log_level, log_file, console_output=args.console_output)
+    configure_logging(args.log_level, MASTER_LOG_FILE, console_output=args.console_output)
 
     logger.info("=" * 60)
     logger.info("RPi Logger - Master System Starting")
     logger.info("=" * 60)
     logger.info("Data directory: %s", args.data_dir)
-    logger.info("Log file: %s", log_file)
+    logger.info("Log file: %s", MASTER_LOG_FILE)
     logger.info("Session will be created when user starts recording")
     logger.info("=" * 60)
 
@@ -165,6 +137,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
         log_level=args.log_level,
     )
 
+    # Complete async initialization
+    await logger_system.async_init()
+
     modules = logger_system.get_available_modules()
     logger.info("Discovered %d modules:", len(modules))
     for module in modules:
@@ -172,21 +147,25 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     ui = MainWindow(logger_system)
 
+    # Setup shutdown coordinator
+    shutdown_coordinator = get_shutdown_coordinator()
+
+    # Register cleanup callbacks in order
+    async def cleanup_logger_system():
+        await logger_system.cleanup()
+
+    async def cleanup_ui():
+        if ui.root:
+            ui.root.quit()
+
+    shutdown_coordinator.register_cleanup(cleanup_logger_system)
+    shutdown_coordinator.register_cleanup(cleanup_ui)
+
+    # Setup signal handlers
     loop = asyncio.get_running_loop()
 
     def signal_handler():
-        logger.info("Received shutdown signal")
-        asyncio.create_task(shutdown())
-
-    async def shutdown():
-        logger.info("Shutting down...")
-        try:
-            await logger_system.cleanup()
-        except Exception as e:
-            logger.error("Error during cleanup: %s", e)
-        finally:
-            if ui.root:
-                ui.root.quit()
+        asyncio.create_task(shutdown_coordinator.initiate_shutdown("signal"))
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -198,11 +177,15 @@ async def main(argv: Optional[list[str]] = None) -> None:
     try:
         await ui.run()
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        await shutdown_coordinator.initiate_shutdown("keyboard interrupt")
     except Exception as e:
         logger.error("Unexpected error: %s", e, exc_info=True)
+        await shutdown_coordinator.initiate_shutdown("exception")
     finally:
-        await logger_system.cleanup()
+        # Ensure shutdown completes if not already initiated
+        if not shutdown_coordinator.is_complete:
+            await shutdown_coordinator.initiate_shutdown("finally block")
+
         logger.info("=" * 60)
         logger.info("RPi Logger - Master System Stopped")
         logger.info("=" * 60)

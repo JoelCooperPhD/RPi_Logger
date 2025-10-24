@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from .paths import MODULES_DIR
+
 logger = logging.getLogger("ModuleDiscovery")
 
 
@@ -97,7 +99,7 @@ async def discover_modules_async(modules_dir: Path = None) -> List[ModuleInfo]:
 
 def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
     if modules_dir is None:
-        modules_dir = Path(__file__).parent.parent / "Modules"
+        modules_dir = MODULES_DIR
 
     if not modules_dir.exists():
         logger.error("Modules directory not found: %s", modules_dir)

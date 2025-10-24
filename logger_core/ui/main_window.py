@@ -10,6 +10,7 @@ from PIL import Image, ImageTk
 
 from ..logger_system import LoggerSystem
 from ..config_manager import get_config_manager
+from ..paths import CONFIG_PATH, LOGO_PATH
 from .main_controller import MainController
 from .timer_manager import TimerManager
 
@@ -40,17 +41,14 @@ class MainWindow:
         self.trial_label_var: Optional[tk.StringVar] = None
         self.trial_label_entry: Optional[ttk.Entry] = None
 
-        self.config_path = Path(__file__).parent.parent.parent / "config.txt"
-
     def build_ui(self) -> None:
         self.root = tk.Tk()
         self.root.title("RS Logger")
 
-        config_path = Path(__file__).parent.parent.parent / "config.txt"
         config_manager = get_config_manager()
 
-        if config_path.exists():
-            config = config_manager.read_config(config_path)
+        if CONFIG_PATH.exists():
+            config = config_manager.read_config(CONFIG_PATH)
             window_x = config_manager.get_int(config, 'window_x', default=0)
             window_y = config_manager.get_int(config, 'window_y', default=0)
             window_width = config_manager.get_int(config, 'window_width', default=800)
@@ -166,8 +164,7 @@ class MainWindow:
         header_frame.grid_propagate(False)
 
         try:
-            logo_path = Path(__file__).parent / "logo_100.png"
-            logo_image = Image.open(logo_path)
+            logo_image = Image.open(LOGO_PATH)
             new_size = (int(logo_image.width * 0.6), int(logo_image.height * 0.6))
             logo_image = logo_image.resize(new_size, Image.Resampling.LANCZOS)
             logo_photo = ImageTk.PhotoImage(logo_image)
