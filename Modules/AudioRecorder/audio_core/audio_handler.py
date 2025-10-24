@@ -101,7 +101,7 @@ class AudioHandler:
             self.stream = None
             return False
 
-    def start_recording(self) -> bool:
+    def start_recording(self, session_dir: Optional[Path] = None, trial_number: Optional[int] = None) -> bool:
         if self.recording:
             self.logger.warning("Already recording")
             return False
@@ -110,7 +110,7 @@ class AudioHandler:
             self.logger.error("Cannot record - stream not started")
             return False
 
-        self.recording_manager.start_recording()
+        self.recording_manager.start_recording(session_dir, trial_number, enable_csv_logging=True)
         self.recording = True
         self.frames_since_feedback = 0
         self.logger.info("=" * 80)

@@ -33,9 +33,9 @@ class MainController:
         self.trial_button: Optional[ttk.Button] = None
         self.shutdown_button: Optional[ttk.Button] = None
 
-        self.session_status_label: Optional[tk.Label] = None
-        self.trial_counter_label: Optional[tk.Label] = None
-        self.session_path_label: Optional[tk.Label] = None
+        self.session_status_label: Optional[ttk.Label] = None
+        self.trial_counter_label: Optional[ttk.Label] = None
+        self.session_path_label: Optional[ttk.Label] = None
 
         self.trial_label_var: Optional[tk.StringVar] = None
 
@@ -51,9 +51,9 @@ class MainController:
         session_button: ttk.Button,
         trial_button: ttk.Button,
         shutdown_button: ttk.Button,
-        session_status_label: tk.Label,
-        trial_counter_label: tk.Label,
-        session_path_label: tk.Label,
+        session_status_label: ttk.Label,
+        trial_counter_label: ttk.Label,
+        session_path_label: ttk.Label,
         trial_label_var: tk.StringVar
     ) -> None:
         self.root = root
@@ -277,6 +277,8 @@ class MainController:
 
             self.logger.info("Trial stopped (trial #%d)", self.trial_counter)
 
+            self._spawn_independent_mux_process(self.trial_counter)
+
         except Exception as e:
             self.logger.error("Error stopping trial: %s", e, exc_info=True)
             messagebox.showerror("Error", f"Failed to stop trial: {e}")
@@ -296,56 +298,15 @@ class MainController:
 
         self.logger.info("Shutdown requested from UI")
 
-        self.shutdown_button.config(state='disabled')
-        self.shutdown_button.config(text="Shutting Down...")
+        self.shutdown_button.config(state='disabled', text="Shutting Down...")
 
-        self.running = False
-
-        # Register UI-specific cleanup and trigger shutdown
         shutdown_coordinator = get_shutdown_coordinator()
-        shutdown_coordinator.register_cleanup(self._save_window_geometry)
-        shutdown_coordinator.register_cleanup(self._save_running_modules_state)
-        shutdown_coordinator.register_cleanup(self._stop_timers)
 
-        asyncio.create_task(shutdown_coordinator.initiate_shutdown("UI button"))
+        async def shutdown_and_stop():
+            await shutdown_coordinator.initiate_shutdown("UI button")
+            self.running = False
 
-    async def _save_window_geometry(self) -> None:
-        """Save main window geometry to config."""
-        if not self.root:
-            return
-
-        try:
-            from Modules.base import gui_utils
-
-            geometry_str = self.root.geometry()
-            parsed = gui_utils.parse_geometry_string(geometry_str)
-
-            if parsed:
-                width, height, x, y = parsed
-
-                config_manager = get_config_manager()
-                updates = {
-                    'window_x': x,
-                    'window_y': y,
-                    'window_width': width,
-                    'window_height': height,
-                }
-                if config_manager.write_config(CONFIG_PATH, updates):
-                    self.logger.info("Saved main logger window geometry: %dx%d+%d+%d", width, height, x, y)
-                else:
-                    self.logger.warning("Failed to save window geometry")
-            else:
-                self.logger.warning("Failed to parse window geometry: %s", geometry_str)
-        except Exception as e:
-            self.logger.error("Error saving window geometry: %s", e)
-
-    async def _save_running_modules_state(self) -> None:
-        """Save currently running modules to restore on next launch."""
-        await self.logger_system.save_running_modules_state()
-
-    async def _stop_timers(self) -> None:
-        """Stop all active timers."""
-        await self.timer_manager.stop_all()
+        asyncio.create_task(shutdown_and_stop())
 
     async def _status_callback(self, module_name: str, state: ModuleState, status) -> None:
         if module_name in self.module_vars:
@@ -441,3 +402,37 @@ class MainController:
             self.logger.info("Opened issue tracker: %s", url)
         except Exception as e:
             self.logger.error("Failed to open issue tracker: %s", e)
+
+    def _spawn_independent_mux_process(self, trial_number: int) -> None:
+        import subprocess
+        import sys
+        from pathlib import Path as PathType
+
+        try:
+            session_dir = self.logger_system.session_dir
+            project_root = PathType(__file__).parent.parent.parent
+            sync_and_mux_script = project_root / "utils" / "sync_and_mux.py"
+
+            if not sync_and_mux_script.exists():
+                self.logger.error("Auto-mux script not found: %s", sync_and_mux_script)
+                return
+
+            cmd = [
+                sys.executable,
+                str(sync_and_mux_script),
+                str(session_dir),
+                "--trial", str(trial_number)
+            ]
+
+            subprocess.Popen(
+                cmd,
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                cwd=str(project_root)
+            )
+
+            self.logger.info("Auto-mux process started for trial %d", trial_number)
+
+        except Exception as e:
+            self.logger.error("Failed to spawn auto-mux process: %s", e, exc_info=True)

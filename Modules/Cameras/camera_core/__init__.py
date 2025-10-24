@@ -1,8 +1,5 @@
-
-from .camera_utils import (
-    RollingFPS,
-    FrameTimingMetadata,
-)
+from Modules.base import RollingFPS
+from .camera_utils import FrameTimingMetadata
 from .recording import CameraRecordingManager
 from .camera_handler import CameraHandler
 from .camera_system import CameraSystem, CameraInitializationError

@@ -142,7 +142,6 @@ class TkinterGUIBase:
             self.log_frame,
             height=height,
             wrap=tk.WORD,
-            font=('TkFixedFont', 8),
             bg='#f5f5f5',
             fg='#333333'
         )

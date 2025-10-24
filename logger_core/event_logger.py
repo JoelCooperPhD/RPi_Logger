@@ -15,7 +15,7 @@ class EventLogger:
 
     def __init__(self, session_dir: Path, session_timestamp: str):
         self.session_dir = session_dir
-        self.event_log_path = session_dir / f"CONTROLS_{session_timestamp}.csv"
+        self.event_log_path = session_dir / f"{session_timestamp}_CONTROL.csv"
         self.initialized = False
         self._write_lock = asyncio.Lock()
 

@@ -1,0 +1,10 @@
+{
+  "timestamp": "2025-10-24T15:06:22.725195",
+  "running_modules": [
+    "Audio",
+    "Notes",
+    "EyeTracker",
+    "DRT",
+    "Camera"
+  ]
+}

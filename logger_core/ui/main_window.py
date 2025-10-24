@@ -2,8 +2,8 @@
 import asyncio
 import logging
 import tkinter as tk
-import tkinter.font as tkfont
 from tkinter import ttk
+from tkinter.scrolledtext import ScrolledText
 from pathlib import Path
 from typing import Dict, Optional
 from PIL import Image, ImageTk
@@ -13,6 +13,41 @@ from ..config_manager import get_config_manager
 from ..paths import CONFIG_PATH, LOGO_PATH
 from .main_controller import MainController
 from .timer_manager import TimerManager
+
+
+class TextHandler(logging.Handler):
+
+    def __init__(self, text_widget: ScrolledText):
+        super().__init__()
+        self.text_widget = text_widget
+        self.max_lines = 500
+        self.setFormatter(
+            logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                datefmt='%H:%M:%S'
+            )
+        )
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record) + '\n'
+            self.text_widget.after(0, self._append_log, msg)
+        except Exception:
+            pass
+
+    def _append_log(self, msg: str) -> None:
+        try:
+            self.text_widget.config(state='normal')
+            self.text_widget.insert(tk.END, msg)
+            self.text_widget.see(tk.END)
+
+            num_lines = int(self.text_widget.index('end-1c').split('.')[0])
+            if num_lines > self.max_lines:
+                self.text_widget.delete('1.0', f'{num_lines - self.max_lines}.0')
+
+            self.text_widget.config(state='disabled')
+        except Exception:
+            pass
 
 
 class MainWindow:
@@ -31,15 +66,23 @@ class MainWindow:
         self.trial_button: Optional[ttk.Button] = None
         self.shutdown_button: Optional[ttk.Button] = None
 
-        self.current_time_label: Optional[tk.Label] = None
-        self.session_status_label: Optional[tk.Label] = None
-        self.session_timer_label: Optional[tk.Label] = None
-        self.trial_timer_label: Optional[tk.Label] = None
-        self.trial_counter_label: Optional[tk.Label] = None
-        self.session_path_label: Optional[tk.Label] = None
+        self.current_time_label: Optional[ttk.Label] = None
+        self.session_status_label: Optional[ttk.Label] = None
+        self.session_timer_label: Optional[ttk.Label] = None
+        self.trial_timer_label: Optional[ttk.Label] = None
+        self.trial_counter_label: Optional[ttk.Label] = None
+        self.session_path_label: Optional[ttk.Label] = None
+        self.cpu_label: Optional[ttk.Label] = None
+        self.ram_label: Optional[ttk.Label] = None
+        self.disk_label: Optional[ttk.Label] = None
 
         self.trial_label_var: Optional[tk.StringVar] = None
         self.trial_label_entry: Optional[ttk.Entry] = None
+
+        self.logger_frame: Optional[ttk.LabelFrame] = None
+        self.logger_text: Optional[ScrolledText] = None
+        self.logger_visible_var: Optional[tk.BooleanVar] = None
+        self.log_handler: Optional[logging.Handler] = None
 
     def build_ui(self) -> None:
         self.root = tk.Tk()
@@ -59,20 +102,19 @@ class MainWindow:
                 self.logger.info("Applied saved window geometry: %dx%d+%d+%d", window_width, window_height, window_x, window_y)
             else:
                 self.root.geometry(f"{window_width}x{window_height}")
-            self.root.minsize(window_width, window_height)
         else:
             self.root.geometry("800x600")
-            self.root.minsize(800, 600)
 
-        self.root.configure(bg='#F5F5F7')
 
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=0)
         self.root.rowconfigure(1, weight=1)
+        self.root.rowconfigure(2, weight=0)
 
         self._build_menubar()
         self._build_header()
         self._build_main_content()
+        self._build_logger_frame()
 
         self.root.protocol("WM_DELETE_WINDOW", self.controller.on_shutdown)
 
@@ -91,7 +133,10 @@ class MainWindow:
         self.timer_manager.set_labels(
             self.current_time_label,
             self.session_timer_label,
-            self.trial_timer_label
+            self.trial_timer_label,
+            self.cpu_label,
+            self.ram_label,
+            self.disk_label
         )
 
     def _build_menubar(self) -> None:
@@ -111,6 +156,22 @@ class MainWindow:
                 variable=var,
                 command=lambda name=module_info.name: self.controller.on_module_menu_toggle(name)
             )
+
+        config_manager = get_config_manager()
+        logger_visible_default = True
+        if CONFIG_PATH.exists():
+            config = config_manager.read_config(CONFIG_PATH)
+            logger_visible_default = config_manager.get_bool(config, 'gui_logger_visible', default=True)
+        self.logger_visible_var = tk.BooleanVar(value=logger_visible_default)
+
+        view_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="View", menu=view_menu)
+
+        view_menu.add_checkbutton(
+            label="Show Logger",
+            variable=self.logger_visible_var,
+            command=self._toggle_logger
+        )
 
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -159,8 +220,8 @@ class MainWindow:
         )
 
     def _build_header(self) -> None:
-        header_frame = tk.Frame(self.root, bg='white', height=80)
-        header_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        header_frame = ttk.Frame(self.root, height=80)
+        header_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=(5, 0))
         header_frame.grid_propagate(False)
 
         try:
@@ -169,40 +230,37 @@ class MainWindow:
             logo_image = logo_image.resize(new_size, Image.Resampling.LANCZOS)
             logo_photo = ImageTk.PhotoImage(logo_image)
 
-            logo_label = tk.Label(header_frame, image=logo_photo, bg='white')
+            logo_label = ttk.Label(header_frame, image=logo_photo)
             logo_label.image = logo_photo
             logo_label.pack(expand=True, pady=10)
         except Exception as e:
             self.logger.warning("Could not load logo: %s", e)
 
     def _build_main_content(self) -> None:
-        main_frame = ttk.Frame(self.root, padding="5")
-        main_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        main_frame = ttk.Frame(self.root)
+        main_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(0, weight=1)
+        main_frame.rowconfigure(1, weight=0)
 
         self._configure_styles()
 
         control_frame = ttk.Frame(main_frame)
         control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
         control_frame.columnconfigure(0, weight=0)
-        control_frame.columnconfigure(1, weight=1)
+        control_frame.columnconfigure(1, weight=0)
+        control_frame.columnconfigure(2, weight=2)
         control_frame.rowconfigure(0, weight=1)
+        control_frame.rowconfigure(1, weight=0)
 
         self._build_session_trial_controls(control_frame)
         self._build_info_panel(control_frame)
+
         self._build_shutdown_button(main_frame)
 
     def _configure_styles(self) -> None:
         style = ttk.Style()
         style.theme_use('clam')
-
-        available_fonts = tkfont.families()
-        button_font = ('Helvetica', 10)
-        if 'SF Pro Display' in available_fonts:
-            button_font = ('SF Pro Display', 10)
-        elif 'Segoe UI' in available_fonts:
-            button_font = ('Segoe UI', 10)
 
         style.configure(
             'Active.TButton',
@@ -211,8 +269,7 @@ class MainWindow:
             borderwidth=1,
             bordercolor='#007AFF',
             relief='flat',
-            padding=(3, 3),
-            font=button_font
+            padding=(3, 3)
         )
         style.map('Active.TButton',
                   background=[('pressed', '#0051D5'), ('active', '#0062CC')],
@@ -225,8 +282,7 @@ class MainWindow:
             borderwidth=1,
             bordercolor='#C7C7CC',
             relief='flat',
-            padding=(3, 3),
-            font=button_font
+            padding=(3, 3)
         )
         style.map('Inactive.TButton',
                   background=[('pressed', '#D1D1D6'), ('active', '#D1D1D6')],
@@ -239,23 +295,17 @@ class MainWindow:
             borderwidth=1,
             bordercolor='#FF3B30',
             relief='flat',
-            padding=(3, 3),
-            font=button_font
+            padding=(3, 3)
         )
         style.map('Shutdown.TButton',
                   background=[('pressed', '#CC0000'), ('active', '#E60000')],
                   foreground=[('pressed', 'white'), ('active', 'white')])
 
     def _build_session_trial_controls(self, parent: ttk.Frame) -> None:
-        session_trial_frame = ttk.Frame(parent)
-        session_trial_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        session_trial_frame.columnconfigure(0, weight=0)
-        session_trial_frame.columnconfigure(1, weight=0)
-        session_trial_frame.rowconfigure(0, weight=1)
-        session_trial_frame.rowconfigure(1, weight=0)
-
-        session_control_frame = tk.LabelFrame(session_trial_frame, text="Session", padx=8, pady=8)
-        session_control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 2))
+        session_control_frame = ttk.LabelFrame(parent, text="Session", padding=(8, 8))
+        session_control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
+        session_control_frame.columnconfigure(0, weight=1)
+        session_control_frame.rowconfigure(0, weight=1)
 
         self.session_button = ttk.Button(
             session_control_frame,
@@ -264,10 +314,12 @@ class MainWindow:
             width=10,
             command=self.controller.on_toggle_session
         )
-        self.session_button.pack(fill=tk.BOTH, expand=True)
+        self.session_button.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        trial_control_frame = tk.LabelFrame(session_trial_frame, text="Trial", padx=8, pady=8)
-        trial_control_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(2, 2))
+        trial_control_frame = ttk.LabelFrame(parent, text="Trial", padding=(8, 8))
+        trial_control_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
+        trial_control_frame.columnconfigure(0, weight=1)
+        trial_control_frame.rowconfigure(0, weight=1)
 
         self.trial_button = ttk.Button(
             trial_control_frame,
@@ -276,120 +328,212 @@ class MainWindow:
             width=10,
             command=self.controller.on_toggle_trial
         )
-        self.trial_button.pack(fill=tk.BOTH, expand=True)
+        self.trial_button.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        trial_label_frame = tk.LabelFrame(session_trial_frame, text="Trial Label", padx=2, pady=2)
-        trial_label_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), padx=(0, 2), pady=(2, 0))
+        trial_label_frame = ttk.LabelFrame(parent, text="Trial Label", padding=(2, 2))
+        trial_label_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5), pady=(5, 0))
+        trial_label_frame.columnconfigure(0, weight=1)
+        trial_label_frame.rowconfigure(0, weight=1)
 
         self.trial_label_var = tk.StringVar()
         self.trial_label_entry = ttk.Entry(
             trial_label_frame,
-            textvariable=self.trial_label_var,
-            font=("Arial", 10),
-            foreground='#999999'
+            textvariable=self.trial_label_var
         )
-        self.trial_label_entry.pack(fill=tk.X, expand=True)
-
-        self.trial_label_var.set("None")
-        self.trial_label_entry.bind("<FocusIn>", self._on_trial_label_focus_in)
-        self.trial_label_entry.bind("<FocusOut>", self._on_trial_label_focus_out)
+        self.trial_label_entry.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
     def _build_info_panel(self, parent: ttk.Frame) -> None:
-        info_frame = tk.LabelFrame(parent, text="Information", padx=2, pady=2)
-        info_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
+        info_frame = ttk.LabelFrame(parent, text="Information", padding=(2, 2))
+        info_frame.grid(row=0, column=2, rowspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
         info_frame.columnconfigure(0, weight=0)
         info_frame.columnconfigure(1, weight=1)
 
-        tk.Label(info_frame, text="Current Time:", anchor='w', font=("Arial", 9)).grid(
+        ttk.Label(info_frame, text="Current Time:", anchor='w').grid(
             row=0, column=0, sticky='w', pady=1
         )
-        self.current_time_label = tk.Label(
+        self.current_time_label = ttk.Label(
             info_frame,
             text="--:--:--",
-            anchor='e',
-            font=("Arial", 9)
+            anchor='e'
         )
         self.current_time_label.grid(row=0, column=1, sticky='e', pady=0)
 
-        tk.Label(info_frame, text="Session Time:", anchor='w', font=("Arial", 9)).grid(
+        ttk.Label(info_frame, text="Session Time:", anchor='w').grid(
             row=1, column=0, sticky='w', pady=1
         )
-        self.session_timer_label = tk.Label(
+        self.session_timer_label = ttk.Label(
             info_frame,
             text="--:--:--",
-            anchor='e',
-            font=("Arial", 9)
+            anchor='e'
         )
         self.session_timer_label.grid(row=1, column=1, sticky='e', pady=0)
 
-        tk.Label(info_frame, text="Trial Time:", anchor='w', font=("Arial", 9)).grid(
+        ttk.Label(info_frame, text="Trial Time:", anchor='w').grid(
             row=2, column=0, sticky='w', pady=1
         )
-        self.trial_timer_label = tk.Label(
+        self.trial_timer_label = ttk.Label(
             info_frame,
             text="--:--:--",
-            anchor='e',
-            font=("Arial", 9)
+            anchor='e'
         )
         self.trial_timer_label.grid(row=2, column=1, sticky='e', pady=0)
 
-        tk.Label(info_frame, text="Trial Count:", anchor='w', font=("Arial", 9)).grid(
+        ttk.Label(info_frame, text="Trial Count:", anchor='w').grid(
             row=3, column=0, sticky='w', pady=1
         )
-        self.trial_counter_label = tk.Label(
+        self.trial_counter_label = ttk.Label(
             info_frame,
             text="0",
-            anchor='e',
-            font=("Arial", 9)
+            anchor='e'
         )
         self.trial_counter_label.grid(row=3, column=1, sticky='e', pady=0)
 
-        tk.Label(info_frame, text="Status:", anchor='w', font=("Arial", 9)).grid(
+        ttk.Label(info_frame, text="Status:", anchor='w').grid(
             row=4, column=0, sticky='w', pady=1
         )
-        self.session_status_label = tk.Label(
+        self.session_status_label = ttk.Label(
             info_frame,
             text="Idle",
-            anchor='e',
-            font=("Arial", 9)
+            anchor='e'
         )
         self.session_status_label.grid(row=4, column=1, sticky='e', pady=0)
 
-        tk.Label(info_frame, text="Path:", anchor='w', font=("Arial", 8), foreground='#666666').grid(
+        ttk.Label(info_frame, text="Path:", anchor='w', foreground='#666666').grid(
             row=5, column=0, sticky='w', pady=(2, 0)
         )
         session_info = self.logger_system.get_session_info()
-        self.session_path_label = tk.Label(
+        self.session_path_label = ttk.Label(
             info_frame,
             text=f"{session_info['session_dir']}",
             anchor='e',
-            font=("Arial", 8),
             foreground='#666666'
         )
         self.session_path_label.grid(row=5, column=1, sticky='e', pady=(2, 0))
 
-    def _build_shutdown_button(self, parent: ttk.Frame) -> None:
-        shutdown_frame = ttk.Frame(parent)
-        shutdown_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 0))
-        shutdown_frame.columnconfigure(0, weight=1)
+        ttk.Separator(info_frame, orient='horizontal').grid(
+            row=6, column=0, columnspan=2, sticky='ew', pady=5
+        )
 
+        ttk.Label(info_frame, text="CPU:", anchor='w').grid(
+            row=7, column=0, sticky='w', pady=1
+        )
+        self.cpu_label = ttk.Label(
+            info_frame,
+            text="--",
+            anchor='e'
+        )
+        self.cpu_label.grid(row=7, column=1, sticky='e', pady=0)
+
+        ttk.Label(info_frame, text="RAM:", anchor='w').grid(
+            row=8, column=0, sticky='w', pady=1
+        )
+        self.ram_label = ttk.Label(
+            info_frame,
+            text="--",
+            anchor='e'
+        )
+        self.ram_label.grid(row=8, column=1, sticky='e', pady=0)
+
+        ttk.Label(info_frame, text="Free Disk:", anchor='w').grid(
+            row=9, column=0, sticky='w', pady=1
+        )
+        self.disk_label = ttk.Label(
+            info_frame,
+            text="--",
+            anchor='e'
+        )
+        self.disk_label.grid(row=9, column=1, sticky='e', pady=0)
+
+    def _build_shutdown_button(self, parent: ttk.Frame) -> None:
         self.shutdown_button = ttk.Button(
-            shutdown_frame,
+            parent,
             text="Shutdown Logger",
             style='Shutdown.TButton',
             command=self.controller.on_shutdown
         )
-        self.shutdown_button.pack(fill=tk.X)
+        self.shutdown_button.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 0))
 
-    def _on_trial_label_focus_in(self, event) -> None:
-        if self.trial_label_var.get() == "None":
-            self.trial_label_var.set("")
-            self.trial_label_entry.config(foreground='#000000')
+    def _build_logger_frame(self) -> None:
+        self.logger_frame = ttk.LabelFrame(self.root, text="Logger", padding="3")
+        self.logger_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=5, pady=(0, 5))
+        self.logger_frame.columnconfigure(0, weight=1)
 
-    def _on_trial_label_focus_out(self, event) -> None:
-        if not self.trial_label_var.get().strip():
-            self.trial_label_var.set("None")
-            self.trial_label_entry.config(foreground='#999999')
+        self.logger_text = ScrolledText(
+            self.logger_frame,
+            height=2,
+            wrap=tk.WORD,
+            bg='#f5f5f5',
+            fg='#333333',
+            state='disabled'
+        )
+        self.logger_text.grid(row=0, column=0, sticky=(tk.W, tk.E))
+
+        if not self.logger_visible_var.get():
+            self.logger_frame.grid_remove()
+
+        self._setup_log_handler()
+
+    def _toggle_logger(self) -> None:
+        visible = self.logger_visible_var.get()
+
+        if visible:
+            self.logger_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=5, pady=(0, 5))
+        else:
+            self.logger_frame.grid_remove()
+
+        self.root.update_idletasks()
+
+        config_manager = get_config_manager()
+        config_manager.write_config(CONFIG_PATH, {'gui_logger_visible': visible})
+        self.logger.debug("Logger visibility set to: %s", visible)
+
+    def _setup_log_handler(self) -> None:
+        if self.logger_text is None:
+            return
+
+        self.log_handler = TextHandler(self.logger_text)
+        self.log_handler.setLevel(logging.INFO)
+
+        root_logger = logging.getLogger()
+        root_logger.addHandler(self.log_handler)
+
+        self.logger.info("Logger display initialized")
+
+    def cleanup_log_handler(self) -> None:
+        if self.log_handler:
+            root_logger = logging.getLogger()
+            root_logger.removeHandler(self.log_handler)
+            self.log_handler = None
+
+    def save_window_geometry(self) -> None:
+        if not self.root:
+            return
+
+        try:
+            from Modules.base import gui_utils
+
+            geometry_str = self.root.geometry()
+            parsed = gui_utils.parse_geometry_string(geometry_str)
+
+            if parsed:
+                width, height, x, y = parsed
+
+                config_manager = get_config_manager()
+                updates = {
+                    'window_x': x,
+                    'window_y': y,
+                    'window_width': width,
+                    'window_height': height,
+                }
+
+                if config_manager.write_config(CONFIG_PATH, updates):
+                    self.logger.info("Saved main logger window geometry: %dx%d+%d+%d", width, height, x, y)
+                else:
+                    self.logger.warning("Failed to save window geometry")
+            else:
+                self.logger.warning("Failed to parse window geometry: %s", geometry_str)
+        except Exception as e:
+            self.logger.error("Error saving window geometry: %s", e, exc_info=True)
 
     async def run(self) -> None:
         self.controller.running = True

@@ -70,7 +70,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.notebook.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
 
     def _create_device_tab(self, port: str) -> DeviceTab:
-        tab_frame = tk.Frame(self.notebook)
+        tab_frame = ttk.Frame(self.notebook)
         tab = DeviceTab(port, tab_frame)
 
         tab_frame.columnconfigure(0, weight=1)
@@ -79,7 +79,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         tab.plotter = DRTPlotter(tab_frame)
         tab.plotter.add_device(port)
 
-        stimulus_frame = tk.LabelFrame(tab_frame, text="Stimulus", padx=10, pady=5)
+        stimulus_frame = ttk.LabelFrame(tab_frame, text="Stimulus", padding=(10, 5))
         stimulus_frame.grid(row=1, column=1, sticky='nsew', padx=5, pady=5)
         stimulus_frame.columnconfigure(0, weight=1)
         stimulus_frame.columnconfigure(1, weight=1)
@@ -92,21 +92,21 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                                          command=lambda: self._on_stimulus_off(port))
         tab.stim_off_button.grid(row=0, column=1, sticky='nsew', padx=2)
 
-        results_frame = tk.LabelFrame(tab_frame, text="Results", padx=10, pady=5)
+        results_frame = ttk.LabelFrame(tab_frame, text="Results", padding=(10, 5))
         results_frame.grid(row=4, column=1, sticky='nsew', padx=5, pady=5)
         results_frame.columnconfigure(0, weight=0)
         results_frame.columnconfigure(1, weight=1)
 
-        tk.Label(results_frame, text="Trial Number:", anchor='w').grid(row=0, column=0, sticky='w', pady=2)
-        tk.Label(results_frame, textvariable=tab.trial_number_var, anchor='e').grid(row=0, column=1, sticky='e', pady=2)
+        ttk.Label(results_frame, text="Trial Number:", anchor='w').grid(row=0, column=0, sticky='w', pady=2)
+        ttk.Label(results_frame, textvariable=tab.trial_number_var, anchor='e').grid(row=0, column=1, sticky='e', pady=2)
 
-        tk.Label(results_frame, text="Reaction Time:", anchor='w').grid(row=1, column=0, sticky='w', pady=2)
-        tk.Label(results_frame, textvariable=tab.reaction_time_var, anchor='e').grid(row=1, column=1, sticky='e', pady=2)
+        ttk.Label(results_frame, text="Reaction Time:", anchor='w').grid(row=1, column=0, sticky='w', pady=2)
+        ttk.Label(results_frame, textvariable=tab.reaction_time_var, anchor='e').grid(row=1, column=1, sticky='e', pady=2)
 
-        tk.Label(results_frame, text="Response Count:", anchor='w').grid(row=2, column=0, sticky='w', pady=2)
-        tk.Label(results_frame, textvariable=tab.click_count_var, anchor='e').grid(row=2, column=1, sticky='e', pady=2)
+        ttk.Label(results_frame, text="Response Count:", anchor='w').grid(row=2, column=0, sticky='w', pady=2)
+        ttk.Label(results_frame, textvariable=tab.click_count_var, anchor='e').grid(row=2, column=1, sticky='e', pady=2)
 
-        configure_frame = tk.Frame(tab_frame)
+        configure_frame = ttk.Frame(tab_frame)
         configure_frame.grid(row=5, column=1, sticky='nsew', padx=5, pady=5)
         configure_frame.columnconfigure(0, weight=1)
 

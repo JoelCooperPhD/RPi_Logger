@@ -1,18 +1,19 @@
 # Camera Module
 
-A professional multi-camera recording system for Raspberry Pi 5 with master-slave architecture, real-time preview, and programmatic control.
+A professional multi-camera recording system for Raspberry Pi 5 with hardware-accelerated H.264 encoding, synchronized timestamping for A/V muxing, and flexible control modes.
 
 ## Features
 
 🎥 **Multi-Camera Support**: Simultaneous recording from multiple cameras (tested with 2x IMX296)
-📹 **High-Quality Recording**: H.264 video encoding with configurable resolution and frame rate
-🧭 **Precise Frame Timing**: Deterministic FPS enforcement with dropped/duplicate tracking and per-recording diagnostics
-⏰ **Timestamp Overlays**: Automatic timestamp and FPS embedding in preview
-🔄 **Master-Slave Architecture**: Command-driven operation via JSON protocol
-🖱️ **Interactive Controls**: Standalone mode with keyboard shortcuts (q=quit, s=snapshot, r=record)
-⚙️ **Flexible Configuration**: Multiple resolutions, frame rates, and output options
-📸 **Synchronized Snapshots**: Simultaneous image capture from both cameras
+📹 **High-Quality Recording**: H.264 GPU-accelerated encoding with configurable resolution and frame rate
+🧭 **Precise Frame Timing**: Per-frame CSV logs with sensor timestamps for ~30ms A/V sync accuracy
+⏰ **Timestamp Overlays**: Frame numbers burned into video and preview for correlation with CSV data
+🔄 **Multiple Modes**: Standalone (interactive), headless, and slave (master logger) modes
+🖱️ **Interactive Controls**: Keyboard shortcuts (q=quit, s=snapshot, r=record) in standalone mode
+⚙️ **Flexible Configuration**: Multiple resolutions (320x240 to 1456x1088), frame rates (1-60 FPS)
+📸 **Synchronized Snapshots**: Simultaneous JPEG capture from all cameras
 🛡️ **Signal Handling**: Graceful shutdown with proper resource cleanup
+📊 **Dropped Frame Detection**: Hardware timestamp analysis for accurate drop counting
 
 ## Hardware Requirements
 
@@ -51,19 +52,23 @@ uv run main_camera.py --auto-start-recording
 tail -f recordings/session_*/session.log
 ```
 
-### Slave Mode (Programmatic Control)
+### Slave Mode (Master Logger Control)
 
 ```bash
-# Start in slave mode for master control (no preview by default in config)
-uv run main_camera.py --mode slave --discovery-retry 3 --output-dir recordings/cameras
+# Typically launched automatically by main logger, but can be tested manually:
+uv run main_camera.py --mode headless --output-dir data/session_test/Cameras
 
-# Slave mode with local preview windows (alongside JSON commands)
-uv run main_camera.py --mode slave --preview
+# Slave mode with local preview windows (for debugging)
+uv run main_camera.py --mode headless --preview
 ```
 
-### Master Control Example
+### Integration with Main Logger
 
-> **Note**: An example master control program can be implemented by sending JSON commands to the slave process. See the "Programmatic Control" section below for implementation details.
+The camera module is typically used via the master logger (`main_logger.py`), which:
+- Automatically launches the module in headless/slave mode
+- Sends JSON commands for session/recording control
+- Receives status updates and handles module lifecycle
+- Coordinates synchronization across all modules
 
 ## Usage Modes
 
@@ -241,20 +246,20 @@ recordings/
   - Use `tail -f session.log` to monitor logs in real-time
 
 **Video Files:**
-- `cam{N}_WIDTHxHEIGHT_FPSfps_TIMESTAMP.h264` — Raw H.264 hardware-encoded video (default)
-  - Better for unattended recording (power-loss resilient)
-  - Playable in VLC and most modern players
-  - Frame numbers burned into video via hardware overlay
-- `cam{N}_WIDTHxHEIGHT_FPSfps_TIMESTAMP.mp4` — MP4 container format (optional)
-  - Enable by setting `disable_mp4_conversion = false` in config.txt
-  - Adds framerate metadata for better compatibility
-  - Requires graceful shutdown (not power-loss safe)
+- Trial-based naming: `{timestamp}_CAM_trial{N:03d}_CAM{id}_{w}x{h}_{fps}fps.mp4`
+- Example: `20251024_120000_CAM_trial001_CAM0_1456x1088_30.0fps.mp4`
+- H.264 hardware-encoded video (GPU-accelerated)
+- Frame numbers burned into video via hardware overlay for correlation with CSV
+- Playable in VLC and most modern players
+- Raw .h264 files available if MP4 conversion disabled
 
-**Diagnostic CSV:**
-- `cam{N}_WIDTHxHEIGHT_FPSfps_TIMESTAMP_frame_timing.csv` — per-frame timing diagnostics
-  - **Columns:** `frame_number`, `write_time_unix`, `sensor_timestamp_ns`, `dropped_since_last`, `total_hardware_drops`
-  - Enables precise frame-by-frame analysis and dropped frame detection
-  - Optional (disable with `enable_csv_timing_log = false` in config.txt for better performance)
+**Timing CSV:**
+- Trial-based naming: `{timestamp}_CAMTIMING_trial{N:03d}_CAM{id}.csv`
+- Example: `20251024_120000_CAMTIMING_trial001_CAM0.csv`
+- **Columns:** `trial`, `frame_number`, `write_time_unix`, `sensor_timestamp_ns`, `dropped_since_last`, `total_hardware_drops`
+- Used by `sync_and_mux.py` for A/V synchronization (~30ms accuracy)
+- Enables precise frame-by-frame analysis and dropped frame detection
+- Optional (disable with `enable_csv_timing_log = false` in config.txt)
 
 **Snapshots:**
 - `snapshot_cam{N}_TIMESTAMP.jpg` — JPEG snapshots captured on-demand

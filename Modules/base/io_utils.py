@@ -81,24 +81,3 @@ def sanitize_error_message(
         msg = msg[:max_length - 3] + '...'
 
     return msg
-
-
-def get_versioned_filename(directory: Path, date: datetime = None) -> str:
-    if date is None:
-        date = datetime.now()
-
-    date_str = date.strftime("%Y-%m-%d")
-
-    version = 1
-    existing_files = []
-    if directory.exists():
-        existing_files = [f.name for f in directory.glob(f"*_{date_str}.txt")]
-
-    for filename in existing_files:
-        match = re.match(r'(\d+)_\d{4}-\d{2}-\d{2}\.txt$', filename)
-        if match:
-            file_version = int(match.group(1))
-            if file_version >= version:
-                version = file_version + 1
-
-    return f"{version}_{date_str}.txt"

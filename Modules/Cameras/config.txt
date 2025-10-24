@@ -29,7 +29,7 @@
 ################################################################################
 
 # Resolution (0-9 presets, see Quick Reference above)
-resolution_preset = 0
+resolution_preset = 2
 
 # Frame rate (1-60 fps)
 target_fps = 30.0
@@ -48,7 +48,7 @@ disable_mp4_conversion = false # Keep raw .h264 files (better for power-loss res
 
 # Preview windows (OpenCV)
 show_preview = true         # Show live preview windows (true/false)
-preview_preset = 4           # Preview size (0-9, smaller = lower CPU)
+preview_preset = 9           # Preview size (0-9, smaller = lower CPU)
 
 # Frame number overlay
 show_frame_number = true     # Display frame number on video/preview
@@ -97,10 +97,10 @@ enable_csv_timing_log = true # Save per-frame timing data for analysis
 ################################################################################
 
 # Auto-start this module when master logger starts
-enabled = true
+enabled = false
 
 # Window position and size (saved automatically on window close)
-window_x = 1141
-window_y = 1151
-window_width = 840
-window_height = 541
+window_x = 2414
+window_y = 595
+window_width = 515
+window_height = 352

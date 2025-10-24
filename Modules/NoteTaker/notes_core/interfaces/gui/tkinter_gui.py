@@ -60,13 +60,12 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         content_frame.rowconfigure(0, weight=1)  # Note history (expandable)
         content_frame.rowconfigure(1, weight=0)  # Entry frame (fixed)
 
-        self.note_history_frame = tk.Frame(content_frame)
+        self.note_history_frame = ttk.Frame(content_frame)
         self.note_history_frame.grid(row=0, column=0, sticky='nsew', padx=5, pady=(0, 5))
 
         self.note_history = scrolledtext.ScrolledText(
             self.note_history_frame,
             height=10,
-            font=("Courier", 9),
             wrap=tk.WORD,
             state=tk.DISABLED
         )
@@ -76,17 +75,16 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.note_history.tag_config("elapsed", foreground="green")
         self.note_history.tag_config("modules", foreground="purple")
 
-        entry_frame = tk.Frame(content_frame)
+        entry_frame = ttk.Frame(content_frame)
         entry_frame.grid(row=1, column=0, sticky='ew', padx=5, pady=5)
 
-        entry_box_frame = tk.Frame(entry_frame)
+        entry_box_frame = ttk.Frame(entry_frame)
         entry_box_frame.pack(side=tk.TOP, fill=tk.X)
 
         self.note_entry = tk.Text(
             entry_box_frame,
             height=1,
             width=50,
-            font=("Arial", 10),
             wrap=tk.WORD
         )
         self.note_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -99,14 +97,14 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         )
         self.add_note_button.pack(side=tk.LEFT, padx=5)
 
-        hidden_frame = tk.Frame(content_frame)
+        hidden_frame = ttk.Frame(content_frame)
         hidden_frame.grid(row=2, column=0)
-        hidden_frame.grid_remove()  # Hide the frame
+        hidden_frame.grid_remove()
 
-        self.status_label = tk.Label(hidden_frame, text="● Ready")
-        self.elapsed_time_label = tk.Label(hidden_frame, text="00:00:00")
-        self.note_count_label = tk.Label(hidden_frame, text="Notes: 0")
-        self.recording_modules_label = tk.Label(hidden_frame, text="Modules: None")
+        self.status_label = ttk.Label(hidden_frame, text="● Ready")
+        self.elapsed_time_label = ttk.Label(hidden_frame, text="00:00:00")
+        self.note_count_label = ttk.Label(hidden_frame, text="Notes: 0")
+        self.recording_modules_label = ttk.Label(hidden_frame, text="Modules: None")
 
     def _setup_keyboard_shortcuts(self):
         self.root.bind("<Control-n>", lambda e: self._focus_note_entry())

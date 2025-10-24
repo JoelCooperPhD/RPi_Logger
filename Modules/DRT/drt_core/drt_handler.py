@@ -266,8 +266,8 @@ class DRTHandler:
             else:
                 session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            port_name = self.port.lstrip('/').replace('/', '_').replace('\\', '_')
-            filename = f"DRT_{port_name}_{session_timestamp}.csv"
+            port_name = self.port.lstrip('/').replace('/', '_').replace('\\', '_').lower()
+            filename = f"{session_timestamp}_DRT_{port_name}.csv"
             data_file = self.output_dir / filename
 
             await asyncio.to_thread(self.output_dir.mkdir, parents=True, exist_ok=True)

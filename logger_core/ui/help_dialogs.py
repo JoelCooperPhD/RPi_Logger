@@ -34,16 +34,15 @@ class AboutDialog:
                 if logo_path.exists():
                     logo_image = Image.open(logo_path)
                     logo_photo = ImageTk.PhotoImage(logo_image)
-                    logo_label = tk.Label(main_frame, image=logo_photo)
+                    logo_label = ttk.Label(main_frame, image=logo_photo)
                     logo_label.image = logo_photo
                     logo_label.pack(pady=(0, 20))
             except Exception:
                 pass
 
-        title_label = tk.Label(
+        title_label = ttk.Label(
             main_frame,
-            text="RPi Logger",
-            font=("Helvetica", 20, "bold")
+            text="RPi Logger"
         )
         title_label.pack()
 
@@ -53,24 +52,24 @@ class AboutDialog:
         except ImportError:
             version_text = "Version Unknown"
 
-        version_label = tk.Label(
+        version_label = ttk.Label(
             main_frame,
-            text=version_text,
-            font=("Helvetica", 10)
+            text=version_text
         )
         version_label.pack(pady=(5, 20))
 
         info_text = (
-            "Multi-modal data logging system for\n"
-            "human factors research and vehicle testing.\n\n"
+            "Professional multi-modal data collection system\n"
+            "for automotive research on Raspberry Pi 5.\n\n"
+            "Synchronized recording across cameras, microphones,\n"
+            "eye tracking, behavioral tasks, and annotations.\n\n"
             "© 2025 RED Scientific\n"
             "All rights reserved."
         )
 
-        info_label = tk.Label(
+        info_label = ttk.Label(
             main_frame,
             text=info_text,
-            font=("Helvetica", 10),
             justify=tk.CENTER
         )
         info_label.pack(pady=10)
@@ -105,10 +104,9 @@ class SystemInfoDialog:
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        title_label = tk.Label(
+        title_label = ttk.Label(
             main_frame,
-            text="System Information",
-            font=("Helvetica", 14, "bold")
+            text="System Information"
         )
         title_label.pack(pady=(0, 10))
 
@@ -118,7 +116,6 @@ class SystemInfoDialog:
         self.text_widget = scrolledtext.ScrolledText(
             text_frame,
             wrap=tk.WORD,
-            font=("Courier", 9),
             state='disabled'
         )
         self.text_widget.pack(fill=tk.BOTH, expand=True)
@@ -220,15 +217,14 @@ class QuickStartDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.dialog.geometry("700x550")
+        self.dialog.geometry("800x650")
 
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        title_label = tk.Label(
+        title_label = ttk.Label(
             main_frame,
-            text="Quick Start Guide",
-            font=("Helvetica", 14, "bold")
+            text="Quick Start Guide"
         )
         title_label.pack(pady=(0, 10))
 
@@ -238,7 +234,6 @@ class QuickStartDialog:
         self.text_widget = scrolledtext.ScrolledText(
             text_frame,
             wrap=tk.WORD,
-            font=("Helvetica", 10),
             state='disabled'
         )
         self.text_widget.pack(fill=tk.BOTH, expand=True)
@@ -257,83 +252,182 @@ class QuickStartDialog:
 
         self.dialog.protocol("WM_DELETE_WINDOW", self.dialog.destroy)
 
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - 350
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - 275
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - 400
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 325
         self.dialog.geometry(f"+{x}+{y}")
 
     def _populate_help(self):
         help_text = """
-GETTING STARTED WITH RPI LOGGER
+═══════════════════════════════════════════════════════════════════
+                    RPi LOGGER QUICK START GUIDE
+═══════════════════════════════════════════════════════════════════
 
+OVERVIEW
+
+The RPi Logger is a multi-modal data collection system that coordinates
+synchronized recording across cameras, microphones, eye tracking, behavioral
+tasks, and annotations. All modules are controlled from a single interface.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. SELECT MODULES
-   • Open the Modules menu
-   • Check the modules you want to use (Cameras, Audio, Eye Tracker, etc.)
-   • Each module will start automatically when checked
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+   ▸ Navigate to: Modules menu
+   ▸ Check the modules you need:
+     • Cameras         - Multi-camera video (up to 2x IMX296 @ 1-60 FPS)
+     • AudioRecorder   - Multi-microphone audio (8-192 kHz)
+     • EyeTracker      - Pupil Labs gaze tracking with scene video
+     • NoteTaker       - Timestamped annotations during sessions
+     • DRT             - sDRT behavioral task devices
+
+   ▸ Modules launch automatically when checked
+   ▸ Wait for green "● Ready" status before recording
+   ▸ Uncheck to stop a module
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 2. START A SESSION
-   • Click the "Start" button in the Session control panel
-   • Select a directory where session data will be saved
-   • A new session folder will be created with a timestamp
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-3. CONFIGURE TRIAL LABEL (Optional)
-   • Enter a label in the "Trial Label" field
-   • This label will be associated with the next trial recording
-   • Use descriptive names like "baseline", "test1", etc.
+   ▸ Click "Start Session" button
+   ▸ A new timestamped folder is created: session_YYYYMMDD_HHMMSS/
+   ▸ All modules prepare for recording
+   ▸ Session timer starts counting
 
-4. RECORD TRIALS
-   • Click "Record" in the Trial control panel to start recording
-   • All active modules will begin capturing data
-   • Click "Pause" to stop the current trial
-   • Trial counter will increment automatically
+   Important: All modules must show "● Ready" status before recording!
 
-5. MONITOR STATUS
-   • Current Time: Real-time clock
-   • Session Time: Duration of current session
-   • Trial Time: Duration of current trial
-   • Trial Count: Number of completed trials
-   • Status: Current system state
-   • Path: Location of session data
 
-6. STOP SESSION
-   • Click "Stop" in the Session control panel
-   • All trials will be finalized
-   • Session data remains in the selected directory
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. RECORD TRIALS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-7. SHUTDOWN
-   • Click "Shutdown Logger" to exit the application
-   • Running modules will be saved and auto-started next time
-   • Window position and settings are saved automatically
+   ▸ Click "Record" to start trial recording
+   ▸ All active modules begin capturing data simultaneously
+   ▸ Status indicators change to "● RECORDING" (red)
+   ▸ Trial timer shows elapsed recording time
 
-DATA ORGANIZATION
+   ▸ Click "Stop" to end the current trial
+   ▸ Data is saved automatically with trial number
+   ▸ Trial counter increments (Trial 1, Trial 2, etc.)
 
-Session data is organized as follows:
-  session_YYYYMMDD_HHMMSS/
-  ├── logs/              (system logs)
-  ├── Camera/            (camera recordings)
-  ├── Audio/             (audio recordings)
-  ├── EyeTracker/        (gaze data)
-  └── Notes/             (text notes)
+   ▸ Repeat Record → Stop for additional trials
+   ▸ All trials are saved to the same session directory
 
-Each module creates its own subdirectory with recordings and metadata.
 
-TIPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. END SESSION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-• Use the File menu to quickly open the output directory
-• Module status indicators show [Ready], [RECORDING], [Error], etc.
-• The logger panel at the bottom shows real-time log messages
-• Configuration files can be edited to customize behavior
-• Each module can be run standalone for testing
+   ▸ Click "End Session" when finished recording
+   ▸ Modules finalize and close recordings
+   ▸ Session folder contains all data from all trials
+   ▸ Status returns to "Ready" for next session
 
-TROUBLESHOOTING
 
-If a module fails to start:
-  1. Check the logger panel for error messages
-  2. Open Help > System Information to check hardware status
-  3. View logs in Help > Open Logs Directory
-  4. Try resetting settings via Help > Reset Settings
-  5. Report issues via Help > Report Issue
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. PROCESS RECORDINGS (POST-SESSION)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-For more information, visit the project repository or contact support.
+   After recording, synchronize audio and video:
+
+   $ python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+
+   This creates synchronized MP4 files with frame-level accuracy (~30ms).
+
+
+═══════════════════════════════════════════════════════════════════
+                          DATA STRUCTURE
+═══════════════════════════════════════════════════════════════════
+
+data/session_20251024_120000/
+├── master.log                                    # Main logger log
+├── 20251024_120000_SYNC_trial001.json           # Sync metadata
+├── 20251024_120000_AV_trial001.mp4              # Muxed audio+video
+├── Cameras/
+│   ├── session.log
+│   ├── 20251024_120000_CAM_trial001_CAM0_1456x1088_30fps.mp4
+│   └── 20251024_120000_CAMTIMING_trial001_CAM0.csv
+├── AudioRecorder/
+│   ├── session.log
+│   ├── 20251024_120000_AUDIO_trial001_MIC0_usb-audio.wav
+│   └── 20251024_120000_AUDIOTIMING_trial001_MIC0.csv
+├── EyeTracker/
+│   ├── session.log
+│   ├── scene_video_20251024_120000.mp4
+│   └── gaze_data_20251024_120000.csv
+├── NoteTaker/
+│   └── session_notes.csv
+└── DRT/
+    └── sDRT_dev_ttyACM0_20251024_120000.csv
+
+
+═══════════════════════════════════════════════════════════════════
+                      MODULE STATUS INDICATORS
+═══════════════════════════════════════════════════════════════════
+
+○ Stopped          Module not running
+○ Starting...      Module launching
+○ Initializing...  Hardware initialization in progress
+● Ready            Ready to record (green)
+● RECORDING        Actively recording data (red)
+● Error            Error encountered (red)
+● Crashed          Process crashed (red)
+
+
+═══════════════════════════════════════════════════════════════════
+                             TIPS
+═══════════════════════════════════════════════════════════════════
+
+✓ Test modules individually before multi-modal sessions
+✓ Verify adequate disk space before long sessions (check System Info)
+✓ Let cameras/sensors warm up for 30 seconds after starting
+✓ Use NoteTaker to annotate events during recording
+✓ Process recordings with sync_and_mux.py immediately after session
+✓ Check logs if modules fail: Help > Open Logs Directory
+✓ Module windows auto-tile on launch for efficient workspace
+
+
+═══════════════════════════════════════════════════════════════════
+                        TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════
+
+Module won't start:
+  1. Check green log panel at bottom for error messages
+  2. Verify hardware connected: Help > System Information
+  3. Kill conflicting processes: $ pkill -f main_camera
+  4. Check module log: data/session_*/ModuleName/session.log
+  5. Reset if needed: Help > Reset Settings
+
+Recording fails immediately:
+  • Verify all modules show "● Ready" before clicking Record
+  • Check sufficient disk space (System Information)
+  • Review module-specific logs for device errors
+
+Audio/video out of sync:
+  • Verify CSV timing files exist in session directory
+  • Re-run sync_and_mux.py with --all-trials flag
+  • Check SYNC.json for reasonable offset values
+
+USB devices not detected:
+  • Check connections: $ lsusb
+  • Verify user in audio group: $ groups
+  • Replug device and wait 5 seconds for auto-detection
+
+Need more help?
+  • GitHub Issues: Help > Report Issue
+  • Documentation: See README.md files in each module
+  • Logs: Help > Open Logs Directory
+
+
+═══════════════════════════════════════════════════════════════════
+                        KEYBOARD SHORTCUTS
+═══════════════════════════════════════════════════════════════════
+
+Ctrl+Q              Quit application
+Ctrl+O              Open data directory
+Ctrl+L              Open logs directory
+F1                  Open this help dialog
 """
 
         self.text_widget.config(state='normal')

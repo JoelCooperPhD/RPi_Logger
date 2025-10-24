@@ -125,7 +125,7 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
             handler = AudioHandler(device_id, device_info, self.sample_rate, gui=self.gui)
 
             if handler.start_stream(self.feedback_queue):
-                if handler.start_recording():
+                if handler.start_recording(self.session_dir, trial_number):
                     self.active_handlers[device_id] = handler
                     success_count += 1
                 else:

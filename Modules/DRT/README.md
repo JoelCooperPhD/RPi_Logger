@@ -1,8 +1,10 @@
 # DRT Module - sDRT Device Monitor and Data Logger
 
+Multi-device sDRT (Simple Detection Response Task) system with USB serial communication, automatic device detection, real-time plotting, and trial-based data logging.
+
 ## Overview
 
-The DRT module provides multi-device support for sDRT (Simple Detection Response Task) devices connected via USB serial. It features automatic device detection, hot-plug support, real-time data display, and data logging.
+The DRT module provides comprehensive support for sDRT devices connected via USB serial. Features include automatic VID/PID-based device detection, USB hot-plug support, real-time scrolling plots, ISO preset configuration, and CSV data export.
 
 ## Architecture
 
@@ -83,14 +85,18 @@ To support different devices, update these values in `config.txt`.
 
 ## Data Logging
 
-Trial data is logged to CSV files with format:
+Trial data is logged to CSV files with timestamps and reaction times:
+
+**CSV Format:**
 ```
 Timestamp,Port,TrialNumber,ReactionTime_ms
 2025-10-23T10:15:30.123456,/dev/ttyACM0,1,342
 2025-10-23T10:15:32.456789,/dev/ttyACM0,2,298
 ```
 
-Files are created per device: `sDRT_<port>_<timestamp>.csv`
+**File Naming:**
+- Standalone mode: `sDRT_<port>_<timestamp>.csv`
+- Master logger mode: Saved to session directory with trial-based naming
 
 ## Usage
 
@@ -100,8 +106,18 @@ cd Modules/DRT
 python3 main_drt.py --mode gui
 ```
 
-### With Main Logger
-The module auto-integrates when `enabled = true` in `config.txt`
+### Master Logger Integration (Recommended)
+
+The DRT module is typically used via the master logger (`main_logger.py`), which:
+- Automatically launches the module when checked in the module selection
+- Sends JSON commands for session/recording control
+- Coordinates window positioning with other modules
+- Manages trial-based recording
+
+To enable auto-start:
+1. Edit `Modules/DRT/config.txt`: Set `enabled = true`
+2. Launch master logger: `python3 main_logger.py`
+3. DRT will automatically launch with the other enabled modules
 
 ### Multi-Device Support
 - Automatically detects and connects to all sDRT devices

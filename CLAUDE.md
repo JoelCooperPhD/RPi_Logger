@@ -301,6 +301,119 @@ Launch the logger:
 python main_logger.py
 ```
 
+## Audio-Video Synchronization System
+
+### Overview
+
+The RPi Logger implements **frame-level A/V synchronization** (~30ms accuracy) using timestamped CSV logs and automatic muxing.
+
+### Architecture
+
+```
+┌──────────────┐         ┌──────────────┐
+│   Audio      │         │   Camera     │
+│   Module     │         │   Module     │
+└──────┬───────┘         └──────┬───────┘
+       │                        │
+       │ Timestamp each         │ Timestamp each
+       │ audio chunk            │ video frame
+       │                        │
+       ▼                        ▼
+┌──────────────┐         ┌──────────────┐
+│ AUDIOTIMING  │         │ CAMTIMING    │
+│   .csv       │         │   .csv       │
+└──────┬───────┘         └──────┬───────┘
+       │                        │
+       └────────┬───────────────┘
+                │
+                ▼
+        ┌───────────────┐
+        │  sync_and_mux │
+        │    utility    │
+        └───────┬───────┘
+                │
+                ├─► SYNC.json (metadata)
+                │
+                └─► AV.mp4 (muxed output)
+```
+
+### Timestamp Capture
+
+**Audio** (`Modules/AudioRecorder/audio_core/recording/manager.py`):
+- Captures `time.time()` and `time.perf_counter()` at recording start
+- Logs timestamp for each audio chunk (~21ms @ 48kHz/1024 samples)
+- CSV format: `trial,chunk_number,write_time_unix,frames_in_chunk,total_frames`
+
+**Camera** (`Modules/Cameras/camera_core/recording/manager.py`):
+- Captures `time.time()` and `time.perf_counter()` at recording start
+- Logs timestamp per video frame (~33ms @ 30fps)
+- CSV format: `trial,frame_number,write_time_unix,sensor_timestamp_ns,dropped_since_last,total_hardware_drops`
+
+### File Naming Convention
+
+All files use consistent naming with trial numbers:
+
+- Audio: `{timestamp}_AUDIO_trial{N:03d}_MIC{id}_{name}.wav`
+- Audio CSV: `{timestamp}_AUDIOTIMING_trial{N:03d}_MIC{id}.csv`
+- Video: `{timestamp}_CAM_trial{N:03d}_CAM{id}_{w}x{h}_{fps}fps.mp4`
+- Video CSV: `{timestamp}_CAMTIMING_trial{N:03d}_CAM{id}.csv`
+- Sync Metadata: `{timestamp}_SYNC_trial{N:03d}.json`
+- Muxed Output: `{timestamp}_AV_trial{N:03d}.mp4`
+
+### Synchronization Workflow
+
+1. **Recording** - Modules capture timestamps during recording
+2. **Post-Processing** - Run `utils/sync_and_mux.py` on session directory
+3. **Offset Calculation** - Compare audio/video start times
+4. **Muxing** - FFmpeg combines streams with calculated offset
+
+### Usage
+
+```bash
+# Process all trials in a session
+python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+
+# Process specific trial
+python utils/sync_and_mux.py data/session_20251024_120000 --trial 1
+
+# Generate sync files only (skip muxing)
+python utils/sync_and_mux.py data/session_20251024_120000 --no-mux
+```
+
+### Components
+
+**Sync Metadata Writer** (`Modules/base/sync_metadata.py`):
+- Writes unified SYNC.json with timing data for all modules
+- Provides helper for calculating audio offsets
+
+**A/V Muxer** (`Modules/base/av_muxer.py`):
+- Async FFmpeg wrapper for muxing audio/video
+- Applies `-itsoffset` for synchronization
+- Configurable timeout and source file deletion
+
+**Recording Managers**:
+- Audio: `Modules/AudioRecorder/audio_core/recording/manager.py`
+- Camera: `Modules/Cameras/camera_core/recording/manager.py`
+- Both implement `get_sync_metadata()` method
+
+### Configuration
+
+**File:** `Modules/base/constants.py`
+
+```python
+AV_MUXING_ENABLED = True          # Enable automatic muxing
+AV_MUXING_TIMEOUT_SECONDS = 60    # FFmpeg timeout
+AV_DELETE_SOURCE_FILES = False    # Keep originals after mux
+```
+
+### Sync Accuracy
+
+- **Frame-level**: ~30ms accuracy (sufficient for most use cases)
+- **Timestamp source**: `time.time()` (Unix wall clock)
+- **Drift**: May accumulate in very long recordings (>1 hour)
+
+For sub-frame accuracy (<5ms), hardware-based sync would be required.
+
 ## Future Enhancements
 
 - [ ] Unit tests for managers
@@ -308,3 +421,4 @@ python main_logger.py
 - [ ] Metrics collection
 - [ ] Performance profiling
 - [ ] Module dependency management
+- [ ] Hardware-based sub-frame sync (GPIO triggers)

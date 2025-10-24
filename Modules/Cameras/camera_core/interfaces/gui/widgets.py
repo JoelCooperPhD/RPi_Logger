@@ -99,7 +99,7 @@ class ScrollableLogWidget(tk.Frame):
         super().__init__(parent, **kwargs)
 
         self.text = tk.Text(self, height=height, wrap='word', state='disabled',
-                           bg='#f5f5f5', font=('Courier', 9))
+                           bg='#f5f5f5')
         scrollbar = ttk.Scrollbar(self, orient='vertical', command=self.text.yview)
         self.text.configure(yscrollcommand=scrollbar.set)
 

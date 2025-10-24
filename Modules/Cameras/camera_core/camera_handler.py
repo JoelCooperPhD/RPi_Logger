@@ -160,7 +160,7 @@ class CameraHandler:
             await self.recording_manager.cleanup()
 
         try:
-            self.picam2.stop()
+            await asyncio.to_thread(self.picam2.stop)
         except Exception as e:
             self.logger.debug("Camera stop error (ignored): %s", e)
 
@@ -193,12 +193,12 @@ class CameraHandler:
                 self.logger.warning("Task cancellation did not complete within %d seconds", CLEANUP_TIMEOUT_SECONDS)
 
         try:
-            self.picam2.stop_preview()
+            await asyncio.to_thread(self.picam2.stop_preview)
         except Exception:
             pass
 
         try:
-            self.picam2.close()
+            await asyncio.to_thread(self.picam2.close)
         except Exception as e:
             self.logger.debug("Camera close error: %s", e)
 

@@ -2,8 +2,8 @@
 
 # Module settings (managed by master logger)
 enabled = false
-window_x = 1053
-window_y = 686
+window_x = 1728
+window_y = 162
 window_width = 951
 window_height = 324
 
