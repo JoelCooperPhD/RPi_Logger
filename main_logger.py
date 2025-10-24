@@ -100,6 +100,21 @@ def configure_logging(log_level: str, log_file: Path, console_output: bool = Tru
 
 
 async def main(argv: Optional[list[str]] = None) -> None:
+    """
+    Main entry point for the RPi Logger system.
+
+    Shutdown Sequence:
+    1. User triggers shutdown via signal (Ctrl+C), UI button, or exception
+    2. ShutdownCoordinator.initiate_shutdown() is called with source identifier
+    3. Coordinator executes registered cleanup callbacks in order:
+       a. cleanup_logger_system() - Stops all modules, saves geometry
+       b. cleanup_ui() - Closes main window
+    4. Finally block ensures shutdown completes
+    5. Logs shutdown message and exits
+
+    The ShutdownCoordinator ensures shutdown happens exactly once, regardless
+    of how many times it's triggered, preventing race conditions.
+    """
     args = parse_args(argv)
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
