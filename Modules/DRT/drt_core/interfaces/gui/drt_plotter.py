@@ -212,9 +212,6 @@ class DRTPlotter:
 
         self._state_now[port] = int(state)
 
-    def update_display(self):
-        pass
-
     def pause(self):
         logger.info("PAUSE: Creating gap in stimulus line, animation keeps running")
         for port in list(self._state_now.keys()):

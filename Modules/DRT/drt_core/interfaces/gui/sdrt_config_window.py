@@ -197,6 +197,11 @@ class SDRTConfigWindow:
         except Exception as e:
             logger.error(f"Error uploading configuration: {e}", exc_info=True)
 
+    async def _reload_config(self, handler: 'DRTHandler'):
+        self._clear_settings()
+        await asyncio.sleep(0.5)
+        await self._load_current_config(handler)
+
     async def _send_config_and_reload(
         self,
         handler: 'DRTHandler',
@@ -210,13 +215,8 @@ class SDRTConfigWindow:
             await handler.set_upper_isi(upper_isi)
             await handler.set_intensity(intensity)
             await handler.set_stimulus_duration(stim_dur)
-
             logger.info("Configuration uploaded successfully")
-
-            self._clear_settings()
-
-            await asyncio.sleep(0.5)
-            await self._load_current_config(handler)
+            await self._reload_config(handler)
         except Exception as e:
             logger.error(f"Failed to send configuration: {e}", exc_info=True)
 
@@ -225,13 +225,9 @@ class SDRTConfigWindow:
 
     async def _send_iso_preset(self, handler: 'DRTHandler'):
         try:
-            await handler.set_iso_standard()
+            await handler.set_iso_params()
             logger.info("ISO standard configuration sent to device")
-
-            self._clear_settings()
-
-            await asyncio.sleep(0.5)
-            await self._load_current_config(handler)
+            await self._reload_config(handler)
         except Exception as e:
             logger.error(f"Failed to send ISO preset: {e}", exc_info=True)
 
