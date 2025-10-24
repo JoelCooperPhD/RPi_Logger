@@ -164,9 +164,6 @@ class StreamHandler:
                                         logger.info(f"Sample pixel: {sample}")
                                 else:
                                     logger.info("Grayscale frame detected")
-
-                            elif self.camera_frames % 30 == 1:  # Log every 30 frames
-                                logger.info(f"Video frames received: {self.camera_frames}")
                         else:
                             if frame_count <= 5:
                                 logger.warning(f"Frame {frame_count}: to_ndarray() returned None")
@@ -203,9 +200,6 @@ class StreamHandler:
                 self.last_gaze = gaze
                 self._enqueue_latest(self._gaze_queue, gaze)
                 self._gaze_ready_event.set()  # Signal gaze available
-
-                if gaze_count % 100 == 1:  # Log every 100 gaze samples
-                    logger.info(f"Gaze samples received: {gaze_count}")
 
         except asyncio.CancelledError:
             logger.debug("Gaze stream task cancelled")
@@ -321,7 +315,8 @@ class StreamHandler:
         try:
             await asyncio.wait_for(self._frame_ready_event.wait(), timeout=timeout)
             self._frame_ready_event.clear()
-            return await self.next_frame(timeout=0)  # Non-blocking get
+            # Return the last frame packet directly (set at the same time as the event)
+            return self._last_frame_packet
         except asyncio.TimeoutError:
             return None
 

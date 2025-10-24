@@ -18,7 +18,13 @@ class CommandHandler(BaseCommandHandler):
             self.logger.error("Recording manager not available")
             return False
 
-        await self.system.recording_manager.start_recording(trial_number)
+        # Get session_dir from command_data if available
+        from pathlib import Path
+        session_dir = None
+        if "session_dir" in command_data:
+            session_dir = Path(command_data["session_dir"])
+
+        await self.system.recording_manager.start_recording(session_dir, trial_number)
         self.system.recording = True
         return True
 

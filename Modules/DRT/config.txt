@@ -1,9 +1,9 @@
-enabled = true
+enabled = false
 window_geometry = 800x600+100+100
 device_vid = 9114
 device_pid = 32798
 baudrate = 9600
-window_x = 2014
-window_y = 500
+window_x = 1855
+window_y = 1256
 window_width = 954
 window_height = 317

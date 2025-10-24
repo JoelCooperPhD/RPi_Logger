@@ -66,6 +66,7 @@ class RecordingManager(RecordingManagerBase):
         self._last_gaze_timestamp: Optional[float] = None
         self._last_write_monotonic: Optional[float] = None
         self._written_frames = 0
+        self._recorded_frame_count = 0  # Frame counter for overlay (matches CSV frame_number)
         self._skipped_frames = 0  # Frames skipped due to FPS throttling
         self._duplicated_frames = 0  # Frames duplicated when no new frame available
         self._recording_start_time: Optional[float] = None
@@ -218,6 +219,7 @@ class RecordingManager(RecordingManagerBase):
             self._last_gaze_timestamp = None
             self._last_write_monotonic = None
             self._written_frames = 0
+            self._recorded_frame_count = 0
             self._skipped_frames = 0
             self._duplicated_frames = 0
             self._recording_start_time = time.perf_counter()
@@ -455,6 +457,7 @@ class RecordingManager(RecordingManagerBase):
         self._last_gaze_timestamp = None
         self._last_write_monotonic = None
         self._written_frames = 0
+        self._recorded_frame_count = 0
         self._skipped_frames = 0
         self._duplicated_frames = 0
         self._recording_start_time = None
@@ -472,6 +475,12 @@ class RecordingManager(RecordingManagerBase):
             'frames_dropped': self._skipped_frames,
             'output_files': output_files,
         }
+
+    async def pause_recording(self):
+        raise NotImplementedError("Pause not supported by eye tracker recording")
+
+    async def resume_recording(self):
+        raise NotImplementedError("Resume not supported by eye tracker recording")
 
     def write_frame(self, frame: np.ndarray, metadata: Optional[FrameTimingMetadata] = None):
         if not self._is_recording:
@@ -653,6 +662,10 @@ class RecordingManager(RecordingManagerBase):
     @property
     def duplicated_frames(self) -> int:
         return self._duplicated_frames
+
+    @property
+    def recorded_frame_count(self) -> int:
+        return self._recorded_frame_count
 
     async def cleanup(self):
         await self.stop_recording()
@@ -884,6 +897,7 @@ class RecordingManager(RecordingManagerBase):
         write_duration = write_end_monotonic - write_start_monotonic
 
         self._written_frames += 1
+        self._recorded_frame_count += 1
         self._last_write_monotonic = write_start_monotonic
 
         write_time_iso = datetime.datetime.fromtimestamp(write_time_unix, tz=datetime.timezone.utc).isoformat(

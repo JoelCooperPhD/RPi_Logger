@@ -110,6 +110,16 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
 
         except Exception as e:
             self.logger.error("Failed to initialize cameras: %s", e)
+
+            for cam in self.cameras:
+                try:
+                    await cam.cleanup()
+                except Exception as cleanup_error:
+                    self.logger.debug("Cleanup error for camera: %s", cleanup_error)
+
+            self.cameras.clear()
+            self.preview_enabled.clear()
+
             if self.slave_mode:
                 StatusMessage.send("error", {"message": f"Camera initialization failed: {e}"})
             raise

@@ -56,7 +56,7 @@ discovery_retry = 3.0        # Retry interval after device failure (seconds)
 ################################################################################
 
 # Auto-start this module when master logger starts
-enabled = true
+enabled = false
 
 # Window position and size (saved automatically on window close)
 window_x = 1308

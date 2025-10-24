@@ -198,6 +198,12 @@ class CameraRecordingManager(RecordingManagerBase):
             'output_files': output_files,
         }
 
+    async def pause_recording(self):
+        raise NotImplementedError("Pause not supported by camera recording")
+
+    async def resume_recording(self):
+        raise NotImplementedError("Resume not supported by camera recording")
+
     async def cleanup(self) -> None:
         await self.stop_recording()
 

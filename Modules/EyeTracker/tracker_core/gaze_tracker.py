@@ -131,7 +131,8 @@ class GazeTracker:
     async def _process_frames(self):
         frame_interval = 1.0 / self.config.fps
         fps_int = max(int(self.config.fps), 1)
-        next_frame_deadline = time.perf_counter()
+        # Give a reasonable timeout for the first frame (10 seconds)
+        next_frame_deadline = time.perf_counter() + 10.0
         no_frame_count = 0
 
         while self.running:
@@ -213,47 +214,38 @@ class GazeTracker:
                 display_frame = None
                 recording_frame = None
 
-                if self.display_enabled and self.recording_manager.is_recording:
-                    # Both display and recording: process both separately
-                    # Phase 1.3: Scale early for display (reduces overlay CPU)
-                    preview_frame = self.frame_processor.scale_for_preview(processed_frame)
-                    display_frame = await self.frame_processor.add_display_overlays_async(
-                        preview_frame,
-                        self.frame_count,
-                        current_camera_frames,
-                        self.start_time,
-                        self.recording_manager.is_recording,
-                        latest_gaze,
-                        self.stream_handler.get_camera_fps(),
-                        self.dropped_frames,
-                        self.recording_manager.duplicated_frames,
-                        self.config.fps,
-                        experiment_label=self.recording_manager.current_experiment_label,
-                    )
-                    # Minimal overlay for recording (just gaze circle)
-                    recording_frame = self.frame_processor.add_minimal_gaze(processed_frame.copy(), latest_gaze)
+                # Always create display frame (for GUI or OpenCV display)
+                # Phase 1.3: Scale early for display (reduces overlay CPU)
+                preview_frame = self.frame_processor.scale_for_preview(processed_frame)
 
-                elif self.display_enabled:
-                    # Display only: full overlays with early scaling
-                    # Phase 1.3: Scale early for display (reduces overlay CPU)
-                    preview_frame = self.frame_processor.scale_for_preview(processed_frame)
-                    display_frame = await self.frame_processor.add_display_overlays_async(
-                        preview_frame,
-                        self.frame_count,
-                        current_camera_frames,
-                        self.start_time,
-                        self.recording_manager.is_recording,
-                        latest_gaze,
-                        self.stream_handler.get_camera_fps(),
-                        self.dropped_frames,
-                        self.recording_manager.duplicated_frames,
-                        self.config.fps,
-                        experiment_label=self.recording_manager.current_experiment_label,
-                    )
+                # Use synchronous version to avoid event loop issues
+                display_frame = self.frame_processor.add_display_overlays(
+                    preview_frame,
+                    self.frame_count,
+                    current_camera_frames,
+                    self.start_time,
+                    self.recording_manager.is_recording,
+                    latest_gaze,
+                    self.stream_handler.get_camera_fps(),
+                    self.dropped_frames,
+                    self.recording_manager.duplicated_frames,
+                    self.config.fps,
+                    experiment_label=self.recording_manager.current_experiment_label,
+                )
 
-                elif self.recording_manager.is_recording:
-                    # Recording only (headless): minimal overlay
-                    recording_frame = self.frame_processor.add_minimal_gaze(processed_frame, latest_gaze)
+                if self.recording_manager.is_recording:
+                    # Minimal overlay for recording: frame number + optional gaze circle
+                    if self.config.enable_recording_overlay:
+                        frame_number = self.recording_manager.recorded_frame_count + 1  # +1 because we increment AFTER writing
+                        recording_frame = self.frame_processor.add_minimal_recording_overlay(
+                            processed_frame.copy(),
+                            frame_number,
+                            latest_gaze,
+                            include_gaze=self.config.include_gaze_in_recording
+                        )
+                    else:
+                        # No overlay, use raw processed frame
+                        recording_frame = processed_frame.copy()
 
                 # Store display frame if generated
                 if display_frame is not None:

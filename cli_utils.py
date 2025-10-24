@@ -186,6 +186,8 @@ RESOLUTION_PRESETS = {
     5: (640, 480, "VGA - Minimal CPU usage", "4:3"),
     6: (480, 360, "QVGA+ - Very low CPU preview", "4:3"),
     7: (320, 240, "QVGA - Ultra minimal preview", "4:3"),
+    8: (240, 180, "Tiny - Extra small preview", "4:3"),
+    9: (160, 120, "Micro - Minimal window size", "4:3"),
 }
 
 RESOLUTION_TO_PRESET = {(w, h): num for num, (w, h, _, _) in RESOLUTION_PRESETS.items()}

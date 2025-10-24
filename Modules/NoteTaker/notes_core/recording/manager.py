@@ -68,6 +68,12 @@ class RecordingManager:
             logger.error("Failed to stop recording: %s", e, exc_info=True)
             return False
 
+    async def pause_recording(self):
+        raise NotImplementedError("Pause not supported by note recording")
+
+    async def resume_recording(self):
+        raise NotImplementedError("Resume not supported by note recording")
+
     async def add_note(self, note_text: str, recording_modules: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
         if not self.recording:
             logger.warning("Cannot add note - recording not active")

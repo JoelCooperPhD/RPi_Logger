@@ -1,7 +1,7 @@
 # NoteTaker Module Configuration
 
 # Module settings (managed by master logger)
-enabled = true
+enabled = false
 window_x = 1053
 window_y = 686
 window_width = 951
