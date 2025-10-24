@@ -1,20 +1,38 @@
+"""
+Logger System - Main coordinator for the RPi Logger.
+
+This is the facade that coordinates between ModuleManager, SessionManager,
+WindowManager, and other components. It provides a unified API for the UI.
+"""
 
 import asyncio
 import datetime
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Callable
+from typing import Dict, List, Optional, Callable
 
-from .module_discovery import ModuleInfo, discover_modules
-from .module_process import ModuleProcess, ModuleState
+from .module_discovery import ModuleInfo
+from .module_process import ModuleState
 from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
 from .config_manager import get_config_manager
 from .event_logger import EventLogger
+from .paths import STATE_FILE
+from .module_manager import ModuleManager
+from .session_manager import SessionManager
 
 
 class LoggerSystem:
+    """
+    Main coordinator for the logger system.
+
+    This class acts as a facade, delegating to specialized managers:
+    - ModuleManager: Module discovery and lifecycle
+    - SessionManager: Session and recording control
+    - WindowManager: Window layout and geometry
+    """
+
     def __init__(
         self,
         session_dir: Path,
@@ -28,220 +46,58 @@ class LoggerSystem:
         self.log_level = log_level
         self.ui_callback = ui_callback
 
-        self.available_modules: List[ModuleInfo] = []
-        self.selected_modules: Set[str] = set()
-        self.module_processes: Dict[str, ModuleProcess] = {}
-
+        # Managers
+        self.module_manager = ModuleManager(
+            session_dir=session_dir,
+            session_prefix=session_prefix,
+            log_level=log_level,
+            status_callback=self._module_status_callback,
+        )
+        self.session_manager = SessionManager()
         self.window_manager = WindowManager()
         self.config_manager = get_config_manager()
 
-        self.recording = False
+        # State
         self.shutdown_event = asyncio.Event()
-
         self.event_logger: Optional[EventLogger] = None
 
-        self._discover_modules()
-        self._load_enabled_modules()
+    async def async_init(self) -> None:
+        """Complete async initialization. Must be called after construction."""
+        await self._load_enabled_modules()
 
-    def _discover_modules(self) -> None:
-        self.logger.info("Discovering modules...")
-        self.available_modules = discover_modules()
-        self.logger.info("Found %d modules: %s",
-                        len(self.available_modules),
-                        [m.name for m in self.available_modules])
-
-    def _load_enabled_modules(self) -> None:
-        self.selected_modules.clear()
-
-        state_file = Path(__file__).parent.parent / "data" / "running_modules.json"
+    async def _load_enabled_modules(self) -> None:
+        """Load enabled modules asynchronously, avoiding blocking I/O."""
+        # First, check if we have running modules from last session
         running_modules_from_last_session = None
 
-        if state_file.exists():
+        if STATE_FILE.exists():
             try:
-                with open(state_file, 'r') as f:
-                    state = json.load(f)
-                    running_modules_from_last_session = set(state.get('running_modules', []))
-                    self.logger.info("Loaded running modules from last session: %s", running_modules_from_last_session)
-                    # Delete the state file after reading it (one-time use)
-                    state_file.unlink()
+                # Wrap blocking I/O in thread pool
+                def read_state():
+                    with open(STATE_FILE, 'r') as f:
+                        return json.load(f)
+
+                state = await asyncio.to_thread(read_state)
+                running_modules_from_last_session = set(state.get('running_modules', []))
+                self.logger.info("Loaded running modules from last session: %s", running_modules_from_last_session)
+
+                # Delete the state file after reading it (one-time use)
+                await asyncio.to_thread(STATE_FILE.unlink)
             except Exception as e:
                 self.logger.error("Failed to load running modules state: %s", e)
 
+        # Load module selection state
         if running_modules_from_last_session:
+            # Restore from last session
             for module_name in running_modules_from_last_session:
-                if any(m.name == module_name for m in self.available_modules):
-                    self.selected_modules.add(module_name)
+                if self.module_manager.select_module(module_name):
                     self.logger.info("Module %s will be restored from last session", module_name)
-                else:
-                    self.logger.warning("Module %s from last session not found", module_name)
         else:
-            for module_info in self.available_modules:
-                if not module_info.config_path:
-                    self.selected_modules.add(module_info.name)
-                    self.logger.debug("Module %s has no config, defaulting to enabled", module_info.name)
-                    continue
+            # Load from config files
+            await self.module_manager.load_enabled_modules()
 
-                config = self.config_manager.read_config(module_info.config_path)
-                enabled = self.config_manager.get_bool(config, 'enabled', default=True)
-
-                if enabled:
-                    self.selected_modules.add(module_info.name)
-                    self.logger.info("Module %s enabled in config", module_info.name)
-                else:
-                    self.logger.info("Module %s disabled in config", module_info.name)
-
-    def get_available_modules(self) -> List[ModuleInfo]:
-        return self.available_modules
-
-    def select_module(self, module_name: str) -> bool:
-        if not any(m.name == module_name for m in self.available_modules):
-            self.logger.warning("Module not found: %s", module_name)
-            return False
-
-        self.selected_modules.add(module_name)
-        self.logger.info("Selected module: %s", module_name)
-        return True
-
-    def deselect_module(self, module_name: str) -> None:
-        self.selected_modules.discard(module_name)
-        self.logger.info("Deselected module: %s", module_name)
-
-    def get_selected_modules(self) -> List[str]:
-        return list(self.selected_modules)
-
-    def is_module_selected(self, module_name: str) -> bool:
-        return module_name in self.selected_modules
-
-    def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
-        module_info = next(
-            (m for m in self.available_modules if m.name == module_name),
-            None
-        )
-        if not module_info or not module_info.config_path:
-            self.logger.warning("Cannot update enabled state - no config for %s", module_name)
-            return False
-
-        success = self.config_manager.write_config(
-            module_info.config_path,
-            {'enabled': enabled}
-        )
-
-        if success:
-            self.logger.info("Updated %s enabled state to %s", module_name, enabled)
-        else:
-            self.logger.error("Failed to update %s enabled state", module_name)
-
-        return success
-
-    def is_module_running(self, module_name: str) -> bool:
-        process = self.module_processes.get(module_name)
-        return process is not None and process.is_running()
-
-    async def start_module(self, module_name: str) -> bool:
-        if module_name in self.module_processes:
-            process = self.module_processes[module_name]
-
-            if process.is_running():
-                self.logger.info("Module %s still running, waiting for stop to complete...", module_name)
-
-                for _ in range(50):  # 50 * 0.1s = 5s
-                    if not process.is_running():
-                        break
-                    await asyncio.sleep(0.1)
-
-                # If still running after timeout, force stop
-                if process.is_running():
-                    self.logger.warning("Module %s still running after timeout, forcing stop", module_name)
-                    await process.stop()
-                    await asyncio.sleep(0.5)
-
-            self.module_processes.pop(module_name, None)
-            self.selected_modules.discard(module_name)
-
-        module_info = next(
-            (m for m in self.available_modules if m.name == module_name),
-            None
-        )
-        if not module_info:
-            self.logger.error("Module info not found: %s", module_name)
-            return False
-
-        self.session_dir.mkdir(parents=True, exist_ok=True)
-        self.logger.info("Using session directory for %s: %s", module_name, self.session_dir)
-
-        window_geometry = None
-        self.logger.info("=" * 60)
-        self.logger.info("GEOMETRY_LOAD: Loading geometry for %s", module_name)
-        if module_info.config_path:
-            self.logger.info("GEOMETRY_LOAD: Config path: %s", module_info.config_path)
-            config = self.config_manager.read_config(module_info.config_path)
-            x = self.config_manager.get_int(config, 'window_x', default=None)
-            y = self.config_manager.get_int(config, 'window_y', default=None)
-            width = self.config_manager.get_int(config, 'window_width', default=None)
-            height = self.config_manager.get_int(config, 'window_height', default=None)
-
-            self.logger.info("GEOMETRY_LOAD: Read from config: x=%s, y=%s, width=%s, height=%s", x, y, width, height)
-
-            if all(v is not None for v in [x, y, width, height]):
-                window_geometry = WindowGeometry(x=x, y=y, width=width, height=height)
-                self.logger.info("GEOMETRY_LOAD: ✓ Using saved geometry: %s", window_geometry.to_geometry_string())
-            else:
-                self.logger.info("GEOMETRY_LOAD: ✗ Incomplete geometry data, using defaults")
-        else:
-            self.logger.info("GEOMETRY_LOAD: No config path available")
-        self.logger.info("=" * 60)
-
-        process = ModuleProcess(
-            module_info,
-            self.session_dir,
-            session_prefix=self.session_prefix,
-            status_callback=self._module_status_callback,
-            log_level=self.log_level,
-            window_geometry=window_geometry,
-        )
-
-        try:
-            success = await process.start()
-            if success:
-                self.module_processes[module_name] = process
-                self.selected_modules.add(module_name)
-                self.logger.info("Module %s started successfully", module_name)
-            else:
-                self.logger.error("Module %s failed to start", module_name)
-            return success
-        except Exception as e:
-            self.logger.error("Exception starting %s: %s", module_name, e, exc_info=True)
-            return False
-
-    async def stop_module(self, module_name: str) -> bool:
-        process = self.module_processes.get(module_name)
-        if not process:
-            self.logger.warning("Module %s not found in processes", module_name)
-            return False
-
-        if not process.is_running():
-            self.logger.warning("Module %s not running", module_name)
-            self.module_processes.pop(module_name, None)
-            self.selected_modules.discard(module_name)
-            return True
-
-        try:
-            if process.is_recording():
-                await process.pause()
-                await asyncio.sleep(0.5)  # Give it time to pause recording
-
-            await process.stop()
-
-            self.module_processes.pop(module_name, None)
-            self.selected_modules.discard(module_name)
-
-            self.logger.info("Module %s stopped successfully", module_name)
-            return True
-        except Exception as e:
-            self.logger.error("Error stopping %s: %s", module_name, e, exc_info=True)
-            return False
-
-    async def _module_status_callback(self, process: ModuleProcess, status: Optional[StatusMessage]) -> None:
+    async def _module_status_callback(self, process, status: Optional[StatusMessage]) -> None:
+        """Handle status updates from module processes."""
         module_name = process.module_info.name
 
         if status:
@@ -262,42 +118,91 @@ class LoggerSystem:
             except Exception as e:
                 self.logger.error("UI callback error: %s", e)
 
-    async def start_all(self) -> Dict[str, bool]:
-        self.logger.info("Starting all selected modules: %s", self.selected_modules)
+    # ========== Module Management (delegate to ModuleManager) ==========
 
-        if not self.selected_modules:
+    def get_available_modules(self) -> List[ModuleInfo]:
+        """Get list of all discovered modules."""
+        return self.module_manager.get_available_modules()
+
+    def select_module(self, module_name: str) -> bool:
+        """Select a module for use."""
+        return self.module_manager.select_module(module_name)
+
+    def deselect_module(self, module_name: str) -> None:
+        """Deselect a module."""
+        self.module_manager.deselect_module(module_name)
+
+    def get_selected_modules(self) -> List[str]:
+        """Get list of selected module names."""
+        return self.module_manager.get_selected_modules()
+
+    def is_module_selected(self, module_name: str) -> bool:
+        """Check if a module is selected."""
+        return self.module_manager.is_module_selected(module_name)
+
+    def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
+        """Update a module's enabled state in config."""
+        return self.module_manager.toggle_module_enabled(module_name, enabled)
+
+    def is_module_running(self, module_name: str) -> bool:
+        """Check if a module is running."""
+        return self.module_manager.is_module_running(module_name)
+
+    def get_module_state(self, module_name: str) -> Optional[ModuleState]:
+        """Get the state of a module."""
+        return self.module_manager.get_module_state(module_name)
+
+    async def start_module(self, module_name: str) -> bool:
+        """Start a module."""
+        # Load window geometry from config
+        window_geometry = await self._load_module_geometry(module_name)
+        return await self.module_manager.start_module(module_name, window_geometry)
+
+    async def _load_module_geometry(self, module_name: str) -> Optional[WindowGeometry]:
+        """Load saved window geometry for a module."""
+        modules = self.module_manager.get_available_modules()
+        module_info = next((m for m in modules if m.name == module_name), None)
+
+        if not module_info or not module_info.config_path:
+            return None
+
+        config = await self.config_manager.read_config_async(module_info.config_path)
+        x = self.config_manager.get_int(config, 'window_x', default=None)
+        y = self.config_manager.get_int(config, 'window_y', default=None)
+        width = self.config_manager.get_int(config, 'window_width', default=None)
+        height = self.config_manager.get_int(config, 'window_height', default=None)
+
+        if all(v is not None for v in [x, y, width, height]):
+            return WindowGeometry(x=x, y=y, width=width, height=height)
+
+        return None
+
+    async def stop_module(self, module_name: str) -> bool:
+        """Stop a module."""
+        return await self.module_manager.stop_module(module_name)
+
+    async def start_all(self) -> Dict[str, bool]:
+        """Start all selected modules with proper window layout."""
+        selected_modules = self.module_manager.get_selected_modules()
+        self.logger.info("Starting all selected modules: %s", selected_modules)
+
+        if not selected_modules:
             self.logger.warning("No modules selected")
             return {}
 
-        results = {}
-
-        self.session_dir.mkdir(parents=True, exist_ok=True)
-        self.logger.info("Using session directory for all modules: %s", self.session_dir)
-
+        # Calculate window layout
         saved_geometries: Dict[str, WindowGeometry] = {}
         modules_needing_tiling: List[str] = []
 
-        for module_name in self.selected_modules:
-            module_info = next(
-                (m for m in self.available_modules if m.name == module_name),
-                None
-            )
-            if not module_info or not module_info.config_path:
-                modules_needing_tiling.append(module_name)
-                continue
-
-            config = self.config_manager.read_config(module_info.config_path)
-            x = self.config_manager.get_int(config, 'window_x', default=0)
-            y = self.config_manager.get_int(config, 'window_y', default=0)
-            width = self.config_manager.get_int(config, 'window_width', default=800)
-            height = self.config_manager.get_int(config, 'window_height', default=600)
-
-            if x != 0 or y != 0:
-                saved_geometries[module_name] = WindowGeometry(x=x, y=y, width=width, height=height)
+        for module_name in selected_modules:
+            geometry = await self._load_module_geometry(module_name)
+            if geometry and (geometry.x != 0 or geometry.y != 0):
+                saved_geometries[module_name] = geometry
                 self.logger.info("Using saved geometry for %s", module_name)
             else:
                 modules_needing_tiling.append(module_name)
 
+        # Calculate tiling for modules without saved geometry
         tiling_geometries: Dict[str, WindowGeometry] = {}
         if modules_needing_tiling:
             self.logger.info("Calculating tiling layout for %d modules", len(modules_needing_tiling))
@@ -308,36 +213,17 @@ class LoggerSystem:
             for idx, module_name in enumerate(modules_needing_tiling):
                 tiling_geometries[module_name] = tiling_layout.get(str(idx))
 
+        # Start all modules
+        results = {}
         start_tasks = []
 
-        for module_name in self.selected_modules:
-            module_info = next(
-                (m for m in self.available_modules if m.name == module_name),
-                None
-            )
-            if not module_info:
-                self.logger.error("Module info not found: %s", module_name)
-                results[module_name] = False
-                continue
-
-            window_geometry = saved_geometries.get(module_name) or tiling_geometries.get(module_name)
-
-            process = ModuleProcess(
-                module_info,
-                self.session_dir,
-                session_prefix=self.session_prefix,
-                status_callback=self._module_status_callback,
-                log_level=self.log_level,
-                window_geometry=window_geometry,
-            )
-
-            self.module_processes[module_name] = process
-
-            start_tasks.append(self._start_module(module_name, process))
+        for module_name in selected_modules:
+            geometry = saved_geometries.get(module_name) or tiling_geometries.get(module_name)
+            start_tasks.append(self.module_manager.start_module(module_name, geometry))
 
         start_results = await asyncio.gather(*start_tasks, return_exceptions=True)
 
-        for module_name, result in zip(self.selected_modules, start_results):
+        for module_name, result in zip(selected_modules, start_results):
             if isinstance(result, Exception):
                 self.logger.error("Failed to start %s: %s", module_name, result)
                 results[module_name] = False
@@ -345,224 +231,91 @@ class LoggerSystem:
                 results[module_name] = result
 
         self.logger.info("Waiting for modules to initialize...")
-        await asyncio.sleep(2.0)  # Give modules time to initialize
+        await asyncio.sleep(2.0)
 
         success_count = sum(1 for v in results.values() if v)
         self.logger.info("Started %d/%d modules", success_count, len(results))
 
         return results
 
-    async def _start_module(self, module_name: str, process: ModuleProcess) -> bool:
-        try:
-            success = await process.start()
-            if success:
-                self.logger.info("Module %s started", module_name)
-            else:
-                self.logger.error("Module %s failed to start", module_name)
-            return success
-        except Exception as e:
-            self.logger.error("Exception starting %s: %s", module_name, e, exc_info=True)
-            return False
+    # ========== Session Management (delegate to SessionManager) ==========
 
     async def start_session_all(self) -> Dict[str, bool]:
-        self.logger.info("Starting session on all modules")
-
-        for module_name, process in self.module_processes.items():
-            process.output_dir = self.session_dir
-            self.logger.info("Updated %s output_dir to: %s", module_name, self.session_dir)
-
-        results = {}
-        tasks = []
-        for module_name, process in self.module_processes.items():
-            if process.is_running():
-                tasks.append(self._start_session_module(module_name, process))
-            else:
-                self.logger.warning("Module %s not running, skipping session start", module_name)
-                results[module_name] = False
-
-        if tasks:
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for module_name, result in zip(self.module_processes.keys(), task_results):
-                if isinstance(result, Exception):
-                    self.logger.error("Error starting session for %s: %s", module_name, result)
-                    results[module_name] = False
-                else:
-                    results[module_name] = result
-
-        return results
-
-    async def _start_session_module(self, module_name: str, process: ModuleProcess) -> bool:
-        try:
-            await process.start_session()
-            self.logger.info("Sent start_session to %s", module_name)
-            return True
-        except Exception as e:
-            self.logger.error("Error starting session for %s: %s", module_name, e)
-            return False
+        """Start session on all modules."""
+        return await self.session_manager.start_session_all(
+            self.module_manager.module_processes,
+            self.session_dir
+        )
 
     async def stop_session_all(self) -> Dict[str, bool]:
-        self.logger.info("Stopping session on all modules")
-
-        results = {}
-        tasks = []
-        for module_name, process in self.module_processes.items():
-            if process.is_running():
-                tasks.append(self._stop_session_module(module_name, process))
-            else:
-                self.logger.warning("Module %s not running, skipping session stop", module_name)
-                results[module_name] = False
-
-        if tasks:
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for module_name, result in zip(self.module_processes.keys(), task_results):
-                if isinstance(result, Exception):
-                    self.logger.error("Error stopping session for %s: %s", module_name, result)
-                    results[module_name] = False
-                else:
-                    results[module_name] = result
-
-        return results
-
-    async def _stop_session_module(self, module_name: str, process: ModuleProcess) -> bool:
-        try:
-            await process.stop_session()
-            self.logger.info("Sent stop_session to %s", module_name)
-            return True
-        except Exception as e:
-            self.logger.error("Error stopping session for %s: %s", module_name, e)
-            return False
+        """Stop session on all modules."""
+        return await self.session_manager.stop_session_all(
+            self.module_manager.module_processes
+        )
 
     async def record_all(self, trial_number: int = None, trial_label: str = None) -> Dict[str, bool]:
-        self.logger.info("Starting recording on all modules (trial %s, label: %s)", trial_number if trial_number else "N/A", trial_label if trial_label else "N/A")
-
-        if self.recording:
-            self.logger.warning("Already recording")
-            return {}
-
-        for module_name, process in self.module_processes.items():
-            process.output_dir = self.session_dir
-
-        results = {}
-
-        tasks = []
-        for module_name, process in self.module_processes.items():
-            if process.is_running():
-                tasks.append(self._record_module(module_name, process, trial_number, trial_label))
-            else:
-                self.logger.warning("Module %s not running, skipping", module_name)
-                results[module_name] = False
-
-        if tasks:
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for module_name, result in zip(self.module_processes.keys(), task_results):
-                if isinstance(result, Exception):
-                    self.logger.error("Error starting recording for %s: %s",
-                                    module_name, result)
-                    results[module_name] = False
-                else:
-                    results[module_name] = result
-
-        self.recording = True
-        return results
-
-    async def _record_module(self, module_name: str, process: ModuleProcess, trial_number: int = None, trial_label: str = None) -> bool:
-        try:
-            await process.record(trial_number, trial_label)
-            self.logger.info("Sent record to %s (trial %s, label: %s)", module_name, trial_number if trial_number else "N/A", trial_label if trial_label else "N/A")
-            return True
-        except Exception as e:
-            self.logger.error("Error starting recording for %s: %s", module_name, e)
-            return False
+        """Start recording on all modules."""
+        return await self.session_manager.record_all(
+            self.module_manager.module_processes,
+            self.session_dir,
+            trial_number,
+            trial_label
+        )
 
     async def pause_all(self) -> Dict[str, bool]:
-        self.logger.info("Pausing recording on all modules")
-
-        if not self.recording:
-            self.logger.warning("Not recording")
-            return {}
-
-        results = {}
-
-        tasks = []
-        for module_name, process in self.module_processes.items():
-            if process.is_running():
-                tasks.append(self._pause_module(module_name, process))
-            else:
-                results[module_name] = False
-
-        if tasks:
-            task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for module_name, result in zip(self.module_processes.keys(), task_results):
-                if isinstance(result, Exception):
-                    self.logger.error("Error pausing recording for %s: %s",
-                                    module_name, result)
-                    results[module_name] = False
-                else:
-                    results[module_name] = result
-
-        self.recording = False
-        return results
-
-    async def _pause_module(self, module_name: str, process: ModuleProcess) -> bool:
-        try:
-            await process.pause()
-            self.logger.info("Sent pause to %s", module_name)
-            return True
-        except Exception as e:
-            self.logger.error("Error pausing recording for %s: %s", module_name, e)
-            return False
+        """Pause recording on all modules."""
+        return await self.session_manager.pause_all(
+            self.module_manager.module_processes
+        )
 
     async def start_recording_all(self, trial_number: int = None, trial_label: str = None) -> Dict[str, bool]:
+        """Alias for record_all."""
         return await self.record_all(trial_number, trial_label)
 
     async def stop_recording_all(self) -> Dict[str, bool]:
+        """Alias for pause_all."""
         return await self.pause_all()
 
     async def get_status_all(self) -> Dict[str, ModuleState]:
-        results = {}
+        """Get status from all modules."""
+        return await self.session_manager.get_status_all(
+            self.module_manager.module_processes
+        )
 
-        for module_name, process in self.module_processes.items():
-            if process.is_running():
-                try:
-                    await process.get_status()
-                    results[module_name] = process.get_state()
-                except Exception as e:
-                    self.logger.error("Error getting status from %s: %s",
-                                    module_name, e)
-                    results[module_name] = ModuleState.ERROR
-            else:
-                results[module_name] = process.get_state()
+    def is_any_recording(self) -> bool:
+        """Check if any module is recording."""
+        return self.session_manager.is_any_recording(
+            self.module_manager.module_processes
+        )
 
-        return results
+    @property
+    def recording(self) -> bool:
+        """Check if currently recording."""
+        return self.session_manager.recording
+
+    # ========== Cleanup and State Management ==========
 
     async def stop_all(self) -> None:
+        """Stop all modules."""
         self.logger.info("Stopping all modules")
 
-        if self.recording:
+        if self.session_manager.recording:
             await self.pause_all()
             await asyncio.sleep(1.0)
 
         # Request geometry from all running modules BEFORE shutting them down
         await self._request_geometries_from_all()
 
-        stop_tasks = []
-        for module_name, process in self.module_processes.items():
-            if process.is_running():
-                stop_tasks.append(self._stop_module(module_name, process))
-
-        if stop_tasks:
-            await asyncio.gather(*stop_tasks, return_exceptions=True)
-
-        self.module_processes.clear()
-        self.logger.info("All modules stopped")
+        await self.module_manager.stop_all()
 
     async def _request_geometries_from_all(self) -> None:
+        """Request window geometry from all running modules."""
         self.logger.info("Requesting geometry from all running modules...")
 
         get_geometry_tasks = []
-        for module_name, process in self.module_processes.items():
+        for module_name, process in self.module_manager.module_processes.items():
             if process.is_running():
-                async def request_geometry(name: str, proc: ModuleProcess):
+                async def request_geometry(name: str, proc):
                     try:
                         await proc.send_command(CommandMessage.get_geometry())
                         self.logger.debug("Requested geometry from %s", name)
@@ -575,47 +328,16 @@ class LoggerSystem:
             await asyncio.gather(*get_geometry_tasks, return_exceptions=True)
             await asyncio.sleep(0.3)
 
-    async def _stop_module(self, module_name: str, process: ModuleProcess) -> None:
-        try:
-            await process.stop()
-            self.logger.info("Module %s stopped", module_name)
-        except Exception as e:
-            self.logger.error("Error stopping %s: %s", module_name, e)
-
-    def get_module_state(self, module_name: str) -> Optional[ModuleState]:
-        process = self.module_processes.get(module_name)
-        if process:
-            return process.get_state()
-        return None
-
-    def is_any_recording(self) -> bool:
-        return any(p.is_recording() for p in self.module_processes.values())
-
-    def get_session_info(self) -> dict:
-        return {
-            "session_dir": str(self.session_dir),
-            "session_name": self.session_dir.name,
-            "recording": self.recording,
-            "selected_modules": list(self.selected_modules),
-            "running_modules": [
-                name for name, proc in self.module_processes.items()
-                if proc.is_running()
-            ],
-        }
-
     async def save_running_modules_state(self) -> bool:
+        """Save list of currently running modules for next launch."""
         try:
-            running_modules = [
-                name for name, process in self.module_processes.items()
-                if process.is_running()
-            ]
+            running_modules = self.module_manager.get_running_modules()
 
             if not running_modules:
                 self.logger.info("No running modules to save")
                 return True
 
-            state_file = Path(__file__).parent.parent / "data" / "running_modules.json"
-            await asyncio.to_thread(state_file.parent.mkdir, parents=True, exist_ok=True)
+            await asyncio.to_thread(STATE_FILE.parent.mkdir, parents=True, exist_ok=True)
 
             state = {
                 'timestamp': datetime.datetime.now().isoformat(),
@@ -624,7 +346,7 @@ class LoggerSystem:
 
             # Offload JSON file write to thread pool to avoid blocking
             def write_json():
-                with open(state_file, 'w') as f:
+                with open(STATE_FILE, 'w') as f:
                     json.dump(state, f, indent=2)
 
             await asyncio.to_thread(write_json)
@@ -637,6 +359,18 @@ class LoggerSystem:
             return False
 
     async def cleanup(self) -> None:
+        """Cleanup all resources."""
         self.logger.info("Cleaning up logger system")
         await self.stop_all()
         self.shutdown_event.set()
+
+    def get_session_info(self) -> dict:
+        """Get information about the current session."""
+        running_modules = self.module_manager.get_running_modules()
+        return {
+            "session_dir": str(self.session_dir),
+            "session_name": self.session_dir.name,
+            "recording": self.session_manager.recording,
+            "selected_modules": self.module_manager.get_selected_modules(),
+            "running_modules": running_modules,
+        }
