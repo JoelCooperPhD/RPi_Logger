@@ -122,6 +122,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
         log_level=args.log_level,
     )
 
+    # Complete async initialization
+    await logger_system.async_init()
+
     modules = logger_system.get_available_modules()
     logger.info("Discovered %d modules:", len(modules))
     for module in modules:
