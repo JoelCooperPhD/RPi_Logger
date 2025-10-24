@@ -141,9 +141,11 @@ async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
     args.output_dir = ensure_directory(args.output_dir)
 
+    module_dir = Path(__file__).parent
     session_name, log_file, is_command_mode = setup_module_logging(
         args,
         module_name='eyetracker',
+        module_dir=module_dir,
         default_prefix='tracking'
     )
 

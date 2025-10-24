@@ -1,7 +1,6 @@
 
 import argparse
 import asyncio
-import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 import signal
@@ -10,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from logger_core import LoggerSystem
-from logger_core.ui import MenuUI
+from logger_core.ui import MainWindow
 
 
 logger = logging.getLogger(__name__)
@@ -146,24 +145,22 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    session_name = f"{args.session_prefix}_{timestamp}"
-    session_dir = args.data_dir / session_name
-    session_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = Path(__file__).parent / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
 
-    log_file = session_dir / "master.log"
+    log_file = logs_dir / "master.log"
     configure_logging(args.log_level, log_file, console_output=args.console_output)
 
     logger.info("=" * 60)
     logger.info("RPi Logger - Master System Starting")
     logger.info("=" * 60)
-    logger.info("Session: %s", session_name)
-    logger.info("Session directory: %s", session_dir)
+    logger.info("Data directory: %s", args.data_dir)
     logger.info("Log file: %s", log_file)
+    logger.info("Session will be created when user starts recording")
     logger.info("=" * 60)
 
     logger_system = LoggerSystem(
-        session_dir=session_dir,
+        session_dir=args.data_dir,
         session_prefix=args.session_prefix,
         log_level=args.log_level,
     )
@@ -173,7 +170,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
     for module in modules:
         logger.info("  - %s: %s", module.name, module.entry_point)
 
-    ui = MenuUI(logger_system)
+    ui = MainWindow(logger_system)
 
     loop = asyncio.get_running_loop()
 

@@ -106,12 +106,12 @@ class AudioHandler:
         self.logger.info("=" * 80)
         return True
 
-    async def stop_recording(self, session_dir: Path, recording_count: int) -> Optional[Path]:
+    async def stop_recording(self, session_dir: Path, trial_number: int) -> Optional[Path]:
         if not self.recording:
             return None
 
         self.recording = False
-        audio_path = await self.recording_manager.stop_recording(session_dir, recording_count)
+        audio_path = await self.recording_manager.stop_recording(session_dir, trial_number)
         self.logger.info("=" * 80)
         self.logger.info("========== RECORDING STOPPED: Device %d ==========", self.device_id)
         self.logger.info("=" * 80)

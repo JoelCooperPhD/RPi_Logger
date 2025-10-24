@@ -11,6 +11,7 @@ from .module_process import ModuleProcess, ModuleState
 from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
 from .config_manager import get_config_manager
+from .event_logger import EventLogger
 
 
 class LoggerSystem:
@@ -36,6 +37,8 @@ class LoggerSystem:
 
         self.recording = False
         self.shutdown_event = asyncio.Event()
+
+        self.event_logger: Optional[EventLogger] = None
 
         self._discover_modules()
         self._load_enabled_modules()
@@ -163,9 +166,8 @@ class LoggerSystem:
             self.logger.error("Module info not found: %s", module_name)
             return False
 
-        module_dir = self.session_dir / module_name
-        module_dir.mkdir(parents=True, exist_ok=True)
-        self.logger.info("Created module directory: %s", module_dir)
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.info("Using session directory for %s: %s", module_name, self.session_dir)
 
         window_geometry = None
         self.logger.info("=" * 60)
@@ -191,7 +193,7 @@ class LoggerSystem:
 
         process = ModuleProcess(
             module_info,
-            module_dir,
+            self.session_dir,
             session_prefix=self.session_prefix,
             status_callback=self._module_status_callback,
             log_level=self.log_level,
@@ -225,8 +227,8 @@ class LoggerSystem:
 
         try:
             if process.is_recording():
-                await process.stop_recording()
-                await asyncio.sleep(0.5)  # Give it time to stop recording
+                await process.pause()
+                await asyncio.sleep(0.5)  # Give it time to pause recording
 
             await process.stop()
 
@@ -269,10 +271,8 @@ class LoggerSystem:
 
         results = {}
 
-        for module_name in self.selected_modules:
-            module_dir = self.session_dir / module_name
-            module_dir.mkdir(parents=True, exist_ok=True)
-            self.logger.info("Created module directory: %s", module_dir)
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.info("Using session directory for all modules: %s", self.session_dir)
 
         saved_geometries: Dict[str, WindowGeometry] = {}
         modules_needing_tiling: List[str] = []
@@ -322,10 +322,9 @@ class LoggerSystem:
 
             window_geometry = saved_geometries.get(module_name) or tiling_geometries.get(module_name)
 
-            module_dir = self.session_dir / module_name
             process = ModuleProcess(
                 module_info,
-                module_dir,
+                self.session_dir,
                 session_prefix=self.session_prefix,
                 status_callback=self._module_status_callback,
                 log_level=self.log_level,
@@ -365,19 +364,90 @@ class LoggerSystem:
             self.logger.error("Exception starting %s: %s", module_name, e, exc_info=True)
             return False
 
-    async def start_recording_all(self) -> Dict[str, bool]:
-        self.logger.info("Starting recording on all modules")
+    async def start_session_all(self) -> Dict[str, bool]:
+        self.logger.info("Starting session on all modules")
+
+        for module_name, process in self.module_processes.items():
+            process.output_dir = self.session_dir
+            self.logger.info("Updated %s output_dir to: %s", module_name, self.session_dir)
+
+        results = {}
+        tasks = []
+        for module_name, process in self.module_processes.items():
+            if process.is_running():
+                tasks.append(self._start_session_module(module_name, process))
+            else:
+                self.logger.warning("Module %s not running, skipping session start", module_name)
+                results[module_name] = False
+
+        if tasks:
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for module_name, result in zip(self.module_processes.keys(), task_results):
+                if isinstance(result, Exception):
+                    self.logger.error("Error starting session for %s: %s", module_name, result)
+                    results[module_name] = False
+                else:
+                    results[module_name] = result
+
+        return results
+
+    async def _start_session_module(self, module_name: str, process: ModuleProcess) -> bool:
+        try:
+            await process.start_session()
+            self.logger.info("Sent start_session to %s", module_name)
+            return True
+        except Exception as e:
+            self.logger.error("Error starting session for %s: %s", module_name, e)
+            return False
+
+    async def stop_session_all(self) -> Dict[str, bool]:
+        self.logger.info("Stopping session on all modules")
+
+        results = {}
+        tasks = []
+        for module_name, process in self.module_processes.items():
+            if process.is_running():
+                tasks.append(self._stop_session_module(module_name, process))
+            else:
+                self.logger.warning("Module %s not running, skipping session stop", module_name)
+                results[module_name] = False
+
+        if tasks:
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for module_name, result in zip(self.module_processes.keys(), task_results):
+                if isinstance(result, Exception):
+                    self.logger.error("Error stopping session for %s: %s", module_name, result)
+                    results[module_name] = False
+                else:
+                    results[module_name] = result
+
+        return results
+
+    async def _stop_session_module(self, module_name: str, process: ModuleProcess) -> bool:
+        try:
+            await process.stop_session()
+            self.logger.info("Sent stop_session to %s", module_name)
+            return True
+        except Exception as e:
+            self.logger.error("Error stopping session for %s: %s", module_name, e)
+            return False
+
+    async def record_all(self, trial_number: int = None, trial_label: str = None) -> Dict[str, bool]:
+        self.logger.info("Starting recording on all modules (trial %s, label: %s)", trial_number if trial_number else "N/A", trial_label if trial_label else "N/A")
 
         if self.recording:
             self.logger.warning("Already recording")
             return {}
+
+        for module_name, process in self.module_processes.items():
+            process.output_dir = self.session_dir
 
         results = {}
 
         tasks = []
         for module_name, process in self.module_processes.items():
             if process.is_running():
-                tasks.append(self._start_recording_module(module_name, process))
+                tasks.append(self._record_module(module_name, process, trial_number, trial_label))
             else:
                 self.logger.warning("Module %s not running, skipping", module_name)
                 results[module_name] = False
@@ -395,17 +465,17 @@ class LoggerSystem:
         self.recording = True
         return results
 
-    async def _start_recording_module(self, module_name: str, process: ModuleProcess) -> bool:
+    async def _record_module(self, module_name: str, process: ModuleProcess, trial_number: int = None, trial_label: str = None) -> bool:
         try:
-            await process.start_recording()
-            self.logger.info("Sent start_recording to %s", module_name)
+            await process.record(trial_number, trial_label)
+            self.logger.info("Sent record to %s (trial %s, label: %s)", module_name, trial_number if trial_number else "N/A", trial_label if trial_label else "N/A")
             return True
         except Exception as e:
             self.logger.error("Error starting recording for %s: %s", module_name, e)
             return False
 
-    async def stop_recording_all(self) -> Dict[str, bool]:
-        self.logger.info("Stopping recording on all modules")
+    async def pause_all(self) -> Dict[str, bool]:
+        self.logger.info("Pausing recording on all modules")
 
         if not self.recording:
             self.logger.warning("Not recording")
@@ -416,7 +486,7 @@ class LoggerSystem:
         tasks = []
         for module_name, process in self.module_processes.items():
             if process.is_running():
-                tasks.append(self._stop_recording_module(module_name, process))
+                tasks.append(self._pause_module(module_name, process))
             else:
                 results[module_name] = False
 
@@ -424,7 +494,7 @@ class LoggerSystem:
             task_results = await asyncio.gather(*tasks, return_exceptions=True)
             for module_name, result in zip(self.module_processes.keys(), task_results):
                 if isinstance(result, Exception):
-                    self.logger.error("Error stopping recording for %s: %s",
+                    self.logger.error("Error pausing recording for %s: %s",
                                     module_name, result)
                     results[module_name] = False
                 else:
@@ -433,14 +503,20 @@ class LoggerSystem:
         self.recording = False
         return results
 
-    async def _stop_recording_module(self, module_name: str, process: ModuleProcess) -> bool:
+    async def _pause_module(self, module_name: str, process: ModuleProcess) -> bool:
         try:
-            await process.stop_recording()
-            self.logger.info("Sent stop_recording to %s", module_name)
+            await process.pause()
+            self.logger.info("Sent pause to %s", module_name)
             return True
         except Exception as e:
-            self.logger.error("Error stopping recording for %s: %s", module_name, e)
+            self.logger.error("Error pausing recording for %s: %s", module_name, e)
             return False
+
+    async def start_recording_all(self, trial_number: int = None, trial_label: str = None) -> Dict[str, bool]:
+        return await self.record_all(trial_number, trial_label)
+
+    async def stop_recording_all(self) -> Dict[str, bool]:
+        return await self.pause_all()
 
     async def get_status_all(self) -> Dict[str, ModuleState]:
         results = {}
@@ -463,7 +539,7 @@ class LoggerSystem:
         self.logger.info("Stopping all modules")
 
         if self.recording:
-            await self.stop_recording_all()
+            await self.pause_all()
             await asyncio.sleep(1.0)
 
         # Request geometry from all running modules BEFORE shutting them down

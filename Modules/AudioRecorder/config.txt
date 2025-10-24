@@ -25,12 +25,9 @@
 # Sample rate (Hz)
 sample_rate = 48000
 
-# Output files
+# Output files (used only in standalone mode; master logger overrides these)
 output_dir = data
-session_prefix = experiment
-
-# Auto-start recording
-auto_start_recording = false # Automatically start recording on startup (true/false)
+session_prefix = session
 
 # Auto-select new devices
 auto_select_new = true # Automatically select newly detected input devices (true/false)
@@ -40,7 +37,7 @@ auto_select_new = true # Automatically select newly detected input devices (true
 # LOGGING
 ################################################################################
 
-# Log file: output_dir/experiment_YYYYMMDD_HHMMSS/session.log
+# Log file: output_dir/session_YYYYMMDD_HHMMSS/session.log
 log_level = info             # Python log level (debug/info/warning/error/critical)
 console_output = false       # Also print to console (true/false)
 

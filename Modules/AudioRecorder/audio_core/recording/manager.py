@@ -50,7 +50,7 @@ class AudioRecordingManager:
                 self.frames_recorded / self.sample_rate
             )
 
-    async def stop_recording(self, session_dir: Path, recording_count: int) -> Optional[Path]:
+    async def stop_recording(self, session_dir: Path, trial_number: int) -> Optional[Path]:
         if not self.recording:
             return None
 
@@ -60,9 +60,14 @@ class AudioRecordingManager:
             self.logger.warning("No audio data to save")
             return None
 
-        timestamp = datetime.now().strftime("%H%M%S")
+        session_name = session_dir.name
+        if "_" in session_name:
+            session_timestamp = session_name.split("_", 1)[1]
+        else:
+            session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         safe_device_name = self.device_name.replace(' ', '_').replace(':', '')
-        filename = f"mic{self.device_id}_{safe_device_name}_rec{recording_count:03d}_{timestamp}.wav"
+        filename = f"AUDIO_mic{self.device_id}_{safe_device_name}_trial{trial_number:03d}_{session_timestamp}.wav"
         self.audio_path = session_dir / filename
 
         def prepare_audio_data():

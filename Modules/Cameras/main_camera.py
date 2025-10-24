@@ -162,9 +162,11 @@ async def main(argv: Optional[list[str]] = None) -> None:
     os.environ['LIBCAMERA_LOG_LEVELS'] = f'Camera:{libcam_level},RPI:{libcam_level},IPAProxy:{libcam_level}'
     os.environ['LIBCAMERA_LOG_FILE'] = 'syslog'  # Disable libcamera's separate log file
 
+    module_dir = Path(__file__).parent
     session_name, log_file, is_command_mode = setup_module_logging(
         args,
         module_name='camera',
+        module_dir=module_dir,
         default_prefix='session'
     )
 

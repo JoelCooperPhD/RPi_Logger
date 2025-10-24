@@ -30,7 +30,7 @@ def extract_module_name_from_entry(entry_point: Path) -> Optional[str]:
     name_part = match.group(1)
 
     parts = name_part.split('_')
-    title_case = ''.join(word.capitalize() for word in parts)
+    title_case = ''.join(word if word.isupper() else word.capitalize() for word in parts)
 
     return title_case
 

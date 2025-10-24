@@ -18,6 +18,7 @@ import aiofiles
 import cv2
 import numpy as np
 
+from Modules.base.io_utils import get_versioned_filename
 from ..config.tracker_config import TrackerConfig as Config
 
 logger = logging.getLogger(__name__)
@@ -100,21 +101,30 @@ class RecordingManager:
         else:
             await self.start_recording()
 
-    async def start_recording(self):
+    async def start_recording(self, trial_number: int = 1):
         if self.recording:
             return
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        w, h = self.config.resolution
         target_dir = self._current_experiment_dir or self._output_root
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        base_name = f"gaze_{w}x{h}_{self.config.fps}fps_{timestamp}"
-        self.recording_filename = str(target_dir / f"{base_name}.mp4")
-        self.gaze_filename = str(target_dir / f"{base_name}.csv")
-        self.frame_timing_filename = str(target_dir / f"{base_name}_frame_timing.csv")
-        self.imu_filename = str(target_dir / f"{base_name}_imu.csv")
-        self.events_filename = str(target_dir / f"{base_name}_events.csv")
+        dir_name = target_dir.name
+        if "_" in dir_name:
+            session_timestamp = dir_name.split("_", 1)[1]
+        else:
+            session_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        w, h = self.config.resolution
+        base_name = f"GAZE_{w}x{h}_{self.config.fps}fps_{session_timestamp}"
+        self.recording_filename = str(target_dir / f"{base_name}_trial{trial_number:03d}.mp4")
+
+        base_versioned = get_versioned_filename(target_dir, datetime.datetime.now())
+        base_versioned_no_ext = base_versioned.rsplit('.', 1)[0]
+
+        self.gaze_filename = str(target_dir / f"{base_versioned_no_ext}_gazedata.txt")
+        self.frame_timing_filename = str(target_dir / f"{base_versioned_no_ext}_frametiming.txt")
+        self.imu_filename = str(target_dir / f"{base_versioned_no_ext}_imu.txt")
+        self.events_filename = str(target_dir / f"{base_versioned_no_ext}_events.txt")
 
         try:
             if self.use_ffmpeg:
@@ -159,30 +169,41 @@ class RecordingManager:
                     raise RuntimeError("Failed to start OpenCV video writer")
 
             # Open and initialize CSV files using asyncio.to_thread to avoid blocking
-            self._gaze_file = await asyncio.to_thread(open, self.gaze_filename, "w", encoding="utf-8")
-            await asyncio.to_thread(self._gaze_file.write, "timestamp,x,y,worn\n")
+            # Check if files exist and append if they do
+            from pathlib import Path
+            gaze_exists = await asyncio.to_thread(Path(self.gaze_filename).exists)
+            frame_timing_exists = await asyncio.to_thread(Path(self.frame_timing_filename).exists)
+            imu_exists = await asyncio.to_thread(Path(self.imu_filename).exists)
+            events_exists = await asyncio.to_thread(Path(self.events_filename).exists)
 
-            self._frame_timing_file = await asyncio.to_thread(open, self.frame_timing_filename, "w", encoding="utf-8")
-            await asyncio.to_thread(
-                self._frame_timing_file.write,
-                "frame_number,write_time_unix,write_time_iso,expected_delta,actual_delta,delta_error,"
-                "queue_delay,capture_latency,write_duration,queue_backlog_after,camera_frame_index,"
-                "display_frame_index,camera_timestamp_unix,camera_timestamp_diff,gaze_timestamp_unix,"
-                "gaze_timestamp_diff,available_camera_fps,dropped_frames_total,duplicates_total,is_duplicate\n"
-            )
+            self._gaze_file = await asyncio.to_thread(open, self.gaze_filename, "a" if gaze_exists else "w", encoding="utf-8")
+            if not gaze_exists:
+                await asyncio.to_thread(self._gaze_file.write, "timestamp,x,y,worn\n")
 
-            self._imu_file = await asyncio.to_thread(open, self.imu_filename, "w", encoding="utf-8")
-            await asyncio.to_thread(
-                self._imu_file.write,
-                "timestamp,timestamp_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,"
-                "quat_w,quat_x,quat_y,quat_z,temperature\n"
-            )
+            self._frame_timing_file = await asyncio.to_thread(open, self.frame_timing_filename, "a" if frame_timing_exists else "w", encoding="utf-8")
+            if not frame_timing_exists:
+                await asyncio.to_thread(
+                    self._frame_timing_file.write,
+                    "frame_number,write_time_unix,write_time_iso,expected_delta,actual_delta,delta_error,"
+                    "queue_delay,capture_latency,write_duration,queue_backlog_after,camera_frame_index,"
+                    "display_frame_index,camera_timestamp_unix,camera_timestamp_diff,gaze_timestamp_unix,"
+                    "gaze_timestamp_diff,available_camera_fps,dropped_frames_total,duplicates_total,is_duplicate\n"
+                )
 
-            self._event_file = await asyncio.to_thread(open, self.events_filename, "w", encoding="utf-8")
-            await asyncio.to_thread(
-                self._event_file.write,
-                "timestamp,timestamp_ns,event_type,event_subtype,confidence,duration,payload\n"
-            )
+            self._imu_file = await asyncio.to_thread(open, self.imu_filename, "a" if imu_exists else "w", encoding="utf-8")
+            if not imu_exists:
+                await asyncio.to_thread(
+                    self._imu_file.write,
+                    "timestamp,timestamp_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,"
+                    "quat_w,quat_x,quat_y,quat_z,temperature\n"
+                )
+
+            self._event_file = await asyncio.to_thread(open, self.events_filename, "a" if events_exists else "w", encoding="utf-8")
+            if not events_exists:
+                await asyncio.to_thread(
+                    self._event_file.write,
+                    "timestamp,timestamp_ns,event_type,event_subtype,confidence,duration,payload\n"
+                )
 
             self._last_gaze_timestamp = None
             self._last_write_monotonic = None

@@ -268,11 +268,23 @@ class ModuleProcess:
 
         await self.command_queue.put(command)
 
-    async def start_recording(self) -> None:
-        await self.send_command(CommandMessage.start_recording())
+    async def start_session(self) -> None:
+        await self.send_command(CommandMessage.start_session(session_dir=str(self.output_dir)))
+
+    async def stop_session(self) -> None:
+        await self.send_command(CommandMessage.stop_session())
+
+    async def record(self, trial_number: int = None, trial_label: str = None) -> None:
+        await self.send_command(CommandMessage.record(session_dir=str(self.output_dir), trial_number=trial_number, trial_label=trial_label))
+
+    async def pause(self) -> None:
+        await self.send_command(CommandMessage.pause())
+
+    async def start_recording(self, trial_number: int = None, trial_label: str = None) -> None:
+        await self.record(trial_number, trial_label)
 
     async def stop_recording(self) -> None:
-        await self.send_command(CommandMessage.stop_recording())
+        await self.pause()
 
     async def get_status(self) -> None:
         await self.send_command(CommandMessage.get_status())

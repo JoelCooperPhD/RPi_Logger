@@ -13,51 +13,39 @@ class CommandHandler(BaseCommandHandler):
     def __init__(self, system: 'TrackerSystem', gui=None):
         super().__init__(system, gui=gui)
 
-    async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
-        if not self._check_recording_state(should_be_recording=False):
-            return
+    async def _start_recording_impl(self, command_data: Dict[str, Any], trial_number: int) -> bool:
+        if not hasattr(self.system, 'recording_manager'):
+            self.logger.error("Recording manager not available")
+            return False
 
-        try:
+        await self.system.recording_manager.start_recording(trial_number)
+        self.system.recording = True
+        return True
+
+    async def _stop_recording_impl(self, command_data: Dict[str, Any]) -> bool:
+        if not hasattr(self.system, 'recording_manager'):
+            self.logger.error("Recording manager not available")
+            return False
+
+        await self.system.recording_manager.stop_recording()
+        self.system.recording = False
+        return True
+
+    def _update_session_dir(self, command_data: Dict[str, Any]) -> None:
+        super()._update_session_dir(command_data)
+
+        if "session_dir" in command_data:
+            from pathlib import Path
+            session_dir = Path(command_data["session_dir"])
             if hasattr(self.system, 'recording_manager'):
-                await self.system.recording_manager.start_recording()
-                self.system.recording = True
-                self.logger.info("Recording started")
-                StatusMessage.send("recording_started", {
-                    "experiment_dir": str(self.system.recording_manager.current_experiment_dir)
-                })
-            else:
-                self.logger.error("Recording manager not available")
-                StatusMessage.send("error", {
-                    "message": "Recording manager not available"
-                })
+                self.system.recording_manager._output_root = session_dir
+                session_dir.mkdir(parents=True, exist_ok=True)
 
-        except Exception as e:
-            self.logger.exception("Failed to start recording: %s", e)
-            StatusMessage.send("error", {
-                "message": f"Failed to start recording: {str(e)[:100]}"
-            })
-
-    async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
-        if not self._check_recording_state(should_be_recording=True):
-            return
-
-        try:
-            if hasattr(self.system, 'recording_manager'):
-                await self.system.recording_manager.stop_recording()
-                self.system.recording = False
-                self.logger.info("Recording stopped")
-                StatusMessage.send("recording_stopped", {})
-            else:
-                self.logger.error("Recording manager not available")
-                StatusMessage.send("error", {
-                    "message": "Recording manager not available"
-                })
-
-        except Exception as e:
-            self.logger.exception("Failed to stop recording: %s", e)
-            StatusMessage.send("error", {
-                "message": f"Failed to stop recording: {str(e)[:100]}"
-            })
+    def _get_recording_started_status_data(self, trial_number: int) -> Dict[str, Any]:
+        data = super()._get_recording_started_status_data(trial_number)
+        if hasattr(self.system, 'recording_manager'):
+            data["experiment_dir"] = str(self.system.recording_manager.current_experiment_dir)
+        return data
 
     async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
         try:

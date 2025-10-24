@@ -3,6 +3,7 @@ import logging
 import subprocess
 import sys
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class TkinterMenuBase:
 
-    def create_menu_bar(self, include_sources: bool = True, include_recording: bool = True):
+    def create_menu_bar(self, include_sources: bool = True):
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterMenuBase requires 'self.root' attribute")
 
@@ -26,13 +27,12 @@ class TkinterMenuBase:
 
         self._create_file_menu(menubar)
 
-        if include_recording:
-            self._create_recording_menu(menubar)
-
         if include_sources:
             self._create_sources_menu(menubar)
 
         self._create_view_menu(menubar)
+
+        self._create_help_menu(menubar)
 
         self.populate_module_menus()
 
@@ -46,27 +46,12 @@ class TkinterMenuBase:
             label="Open Output Directory",
             command=self._on_open_output_dir
         )
+
         self.file_menu.add_separator()
         self.file_menu.add_command(
             label="Quit",
             command=self._on_quit
         )
-
-    def _create_recording_menu(self, menubar: tk.Menu):
-        self.recording_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Recording", menu=self.recording_menu)
-
-        self.recording_menu.add_command(
-            label="▶ Start Recording",
-            command=lambda: self.on_start_recording()
-        )
-        self.recording_menu.add_command(
-            label="⏹ Stop Recording",
-            command=lambda: self.on_stop_recording()
-        )
-
-        self._recording_start_idx = 0
-        self._recording_stop_idx = 1
 
     def _create_sources_menu(self, menubar: tk.Menu):
         self.sources_menu = tk.Menu(menubar, tearoff=0)
@@ -80,6 +65,53 @@ class TkinterMenuBase:
             label="Show Logger",
             variable=self.logger_visible_var,
             command=self._toggle_logger
+        )
+
+    def _create_help_menu(self, menubar: tk.Menu):
+        self.help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=self.help_menu)
+
+        self.help_menu.add_command(
+            label="Quick Start Guide",
+            command=self._show_help
+        )
+
+        self.help_menu.add_separator()
+
+        self.help_menu.add_command(
+            label="About RED Scientific",
+            command=self._show_about
+        )
+
+        self.help_menu.add_command(
+            label="System Information",
+            command=self._show_system_info
+        )
+
+        self.help_menu.add_separator()
+
+        self.help_menu.add_command(
+            label="Open Logs Directory",
+            command=self._open_logs_directory
+        )
+
+        self.help_menu.add_separator()
+
+        self.help_menu.add_command(
+            label="View Config File",
+            command=self._open_config_file
+        )
+
+        self.help_menu.add_command(
+            label="Reset Settings",
+            command=self._reset_settings
+        )
+
+        self.help_menu.add_separator()
+
+        self.help_menu.add_command(
+            label="Report Issue",
+            command=self._report_issue
         )
 
 
@@ -132,27 +164,6 @@ class TkinterMenuBase:
 
         return var
 
-    def add_recording_action(self, label: str, command: Callable,
-                            separator_before: bool = False) -> int:
-        if separator_before:
-            self.recording_menu.add_separator()
-
-        idx = self.recording_menu.index('end')
-        if idx is None:
-            idx = -1
-        idx += 1
-
-        self.recording_menu.add_command(label=label, command=command)
-        return idx
-
-    def enable_recording_controls(self, enabled: bool):
-        state = 'normal' if enabled else 'disabled'
-        try:
-            self.recording_menu.entryconfig(self._recording_start_idx, state=state)
-            self.recording_menu.entryconfig(self._recording_stop_idx, state=state)
-        except Exception as e:
-            logger.debug("Error toggling recording menu: %s", e)
-
     def enable_sources_menu(self, enabled: bool):
         state = 'normal' if enabled else 'disabled'
         try:
@@ -169,12 +180,6 @@ class TkinterMenuBase:
 
     def populate_module_menus(self):
         pass
-
-    def on_start_recording(self):
-        raise NotImplementedError("Subclass must implement on_start_recording()")
-
-    def on_stop_recording(self):
-        raise NotImplementedError("Subclass must implement on_stop_recording()")
 
     def get_output_directory(self) -> Path:
         if hasattr(self, 'args') and hasattr(self.args, 'output_dir'):
@@ -264,3 +269,86 @@ class TkinterMenuBase:
             logger.warning("No close handler found, destroying window directly")
             if hasattr(self, 'root'):
                 self.root.destroy()
+
+    def _show_about(self):
+        try:
+            from logger_core.ui.help_dialogs import AboutDialog
+            AboutDialog(self.root)
+        except Exception as e:
+            logger.error("Failed to show About dialog: %s", e)
+
+    def _show_system_info(self):
+        try:
+            from logger_core.ui.help_dialogs import SystemInfoDialog
+            logger_system = getattr(self, 'system', None)
+            SystemInfoDialog(self.root, logger_system)
+        except Exception as e:
+            logger.error("Failed to show System Info dialog: %s", e)
+
+    def _show_help(self):
+        try:
+            from logger_core.ui.help_dialogs import QuickStartDialog
+            QuickStartDialog(self.root)
+        except Exception as e:
+            logger.error("Failed to show Help dialog: %s", e)
+
+    def _open_logs_directory(self):
+        try:
+            output_dir = self.get_output_directory()
+            logs_dir = output_dir / "logs"
+
+            if not logs_dir.exists():
+                logs_dir = output_dir
+
+            if sys.platform == 'linux':
+                subprocess.Popen(['xdg-open', str(logs_dir)])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(logs_dir)])
+            elif sys.platform == 'win32':
+                subprocess.Popen(['explorer', str(logs_dir)])
+
+            logger.info("Opened logs directory: %s", logs_dir)
+        except Exception as e:
+            logger.error("Failed to open logs directory: %s", e)
+
+    def _open_config_file(self):
+        try:
+            if hasattr(self, 'system') and hasattr(self.system, 'config_file_path'):
+                config_path = self.system.config_file_path
+            else:
+                config_path = Path(__file__).parent.parent / "config.txt"
+
+            if not config_path.exists():
+                logger.warning("Config file not found: %s", config_path)
+                return
+
+            if sys.platform == 'linux':
+                subprocess.Popen(['xdg-open', str(config_path)])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(config_path)])
+            elif sys.platform == 'win32':
+                subprocess.Popen(['notepad.exe', str(config_path)])
+
+            logger.info("Opened config file: %s", config_path)
+        except Exception as e:
+            logger.error("Failed to open config file: %s", e)
+
+    def _reset_settings(self):
+        try:
+            if hasattr(self, 'system') and hasattr(self.system, 'config_file_path'):
+                config_path = self.system.config_file_path
+            else:
+                config_path = Path(__file__).parent.parent / "config.txt"
+
+            from logger_core.ui.help_dialogs import ResetSettingsDialog
+            ResetSettingsDialog(self.root, config_path)
+        except Exception as e:
+            logger.error("Failed to reset settings: %s", e)
+
+    def _report_issue(self):
+        try:
+            url = "https://github.com/JoelCooperPhD/RPi_Logger/issues"
+            webbrowser.open(url)
+            logger.info("Opened issue tracker: %s", url)
+        except Exception as e:
+            logger.error("Failed to open issue tracker: %s", e)

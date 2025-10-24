@@ -29,12 +29,9 @@ target_fps = 5.0
 resolution_width = 1280
 resolution_height = 720
 
-# Output files
+# Output files (used only in standalone mode; master logger overrides these)
 output_dir = data
-session_prefix = tracking
-
-# Auto-start recording
-auto_start_recording = false # Automatically start recording on startup (true/false)
+session_prefix = session
 
 
 ################################################################################
@@ -61,7 +58,7 @@ gui_preview_update_hz = 10   # Preview frame rate (1-30 Hz, higher = smoother bu
 # LOGGING
 ################################################################################
 
-# Log file: output_dir/tracking_YYYYMMDD_HHMMSS/session.log
+# Log file: output_dir/session_YYYYMMDD_HHMMSS/session.log
 log_level = info             # Python log level (debug/info/warning/error/critical)
 console_output = false       # Also print to console (true/false)
 

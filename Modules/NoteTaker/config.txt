@@ -2,19 +2,16 @@
 
 # Module settings (managed by master logger)
 enabled = false
-window_x = 1206
-window_y = 806
+window_x = 1832
+window_y = 335
 window_width = 770
-window_height = 220
+window_height = 324
 
-# Output settings
-output_dir = notes
-session_prefix = notes
+# Output settings (used only in standalone mode; master logger overrides these)
+output_dir = data
+session_prefix = session
 log_level = info
 console_output = false
-
-# Recording settings
-auto_start_recording = false
 
 # GUI settings
 gui_show_note_history = true

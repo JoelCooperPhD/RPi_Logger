@@ -41,12 +41,38 @@ class CommandMessage:
             return None
 
     @staticmethod
-    def start_recording() -> str:
-        return CommandMessage.create("start_recording")
+    def start_session(session_dir: str = None) -> str:
+        kwargs = {}
+        if session_dir:
+            kwargs["session_dir"] = session_dir
+        return CommandMessage.create("start_session", **kwargs)
+
+    @staticmethod
+    def stop_session() -> str:
+        return CommandMessage.create("stop_session")
+
+    @staticmethod
+    def record(session_dir: str = None, trial_number: int = None, trial_label: str = None) -> str:
+        kwargs = {}
+        if session_dir:
+            kwargs["session_dir"] = session_dir
+        if trial_number is not None:
+            kwargs["trial_number"] = trial_number
+        if trial_label:
+            kwargs["trial_label"] = trial_label
+        return CommandMessage.create("record", **kwargs)
+
+    @staticmethod
+    def pause() -> str:
+        return CommandMessage.create("pause")
+
+    @staticmethod
+    def start_recording(session_dir: str = None, trial_number: int = None, trial_label: str = None) -> str:
+        return CommandMessage.record(session_dir, trial_number, trial_label)
 
     @staticmethod
     def stop_recording() -> str:
-        return CommandMessage.create("stop_recording")
+        return CommandMessage.pause()
 
     @staticmethod
     def take_snapshot() -> str:
@@ -167,8 +193,10 @@ class StatusType:
 
 if __name__ == "__main__":
     print("Testing command creation:")
-    print(CommandMessage.start_recording())
-    print(CommandMessage.stop_recording())
+    print(CommandMessage.start_session())
+    print(CommandMessage.stop_session())
+    print(CommandMessage.record())
+    print(CommandMessage.pause())
     print(CommandMessage.get_status())
     print(CommandMessage.quit())
 

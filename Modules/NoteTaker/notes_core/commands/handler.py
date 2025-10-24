@@ -16,41 +16,27 @@ class CommandHandler(BaseCommandHandler):
         super().__init__(system)
         self.gui = gui
 
-    async def handle_start_recording(self, command_data: dict) -> None:
-        logger.info("Received start_recording command")
+    async def _start_recording_impl(self, command_data: dict, trial_number: int) -> bool:
+        return await self.system.start_recording()
 
-        if await self.system.start_recording():
-            StatusMessage.send("recording_started", {
-                "note_count": 0
-            })
-            logger.info("Recording started successfully")
+    async def _stop_recording_impl(self, command_data: dict) -> bool:
+        return await self.system.stop_recording()
 
-            if self.gui:
-                self.gui.sync_recording_state()
-        else:
-            StatusMessage.send("error", {
-                "message": "Failed to start note recording"
-            })
-            logger.error("Failed to start recording")
+    def _update_session_dir(self, command_data: dict) -> None:
+        super()._update_session_dir(command_data)
 
-    async def handle_stop_recording(self, command_data: dict) -> None:
-        logger.info("Received stop_recording command")
+        if "session_dir" in command_data:
+            from pathlib import Path
+            from ..notes_handler import NotesHandler
+            session_dir = Path(command_data["session_dir"])
+            self.system.notes_handler = NotesHandler(session_dir)
 
+    def _get_recording_started_status_data(self, trial_number: int) -> dict:
+        return {"note_count": 0}
+
+    def _get_recording_stopped_status_data(self) -> dict:
         note_count = self.system.notes_handler.note_count if self.system.notes_handler else 0
-
-        if await self.system.stop_recording():
-            StatusMessage.send("recording_stopped", {
-                "note_count": note_count
-            })
-            logger.info("Recording stopped successfully (%d notes)", note_count)
-
-            if self.gui:
-                self.gui.sync_recording_state()
-        else:
-            StatusMessage.send("error", {
-                "message": "Failed to stop note recording"
-            })
-            logger.error("Failed to stop recording")
+        return {"note_count": note_count}
 
     async def handle_get_status(self, command_data: dict) -> None:
         logger.debug("Received get_status command")

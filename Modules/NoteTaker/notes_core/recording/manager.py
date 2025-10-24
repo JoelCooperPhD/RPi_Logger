@@ -1,15 +1,15 @@
 
 import asyncio
-import csv
-import io
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import aiofiles
 
-from ..constants import CSV_HEADERS, CSV_FILENAME
+from Modules.base.io_utils import get_versioned_filename
+from ..constants import HEADERS
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,9 @@ class RecordingManager:
 
     def __init__(self, session_dir: Path):
         self.session_dir = session_dir
-        self.csv_file_path: Optional[Path] = None
+
+        filename = get_versioned_filename(session_dir, datetime.now())
+        self.txt_file_path = self.session_dir / filename
         self.recording = False
         self.session_start_time: Optional[datetime] = None
         self.note_count = 0
@@ -31,20 +33,20 @@ class RecordingManager:
         try:
             await asyncio.to_thread(self.session_dir.mkdir, parents=True, exist_ok=True)
 
-            self.csv_file_path = self.session_dir / CSV_FILENAME
+            file_exists = await asyncio.to_thread(self.txt_file_path.exists)
+
+            if not file_exists:
+                async with aiofiles.open(self.txt_file_path, 'w') as f:
+                    await f.write(HEADERS + "\n")
+                logger.info("Created new note file: %s", self.txt_file_path)
+            else:
+                async with aiofiles.open(self.txt_file_path, 'r') as f:
+                    lines = await f.readlines()
+                    self.note_count = len(lines) - 1
+                logger.info("Appending to existing note file: %s (current notes: %d)", self.txt_file_path, self.note_count)
+
             self.session_start_time = datetime.now()
-            self.note_count = 0
-
-            # Use aiofiles for async file I/O
-            async with aiofiles.open(self.csv_file_path, 'w', newline='') as f:
-                # Write CSV header using in-memory buffer then flush to file
-                buffer = io.StringIO()
-                writer = csv.DictWriter(buffer, fieldnames=CSV_HEADERS)
-                writer.writeheader()
-                await f.write(buffer.getvalue())
-
             self.recording = True
-            logger.info("Started note recording: %s", self.csv_file_path)
             return True
 
         except Exception as e:
@@ -59,7 +61,7 @@ class RecordingManager:
         try:
             self.recording = False
             logger.info("Stopped note recording: %d notes recorded to %s",
-                       self.note_count, self.csv_file_path)
+                       self.note_count, self.txt_file_path)
             return True
 
         except Exception as e:
@@ -76,30 +78,21 @@ class RecordingManager:
             return None
 
         try:
-            now = datetime.now()
-            elapsed_seconds = (now - self.session_start_time).total_seconds()
-            elapsed_str = self._format_elapsed_time(elapsed_seconds)
+            timestamp = time.time()
+            note_content = note_text.strip()
 
-            modules_str = ", ".join(recording_modules) if recording_modules else ""
+            row = f"Note,{note_content},{timestamp}\n"
 
-            note_record = {
-                "timestamp": now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],  # Millisecond precision
-                "session_elapsed_time": elapsed_str,
-                "note_text": note_text.strip(),
-                "recording_modules": modules_str
-            }
-
-            # Use aiofiles for async file append
-            async with aiofiles.open(self.csv_file_path, 'a', newline='') as f:
-                # Write CSV row using in-memory buffer then flush to file
-                buffer = io.StringIO()
-                writer = csv.DictWriter(buffer, fieldnames=CSV_HEADERS)
-                writer.writerow(note_record)
-                await f.write(buffer.getvalue())
+            async with aiofiles.open(self.txt_file_path, 'a') as f:
+                await f.write(row)
 
             self.note_count += 1
-            logger.info("Added note #%d (elapsed: %s): '%s'",
-                       self.note_count, elapsed_str, note_text[:50])
+            logger.info("Added note #%d: '%s'", self.note_count, note_text[:50])
+
+            note_record = {
+                "note_text": note_content,
+                "timestamp": timestamp
+            }
 
             return note_record
 
@@ -108,20 +101,29 @@ class RecordingManager:
             return None
 
     async def get_all_notes(self) -> List[Dict[str, Any]]:
-        if not self.csv_file_path:
+        if not self.txt_file_path:
             return []
 
-        # Use asyncio.to_thread for path.exists() check
-        if not await asyncio.to_thread(self.csv_file_path.exists):
+        if not await asyncio.to_thread(self.txt_file_path.exists):
             return []
 
         try:
-            # Use aiofiles for async file read
-            async with aiofiles.open(self.csv_file_path, 'r', newline='') as f:
+            async with aiofiles.open(self.txt_file_path, 'r') as f:
                 content = await f.read()
-                # Parse CSV in memory
-                reader = csv.DictReader(io.StringIO(content))
-                return list(reader)
+                lines = content.strip().split('\n')
+
+            notes = []
+            for line in lines[1:]:
+                if not line.strip():
+                    continue
+
+                parts = line.split(',', 2)
+                if len(parts) >= 3:
+                    notes.append({
+                        "note_text": parts[1],
+                        "timestamp": float(parts[2])
+                    })
+            return notes
         except Exception as e:
             logger.error("Failed to read notes: %s", e, exc_info=True)
             return []

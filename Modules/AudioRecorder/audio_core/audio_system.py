@@ -35,6 +35,7 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
         self.available_devices: Dict[int, dict] = {}
         self.selected_devices: set = set()
         self._known_devices: set = set()
+        self.current_trial_number: int = 1
 
         self.feedback_queue = asyncio.Queue()
 
@@ -101,7 +102,7 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
         self.logger.info("Deselected device %d", device_id)
         return True
 
-    async def start_recording(self) -> bool:
+    async def start_recording(self, trial_number: int = 1) -> bool:
         can_start, error_msg = self.validate_recording_start()
         if not can_start:
             self.logger.warning("Cannot start recording: %s", error_msg)
@@ -111,6 +112,7 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
             self.logger.warning("No devices selected for recording")
             return False
 
+        self.current_trial_number = trial_number
         self._increment_recording_count()
         self.recording = True
         success_count = 0
@@ -131,8 +133,8 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
 
         if success_count > 0:
             device_names = [self.available_devices[did]['name'] for did in self.active_handlers.keys()]
-            self.logger.info("Started recording #%d on %d devices: %s",
-                           self.recording_count, len(self.active_handlers), ', '.join(device_names))
+            self.logger.info("Started recording #%d (trial %d) on %d devices: %s",
+                           self.recording_count, trial_number, len(self.active_handlers), ', '.join(device_names))
             return True
         else:
             self.recording = False
@@ -148,7 +150,7 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
 
         save_tasks = []
         for device_id, handler in self.active_handlers.items():
-            task = handler.stop_recording(self.session_dir, self.recording_count)
+            task = handler.stop_recording(self.session_dir, self.current_trial_number)
             save_tasks.append(task)
 
         if save_tasks:
