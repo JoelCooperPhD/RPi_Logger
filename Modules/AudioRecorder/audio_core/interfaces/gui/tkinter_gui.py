@@ -83,7 +83,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             label = ttk.Label(
                 self.meter_container,
                 text="No devices selected\nSelect devices from the Devices menu",
-                font=('TkDefaultFont', 10),
                 foreground='gray',
                 justify='center'
             )
@@ -106,7 +105,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             label = ttk.Label(
                 device_frame,
                 text=f"Dev{device_id}:",
-                font=('TkDefaultFont', 8, 'bold'),
                 width=6
             )
             label.grid(row=0, column=0, sticky='w', padx=(0, 5))
@@ -191,7 +189,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 canvas.create_text(
                     width // 2, height // 2,
                     text="Hidden",
-                    fill='gray', font=('TkDefaultFont', 7)
+                    fill='gray'
                 )
             return
 
@@ -359,7 +357,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         label = ttk.Label(
             self.meter_container,
             text="Waiting for audio devices...\n\nChecking every 3 seconds",
-            font=('TkDefaultFont', 12),
             foreground='gray',
             justify='center'
         )

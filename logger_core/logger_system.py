@@ -10,17 +10,19 @@ import datetime
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, TYPE_CHECKING
 
 from .module_discovery import ModuleInfo
 from .module_process import ModuleState
 from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
 from .config_manager import get_config_manager
-from .event_logger import EventLogger
 from .paths import STATE_FILE
 from .module_manager import ModuleManager
 from .session_manager import SessionManager
+
+if TYPE_CHECKING:
+    from .event_logger import EventLogger
 
 
 class LoggerSystem:
@@ -59,7 +61,7 @@ class LoggerSystem:
 
         # State
         self.shutdown_event = asyncio.Event()
-        self.event_logger: Optional[EventLogger] = None
+        self.event_logger: Optional['EventLogger'] = None
 
     async def async_init(self) -> None:
         """Complete async initialization. Must be called after construction."""
@@ -181,63 +183,6 @@ class LoggerSystem:
         """Stop a module."""
         return await self.module_manager.stop_module(module_name)
 
-    async def start_all(self) -> Dict[str, bool]:
-        """Start all selected modules with proper window layout."""
-        selected_modules = self.module_manager.get_selected_modules()
-        self.logger.info("Starting all selected modules: %s", selected_modules)
-
-        if not selected_modules:
-            self.logger.warning("No modules selected")
-            return {}
-
-        # Calculate window layout
-        saved_geometries: Dict[str, WindowGeometry] = {}
-        modules_needing_tiling: List[str] = []
-
-        for module_name in selected_modules:
-            geometry = await self._load_module_geometry(module_name)
-            if geometry and (geometry.x != 0 or geometry.y != 0):
-                saved_geometries[module_name] = geometry
-                self.logger.info("Using saved geometry for %s", module_name)
-            else:
-                modules_needing_tiling.append(module_name)
-
-        # Calculate tiling for modules without saved geometry
-        tiling_geometries: Dict[str, WindowGeometry] = {}
-        if modules_needing_tiling:
-            self.logger.info("Calculating tiling layout for %d modules", len(modules_needing_tiling))
-            tiling_layout = self.window_manager.calculate_tiling_layout(
-                len(modules_needing_tiling),
-                saved_geometries=saved_geometries
-            )
-            for idx, module_name in enumerate(modules_needing_tiling):
-                tiling_geometries[module_name] = tiling_layout.get(str(idx))
-
-        # Start all modules
-        results = {}
-        start_tasks = []
-
-        for module_name in selected_modules:
-            geometry = saved_geometries.get(module_name) or tiling_geometries.get(module_name)
-            start_tasks.append(self.module_manager.start_module(module_name, geometry))
-
-        start_results = await asyncio.gather(*start_tasks, return_exceptions=True)
-
-        for module_name, result in zip(selected_modules, start_results):
-            if isinstance(result, Exception):
-                self.logger.error("Failed to start %s: %s", module_name, result)
-                results[module_name] = False
-            else:
-                results[module_name] = result
-
-        self.logger.info("Waiting for modules to initialize...")
-        await asyncio.sleep(2.0)
-
-        success_count = sum(1 for v in results.values() if v)
-        self.logger.info("Started %d/%d modules", success_count, len(results))
-
-        return results
-
     # ========== Session Management (delegate to SessionManager) ==========
 
     async def start_session_all(self) -> Dict[str, bool]:
@@ -268,14 +213,6 @@ class LoggerSystem:
             self.module_manager.module_processes
         )
 
-    async def start_recording_all(self, trial_number: int = None, trial_label: str = None) -> Dict[str, bool]:
-        """Alias for record_all."""
-        return await self.record_all(trial_number, trial_label)
-
-    async def stop_recording_all(self) -> Dict[str, bool]:
-        """Alias for pause_all."""
-        return await self.pause_all()
-
     async def get_status_all(self) -> Dict[str, ModuleState]:
         """Get status from all modules."""
         return await self.session_manager.get_status_all(
@@ -295,16 +232,24 @@ class LoggerSystem:
 
     # ========== Cleanup and State Management ==========
 
-    async def stop_all(self) -> None:
-        """Stop all modules."""
-        self.logger.info("Stopping all modules")
+    async def stop_all(self, request_geometry: bool = True) -> None:
+        """
+        Stop all modules.
+
+        Args:
+            request_geometry: If True, request geometry from modules before stopping.
+                             Set to False during final shutdown to speed up exit.
+        """
+        self.logger.info("Stopping all modules (request_geometry=%s)", request_geometry)
 
         if self.session_manager.recording:
             await self.pause_all()
             await asyncio.sleep(1.0)
 
         # Request geometry from all running modules BEFORE shutting them down
-        await self._request_geometries_from_all()
+        # (skip on final shutdown since modules save their own geometry on exit)
+        if request_geometry:
+            await self._request_geometries_from_all()
 
         await self.module_manager.stop_all()
 
@@ -358,10 +303,17 @@ class LoggerSystem:
             self.logger.error("Failed to save running modules state: %s", e, exc_info=True)
             return False
 
-    async def cleanup(self) -> None:
-        """Cleanup all resources."""
+    async def cleanup(self, request_geometry: bool = True) -> None:
+        """
+        Cleanup all resources.
+
+        Args:
+            request_geometry: If True, request geometry from modules before stopping.
+                             Default is True to ensure geometry is always saved (safe default).
+                             Can be set to False for faster shutdown if modules save their own.
+        """
         self.logger.info("Cleaning up logger system")
-        await self.stop_all()
+        await self.stop_all(request_geometry=request_geometry)
         self.shutdown_event.set()
 
     def get_session_info(self) -> dict:

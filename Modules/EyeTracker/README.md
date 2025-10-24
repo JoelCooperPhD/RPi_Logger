@@ -1,18 +1,18 @@
 # Eye Tracker Module
 
-A professional eye tracking system for Raspberry Pi with Pupil Labs integration, master-slave architecture, real-time preview, and programmatic control.
+A professional eye tracking system for Raspberry Pi with Pupil Labs integration, real-time gaze overlay, CSV data export, and flexible control modes.
 
 ## Features
 
-👁️ **Pupil Labs Integration**: Seamless integration with Pupil Labs eye trackers
-📹 **Gaze Recording**: High-quality gaze data recording with scene video
-🎯 **Real-Time Preview**: OpenCV-based preview with gaze overlay
-⏰ **Frame Synchronization**: Precise timestamp tracking for gaze, IMU, and video data
-🔄 **Master-Slave Architecture**: Command-driven operation via JSON protocol
-🖱️ **Interactive Controls**: Standalone mode with keyboard shortcuts (q=quit, r=record)
-⚙️ **Flexible Configuration**: Configurable resolution, FPS, and output options
+👁️ **Pupil Labs Integration**: Seamless integration with Pupil Labs eye trackers (Invisible/Neon)
+📹 **Gaze Recording**: High-quality gaze data with scene video recording
+🎯 **Real-Time Preview**: OpenCV-based preview with gaze overlay in interactive mode
+⏰ **Multi-Stream Capture**: Synchronized gaze, IMU, events, and video data
+🔄 **Multiple Modes**: Standalone (interactive), headless, and slave (master logger) modes
+🖱️ **Interactive Controls**: Keyboard shortcuts in standalone mode (q=quit, r=record)
+⚙️ **Flexible Configuration**: Configurable resolution (up to 1920x1080), processing FPS (1-120)
 🛡️ **Signal Handling**: Graceful shutdown with proper resource cleanup
-📁 **Session Management**: Organized timestamped output folders
+📊 **CSV Export**: All data streams exported to CSV format for analysis
 
 ## Hardware Requirements
 
@@ -48,22 +48,20 @@ uv run main_tracker.py --auto-start-recording
 tail -f recordings/tracking_*/session.log
 ```
 
-### Slave Mode (Programmatic Control)
+### Slave Mode (Master Logger Control)
 
 ```bash
-# Start in slave mode for master control
-uv run main_tracker.py --mode slave
-
-# Slave mode with specific output directory
-uv run main_tracker.py --mode slave --output-dir recordings/experiment
+# Typically launched automatically by main logger, but can be tested manually:
+uv run main_tracker.py --mode headless --output-dir data/session_test/EyeTracker
 ```
 
-### Headless Mode
+### Integration with Main Logger
 
-```bash
-# Unattended continuous recording
-uv run main_tracker.py --mode headless --auto-start-recording
-```
+The eye tracker module is typically used via the master logger (`main_logger.py`), which:
+- Automatically launches the module in headless/slave mode
+- Sends JSON commands for session/recording control
+- Receives status updates and handles module lifecycle
+- Coordinates synchronization across all modules
 
 ## Usage Modes
 

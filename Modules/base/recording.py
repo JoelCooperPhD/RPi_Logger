@@ -149,7 +149,6 @@ class RecordingManagerBase(ABC):
             await self.stop_recording()
             return False
         else:
-            # Note: Requires session_dir to be set
             if self._current_session_dir is None:
                 raise RuntimeError("Cannot start recording: no session directory set")
             await self.start_recording(self._current_session_dir, self._current_trial_number or 1)
@@ -163,3 +162,18 @@ class RecordingManagerBase(ABC):
         """
         self._current_session_dir = session_dir
         self._current_trial_number = trial_number
+
+    def get_sync_metadata(self) -> dict:
+        """
+        Get synchronization metadata for this recording device.
+
+        Returns:
+            Dictionary with timing and file information for sync purposes.
+            Subclasses should override to provide module-specific data.
+        """
+        return {
+            "device_id": self.device_id,
+            "is_recording": self._is_recording,
+            "session_dir": str(self._current_session_dir) if self._current_session_dir else None,
+            "trial_number": self._current_trial_number,
+        }

@@ -1,249 +1,621 @@
-# RPi Logger - Master Logger System
+# RPi Logger - Multi-Modal Data Collection System
 
-A master orchestrator for managing multiple logging modules with a unified interface.
+A professional multi-modal data collection system for automotive research on Raspberry Pi 5, featuring synchronized recording across cameras, microphones, eye tracking, and behavioral tasks.
 
 ## Overview
 
-The Master Logger discovers, launches, and controls multiple logging modules (Cameras, AudioRecorder, EyeTracker, NoteTaker) through a centralized system with:
+The RPi Logger is designed for in-vehicle data collection with precise synchronization across multiple sensor modalities. The system features:
 
-- **Dynamic Module Discovery**: Automatically finds all modules in `Modules/` directory
-- **Unified Interface**: Tkinter GUI with module selection checkboxes
-- **Centralized Data**: All module outputs saved in organized session directories
-- **Process Orchestration**: Manages module subprocesses via JSON command protocol
-- **Async Architecture**: Pure asyncio design for efficient concurrency
+- **Unified Control Interface**: Single application to control all recording modules
+- **Multi-Modal Recording**: Cameras, microphones, eye tracking, behavioral tasks, and annotations
+- **Frame-Level Synchronization**: Automatic A/V sync with ~30ms accuracy via timestamped CSVs
+- **Modular Architecture**: Each module can run standalone or coordinated through master logger
+- **Async Design**: Modern asyncio patterns for efficient concurrent operation
+- **Session Management**: Organized data output with automatic timestamping
 
-## Available Modules
+## System Features
 
-- **Cameras** - Multi-camera video recording with synchronized capture and overlay support
-- **AudioRecorder** - Multi-channel audio recording with configurable sample rates
-- **EyeTracker** - Pupil Labs eye tracking integration with gaze data and scene video
-- **NoteTaker** - Timestamped note-taking interface for annotating sessions in real-time
+### Hardware Integration
+- **Multi-Camera Video**: Up to 2x cameras (tested with IMX296 Global Shutter) at 1-60 FPS
+- **Multi-Channel Audio**: Multiple USB microphones with 8-192 kHz sampling
+- **Eye Tracking**: Pupil Labs device integration with gaze data and scene video
+- **sDRT Devices**: USB serial communication for detection response tasks
+- **Hot-Plug Support**: Automatic device detection and reconnection
 
-Each module can run standalone with GUI or be controlled through the master logger.
+### Recording Capabilities
+- **Trial-Based Recording**: Record multiple trials within a session
+- **Synchronized Timestamps**: All modules capture `time.time()` and `time.perf_counter()`
+- **CSV Timing Logs**: Per-module timestamped event logs for synchronization
+- **Automatic Muxing**: Post-processing utility creates synchronized A/V files
+- **Note Taking**: Timestamped annotations during data collection
+
+### User Interface
+- **Master Logger GUI**: Tkinter interface for module selection and control
+- **Module GUIs**: Individual windows for each active module with real-time previews
+- **Session Timer**: Live recording duration display
+- **Status Indicators**: Real-time module state feedback
+- **Window Management**: Automatic tiling and geometry restoration
 
 ## Quick Start
 
+### Installation
+
 ```bash
-# Launch the master logger
+# Clone the repository
+git clone <repository-url>
+cd RPi_Logger
+
+# Install dependencies (using uv package manager)
+uv sync
+```
+
+### Launch Master Logger
+
+```bash
+# Start the master logger
 python3 main_logger.py
 
 # Or with custom settings
-python3 main_logger.py --data-dir ~/my_data --session-prefix experiment
+python3 main_logger.py --data-dir ~/research_data --session-prefix experiment
+```
 
-# Run individual modules standalone
-python3 Modules/Cameras/main_camera.py --mode gui
-python3 Modules/AudioRecorder/main_audio.py --mode gui
-python3 Modules/EyeTracker/main_eye_tracker.py --mode gui
+### Basic Workflow
+
+1. **Launch Application**: Run `python3 main_logger.py`
+2. **Select Modules**: Check boxes for desired modules (auto-launches)
+3. **Start Session**: Click "Start Session" to prepare modules
+4. **Record Trial**: Click "Record" to begin trial recording
+5. **Stop Trial**: Click "Stop" to end trial (data saved automatically)
+6. **End Session**: Click "End Session" to finalize
+7. **Process Data**: Run `python utils/sync_and_mux.py <session_dir> --all-trials`
+
+## Available Modules
+
+### Cameras
+Multi-camera video recording with hardware-accelerated H.264 encoding, real-time preview, and frame-level timing diagnostics.
+
+**Key Features:**
+- 1-60 FPS capture with IMX296 sensors
+- H.264 hardware encoding (GPU-accelerated)
+- Per-frame CSV timing logs with sensor timestamps
+- Dropped frame detection via timestamp analysis
+- Configurable resolution presets (320x240 to 1456x1088)
+
+**Standalone Usage:**
+```bash
+python3 Modules/Cameras/main_camera.py --resolution 2 --target-fps 30
+```
+
+### AudioRecorder
+Multi-microphone recording with USB hot-plug support and configurable sample rates.
+
+**Key Features:**
+- 8-192 kHz sample rate support
+- 16-bit PCM WAV encoding
+- Per-chunk CSV timing logs
+- Automatic USB device detection
+- Multiple device simultaneous recording
+
+**Standalone Usage:**
+```bash
+python3 Modules/AudioRecorder/main_audio.py --sample-rate 48000
+```
+
+### EyeTracker
+Pupil Labs eye tracking integration with gaze overlay and scene video recording.
+
+**Key Features:**
+- Network-based device discovery (RTSP)
+- Real-time gaze, IMU, and event data
+- Scene video with gaze overlay
+- CSV export of all data streams
+- Configurable processing FPS (1-120)
+
+**Standalone Usage:**
+```bash
+python3 Modules/EyeTracker/main_eye_tracker.py --target-fps 30
+```
+
+### NoteTaker
+Timestamped note-taking interface for annotating sessions in real-time.
+
+**Key Features:**
+- Millisecond-precision timestamps
+- Session elapsed time tracking
+- Records which modules are actively recording
+- CSV export for analysis
+- Keyboard shortcuts for rapid entry
+
+**Standalone Usage:**
+```bash
 python3 Modules/NoteTaker/main_notes.py --mode gui
 ```
 
-## Usage Workflow
+### DRT (Detection Response Task)
+Multi-device sDRT (Simple Detection Response Task) support with USB serial communication.
 
-1. **Launch and Select Modules**
-   - Launch `main_logger.py`
-   - **Check a module to immediately launch it** (Cameras, AudioRecorder, EyeTracker, NoteTaker)
-   - **Uncheck a module to immediately stop it**
-   - Status indicators show module state in real-time
+**Key Features:**
+- Automatic USB device detection (VID/PID filtering)
+- Multi-device support with hot-plug
+- Real-time scrolling plot (60-second window)
+- ISO preset configuration (3-5s ISI, 1s stimulus)
+- CSV logging of trial data
 
-2. **Start Recording**
-   - Once modules show "● Ready" status
-   - Click "Start Recording" to begin recording on all active modules
-   - Recording timer shows elapsed time
+**Standalone Usage:**
+```bash
+python3 Modules/DRT/main_drt.py --mode gui
+```
 
-3. **Stop Recording**
-   - Click "Stop Recording" to stop recording (modules remain active)
-   - To fully stop a module, uncheck its checkbox
+## Architecture
 
-4. **View Data**
-   - All data saved in: `data/session_YYYYMMDD_HHMMSS/`
-   - Each module has its own subdirectory
-   - Master log: `master.log` in session directory
+### System Layers
 
-## Directory Structure
+```
+┌─────────────────────────────────────────────────────┐
+│                   main_logger.py                    │
+│              (Entry Point & Coordination)           │
+└──────────────────────┬──────────────────────────────┘
+                       │
+           ┌───────────┴───────────┐
+           │    LoggerSystem       │
+           │     (Facade)          │
+           └───────────┬───────────┘
+                       │
+       ┌───────────────┼───────────────┐
+       │               │               │
+┌──────▼──────┐ ┌─────▼──────┐ ┌─────▼──────┐
+│   Module    │ │  Session   │ │  Window    │
+│   Manager   │ │  Manager   │ │  Manager   │
+└─────────────┘ └────────────┘ └────────────┘
+```
+
+### Core Components
+
+**LoggerSystem** (`logger_core/logger_system.py`)
+- Facade pattern coordinator
+- Unified API for UI
+- Delegates to specialized managers
+
+**ModuleManager** (`logger_core/module_manager.py`)
+- Module discovery and lifecycle
+- Process management for slave mode modules
+- JSON command protocol communication
+
+**SessionManager** (`logger_core/session_manager.py`)
+- Session and trial coordination
+- Cross-module recording synchronization
+- State tracking
+
+**ShutdownCoordinator** (`logger_core/shutdown_coordinator.py`)
+- Race-condition-free shutdown
+- Ordered cleanup callbacks
+- State machine protection
+
+**WindowManager** (`logger_core/window_manager.py`)
+- Automatic window tiling
+- Geometry persistence
+
+### Module Architecture
+
+Each module follows a consistent pattern:
+
+```
+Module/
+├── main_<module>.py          # Entry point
+├── config.txt                # Configuration
+├── <module>_core/            # Core implementation
+│   ├── <module>_system.py    # System coordinator
+│   ├── <module>_supervisor.py # Lifecycle management
+│   ├── <module>_handler.py   # Device/sensor handler
+│   ├── recording/            # Recording subsystem
+│   │   └── manager.py        # Recording coordinator
+│   ├── interfaces/gui/       # GUI implementation
+│   │   └── tkinter_gui.py    # Tkinter interface
+│   ├── commands/             # JSON command protocol
+│   │   └── command_handler.py
+│   ├── modes/                # Operation modes
+│   │   ├── gui_mode.py       # Standalone GUI mode
+│   │   └── headless_mode.py  # Slave mode (master logger control)
+│   └── config/               # Config management
+└── recordings/               # Output directory
+```
+
+### Shared Base Classes
+
+All modules inherit from common base classes in `Modules/base/`:
+
+- `BaseSystem`: Core system interface
+- `BaseSupervisor`: Lifecycle and retry logic
+- `TkinterGuiBase`: Common GUI functionality
+- `RecordingMixin`: Recording state management
+- `ConfigLoader`: Configuration file handling
+
+## Session Data Structure
 
 ```
 data/
-└── session_20251014_120000/
-    ├── master.log              # Master logger log
-    ├── Cameras/                # Camera module output
-    │   └── session_*/
-    │       ├── session.log
-    │       ├── camera0.h264
-    │       └── camera1.h264
-    ├── AudioRecorder/          # Audio module output
-    │   └── experiment_*/
-    │       ├── session.log
-    │       └── *.wav files
-    ├── EyeTracker/             # Eye tracker output
-    │   └── tracking_*/
-    │       ├── session.log
-    │       ├── gaze_*.csv
-    │       └── scene_video.mp4
-    └── NoteTaker/              # Note taking output
-        └── notes_*/
-            ├── session.log
-            └── notes.csv
+└── session_20251024_120000/
+    ├── master.log                                      # Master logger log
+    ├── 20251024_120000_SYNC_trial001.json             # Sync metadata
+    ├── 20251024_120000_AV_trial001.mp4                # Muxed audio/video
+    ├── Cameras/
+    │   ├── session.log
+    │   ├── 20251024_120000_CAM_trial001_CAM0_1456x1088_30fps.mp4
+    │   └── 20251024_120000_CAMTIMING_trial001_CAM0.csv
+    ├── AudioRecorder/
+    │   ├── session.log
+    │   ├── 20251024_120000_AUDIO_trial001_MIC0_usb-audio.wav
+    │   └── 20251024_120000_AUDIOTIMING_trial001_MIC0.csv
+    ├── EyeTracker/
+    │   ├── session.log
+    │   ├── scene_video_20251024_120000.mp4
+    │   ├── gaze_data_20251024_120000.csv
+    │   └── frame_timing_20251024_120000.csv
+    ├── NoteTaker/
+    │   ├── session.log
+    │   └── session_notes.csv
+    └── DRT/
+        ├── session.log
+        └── sDRT_dev_ttyACM0_20251024_120000.csv
 ```
 
-## Module Details
+## Audio-Video Synchronization
 
-### Cameras Module
-- Supports multiple simultaneous camera streams
-- Configurable resolution, framerate, and encoding
-- Real-time preview with overlay information
-- Synchronized capture across all cameras
+The system implements **frame-level synchronization** (~30ms accuracy) through:
 
-### AudioRecorder Module
-- Multi-channel audio recording
-- Configurable sample rates and bit depths
-- Real-time level monitoring
-- Support for multiple audio devices
+1. **Timestamp Capture**: Each module captures `time.time()` at recording start
+2. **CSV Timing Logs**: Per-event timestamps for all data (frames, chunks, samples)
+3. **Sync Metadata**: Unified JSON file with timing for all modules
+4. **Automatic Muxing**: FFmpeg combines streams with calculated offset
 
-### EyeTracker Module
-- Integration with Pupil Labs eye tracking hardware
-- Real-time gaze tracking and pupil detection
-- Scene camera video recording
-- CSV export of gaze data with timestamps
+### File Naming Convention
 
-### NoteTaker Module
-- Timestamped note-taking during sessions
-- Text entry with automatic timestamp recording
-- CSV export of all notes with precise timestamps
-- View note history during recording
-- Useful for annotating events or observations during data collection
+All files use consistent trial-based naming:
+
+- Audio: `{timestamp}_AUDIO_trial{N:03d}_MIC{id}_{name}.wav`
+- Video: `{timestamp}_CAM_trial{N:03d}_CAM{id}_{w}x{h}_{fps}fps.mp4`
+- Audio CSV: `{timestamp}_AUDIOTIMING_trial{N:03d}_MIC{id}.csv`
+- Video CSV: `{timestamp}_CAMTIMING_trial{N:03d}_CAM{id}.csv`
+- Sync Metadata: `{timestamp}_SYNC_trial{N:03d}.json`
+- Muxed Output: `{timestamp}_AV_trial{N:03d}.mp4`
+
+### Processing Recordings
+
+```bash
+# Process all trials in a session
+python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+
+# Process specific trial
+python utils/sync_and_mux.py data/session_20251024_120000 --trial 2
+
+# Generate sync metadata only (skip muxing)
+python utils/sync_and_mux.py data/session_20251024_120000 --no-mux
+```
 
 ## Configuration
 
-Edit `config.txt` in the project root to customize:
+### Main Configuration (`config.txt`)
 
 ```ini
-# Data directory
+# Paths
 data_dir = data
-
-# Session prefix
 session_prefix = session
 
 # Logging
 log_level = info
-console_output = true
+console_output = false
+
+# UI
+window_x = 100
+window_y = 100
+window_width = 800
+window_height = 600
+
+# Session restore
+last_session_dir = /path/to/last/session
+```
+
+### Module Configuration
+
+Each module has its own `config.txt` with:
+- `enabled` - Auto-start with master logger
+- Module-specific settings (resolution, sample rate, etc.)
+- Window geometry (auto-saved)
+- Logging configuration
+
+### AV Muxing Configuration (`Modules/base/constants.py`)
+
+```python
+AV_MUXING_ENABLED = True          # Enable automatic muxing
+AV_MUXING_TIMEOUT_SECONDS = 60    # FFmpeg timeout
+AV_DELETE_SOURCE_FILES = False    # Keep originals after mux
 ```
 
 ## Command Line Options
 
+### Main Logger
+
 ```bash
---data-dir DIR              # Root directory for all logging data
+--data-dir DIR              # Root directory for logging data
 --session-prefix PREFIX     # Prefix for session directories
 --log-level LEVEL           # Logging level (debug/info/warning/error/critical)
 --console                   # Also log to console
---no-console                # Log to file only
+--no-console                # Log to file only (default)
 ```
 
-## Module Communication
+### Module-Specific
 
-The master logger communicates with modules via JSON protocol over stdin/stdout:
+See individual module README files for detailed options.
 
-**Commands (Master → Module):**
-- `start_recording` - Begin recording
-- `stop_recording` - Stop recording
-- `get_status` - Request status update
-- `take_snapshot` - Capture snapshot
-- `quit` - Graceful shutdown
+## Module Communication Protocol
 
-**Status Messages (Module → Master):**
-- `initialized` - Module ready
-- `recording_started` - Recording active
-- `recording_stopped` - Recording stopped
-- `error` - Error occurred
-- `status_report` - Status information
+The master logger communicates with modules via **JSON protocol over stdin/stdout**:
 
-## Module Requirements
+### Commands (Master → Module)
 
-For a module to be compatible with the master logger:
-
-1. **Entry Point**: `main_*.py` file (e.g., `main_camera.py`)
-2. **Slave Mode**: Support `--mode slave` argument
-3. **Output Directory**: Accept `--output-dir` to override default
-4. **JSON Protocol**: Implement command/status protocol
-5. **Async Architecture**: Use asyncio for concurrency
-
-## Architecture
-
-```
-main_logger.py
-    ↓
-LoggerSystem (orchestrator)
-    ↓
-ModuleProcess (per module)
-    ↓
-Subprocess (module in slave mode)
-    ↓
-Module Core (camera_core, audio_core, tracker_core, notes_core)
-    ↓
-Shared Base Utilities (Modules/base/)
-    - BaseSystem, BaseSupervisor
-    - TkinterGuiBase, TkinterMenuBase
-    - RecordingMixin, AsyncUtils
-    - ConfigLoader, SessionUtils
+```json
+{"command": "start_session", "session_dir": "/path/to/session"}
+{"command": "start_recording"}
+{"command": "stop_recording"}
+{"command": "end_session"}
+{"command": "get_status"}
+{"command": "quit"}
 ```
 
-All modules share common functionality through the base utilities, ensuring consistent behavior across the system.
+### Status Messages (Module → Master)
+
+```json
+{
+  "type": "status",
+  "status": "initialized|recording_started|recording_stopped|error",
+  "timestamp": "ISO-8601 timestamp",
+  "data": { /* module-specific data */ }
+}
+```
 
 ## Module Status Indicators
 
-- **● Idle** (gray) - Module not started
-- **● Starting...** (orange) - Module launching
-- **● Initializing...** (orange) - Module initializing hardware
-- **● Ready** (green) - Module ready to record
-- **● RECORDING** (red) - Module actively recording
-- **● Error** (red) - Module encountered an error
-- **● Crashed** (red) - Module process crashed
+- **○ Stopped** - Module not running
+- **○ Starting...** - Module launching
+- **○ Initializing...** - Hardware initialization
+- **● Ready** (green) - Ready to record
+- **● RECORDING** (red) - Actively recording
+- **● Error** (red) - Error encountered
+- **● Crashed** (red) - Process crashed
+
+## Development
+
+### Project Structure
+
+```
+RPi_Logger/
+├── main_logger.py          # Master logger entry point
+├── config.txt              # Main configuration
+├── CLAUDE.md               # Architecture documentation
+├── README.md               # This file
+├── logger_core/            # Master logger core
+│   ├── logger_system.py    # System facade
+│   ├── module_manager.py   # Module lifecycle
+│   ├── session_manager.py  # Session/trial control
+│   ├── shutdown_coordinator.py # Graceful shutdown
+│   ├── window_manager.py   # Window layout
+│   ├── config_manager.py   # Config handling
+│   ├── paths.py            # Path constants
+│   ├── event_logger.py     # Event logging
+│   └── ui/                 # User interface
+│       ├── main_window.py  # Main GUI window
+│       ├── main_controller.py # UI event handler
+│       ├── timer_manager.py # Recording timers
+│       └── help_dialogs.py # Help windows
+├── Modules/                # Recording modules
+│   ├── base/               # Shared base classes
+│   │   ├── base_system.py
+│   │   ├── base_supervisor.py
+│   │   ├── tkinter_gui_base.py
+│   │   ├── recording.py
+│   │   ├── io_utils.py
+│   │   ├── constants.py
+│   │   ├── sync_metadata.py # Sync metadata writer
+│   │   ├── av_muxer.py     # FFmpeg A/V muxer
+│   │   └── usb_serial_manager.py # USB device framework
+│   ├── Cameras/            # Camera module
+│   ├── AudioRecorder/      # Audio module
+│   ├── EyeTracker/         # Eye tracking module
+│   ├── NoteTaker/          # Note taking module
+│   └── DRT/                # DRT task module
+├── utils/                  # Utilities
+│   ├── sync_and_mux.py     # A/V sync post-processing
+│   └── README.md           # Utility documentation
+└── data/                   # Session recordings (auto-created)
+```
+
+### Testing
+
+```bash
+# Syntax check all files
+python -m py_compile main_logger.py
+python -m py_compile logger_core/*.py
+
+# Test module in standalone mode
+python3 Modules/Cameras/main_camera.py
+python3 Modules/AudioRecorder/main_audio.py
+
+# Test with master logger
+python3 main_logger.py
+```
+
+### Adding New Modules
+
+To create a new module:
+
+1. **Copy Template**: Use existing module as template (e.g., NoteTaker for simple modules)
+2. **Implement Core**: Create `<module>_system.py` inheriting from `BaseSystem`
+3. **Add Recording**: Implement recording manager with `get_sync_metadata()` method
+4. **Create GUI**: Inherit from `TkinterGuiBase` for consistency
+5. **Add Modes**: Implement GUI and headless modes
+6. **Command Protocol**: Implement JSON command handler
+7. **Configure**: Create `config.txt` with module settings
+8. **Document**: Add README.md with usage instructions
 
 ## Troubleshooting
 
 ### Modules Not Starting
-- Check module logs in `data/session_*/ModuleName/session.log`
+
+**Symptoms**: Module shows "Error" or "Crashed" status
+
+**Solutions**:
+- Check module log in `data/session_*/ModuleName/session.log`
 - Verify hardware is connected (cameras, microphones, eye tracker)
-- Ensure no other processes are using the devices
+- Ensure no other processes are using devices: `pkill -f main_camera`
+- Check permissions for audio/video devices
 
 ### Recording Fails
+
+**Symptoms**: "Record" button doesn't start recording or stops immediately
+
+**Solutions**:
 - Check individual module status indicators
 - Review module-specific configuration files
-- Verify sufficient disk space
+- Verify sufficient disk space: `df -h`
+- Check module logs for specific errors
+
+### Synchronization Issues
+
+**Symptoms**: Audio/video out of sync in muxed output
+
+**Solutions**:
+- Verify timing CSV files exist for both audio and video
+- Check timestamps in SYNC.json are reasonable
+- Ensure FFmpeg is installed: `which ffmpeg`
+- Try manual muxing with custom offset
 
 ### UI Not Responding
+
+**Symptoms**: GUI freezes or becomes unresponsive
+
+**Solutions**:
 - Check master log: `data/session_*/master.log`
-- Ensure no blocking operations in main thread
-- Restart the application
+- Kill processes: `pkill -f main_logger`
+- Restart system
+- Check for blocking operations in logs
 
-## Adding New Modules
+### USB Device Detection
 
-To add a new logging module:
+**Symptoms**: Audio devices or DRT devices not detected
 
-1. Create directory in `Modules/` (e.g., `Modules/NewSensor/`)
-2. Implement `main_newsensor.py` entry point
-3. Support `--mode slave --output-dir DIR` arguments
-4. Implement JSON command protocol
-5. Create `*_core/` directory with module logic
-6. Restart master logger (module auto-discovered)
+**Solutions**:
+- Verify device shows in system: `lsusb` and `arecord -l`
+- Add user to audio group: `sudo usermod -a -G audio $USER`
+- Check VID/PID in module config.txt
+- Restart device or replug USB
 
-## Development
+## Hardware Requirements
 
-**Testing Module Discovery:**
+### Raspberry Pi 5 (Recommended)
+
+- **CPU**: Quad-core ARM Cortex-A76 @ 2.4GHz
+- **RAM**: 4GB minimum, 8GB recommended
+- **Storage**: 32GB+ microSD or USB 3.0 SSD
+- **Cooling**: Active cooling required for multi-camera operation
+- **Power**: Official 27W USB-C power supply
+
+### Supported Hardware
+
+- **Cameras**: Up to 2x CSI cameras (tested: IMX296 Global Shutter)
+- **Microphones**: Multiple USB audio input devices
+- **Eye Tracker**: Pupil Labs (Invisible/Neon) via network
+- **DRT Devices**: USB serial devices (Adafruit Trinket M0 tested)
+
+### Storage Recommendations
+
+- **Class 10+ microSD**: Minimum for single-camera recording
+- **USB 3.0 SSD**: Recommended for multi-camera + audio
+- **Estimate**: ~500 MB/min for 1x camera (720p@30fps) + 1x mic (48kHz)
+
+## Dependencies
+
+All dependencies managed via `uv` package manager:
+
 ```bash
-python3 logger_core/module_discovery.py
+# Install all dependencies
+uv sync
+
+# Core dependencies
+- python >= 3.9
+- tkinter (usually included with Python)
+- asyncio (standard library)
+
+# Module-specific
+- picamera2 (Cameras)
+- opencv-python (Cameras, EyeTracker)
+- sounddevice (AudioRecorder)
+- numpy (multiple modules)
+- pupil-labs-realtime-api (EyeTracker)
+- pyserial (DRT)
+- aiofiles (async file I/O)
+
+# System tools
+- ffmpeg (A/V muxing)
 ```
 
-**Testing Command Protocol:**
-```bash
-python3 logger_core/commands/command_protocol.py
-```
+## Best Practices
 
-**Manual Module Launch (for debugging):**
-```bash
-# Launch camera module in slave mode
-uv run Modules/Cameras/main_camera.py --mode slave --output-dir /tmp/test
-```
+### Recording Sessions
+
+1. **Pre-flight Check**: Test all modules individually before integrated session
+2. **Storage Space**: Verify adequate disk space before long sessions
+3. **Battery/Power**: Ensure stable power supply (UPS recommended)
+4. **Device Warmup**: Let cameras/sensors warm up for 30 seconds
+5. **Post-Session**: Process recordings with `sync_and_mux.py` immediately
+
+### Configuration Management
+
+1. **Backup Configs**: Keep backup of working `config.txt` files
+2. **Module Defaults**: Set reasonable defaults in module configs
+3. **CLI Overrides**: Use command-line args for one-off changes
+4. **Logging Levels**: Use `info` for production, `debug` for troubleshooting
+
+### Development Workflow
+
+1. **Syntax Check**: Always run `python -m py_compile` before testing
+2. **Standalone Testing**: Test modules individually before integration
+3. **Log Review**: Check logs after every session for warnings
+4. **Type Hints**: Maintain type annotations for all functions
+5. **Async Patterns**: Use `asyncio.to_thread()` for blocking I/O
+
+## Performance
+
+### Typical Resource Usage (RPi 5)
+
+- **CPU**: 30-40% with 2x cameras + audio + eye tracker
+- **RAM**: ~500 MB for master logger + all modules
+- **Disk I/O**: ~8 MB/s for 2x 720p cameras + 2x 48kHz mics
+- **Network**: ~2 Mbps for eye tracker stream
+
+### Optimization Tips
+
+1. **Camera Resolution**: Use 720p instead of 1080p to reduce CPU/disk usage
+2. **Audio Sample Rate**: 48kHz is sufficient for most applications
+3. **Preview Windows**: Disable previews in slave mode for lower CPU usage
+4. **Eye Tracker FPS**: 5-10 FPS is sufficient for most gaze tracking
+5. **CSV Logging**: Disable if not needed for synchronization
 
 ## License
 
 Part of the RPi Logger project.
+
+## Contributing
+
+For issues, feature requests, or contributions, please refer to the main project repository.
+
+## Support
+
+- **Documentation**: See `CLAUDE.md` for architecture details
+- **Module Docs**: See individual `Modules/*/README.md` files
+- **Utilities**: See `utils/README.md` for post-processing tools
+
+---
+
+**Version**: October 2025
+**Platform**: Raspberry Pi 5 / Raspberry Pi OS Bookworm
+**Python**: 3.9+

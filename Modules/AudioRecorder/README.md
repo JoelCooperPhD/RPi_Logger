@@ -1,17 +1,18 @@
 # Audio Recorder Module
 
-A professional multi-microphone audio recording system for Raspberry Pi with master-slave architecture, USB hot-plug support, and programmatic control.
+A professional multi-microphone audio recording system for Raspberry Pi with USB hot-plug support, synchronized timestamping for A/V muxing, and flexible control modes.
 
 ## Features
 
 🎙️ **Multi-Device Support**: Simultaneous recording from multiple USB audio devices (tested with multiple USB microphones)
 🎵 **High-Quality Recording**: 16-bit PCM WAV encoding with configurable sample rates (8-192 kHz)
-🔌 **USB Hot-Plug**: Automatic detection and handling of device connections/disconnections
-🔄 **Master-Slave Architecture**: Command-driven operation via JSON protocol
-🖱️ **Interactive Controls**: Standalone mode with keyboard shortcuts (q=quit, r=record, s=status)
-⚙️ **Flexible Configuration**: Multiple sample rates, auto-selection, and output options
+🔌 **USB Hot-Plug**: Automatic detection (5ms polling) and handling of device connections/disconnections
+⏱️ **Precise Timing**: Per-chunk CSV logs with Unix timestamps for ~30ms A/V sync accuracy
+🔄 **Multiple Modes**: Standalone (interactive), headless, and slave (master logger) modes
+🖱️ **Interactive Controls**: Keyboard shortcuts in standalone mode (r=record, s=status, q=quit)
+⚙️ **Flexible Configuration**: Multiple sample rates, auto-device-selection, output options
 🛡️ **Signal Handling**: Graceful shutdown with proper resource cleanup
-📁 **Session Management**: Organized timestamped output folders
+📁 **Trial-Based Output**: Consistent naming for integration with sync_and_mux.py
 
 ## Hardware Requirements
 
@@ -46,19 +47,20 @@ uv run main_audio.py --auto-start-recording
 tail -f recordings/experiment_*/session.log
 ```
 
-### Slave Mode (Programmatic Control)
+### Slave Mode (Master Logger Control)
 
 ```bash
-# Start in slave mode for master control
-uv run main_audio.py --mode slave
+# Typically launched automatically by main logger, but can be tested manually:
+uv run main_audio.py --mode headless --output-dir data/session_test/AudioRecorder
 ```
 
-### Headless Mode
+### Integration with Main Logger
 
-```bash
-# Unattended continuous recording
-uv run main_audio.py --mode headless --auto-start-recording
-```
+The audio module is typically used via the master logger (`main_logger.py`), which:
+- Automatically launches the module in headless/slave mode
+- Sends JSON commands for session/recording control
+- Receives status updates and handles module lifecycle
+- Coordinates synchronization across all modules
 
 ## Usage Modes
 
@@ -205,11 +207,19 @@ recordings/
   - Use `tail -f session.log` to monitor logs in real-time
 
 **Audio Files:**
-- `mic{N}_DeviceName_rec{NNN}_TIMESTAMP.wav` — 16-bit PCM WAV recordings
-  - Mono recording per device
-  - Sample rate as configured (default: 48 kHz)
-  - Filename includes device ID, device name, recording count, and timestamp
-  - Professional audio quality suitable for analysis and archival
+- Trial-based naming: `{timestamp}_AUDIO_trial{N:03d}_MIC{id}_{name}.wav`
+- Example: `20251024_120000_AUDIO_trial001_MIC0_usb-audio.wav`
+- 16-bit PCM WAV format (mono per device)
+- Sample rate as configured (default: 48 kHz)
+- Professional quality suitable for analysis and archival
+- Used by `sync_and_mux.py` for A/V muxing
+
+**Timing CSV:**
+- Trial-based naming: `{timestamp}_AUDIOTIMING_trial{N:03d}_MIC{id}.csv`
+- Example: `20251024_120000_AUDIOTIMING_trial001_MIC0.csv`
+- **Columns:** `trial`, `chunk_number`, `write_time_unix`, `frames_in_chunk`, `total_frames`
+- Used by `sync_and_mux.py` for A/V synchronization (~30ms accuracy)
+- Chunk timestamps captured every ~21ms (1024 samples @ 48kHz)
 
 ## Architecture
 

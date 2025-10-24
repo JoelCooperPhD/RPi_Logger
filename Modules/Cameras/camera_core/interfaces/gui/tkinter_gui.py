@@ -78,8 +78,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         for i in range(len(self.system.cameras)):
             self.preview_container.columnconfigure(i, weight=1)
 
-            label = ttk.Label(self.preview_container, text=f"Camera {i}",
-                            font=('TkDefaultFont', 10, 'bold'))
+            label = ttk.Label(self.preview_container, text=f"Camera {i}")
             label.grid(row=0, column=i, sticky='w', padx=5, pady=(5, 2))
 
             canvas = tk.Canvas(self.preview_container,
@@ -172,7 +171,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                     h = canvas.winfo_height() or self.args.height
                     canvas.create_text(w//2, h//2,
                                       text="Camera Inactive",
-                                      fill='gray', font=('TkDefaultFont', 12),
+                                      fill='gray',
                                       justify='center')
                     logger.info("Camera %d paused (saving CPU)", camera_idx)
                 else:
@@ -258,7 +257,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 canvas_height // 2,
                 text="Waiting for cameras...\n\nChecking every 3 seconds",
                 fill="white",
-                font=('TkDefaultFont', 14),
                 justify='center'
             )
 

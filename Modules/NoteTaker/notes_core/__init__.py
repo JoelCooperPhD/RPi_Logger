@@ -13,6 +13,9 @@ class NotesInitializationError(ModuleInitializationError):
     pass
 
 
+from .notes_system import NotesSystem
+
+
 __all__ = [
     "MODULE_NAME",
     "MODULE_DESCRIPTION",
@@ -20,4 +23,5 @@ __all__ = [
     "DEFAULT_OUTPUT_DIR",
     "DEFAULT_SESSION_PREFIX",
     "NotesInitializationError",
+    "NotesSystem",
 ]

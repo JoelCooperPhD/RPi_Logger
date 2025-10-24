@@ -8,7 +8,6 @@ from typing import Optional, List, Dict, Any
 
 import aiofiles
 
-from Modules.base.io_utils import get_versioned_filename
 from ..constants import HEADERS
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,13 @@ class RecordingManager:
     def __init__(self, session_dir: Path):
         self.session_dir = session_dir
 
-        filename = get_versioned_filename(session_dir, datetime.now())
+        dir_name = session_dir.name
+        if "_" in dir_name:
+            session_timestamp = dir_name.split("_", 1)[1]
+        else:
+            session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        filename = f"{session_timestamp}_NOTES.txt"
         self.txt_file_path = self.session_dir / filename
         self.recording = False
         self.session_start_time: Optional[datetime] = None

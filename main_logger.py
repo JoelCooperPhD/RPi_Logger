@@ -150,9 +150,13 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     # Register cleanup callbacks in order
     async def cleanup_logger_system():
-        await logger_system.cleanup()
+        await logger_system.save_running_modules_state()
+        await logger_system.cleanup(request_geometry=False)
 
     async def cleanup_ui():
+        ui.save_window_geometry()
+        ui.cleanup_log_handler()
+        await ui.timer_manager.stop_all()
         if ui.root:
             ui.root.quit()
 

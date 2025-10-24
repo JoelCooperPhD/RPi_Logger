@@ -1,15 +1,16 @@
 # NoteTaker Module
 
-Timestamped note-taking module for car logging sessions. Allows researchers to log observations and events during data collection with precise timestamps and session context.
+Timestamped note-taking module for automotive research logging. Allows researchers to log observations and events during data collection with millisecond-precision timestamps and automatic recording context capture.
 
 ## Features
 
-- **Timestamped Notes**: Each note captures absolute timestamp and session elapsed time
-- **Module State Tracking**: Records which modules (Camera, Audio, EyeTracker) are actively recording when note is added
-- **Quick Entry**: Keyboard shortcuts for rapid note-taking while driving
-- **Note History**: View all notes from current session in real-time
-- **CSV Export**: Notes saved in CSV format for easy analysis with standard data science tools
+- **Millisecond-Precision Timestamps**: Each note captures absolute timestamp and session elapsed time
+- **Recording Context**: Automatically records which modules (Camera, Audio, EyeTracker, DRT) are actively recording
+- **Quick Entry**: Keyboard shortcuts (Ctrl+N, Enter) for rapid note-taking during sessions
+- **Note History**: View all notes from current session in scrollable text area
+- **CSV Export**: Standard CSV format for analysis with pandas, R, or Excel
 - **Session Integration**: Notes saved to session directory alongside other module data
+- **Master Logger Integration**: Automatically launched and controlled by main logger
 
 ## Usage
 
@@ -28,13 +29,18 @@ python main_notes.py --mode gui --output-dir /path/to/notes
 python main_notes.py --mode gui --console
 ```
 
-### Master Logger Integration
+### Master Logger Integration (Recommended)
 
-The module can be launched via the main logger system:
+The NoteTaker module is typically used via the master logger (`main_logger.py`), which:
+- Automatically launches the module when checked in the module selection
+- Sends JSON commands for session/recording control
+- Provides access to `running_modules.json` for context capture
+- Coordinates window positioning with other modules
 
-1. Enable in `config.txt`: `enabled = true`
-2. Launch master logger: `python main_logger.py`
-3. Select "NoteTaker" from module menu
+To enable auto-start:
+1. Edit `Modules/NoteTaker/config.txt`: Set `enabled = true`
+2. Launch master logger: `python3 main_logger.py`
+3. NoteTaker will automatically launch with the other enabled modules
 
 ## GUI Controls
 

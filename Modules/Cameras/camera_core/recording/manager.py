@@ -9,7 +9,6 @@ from typing import Optional
 
 import numpy as np
 
-from Modules.base.io_utils import get_versioned_filename
 from Modules.base.recording import RecordingManagerBase
 from ..camera_utils import FrameTimingMetadata
 from ..constants import DEFAULT_BITRATE_BPS, FPS_MIN, FPS_MAX, FFMPEG_TIMEOUT_SECONDS
@@ -52,6 +51,7 @@ class CameraRecordingManager(RecordingManagerBase):
         self._latest_lock = threading.Lock()
         self._written_frames = 0
         self._recording_start_time: Optional[float] = None
+        self._recording_start_time_unix: Optional[float] = None
 
         self._csv_stop_task: Optional[asyncio.Task] = None
 
@@ -85,14 +85,14 @@ class CameraRecordingManager(RecordingManagerBase):
             session_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         w, h = self.resolution
-        base_name = f"CAM{self.camera_id}_{w}x{h}_{self.fps:.1f}fps_{session_timestamp}"
 
-        self.video_path = session_dir / f"{base_name}_trial{trial_number:03d}.h264"
+        self.video_path = session_dir / f"{session_timestamp}_CAM_trial{trial_number:03d}_CAM{self.camera_id}_{w}x{h}_{self.fps:.1f}fps.h264"
 
-        timing_filename = get_versioned_filename(session_dir, datetime.datetime.now())
+        timing_filename = f"{session_timestamp}_CAMTIMING_trial{trial_number:03d}_CAM{self.camera_id}.csv"
         self.frame_timing_path = session_dir / timing_filename
 
         self._written_frames = 0
+        self._recording_start_time_unix = time.time()
         self._recording_start_time = time.perf_counter()
         self._overlay.reset_frame_count()
         self._overlay.set_recording(True)
@@ -203,6 +203,19 @@ class CameraRecordingManager(RecordingManagerBase):
 
     async def resume_recording(self):
         raise NotImplementedError("Resume not supported by camera recording")
+
+    def get_sync_metadata(self) -> dict:
+        """Get synchronization metadata for camera recording"""
+        return {
+            "camera_id": self.camera_id,
+            "fps": self.fps,
+            "resolution": list(self.resolution),
+            "bitrate": self.bitrate,
+            "start_time_unix": self._recording_start_time_unix,
+            "start_time_monotonic": self._recording_start_time,
+            "video_file": str(self.video_path) if self.video_path else None,
+            "timing_csv": str(self.frame_timing_path) if self.frame_timing_path else None,
+        }
 
     async def cleanup(self) -> None:
         await self.stop_recording()

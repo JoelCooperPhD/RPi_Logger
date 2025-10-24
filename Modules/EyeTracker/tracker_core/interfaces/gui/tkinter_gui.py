@@ -55,8 +55,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.preview_frame = content_frame
 
-        label = ttk.Label(content_frame, text="Scene Camera (with Gaze Overlay)",
-                        font=('TkDefaultFont', 10, 'bold'))
+        label = ttk.Label(content_frame, text="Scene Camera (with Gaze Overlay)")
         label.grid(row=0, column=0, sticky='w', padx=5, pady=(5, 2))
 
         self.preview_canvas = tk.Canvas(content_frame,
@@ -192,7 +191,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             canvas_height // 2,
             text="Waiting for eye tracker device...\n\nChecking every 3 seconds",
             fill="white",
-            font=('TkDefaultFont', 14),
             justify='center'
         )
 

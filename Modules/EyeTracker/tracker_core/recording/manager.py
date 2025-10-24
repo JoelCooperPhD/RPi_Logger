@@ -18,7 +18,6 @@ import aiofiles
 import cv2
 import numpy as np
 
-from Modules.base.io_utils import get_versioned_filename
 from Modules.base.recording import RecordingManagerBase
 from ..config.tracker_config import TrackerConfig as Config
 
@@ -126,16 +125,12 @@ class RecordingManager(RecordingManagerBase):
             session_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         w, h = self.config.resolution
-        base_name = f"GAZE_{w}x{h}_{self.config.fps}fps_{session_timestamp}"
-        self.recording_filename = str(target_dir / f"{base_name}_trial{trial_number:03d}.mp4")
+        self.recording_filename = str(target_dir / f"{session_timestamp}_GAZE_trial{trial_number:03d}_{w}x{h}_{self.config.fps}fps.mp4")
 
-        base_versioned = get_versioned_filename(target_dir, datetime.datetime.now())
-        base_versioned_no_ext = base_versioned.rsplit('.', 1)[0]
-
-        self.gaze_filename = str(target_dir / f"{base_versioned_no_ext}_gazedata.txt")
-        self.frame_timing_filename = str(target_dir / f"{base_versioned_no_ext}_frametiming.txt")
-        self.imu_filename = str(target_dir / f"{base_versioned_no_ext}_imu.txt")
-        self.events_filename = str(target_dir / f"{base_versioned_no_ext}_events.txt")
+        self.gaze_filename = str(target_dir / f"{session_timestamp}_GAZEDATA.csv")
+        self.frame_timing_filename = str(target_dir / f"{session_timestamp}_FRAMETIMING.csv")
+        self.imu_filename = str(target_dir / f"{session_timestamp}_IMU.csv")
+        self.events_filename = str(target_dir / f"{session_timestamp}_EVENTS.csv")
 
         try:
             if self.use_ffmpeg:
@@ -195,10 +190,9 @@ class RecordingManager(RecordingManagerBase):
             if not frame_timing_exists:
                 await asyncio.to_thread(
                     self._frame_timing_file.write,
-                    "frame_number,write_time_unix,write_time_iso,expected_delta,actual_delta,delta_error,"
-                    "queue_delay,capture_latency,write_duration,queue_backlog_after,camera_frame_index,"
-                    "display_frame_index,camera_timestamp_unix,camera_timestamp_diff,gaze_timestamp_unix,"
-                    "gaze_timestamp_diff,available_camera_fps,dropped_frames_total,duplicates_total,is_duplicate\n"
+                    "frame_number,write_time_unix,queue_delay,capture_latency,write_duration,queue_backlog_after,"
+                    "camera_frame_index,display_frame_index,camera_timestamp_unix,gaze_timestamp_unix,"
+                    "available_camera_fps,dropped_frames_total,duplicates_total,is_duplicate\n"
                 )
 
             self._imu_file = await asyncio.to_thread(open, self.imu_filename, "a" if imu_exists else "w", encoding="utf-8")
@@ -871,28 +865,11 @@ class RecordingManager(RecordingManagerBase):
         if self._frame_timing_file is None:
             return
 
-        expected_delta = 1.0 / self.config.fps if self.config.fps > 0 else 0.0
-        actual_delta: Optional[float] = None
-        if self._last_write_monotonic is not None:
-            actual_delta = write_start_monotonic - self._last_write_monotonic
-
-        delta_error: Optional[float] = None
-        if actual_delta is not None:
-            delta_error = actual_delta - expected_delta
-
         queue_delay = write_start_monotonic - queued.enqueued_monotonic
 
         capture_latency: Optional[float] = None
         if queued.metadata.capture_monotonic is not None:
             capture_latency = write_start_monotonic - queued.metadata.capture_monotonic
-
-        camera_timestamp_diff: Optional[float] = None
-        if queued.metadata.capture_unix is not None:
-            camera_timestamp_diff = write_time_unix - queued.metadata.capture_unix
-
-        gaze_timestamp_diff: Optional[float] = None
-        if queued.metadata.gaze_timestamp is not None:
-            gaze_timestamp_diff = write_time_unix - queued.metadata.gaze_timestamp
 
         write_duration = write_end_monotonic - write_start_monotonic
 
@@ -900,19 +877,14 @@ class RecordingManager(RecordingManagerBase):
         self._recorded_frame_count += 1
         self._last_write_monotonic = write_start_monotonic
 
-        write_time_iso = datetime.datetime.fromtimestamp(write_time_unix, tz=datetime.timezone.utc).isoformat(
-            timespec="milliseconds"
-        )
-
         def fmt(value: Optional[float]) -> str:
             return f"{value:.6f}" if value is not None else ""
 
         row = (
-            f"{self._written_frames},{write_time_unix:.6f},{write_time_iso},{fmt(expected_delta)},{fmt(actual_delta)},{fmt(delta_error)},"
-            f"{fmt(queue_delay)},{fmt(capture_latency)},{fmt(write_duration)},{backlog_after},"
+            f"{self._written_frames},{write_time_unix:.6f},{fmt(queue_delay)},{fmt(capture_latency)},{fmt(write_duration)},{backlog_after},"
             f"{queued.metadata.camera_frame_index if queued.metadata.camera_frame_index is not None else ''},"
             f"{queued.metadata.display_frame_index if queued.metadata.display_frame_index is not None else ''},"
-            f"{fmt(queued.metadata.capture_unix)},{fmt(camera_timestamp_diff)},{fmt(queued.metadata.gaze_timestamp)},{fmt(gaze_timestamp_diff)},"
+            f"{fmt(queued.metadata.capture_unix)},{fmt(queued.metadata.gaze_timestamp)},"
             f"{fmt(queued.metadata.available_camera_fps)},{queued.metadata.dropped_frames_total if queued.metadata.dropped_frames_total is not None else ''},"
             f"{queued.metadata.duplicates_total if queued.metadata.duplicates_total is not None else ''},"
             f"{1 if queued.metadata.is_duplicate else 0}\n"

@@ -17,3 +17,8 @@ MAX_ERROR_MESSAGE_LENGTH = 200           # Maximum length for error messages
 
 # Polling intervals
 KEYBOARD_POLL_INTERVAL = 0.001           # 1ms for keyboard input polling
+
+# Audio-Video synchronization and muxing
+AV_MUXING_ENABLED = True                 # Enable automatic A/V muxing after recording
+AV_MUXING_TIMEOUT_SECONDS = 60           # Timeout for ffmpeg muxing operations
+AV_DELETE_SOURCE_FILES = False           # Delete original audio/video files after muxing
