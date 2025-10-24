@@ -45,8 +45,8 @@ console_output = false        # Also print to console (true/false)
 ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 
 # Window position and size (saved automatically on window close)
-window_x = 1281
-window_y = 250
+window_x = 1304
+window_y = 306
 window_width = 509
 window_height = 277
 

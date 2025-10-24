@@ -14,6 +14,8 @@
 #     5 = 640x480    (VGA - Minimal CPU usage, 4:3)
 #     6 = 480x360    (QVGA+ - Very low CPU, 4:3)
 #     7 = 320x240    (QVGA - Ultra minimal, 4:3)
+#     8 = 240x180    (Tiny - Extra small preview, 4:3)
+#     9 = 160x120    (Micro - Minimal window size, 4:3)
 #
 #   Target FPS: 1-60 (IMX296 sensor supports up to 60 FPS at full resolution)
 #   Common FPS: 60=max smooth, 30=standard, 24=cinematic, 10=low CPU
@@ -26,7 +28,7 @@
 # RECORDING SETTINGS
 ################################################################################
 
-# Resolution (0-7 presets, see Quick Reference above)
+# Resolution (0-9 presets, see Quick Reference above)
 resolution_preset = 0
 
 # Frame rate (1-60 fps)
@@ -46,7 +48,7 @@ disable_mp4_conversion = false # Keep raw .h264 files (better for power-loss res
 
 # Preview windows (OpenCV)
 show_preview = true         # Show live preview windows (true/false)
-preview_preset = 7           # Preview size (0-7, smaller = lower CPU)
+preview_preset = 4           # Preview size (0-9, smaller = lower CPU)
 
 # Frame number overlay
 show_frame_number = true     # Display frame number on video/preview
@@ -98,7 +100,7 @@ enable_csv_timing_log = true # Save per-frame timing data for analysis
 enabled = true
 
 # Window position and size (saved automatically on window close)
-window_x = 1872
-window_y = 125
-window_width = 953
-window_height = 405
+window_x = 1141
+window_y = 1151
+window_width = 840
+window_height = 541

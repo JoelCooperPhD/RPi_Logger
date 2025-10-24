@@ -92,6 +92,12 @@ class AudioRecordingManager:
             self.logger.error("Failed to save recording: %s", e)
             return None
 
+    async def pause_recording(self):
+        raise NotImplementedError("Pause not supported by audio recording")
+
+    async def resume_recording(self):
+        raise NotImplementedError("Resume not supported by audio recording")
+
     async def cleanup(self) -> None:
         self.recording = False
         self.audio_data.clear()

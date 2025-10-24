@@ -5,16 +5,22 @@
 #
 # QUICK REFERENCE:
 #
+#   Preview Resolution Presets (4:3 aspect ratio - matches Pupil Labs scene camera):
+#     0 = 1600x1200  (Full - Native resolution, high quality)
+#     1 = 1280x960   (Large - High quality, 4:3)
+#     2 = 1024x768   (XGA - Good balance, 4:3)
+#     3 = 800x600    (SVGA - Standard quality, 4:3)
+#     4 = 640x480    (VGA - Balanced CPU/quality, 4:3)
+#     5 = 480x360    (Small - Low CPU usage, 4:3)
+#     6 = 320x240    (QVGA - Minimal CPU, 4:3)
+#     7 = 240x180    (Tiny - Very low CPU, 4:3)
+#     8 = 160x120    (Micro - Ultra minimal, 4:3)
+#
 #   Target FPS: 1-120 (recommended: 5-30 for eye tracking)
 #   Common FPS: 30=high quality, 10=balanced, 5=low CPU (default)
 #
-#   Resolution: WIDTHxHEIGHT (e.g., 1280x720)
-#   Common: 1920x1080 (Full HD), 1280x720 (HD 720p), 640x480 (VGA)
-#
-#   Preview Width: 320-1920 pixels (maintains aspect ratio)
-#   Common: 640 (default), 480 (low CPU), 1280 (high quality)
-#
 # NOTE: System automatically discovers Pupil Labs eye tracker devices
+# NOTE: Pupil Labs scene camera outputs 1600x1200 (4:3 aspect ratio)
 ################################################################################
 
 
@@ -23,7 +29,7 @@
 ################################################################################
 
 # Frame rate (1-120 fps, recommended: 5-30)
-target_fps = 5.0
+target_fps = 10.0
 
 # Scene video resolution (WIDTHxHEIGHT)
 resolution_width = 1280
@@ -38,8 +44,38 @@ session_prefix = session
 # DISPLAY & PREVIEW
 ################################################################################
 
-# Preview window
-preview_width = 640          # Preview window width in pixels (maintains aspect ratio)
+# Preview window size (0-8 presets, smaller = lower CPU)
+preview_preset = 6           # 640x480 VGA - Balanced CPU/quality (default)
+
+
+################################################################################
+# RECORDING OVERLAY
+################################################################################
+
+# Frame number overlay on recorded video (for cross-referencing with timing logs)
+enable_recording_overlay = true   # Show frame number on video (true/false)
+include_gaze_in_recording = true  # Include gaze circle on recorded video (true/false)
+
+# Overlay appearance (matching camera module defaults)
+overlay_font_scale = 0.6          # Text size (0.3-2.0)
+overlay_thickness = 1             # Text thickness (1-3)
+overlay_color_r = 0               # Red component (0-255)
+overlay_color_g = 0               # Green component (0-255)
+overlay_color_b = 0               # Blue component (0-255, BGR format)
+overlay_margin_left = 10          # Left margin in pixels
+overlay_line_start_y = 30         # Vertical position from top in pixels
+
+# Gaze indicator settings (both display and recording)
+gaze_circle_radius = 10           # Circle radius in pixels (5-100)
+gaze_circle_thickness = 1         # Circle line thickness (1-10, -1=filled)
+gaze_center_radius = 1            # Center dot radius in pixels (1-10)
+gaze_shape = circle               # Shape: circle or cross
+gaze_color_worn_b = 255           # Color when worn - Blue (0-255)
+gaze_color_worn_g = 255           # Color when worn - Green (0-255)
+gaze_color_worn_r = 0             # Color when worn - Red (0-255, BGR=Yellow)
+gaze_color_not_worn_b = 0         # Color when not worn - Blue (0-255)
+gaze_color_not_worn_g = 0         # Color when not worn - Green (0-255)
+gaze_color_not_worn_r = 255       # Color when not worn - Red (0-255, BGR=Red)
 
 
 ################################################################################
@@ -80,7 +116,7 @@ discovery_retry = 3.0        # Retry interval after device failure (seconds)
 enabled = true
 
 # Window position and size (saved automatically on window close)
-window_x = 2004
-window_y = 762
-window_width = 962
-window_height = 278
+window_x = 1884
+window_y = 435
+window_width = 1025
+window_height = 460

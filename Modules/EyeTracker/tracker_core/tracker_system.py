@@ -37,7 +37,28 @@ class TrackerSystem(BaseSystem, RecordingStateMixin):
             fps=getattr(args, 'target_fps', 5.0),
             resolution=(width, height),
             output_dir=str(getattr(args, 'session_dir', 'recordings')),
-            display_width=getattr(args, 'preview_width', 640)
+            display_width=getattr(args, 'preview_width', 640),
+            preview_width=getattr(args, 'preview_width', 640),
+            preview_height=getattr(args, 'preview_height', None),
+            enable_recording_overlay=getattr(args, 'enable_recording_overlay', True),
+            include_gaze_in_recording=getattr(args, 'include_gaze_in_recording', True),
+            overlay_font_scale=getattr(args, 'overlay_font_scale', 0.6),
+            overlay_thickness=getattr(args, 'overlay_thickness', 1),
+            overlay_color_r=getattr(args, 'overlay_color_r', 0),
+            overlay_color_g=getattr(args, 'overlay_color_g', 0),
+            overlay_color_b=getattr(args, 'overlay_color_b', 0),
+            overlay_margin_left=getattr(args, 'overlay_margin_left', 10),
+            overlay_line_start_y=getattr(args, 'overlay_line_start_y', 30),
+            gaze_circle_radius=getattr(args, 'gaze_circle_radius', 30),
+            gaze_circle_thickness=getattr(args, 'gaze_circle_thickness', 3),
+            gaze_center_radius=getattr(args, 'gaze_center_radius', 2),
+            gaze_shape=getattr(args, 'gaze_shape', 'circle'),
+            gaze_color_worn_b=getattr(args, 'gaze_color_worn_b', 255),
+            gaze_color_worn_g=getattr(args, 'gaze_color_worn_g', 255),
+            gaze_color_worn_r=getattr(args, 'gaze_color_worn_r', 0),
+            gaze_color_not_worn_b=getattr(args, 'gaze_color_not_worn_b', 0),
+            gaze_color_not_worn_g=getattr(args, 'gaze_color_not_worn_g', 0),
+            gaze_color_not_worn_r=getattr(args, 'gaze_color_not_worn_r', 255)
         )
 
         self.device_manager = DeviceManager()

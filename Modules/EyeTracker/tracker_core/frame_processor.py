@@ -1,7 +1,5 @@
 
 import asyncio
-import time
-import datetime
 import logging
 from typing import Optional, Any
 import os
@@ -26,6 +24,30 @@ class FrameProcessor:
         self._logged_color_info = False
         self._logged_gaze_debug = False
         self._logged_gaze_error = False
+
+    def _draw_gaze_indicator(self, frame: np.ndarray, gaze_x: int, gaze_y: int, is_worn: bool) -> None:
+        """Draw gaze indicator (circle or cross) at specified location using config settings"""
+        # Get colors from config
+        if is_worn:
+            color = (self.config.gaze_color_worn_b, self.config.gaze_color_worn_g, self.config.gaze_color_worn_r)
+        else:
+            color = (self.config.gaze_color_not_worn_b, self.config.gaze_color_not_worn_g, self.config.gaze_color_not_worn_r)
+
+        # Draw based on shape config
+        if self.config.gaze_shape == "cross":
+            # Draw cross
+            arm_length = self.config.gaze_circle_radius
+            thickness = self.config.gaze_circle_thickness
+            # Horizontal line
+            cv2.line(frame, (gaze_x - arm_length, gaze_y), (gaze_x + arm_length, gaze_y), color, thickness)
+            # Vertical line
+            cv2.line(frame, (gaze_x, gaze_y - arm_length), (gaze_x, gaze_y + arm_length), color, thickness)
+        else:
+            # Draw circle (default)
+            cv2.circle(frame, (gaze_x, gaze_y), self.config.gaze_circle_radius, color, self.config.gaze_circle_thickness)
+
+        # Draw center dot
+        cv2.circle(frame, (gaze_x, gaze_y), self.config.gaze_center_radius, color, -1)
 
     def process_frame(self, raw_frame: np.ndarray) -> np.ndarray:
         try:
@@ -75,107 +97,6 @@ class FrameProcessor:
             logger.error(f"Error processing frame: {e}")
             return raw_frame
 
-    def add_overlays(
-        self,
-        frame: np.ndarray,
-        frame_count: int,
-        camera_frames: int,
-        start_time: Optional[float],
-        recording: bool,
-        last_gaze: Optional[Any],
-        rolling_camera_fps: Optional[float] = None,
-        dropped_frames: int = 0,
-        duplicates: int = 0,
-        requested_fps: float = 30.0,
-        experiment_label: Optional[str] = None,
-    ) -> np.ndarray:
-        h, w = frame.shape[:2]
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.6
-        thickness = 2
-
-        overlay = frame.copy()
-        banner_height = 200
-        cv2.rectangle(overlay, (0, 0), (w, banner_height), (255, 255, 255), -1)
-        cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, dst=frame)
-
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cv2.putText(frame, f"Time: {timestamp}", (10, 25),
-                   font, font_scale, (0, 0, 0), thickness)
-
-        if start_time:
-            available_fps = rolling_camera_fps if rolling_camera_fps is not None else (camera_frames / (time.time() - start_time) if start_time else 0)
-
-            cv2.putText(frame, f"Available FPS: {available_fps:.1f}", (10, 50),
-                       font, font_scale, (0, 0, 0), thickness)
-            cv2.putText(frame, f"Requested FPS: {requested_fps:.1f}", (10, 75),
-                       font, font_scale, (0, 0, 0), thickness)
-            cv2.putText(frame, f"Dropped: {dropped_frames}", (10, 100),
-                       font, font_scale, (0, 0, 0), thickness)
-            cv2.putText(frame, f"Duplicated: {duplicates}", (10, 125),
-                       font, font_scale, (0, 0, 0), thickness)
-            cv2.putText(frame, f"Display Frames: {frame_count}", (10, 150),
-                       font, font_scale, (0, 0, 0), thickness)
-
-        if experiment_label:
-            cv2.putText(frame, f"Experiment: {experiment_label}", (10, 175),
-                       font, font_scale, (0, 0, 0), thickness)
-
-        if recording:
-            cv2.putText(frame, "RECORDING", (w - 150, 30),
-                       font, font_scale, (0, 0, 255), thickness)
-
-        if last_gaze:
-            gaze_x, gaze_y = None, None
-
-            # Debug gaze data once
-            if not self._logged_gaze_debug:
-                logger.info(f"Gaze x: {getattr(last_gaze, 'x', 'None')}, y: {getattr(last_gaze, 'y', 'None')}")
-                if hasattr(last_gaze, 'x') and hasattr(last_gaze, 'y'):
-                    logger.info(f"Raw gaze coordinates: x={last_gaze.x}, y={last_gaze.y}")
-                    logger.info(f"Frame dimensions: {w}x{h}")
-                self._logged_gaze_debug = True
-
-            if hasattr(last_gaze, 'x') and hasattr(last_gaze, 'y'):
-                try:
-                    raw_x = float(last_gaze.x)
-                    raw_y = float(last_gaze.y)
-
-                    if raw_x > 1.0 or raw_y > 1.0:
-
-                        gaze_x = int((raw_x / 1600.0) * w)
-
-                        scene_y_in_full_frame = raw_y
-                        if scene_y_in_full_frame <= 1200:  # Within scene camera area
-                            gaze_y = int((scene_y_in_full_frame / 1200.0) * h)
-                        else:
-                            gaze_y = h - 1
-                    else:
-                        gaze_x = int(raw_x * w)
-                        gaze_y = int(raw_y * h)
-
-                except Exception as e:
-                    if not self._logged_gaze_error:
-                        logger.error(f"Gaze coordinate error: {e}")
-                        self._logged_gaze_error = True
-
-            if gaze_x is not None and gaze_y is not None:
-                gaze_x = max(0, min(gaze_x, w - 1))
-                gaze_y = max(0, min(gaze_y, h - 1))
-
-                color = (0, 255, 255)  # Yellow for worn
-                if hasattr(last_gaze, 'worn') and not last_gaze.worn:
-                    color = (0, 0, 255)  # Red if not worn
-
-                cv2.circle(frame, (gaze_x, gaze_y), 30, color, 3)
-                cv2.circle(frame, (gaze_x, gaze_y), 2, color, -1)
-
-        cv2.putText(frame, "Q: Quit | R: Record | P: Pause", (w - 280, h - 10),
-                   font, 0.5, (255, 255, 255), 1)
-
-        return frame
-
-    # Phase 1.2: Separate overlay methods for display vs recording
     def add_display_overlays(
         self,
         frame: np.ndarray,
@@ -190,55 +111,120 @@ class FrameProcessor:
         requested_fps: float = 30.0,
         experiment_label: Optional[str] = None,
     ) -> np.ndarray:
-        """Overlays for preview display only (full featured, user-friendly)"""
-        # Same as add_overlays - full featured for display
-        return self.add_overlays(
-            frame, frame_count, camera_frames, start_time, recording,
-            last_gaze, rolling_camera_fps, dropped_frames, duplicates,
-            requested_fps, experiment_label
+        """Simplified display overlay matching camera style: frame number + gaze circle"""
+        # Use same minimal overlay style as recording (but not saved to video)
+        font_scale = self.config.overlay_font_scale
+        thickness = self.config.overlay_thickness
+        text_color = (self.config.overlay_color_b, self.config.overlay_color_g, self.config.overlay_color_r)
+        margin_left = self.config.overlay_margin_left
+        line_start_y = self.config.overlay_line_start_y
+
+        # Show display frame count
+        frame_text = f"{frame_count}"
+        cv2.putText(
+            frame,
+            frame_text,
+            (margin_left, line_start_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            text_color,
+            thickness,
+            cv2.LINE_AA
         )
 
-    def add_minimal_gaze(self, frame: np.ndarray, last_gaze: Optional[Any]) -> np.ndarray:
-        """Just gaze circle for recording (minimal, less intrusive)"""
-        if not last_gaze:
-            return frame
+        # Add gaze circle if available
+        if last_gaze:
+            h, w = frame.shape[:2]
+            gaze_x, gaze_y = None, None
 
-        h, w = frame.shape[:2]
-        gaze_x, gaze_y = None, None
+            if hasattr(last_gaze, 'x') and hasattr(last_gaze, 'y'):
+                try:
+                    raw_x = float(last_gaze.x)
+                    raw_y = float(last_gaze.y)
 
-        if hasattr(last_gaze, 'x') and hasattr(last_gaze, 'y'):
-            try:
-                raw_x = float(last_gaze.x)
-                raw_y = float(last_gaze.y)
-
-                if raw_x > 1.0 or raw_y > 1.0:
-                    gaze_x = int((raw_x / 1600.0) * w)
-                    scene_y_in_full_frame = raw_y
-                    if scene_y_in_full_frame <= 1200:
-                        gaze_y = int((scene_y_in_full_frame / 1200.0) * h)
+                    if raw_x > 1.0 or raw_y > 1.0:
+                        gaze_x = int((raw_x / 1600.0) * w)
+                        scene_y_in_full_frame = raw_y
+                        if scene_y_in_full_frame <= 1200:
+                            gaze_y = int((scene_y_in_full_frame / 1200.0) * h)
+                        else:
+                            gaze_y = h - 1
                     else:
-                        gaze_y = h - 1
-                else:
-                    gaze_x = int(raw_x * w)
-                    gaze_y = int(raw_y * h)
-            except Exception:
-                pass
+                        gaze_x = int(raw_x * w)
+                        gaze_y = int(raw_y * h)
+                except Exception:
+                    pass
 
-        if gaze_x is not None and gaze_y is not None:
-            gaze_x = max(0, min(gaze_x, w - 1))
-            gaze_y = max(0, min(gaze_y, h - 1))
+            if gaze_x is not None and gaze_y is not None:
+                gaze_x = max(0, min(gaze_x, w - 1))
+                gaze_y = max(0, min(gaze_y, h - 1))
 
-            # Smaller circle for recording (less intrusive)
-            color = (0, 255, 255)  # Yellow
-            if hasattr(last_gaze, 'worn') and not last_gaze.worn:
-                color = (0, 0, 255)  # Red if not worn
-
-            cv2.circle(frame, (gaze_x, gaze_y), 15, color, 2)  # Smaller than display version
-            cv2.circle(frame, (gaze_x, gaze_y), 2, color, -1)
+                is_worn = not (hasattr(last_gaze, 'worn') and not last_gaze.worn)
+                self._draw_gaze_indicator(frame, gaze_x, gaze_y, is_worn)
 
         return frame
 
-    # Phase 1.3: Early frame scaling methods
+    def add_minimal_recording_overlay(
+        self,
+        frame: np.ndarray,
+        frame_number: int,
+        last_gaze: Optional[Any] = None,
+        include_gaze: bool = True
+    ) -> np.ndarray:
+        """
+        Minimal overlay for recording: frame number in upper left (matching camera style).
+        Optionally includes gaze circle.
+        """
+        # Use config values
+        font_scale = self.config.overlay_font_scale
+        thickness = self.config.overlay_thickness
+        text_color = (self.config.overlay_color_b, self.config.overlay_color_g, self.config.overlay_color_r)  # BGR format
+        margin_left = self.config.overlay_margin_left
+        line_start_y = self.config.overlay_line_start_y
+
+        frame_text = f"{frame_number}"
+        cv2.putText(
+            frame,
+            frame_text,
+            (margin_left, line_start_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            text_color,
+            thickness,
+            cv2.LINE_AA
+        )
+
+        if include_gaze and last_gaze:
+            h, w = frame.shape[:2]
+            gaze_x, gaze_y = None, None
+
+            if hasattr(last_gaze, 'x') and hasattr(last_gaze, 'y'):
+                try:
+                    raw_x = float(last_gaze.x)
+                    raw_y = float(last_gaze.y)
+
+                    if raw_x > 1.0 or raw_y > 1.0:
+                        gaze_x = int((raw_x / 1600.0) * w)
+                        scene_y_in_full_frame = raw_y
+                        if scene_y_in_full_frame <= 1200:
+                            gaze_y = int((scene_y_in_full_frame / 1200.0) * h)
+                        else:
+                            gaze_y = h - 1
+                    else:
+                        gaze_x = int(raw_x * w)
+                        gaze_y = int(raw_y * h)
+                except Exception:
+                    pass
+
+            if gaze_x is not None and gaze_y is not None:
+                gaze_x = max(0, min(gaze_x, w - 1))
+                gaze_y = max(0, min(gaze_y, h - 1))
+
+                is_worn = not (hasattr(last_gaze, 'worn') and not last_gaze.worn)
+                self._draw_gaze_indicator(frame, gaze_x, gaze_y, is_worn)
+
+        return frame
+
     def scale_for_preview(self, frame: np.ndarray) -> np.ndarray:
         """
         Scale frame down to preview size early in pipeline.
@@ -323,36 +309,6 @@ class FrameProcessor:
     async def process_frame_async(self, raw_frame: np.ndarray) -> np.ndarray:
         return await asyncio.to_thread(self.process_frame, raw_frame)
 
-    async def add_overlays_async(
-        self,
-        frame: np.ndarray,
-        frame_count: int,
-        camera_frames: int,
-        start_time: Optional[float],
-        recording: bool,
-        last_gaze: Optional[Any],
-        rolling_camera_fps: Optional[float] = None,
-        dropped_frames: int = 0,
-        duplicates: int = 0,
-        requested_fps: float = 30.0,
-        experiment_label: Optional[str] = None,
-    ) -> np.ndarray:
-        return await asyncio.to_thread(
-            self.add_overlays,
-            frame,
-            frame_count,
-            camera_frames,
-            start_time,
-            recording,
-            last_gaze,
-            rolling_camera_fps,
-            dropped_frames,
-            duplicates,
-            requested_fps,
-            experiment_label,
-        )
-
-    # Phase 1.2: Async versions of split overlay methods
     async def add_display_overlays_async(
         self,
         frame: np.ndarray,

@@ -137,7 +137,10 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             return
 
         tracker = self.system.gaze_tracker
-        if not hasattr(tracker, '_latest_display_frame') or tracker._latest_display_frame is None:
+        if not hasattr(tracker, '_latest_display_frame'):
+            return
+
+        if tracker._latest_display_frame is None:
             return
 
         frame = tracker._latest_display_frame
