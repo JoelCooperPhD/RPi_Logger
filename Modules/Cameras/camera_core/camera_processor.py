@@ -37,17 +37,17 @@ class CameraProcessor:
 
         self._background_tasks: set[asyncio.Task] = set()
 
-    async def _submit_frame_metadata_async(self, frame, metadata) -> None:
+    async def _write_frame_metadata_async(self, frame, metadata) -> None:
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 None,
-                self.recording_manager.submit_frame,
+                self.recording_manager.write_frame,
                 frame,
                 metadata
             )
         except Exception as exc:
-            self.logger.error("Error submitting frame metadata: %s", exc)
+            self.logger.error("Error writing frame metadata: %s", exc)
 
     def _add_overlays_wrapper(self, frame, capture_fps, collation_fps, captured_frames,
                               collated_frames, requested_fps, is_recording, recording_filename,
@@ -196,7 +196,7 @@ class CameraProcessor:
                     )
 
                     task = asyncio.create_task(
-                        self._submit_frame_metadata_async(None, frame_metadata)
+                        self._write_frame_metadata_async(None, frame_metadata)
                     )
                     self._background_tasks.add(task)
                     task.add_done_callback(self._background_tasks.discard)

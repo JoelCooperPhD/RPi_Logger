@@ -282,8 +282,3 @@ class CameraRecordingManager(RecordingManagerBase):
 
         if self._csv_logger is not None:
             self._csv_logger.log_frame(frame_number, metadata)
-
-    # Alias for backward compatibility
-    def submit_frame(self, frame: Optional[np.ndarray], metadata: FrameTimingMetadata) -> None:
-        """Deprecated: Use write_frame instead"""
-        self.write_frame(frame, metadata)
