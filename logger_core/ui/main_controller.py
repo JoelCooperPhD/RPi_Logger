@@ -13,6 +13,7 @@ from typing import Optional, Dict
 from ..logger_system import LoggerSystem
 from ..module_process import ModuleState
 from ..config_manager import get_config_manager
+from ..paths import CONFIG_PATH
 from .timer_manager import TimerManager
 
 
@@ -41,8 +42,6 @@ class MainController:
         self.running = False
         self.session_active = False
         self.trial_active = False
-
-        self.config_path = Path(__file__).parent.parent.parent / "config.txt"
 
     def set_widgets(
         self,
@@ -123,7 +122,7 @@ class MainController:
             asyncio.create_task(self._stop_session_async())
         else:
             config_manager = get_config_manager()
-            config = config_manager.read_config(self.config_path)
+            config = config_manager.read_config(CONFIG_PATH)
             last_dir = config_manager.get_str(config, 'last_session_dir', default='')
 
             if last_dir and Path(last_dir).exists():
@@ -139,7 +138,7 @@ class MainController:
             if session_dir:
                 self.logger.info("Starting session in: %s", session_dir)
 
-                config_manager.write_config(self.config_path, {'last_session_dir': session_dir})
+                config_manager.write_config(CONFIG_PATH, {'last_session_dir': session_dir})
                 self.logger.debug("Saved last session directory to config: %s", session_dir)
 
                 asyncio.create_task(self._start_session_async(Path(session_dir)))
@@ -314,7 +313,6 @@ class MainController:
                     if parsed:
                         width, height, x, y = parsed
 
-                        config_path = Path(__file__).parent.parent.parent / "config.txt"
                         config_manager = get_config_manager()
                         updates = {
                             'window_x': x,
@@ -322,7 +320,7 @@ class MainController:
                             'window_width': width,
                             'window_height': height,
                         }
-                        if config_manager.write_config(config_path, updates):
+                        if config_manager.write_config(CONFIG_PATH, updates):
                             self.logger.info("Saved main logger window geometry: %dx%d+%d+%d", width, height, x, y)
                         else:
                             self.logger.warning("Failed to save window geometry")
@@ -407,28 +405,25 @@ class MainController:
 
     def open_config_file(self) -> None:
         try:
-            config_path = Path(__file__).parent.parent.parent / "config.txt"
-
-            if not config_path.exists():
-                self.logger.warning("Config file not found: %s", config_path)
+            if not CONFIG_PATH.exists():
+                self.logger.warning("Config file not found: %s", CONFIG_PATH)
                 return
 
             if sys.platform == 'linux':
-                subprocess.Popen(['xdg-open', str(config_path)])
+                subprocess.Popen(['xdg-open', str(CONFIG_PATH)])
             elif sys.platform == 'darwin':
-                subprocess.Popen(['open', str(config_path)])
+                subprocess.Popen(['open', str(CONFIG_PATH)])
             elif sys.platform == 'win32':
-                subprocess.Popen(['notepad.exe', str(config_path)])
+                subprocess.Popen(['notepad.exe', str(CONFIG_PATH)])
 
-            self.logger.info("Opened config file: %s", config_path)
+            self.logger.info("Opened config file: %s", CONFIG_PATH)
         except Exception as e:
             self.logger.error("Failed to open config file: %s", e)
 
     def reset_settings(self) -> None:
         try:
-            config_path = Path(__file__).parent.parent.parent / "config.txt"
             from .help_dialogs import ResetSettingsDialog
-            ResetSettingsDialog(self.root, config_path)
+            ResetSettingsDialog(self.root, CONFIG_PATH)
         except Exception as e:
             self.logger.error("Failed to reset settings: %s", e)
 
