@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from logger_core import LoggerSystem
+from logger_core import LoggerSystem, get_shutdown_coordinator
 from logger_core.ui import MainWindow
 from logger_core.paths import CONFIG_PATH, LOGS_DIR, MASTER_LOG_FILE, ensure_directories
 from logger_core.config_manager import get_config_manager
@@ -132,21 +132,25 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     ui = MainWindow(logger_system)
 
+    # Setup shutdown coordinator
+    shutdown_coordinator = get_shutdown_coordinator()
+
+    # Register cleanup callbacks in order
+    async def cleanup_logger_system():
+        await logger_system.cleanup()
+
+    async def cleanup_ui():
+        if ui.root:
+            ui.root.quit()
+
+    shutdown_coordinator.register_cleanup(cleanup_logger_system)
+    shutdown_coordinator.register_cleanup(cleanup_ui)
+
+    # Setup signal handlers
     loop = asyncio.get_running_loop()
 
     def signal_handler():
-        logger.info("Received shutdown signal")
-        asyncio.create_task(shutdown())
-
-    async def shutdown():
-        logger.info("Shutting down...")
-        try:
-            await logger_system.cleanup()
-        except Exception as e:
-            logger.error("Error during cleanup: %s", e)
-        finally:
-            if ui.root:
-                ui.root.quit()
+        asyncio.create_task(shutdown_coordinator.initiate_shutdown("signal"))
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -158,11 +162,15 @@ async def main(argv: Optional[list[str]] = None) -> None:
     try:
         await ui.run()
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        await shutdown_coordinator.initiate_shutdown("keyboard interrupt")
     except Exception as e:
         logger.error("Unexpected error: %s", e, exc_info=True)
+        await shutdown_coordinator.initiate_shutdown("exception")
     finally:
-        await logger_system.cleanup()
+        # Ensure shutdown completes if not already initiated
+        if not shutdown_coordinator.is_complete:
+            await shutdown_coordinator.initiate_shutdown("finally block")
+
         logger.info("=" * 60)
         logger.info("RPi Logger - Master System Stopped")
         logger.info("=" * 60)
