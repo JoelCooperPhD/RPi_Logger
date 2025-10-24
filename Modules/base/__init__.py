@@ -32,6 +32,12 @@ from .gui_utils import (
 )
 from .tkinter_gui_base import TkinterGUIBase
 from .tkinter_menu_base import TkinterMenuBase
+from .usb_serial_manager import (
+    USBDeviceConfig,
+    USBSerialDevice,
+    USBDeviceMonitor,
+    DeviceState,
+)
 
 __all__ = [
     'BaseSupervisor',
@@ -62,4 +68,8 @@ __all__ = [
     'load_window_geometry_from_config',
     'TkinterGUIBase',
     'TkinterMenuBase',
+    'USBDeviceConfig',
+    'USBSerialDevice',
+    'USBDeviceMonitor',
+    'DeviceState',
 ]

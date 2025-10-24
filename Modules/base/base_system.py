@@ -25,6 +25,7 @@ class BaseSystem(ABC):
         self.initialized = False
 
         self.mode = getattr(args, "mode", "gui")
+        self.mode_instance = None
         self.slave_mode = self.mode == "slave"
         self.headless_mode = self.mode == "headless"
         self.gui_mode = self.mode == "gui"
@@ -37,6 +38,8 @@ class BaseSystem(ABC):
         if self.session_dir:
             self.session_label = self.session_dir.name
             self.logger.info("Session directory: %s", self.session_dir)
+
+        self.trial_label: str = ""
 
         self.console = getattr(args, "console_stdout", sys.stdout)
 
@@ -55,8 +58,8 @@ class BaseSystem(ABC):
             if not (self.DEFER_DEVICE_INIT_IN_GUI and self.gui_mode):
                 await self._initialize_devices()
 
-            mode_instance = self._create_mode_instance(self.mode)
-            await mode_instance.run()
+            self.mode_instance = self._create_mode_instance(self.mode)
+            await self.mode_instance.run()
 
         except KeyboardInterrupt:
             self.logger.info("%s cancelled by user", self.__class__.__name__)

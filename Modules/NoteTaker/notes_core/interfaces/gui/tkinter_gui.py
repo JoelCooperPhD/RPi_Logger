@@ -26,7 +26,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.note_count_label: Optional[tk.Label] = None
         self.recording_modules_label: Optional[tk.Label] = None
         self.note_entry: Optional[tk.Text] = None
-        self.add_note_button: Optional[tk.Button] = None
+        self.add_note_button: Optional[ttk.Button] = None
         self.note_history: Optional[scrolledtext.ScrolledText] = None
         self.note_history_visible_var: Optional[tk.BooleanVar] = None
 
@@ -84,22 +84,18 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.note_entry = tk.Text(
             entry_box_frame,
-            height=3,
+            height=1,
             width=50,
             font=("Arial", 10),
             wrap=tk.WORD
         )
         self.note_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.add_note_button = tk.Button(
+        self.add_note_button = ttk.Button(
             entry_box_frame,
-            text="Add Note\n(Enter)",
+            text="Post",
             command=self._on_add_note,
-            state=tk.DISABLED,
-            bg="#4CAF50",
-            fg="white",
-            font=("Arial", 9, "bold"),
-            width=10
+            state=tk.DISABLED
         )
         self.add_note_button.pack(side=tk.LEFT, padx=5)
 
@@ -215,13 +211,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         if not self.recording_modules_label or not self.system.notes_handler:
             return
 
-        recording_modules = self.system.notes_handler._get_recording_modules()
-
-        if recording_modules:
-            modules_str = ", ".join(recording_modules)
-            self.recording_modules_label.config(text=f"Modules: {modules_str}")
-        else:
-            self.recording_modules_label.config(text="Modules: None")
+        self.recording_modules_label.config(text="Modules: ...")
 
     def sync_recording_state(self):
         if self.system.recording:

@@ -13,30 +13,24 @@ class CommandHandler(BaseCommandHandler):
     def __init__(self, audio_system: 'AudioSystem', gui=None):
         super().__init__(audio_system, gui=gui)
 
-    async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
-        if not self._check_recording_state(should_be_recording=False):
-            return
+    async def _start_recording_impl(self, command_data: Dict[str, Any], trial_number: int) -> bool:
+        return await self.system.start_recording(trial_number)
 
-        success = await self.system.start_recording()
-        if success:
-            device_count = len(self.system.active_handlers)
-            StatusMessage.send("recording_started", {
-                "devices": device_count,
-                "recording_count": self.system.recording_count
-            })
-            self.logger.info("Recording started on %d devices", device_count)
-        else:
-            StatusMessage.send("error", {"message": "Failed to start recording"})
-
-    async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
-        if not self._check_recording_state(should_be_recording=True):
-            return
-
+    async def _stop_recording_impl(self, command_data: Dict[str, Any]) -> bool:
         await self.system.stop_recording()
-        StatusMessage.send("recording_stopped", {
+        return True
+
+    def _get_recording_started_status_data(self, trial_number: int) -> Dict[str, Any]:
+        return {
+            "devices": len(self.system.active_handlers),
+            "recording_count": self.system.recording_count,
+            "trial": trial_number
+        }
+
+    def _get_recording_stopped_status_data(self) -> Dict[str, Any]:
+        return {
             "recording_count": self.system.recording_count
-        })
-        self.logger.info("Recording stopped")
+        }
 
     async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
         status_data = {

@@ -8,6 +8,7 @@ from typing import Optional
 
 import numpy as np
 
+from Modules.base.io_utils import get_versioned_filename
 from ..camera_utils import FrameTimingMetadata
 from ..constants import DEFAULT_BITRATE_BPS, FPS_MIN, FPS_MAX, FFMPEG_TIMEOUT_SECONDS
 from .csv_logger import CSVLogger
@@ -67,25 +68,32 @@ class CameraRecordingManager:
     def recorded_frame_count(self) -> int:
         return self._overlay.get_frame_count()
 
-    async def start_recording(self, session_dir: Path) -> None:
+    async def start_recording(self, session_dir: Path, trial_number: int = 1) -> None:
         if self.recording:
             return
 
         await asyncio.to_thread(session_dir.mkdir, parents=True, exist_ok=True)
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        w, h = self.resolution
-        base_name = f"cam{self.camera_id}_{w}x{h}_{self.fps:.1f}fps_{timestamp}"
+        session_name = session_dir.name
+        if "_" in session_name:
+            session_timestamp = session_name.split("_", 1)[1]
+        else:
+            session_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        self.video_path = session_dir / f"{base_name}.h264"
-        self.frame_timing_path = session_dir / f"{base_name}_frame_timing.csv"
+        w, h = self.resolution
+        base_name = f"CAM{self.camera_id}_{w}x{h}_{self.fps:.1f}fps_{session_timestamp}"
+
+        self.video_path = session_dir / f"{base_name}_trial{trial_number:03d}.h264"
+
+        timing_filename = get_versioned_filename(session_dir, datetime.datetime.now())
+        self.frame_timing_path = session_dir / timing_filename
 
         self._written_frames = 0
         self._overlay.reset_frame_count()
         self._overlay.set_recording(True)
 
         if self.enable_csv_logging:
-            self._csv_logger = CSVLogger(self.camera_id, self.frame_timing_path)
+            self._csv_logger = CSVLogger(self.camera_id, self.frame_timing_path, trial_number)
             try:
                 self._csv_logger.start()
             except RuntimeError as e:

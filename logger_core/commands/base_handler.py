@@ -18,11 +18,17 @@ class BaseCommandHandler(ABC):
         self.logger.debug("Received command: %s", command)
 
         try:
-            if command == "start_recording":
-                await self.handle_start_recording(command_data)
+            if command == "start_session":
+                await self.handle_start_session(command_data)
                 return True
-            elif command == "stop_recording":
-                await self.handle_stop_recording(command_data)
+            elif command == "stop_session":
+                await self.handle_stop_session(command_data)
+                return True
+            elif command in ("record", "start_recording"):
+                await self.handle_record(command_data)
+                return True
+            elif command in ("pause", "stop_recording"):
+                await self.handle_pause(command_data)
                 return True
             elif command == "get_status":
                 await self.handle_get_status(command_data)
@@ -49,17 +55,101 @@ class BaseCommandHandler(ABC):
             self.logger.error(error_msg, exc_info=True)
             return True
 
-    @abstractmethod
-    async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
-        pass
+    async def handle_start_session(self, command_data: Dict[str, Any]) -> None:
+        self._update_session_dir(command_data)
+        self.logger.debug("start_session command received")
 
-    @abstractmethod
-    async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
-        pass
+    async def handle_stop_session(self, command_data: Dict[str, Any]) -> None:
+        self.logger.debug("stop_session command received (no default implementation)")
+
+    async def handle_record(self, command_data: Dict[str, Any]) -> None:
+        if not self._check_recording_state(should_be_recording=False):
+            return
+
+        try:
+            self._update_session_dir(command_data)
+            trial_number = command_data.get("trial_number", 1)
+            trial_label = command_data.get("trial_label", "")
+
+            if hasattr(self.system, 'trial_label'):
+                self.system.trial_label = trial_label
+
+            success = await self._start_recording_impl(command_data, trial_number)
+
+            if success:
+                status_data = self._get_recording_started_status_data(trial_number)
+                StatusMessage.send("recording_started", status_data)
+                self.logger.info("Recording started (trial %d)", trial_number)
+                self._sync_gui_recording_state()
+            else:
+                StatusMessage.send("error", {"message": "Failed to start recording"})
+                self.logger.error("Failed to start recording")
+
+        except Exception as e:
+            self.logger.exception("Failed to start recording: %s", e)
+            StatusMessage.send("error", {
+                "message": f"Failed to start recording: {str(e)[:100]}"
+            })
+
+    async def handle_pause(self, command_data: Dict[str, Any]) -> None:
+        if not self._check_recording_state(should_be_recording=True):
+            return
+
+        try:
+            success = await self._stop_recording_impl(command_data)
+
+            if success:
+                status_data = self._get_recording_stopped_status_data()
+                StatusMessage.send("recording_stopped", status_data)
+                self.logger.info("Recording paused")
+                self._sync_gui_recording_state()
+            else:
+                StatusMessage.send("error", {"message": "Failed to pause recording"})
+                self.logger.error("Failed to pause recording")
+
+        except Exception as e:
+            self.logger.exception("Failed to pause recording: %s", e)
+            StatusMessage.send("error", {
+                "message": f"Failed to pause recording: {str(e)[:100]}"
+            })
 
     @abstractmethod
     async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
         pass
+
+    @abstractmethod
+    async def _start_recording_impl(self, command_data: Dict[str, Any], trial_number: int) -> bool:
+        pass
+
+    @abstractmethod
+    async def _stop_recording_impl(self, command_data: Dict[str, Any]) -> bool:
+        pass
+
+    def _update_session_dir(self, command_data: Dict[str, Any]) -> None:
+        if "session_dir" not in command_data:
+            return
+
+        from pathlib import Path
+        session_dir = Path(command_data["session_dir"])
+
+        if hasattr(self.system, 'session_dir'):
+            self.system.session_dir = session_dir
+        if hasattr(self.system, 'session_label'):
+            self.system.session_label = session_dir.name
+        if hasattr(self.system, 'output_dir'):
+            self.system.output_dir = session_dir
+
+        self.logger.info("Updated session directory to: %s", session_dir)
+
+    def _get_recording_started_status_data(self, trial_number: int) -> Dict[str, Any]:
+        return {"trial": trial_number}
+
+    def _get_recording_stopped_status_data(self) -> Dict[str, Any]:
+        return {}
+
+    def _sync_gui_recording_state(self) -> None:
+        if self.gui and hasattr(self.gui, 'sync_recording_state'):
+            self.gui.sync_recording_state()
 
     async def handle_get_geometry(self, command_data: Dict[str, Any]) -> None:
         if not self.gui:
@@ -175,7 +265,7 @@ class BaseCommandHandler(ABC):
         is_async: bool = True
     ) -> None:
         """
-        Standardized handler for recording start/stop actions.
+        Standardized handler for recording record/pause actions.
 
         This method encapsulates the common pattern:
         1. Check recording state
@@ -183,21 +273,21 @@ class BaseCommandHandler(ABC):
         3. Send success/error status message
 
         Args:
-            action: 'start' or 'stop' (used for status messages)
+            action: 'record' or 'pause' (used for status messages)
             callback: The function/method to call for the action
             extra_data: Optional additional data to include in success status
             is_async: True if callback is async, False if sync
 
         Example usage in subclass:
-            async def handle_start_recording(self, command_data):
+            async def handle_record(self, command_data):
                 await self._handle_recording_action(
-                    'start',
-                    lambda: self.system.start_recording(),
+                    'record',
+                    lambda: self.system.record(),
                     extra_data={'cameras': len(self.system.cameras)}
                 )
         """
         # Determine expected state based on action
-        should_be_recording = (action == 'stop')
+        should_be_recording = (action == 'pause')
 
         if not self._check_recording_state(should_be_recording):
             return
@@ -210,7 +300,7 @@ class BaseCommandHandler(ABC):
                 result = callback()
 
             # Send success status
-            status_name = f"recording_{action}ed"
+            status_name = f"recording_{'started' if action == 'record' else 'stopped'}"
             data = extra_data.copy() if extra_data else {}
 
             # Include result in data if it's a dict

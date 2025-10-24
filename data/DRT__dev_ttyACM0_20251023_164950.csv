@@ -1,0 +1,3 @@
+Timestamp,Port,TrialNumber,ReactionTime_ms
+2025-10-23T16:49:50.833549,/dev/ttyACM0,1,-1.0
+2025-10-23T16:49:52.280074,/dev/ttyACM0,2,-1.0

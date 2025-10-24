@@ -32,12 +32,9 @@ resolution_preset = 0
 # Frame rate (1-60 fps)
 target_fps = 30.0
 
-# Output files
+# Output files (used only in standalone mode; master logger overrides these)
 output_dir = data
 session_prefix = session
-
-# Auto-start recording
-auto_start_recording = false # Automatically start recording on startup (true/false)
 
 # Video format (raw .h264 vs MP4 container)
 disable_mp4_conversion = false # Keep raw .h264 files (better for power-loss resilience)
@@ -101,7 +98,7 @@ enable_csv_timing_log = true # Save per-frame timing data for analysis
 enabled = false
 
 # Window position and size (saved automatically on window close)
-window_x = 2002
-window_y = 29
+window_x = 2007
+window_y = 93
 window_width = 953
 window_height = 405

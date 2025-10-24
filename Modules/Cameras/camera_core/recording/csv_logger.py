@@ -3,9 +3,11 @@ import asyncio
 import logging
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+from Modules.base.io_utils import get_versioned_filename
 from ..camera_utils import FrameTimingMetadata
 from ..constants import CSV_FLUSH_INTERVAL_FRAMES, CSV_QUEUE_SIZE, CSV_LOGGER_STOP_TIMEOUT_SECONDS, FRAME_LOG_COUNT
 
@@ -24,11 +26,13 @@ class CSVLogger:
         self,
         camera_id: int,
         csv_path: Path,
+        trial_number: int = 1,
         flush_interval: int = CSV_FLUSH_INTERVAL_FRAMES,
         queue_size: int = CSV_QUEUE_SIZE
     ):
         self.camera_id = camera_id
         self.csv_path = csv_path
+        self.trial_number = trial_number
         self.flush_interval = flush_interval
         self.queue_size = queue_size
 
@@ -46,10 +50,14 @@ class CSVLogger:
             raise RuntimeError("CSV logger already started")
 
         try:
-            self._file = open(self.csv_path, "w", encoding="utf-8", buffering=8192)
-            self._file.write(
-                "frame_number,write_time_unix,sensor_timestamp_ns,dropped_since_last,total_hardware_drops\n"
-            )
+            file_exists = self.csv_path.exists()
+            mode = "a" if file_exists else "w"
+            self._file = open(self.csv_path, mode, encoding="utf-8", buffering=8192)
+
+            if not file_exists:
+                self._file.write(
+                    "trial,frame_number,write_time_unix,sensor_timestamp_ns,dropped_since_last,total_hardware_drops\n"
+                )
 
             self._queue = asyncio.Queue(maxsize=self.queue_size)
             self._running = True
@@ -173,6 +181,7 @@ class CSVLogger:
                        total_drops)
 
         row = (
+            f"{self.trial_number},"
             f"{entry.frame_number},"
             f"{entry.write_time_unix:.6f},"
             f"{entry.metadata.sensor_timestamp_ns if entry.metadata.sensor_timestamp_ns is not None else ''},"

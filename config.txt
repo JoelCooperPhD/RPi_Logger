@@ -16,18 +16,23 @@
 # SESSION SETTINGS
 ################################################################################
 
-# Data directory (all module outputs saved here)
+# Data directory for master logs and temporary files
+# Module data is saved to user-selected location, not here
 data_dir = data
 
-# Session prefix (creates: data/session_YYYYMMDD_HHMMSS/)
+# Session prefix (creates: session_YYYYMMDD_HHMMSS/ in user-selected location)
 session_prefix = session
+
+# Last used session directory (automatically updated when user selects location via UI)
+# This is where session data and recordings are actually saved
+last_session_dir = /home/rs-pi-2/Desktop
 
 
 ################################################################################
 # LOGGING
 ################################################################################
 
-# Master log file: data/session_YYYYMMDD_HHMMSS/master.log
+# Master log file: data/logs/master_YYYYMMDD_HHMMSS.log
 log_level = info              # Python log level (debug/info/warning/error/critical)
 console_output = false        # Also print to console (true/false)
 
@@ -40,10 +45,10 @@ console_output = false        # Also print to console (true/false)
 ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 
 # Window position and size (saved automatically on window close)
-window_x = 1114
-window_y = 52
-window_width = 858
-window_height = 657
+window_x = 1281
+window_y = 250
+window_width = 509
+window_height = 277
 
 
 ################################################################################
@@ -73,9 +78,13 @@ window_height = 657
 #    - "Stop All Modules" shuts down all modules
 #
 # 3. Session Organization:
-#    data/
-#    └── session_20251014_120000/     # Session directory (master creates)
-#        ├── master.log               # Master logger log
+#    User selects save location (e.g., /home/user/Desktop)
+#    System creates timestamped subdirectory:
+#
+#    /home/user/Desktop/
+#    └── session_20251014_120000/     # Session directory (created when user starts session)
+#        ├── logs/                    # Event logs
+#        │   └── events.db            # Session event database
 #        ├── Camera/                  # Camera module directory
 #        │   ├── camera.log           # Module log file
 #        │   └── recordings/          # Recordings directly here
@@ -91,6 +100,8 @@ window_height = 657
 #            └── recordings/          # Recordings directly here
 #                ├── gaze_*.csv
 #                └── ...
+#
+#    Master logger logs go to: data/logs/master_YYYYMMDD_HHMMSS.log
 #
 # 4. Module Communication:
 #    - Master launches modules with: --mode gui --output-dir {session_dir}/ModuleName/ --enable-commands

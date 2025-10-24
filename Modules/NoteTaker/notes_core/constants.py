@@ -9,9 +9,9 @@ MODULE_DESCRIPTION = "Timestamped note-taking module for car logging sessions"
 
 DEFAULT_OUTPUT_DIR = "notes"
 DEFAULT_SESSION_PREFIX = "notes"
-CSV_FILENAME = "session_notes.csv"
+TXT_FILENAME_PATTERN = "{version}_{date}.txt"
 
-CSV_HEADERS = ["timestamp", "session_elapsed_time", "note_text", "recording_modules"]
+HEADERS = "Note,Content,Timestamp"
 
 DEFAULT_WINDOW_WIDTH = 600
 DEFAULT_WINDOW_HEIGHT = 500

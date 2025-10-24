@@ -17,38 +17,41 @@ class CommandHandler(BaseCommandHandler):
     def __init__(self, camera_system: 'CameraSystem', gui=None):
         super().__init__(camera_system, gui=gui)
 
-    async def handle_start_recording(self, command_data: Dict[str, Any]) -> None:
-        if self._check_recording_state(should_be_recording=False):
+    async def _start_recording_impl(self, command_data: Dict[str, Any], trial_number: int) -> bool:
+        if "session_dir" in command_data:
+            session_dir = Path(command_data["session_dir"])
+        else:
             session_dir = self.system._ensure_session_dir()
-            await asyncio.gather(*[cam.start_recording(session_dir) for cam in self.system.cameras])
-            self.system.recording = True
-            StatusMessage.send(
-                "recording_started",
-                {
-                    "session": self.system.session_label,
-                    "files": [
-                        str(cam.recording_manager.video_path)
-                        for cam in self.system.cameras
-                        if cam.recording_manager.video_path
-                    ],
-                },
-            )
 
-    async def handle_stop_recording(self, command_data: Dict[str, Any]) -> None:
-        if self._check_recording_state(should_be_recording=True):
-            await asyncio.gather(*[cam.stop_recording() for cam in self.system.cameras])
-            self.system.recording = False
-            StatusMessage.send(
-                "recording_stopped",
-                {
-                    "session": self.system.session_label,
-                    "files": [
-                        str(cam.recording_manager.video_path)
-                        for cam in self.system.cameras
-                        if cam.recording_manager.video_path is not None
-                    ],
-                },
-            )
+        await asyncio.gather(*[cam.start_recording(session_dir, trial_number) for cam in self.system.cameras])
+        self.system.recording = True
+        return True
+
+    async def _stop_recording_impl(self, command_data: Dict[str, Any]) -> bool:
+        await asyncio.gather(*[cam.stop_recording() for cam in self.system.cameras])
+        self.system.recording = False
+        return True
+
+    def _get_recording_started_status_data(self, trial_number: int) -> Dict[str, Any]:
+        return {
+            "session": self.system.session_label,
+            "trial": trial_number,
+            "files": [
+                str(cam.recording_manager.video_path)
+                for cam in self.system.cameras
+                if cam.recording_manager.video_path
+            ],
+        }
+
+    def _get_recording_stopped_status_data(self) -> Dict[str, Any]:
+        return {
+            "session": self.system.session_label,
+            "files": [
+                str(cam.recording_manager.video_path)
+                for cam in self.system.cameras
+                if cam.recording_manager.video_path is not None
+            ],
+        }
 
     async def handle_take_snapshot(self, command_data: Dict[str, Any]) -> None:
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -269,21 +269,23 @@ def get_config_str(config: dict, key: str, default: str) -> str:
 def setup_module_logging(
     args: Any,
     module_name: str,
+    module_dir: Path,
     default_prefix: str = 'session'
 ) -> Tuple[str, Path, bool]:
-    # Import here to avoid circular dependencies
     from Modules.base import setup_session_from_args, redirect_stderr_stdout
 
-    session_dir, session_name, log_file, is_command_mode = setup_session_from_args(
+    session_dir, session_name, is_command_mode = setup_session_from_args(
         args,
-        module_name=module_name,
         default_prefix=default_prefix
     )
 
-    # Redirect stderr/stdout to log file BEFORE configuring logging
+    logs_dir = module_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    log_file = logs_dir / f"{module_name}.log"
+
     original_stdout = redirect_stderr_stdout(log_file)
 
-    # This must be done BEFORE any imports that might send status messages
     if is_command_mode:
         from logger_core.commands import StatusMessage
         StatusMessage.configure(original_stdout)

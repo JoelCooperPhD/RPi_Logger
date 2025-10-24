@@ -1,0 +1,9 @@
+enabled = false
+window_geometry = 800x600+100+100
+device_vid = 9114
+device_pid = 32798
+baudrate = 9600
+window_x = 2127
+window_y = 313
+window_width = 830
+window_height = 433

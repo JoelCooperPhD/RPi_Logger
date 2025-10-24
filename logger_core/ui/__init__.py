@@ -1,4 +1,4 @@
 
-from .menu_ui import MenuUI
+from .main_window import MainWindow
 
-__all__ = ['MenuUI']
+__all__ = ['MainWindow']
