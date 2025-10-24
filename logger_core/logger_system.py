@@ -12,6 +12,7 @@ from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
 from .config_manager import get_config_manager
 from .event_logger import EventLogger
+from .paths import STATE_FILE
 
 
 class LoggerSystem:
@@ -53,17 +54,16 @@ class LoggerSystem:
     def _load_enabled_modules(self) -> None:
         self.selected_modules.clear()
 
-        state_file = Path(__file__).parent.parent / "data" / "running_modules.json"
         running_modules_from_last_session = None
 
-        if state_file.exists():
+        if STATE_FILE.exists():
             try:
-                with open(state_file, 'r') as f:
+                with open(STATE_FILE, 'r') as f:
                     state = json.load(f)
                     running_modules_from_last_session = set(state.get('running_modules', []))
                     self.logger.info("Loaded running modules from last session: %s", running_modules_from_last_session)
                     # Delete the state file after reading it (one-time use)
-                    state_file.unlink()
+                    STATE_FILE.unlink()
             except Exception as e:
                 self.logger.error("Failed to load running modules state: %s", e)
 
@@ -614,8 +614,7 @@ class LoggerSystem:
                 self.logger.info("No running modules to save")
                 return True
 
-            state_file = Path(__file__).parent.parent / "data" / "running_modules.json"
-            await asyncio.to_thread(state_file.parent.mkdir, parents=True, exist_ok=True)
+            await asyncio.to_thread(STATE_FILE.parent.mkdir, parents=True, exist_ok=True)
 
             state = {
                 'timestamp': datetime.datetime.now().isoformat(),
@@ -624,7 +623,7 @@ class LoggerSystem:
 
             # Offload JSON file write to thread pool to avoid blocking
             def write_json():
-                with open(state_file, 'w') as f:
+                with open(STATE_FILE, 'w') as f:
                     json.dump(state, f, indent=2)
 
             await asyncio.to_thread(write_json)

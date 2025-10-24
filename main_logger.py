@@ -10,63 +10,22 @@ from typing import Optional
 
 from logger_core import LoggerSystem
 from logger_core.ui import MainWindow
+from logger_core.paths import CONFIG_PATH, LOGS_DIR, MASTER_LOG_FILE, ensure_directories
+from logger_core.config_manager import get_config_manager
 
 
 logger = logging.getLogger(__name__)
 
 
-def load_config_file(config_path: Path = None) -> dict:
-    if config_path is None:
-        config_path = Path(__file__).parent / "config.txt"
-
-    config = {}
-
-    if not config_path.exists():
-        return config
-
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                    key = key.strip()
-                    value = value.strip()
-
-                    if '#' in value:
-                        value = value.split('#')[0].strip()
-
-                    if value.startswith('"') and value.endswith('"'):
-                        value = value[1:-1]
-                    elif value.startswith("'") and value.endswith("'"):
-                        value = value[1:-1]
-                    config[key] = value
-    except Exception as e:
-        logger.warning("Failed to load config from %s: %s", config_path, e)
-
-    return config
-
-
 def parse_args(argv: Optional[list[str]] = None):
-    config = load_config_file()
+    """Parse command-line arguments with config file defaults."""
+    config_manager = get_config_manager()
+    config = config_manager.read_config(CONFIG_PATH)
 
-    def get_config_str(key, default):
-        return config.get(key, default)
-
-    def get_config_bool(key, default):
-        if key in config:
-            value = config[key]
-            if isinstance(value, bool):
-                return value
-            return str(value).lower() in ('true', '1', 'yes', 'on')
-        return default
-
-    default_data_dir = Path(get_config_str('data_dir', 'data'))
-    default_session_prefix = get_config_str('session_prefix', 'session')
-    default_log_level = get_config_str('log_level', 'info')
-    default_console_output = get_config_bool('console_output', True)
+    default_data_dir = Path(config_manager.get_str(config, 'data_dir', default='data'))
+    default_session_prefix = config_manager.get_str(config, 'session_prefix', default='session')
+    default_log_level = config_manager.get_str(config, 'log_level', default='info')
+    default_console_output = config_manager.get_bool(config, 'console_output', default=True)
 
     parser = argparse.ArgumentParser(
         description="RPi Logger - Master logging orchestrator for multiple modules"
@@ -145,17 +104,15 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
 
-    logs_dir = Path(__file__).parent / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    ensure_directories()
 
-    log_file = logs_dir / "master.log"
-    configure_logging(args.log_level, log_file, console_output=args.console_output)
+    configure_logging(args.log_level, MASTER_LOG_FILE, console_output=args.console_output)
 
     logger.info("=" * 60)
     logger.info("RPi Logger - Master System Starting")
     logger.info("=" * 60)
     logger.info("Data directory: %s", args.data_dir)
-    logger.info("Log file: %s", log_file)
+    logger.info("Log file: %s", MASTER_LOG_FILE)
     logger.info("Session will be created when user starts recording")
     logger.info("=" * 60)
 
