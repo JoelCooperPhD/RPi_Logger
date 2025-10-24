@@ -38,6 +38,22 @@ from .usb_serial_manager import (
     USBDeviceMonitor,
     DeviceState,
 )
+from .metadata import (
+    DeviceType,
+    FrameMetadata,
+    GazeMetadata,
+    CameraMetadata,
+)
+from .recording import RecordingManagerBase
+from .status import (
+    ModuleState,
+    StatusType,
+    ModuleStatus,
+    create_ready_status,
+    create_error_status,
+    create_recording_started_status,
+    create_recording_stopped_status,
+)
 
 __all__ = [
     'BaseSupervisor',
@@ -72,4 +88,17 @@ __all__ = [
     'USBSerialDevice',
     'USBDeviceMonitor',
     'DeviceState',
+    # Phase 2: Cross-module standardization
+    'DeviceType',
+    'FrameMetadata',
+    'GazeMetadata',
+    'CameraMetadata',
+    'RecordingManagerBase',
+    'ModuleState',
+    'StatusType',
+    'ModuleStatus',
+    'create_ready_status',
+    'create_error_status',
+    'create_recording_started_status',
+    'create_recording_stopped_status',
 ]

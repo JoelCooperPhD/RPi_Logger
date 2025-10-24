@@ -48,6 +48,12 @@ class StreamHandler:
         self._imu_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
         self._event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
 
+        # Event-driven coordination (Phase 1.1 optimization)
+        self._frame_ready_event = asyncio.Event()
+        self._gaze_ready_event = asyncio.Event()
+        self._imu_ready_event = asyncio.Event()
+        self._event_ready_event = asyncio.Event()
+
     def _update_running_flag(self) -> None:
         self.running = any(
             (
@@ -145,6 +151,7 @@ class StreamHandler:
                             self._last_frame_packet = packet
                             self.camera_fps_tracker.add_frame()
                             self._enqueue_latest(self._frame_queue, packet)
+                            self._frame_ready_event.set()  # Signal frame available
 
                             if self.camera_frames == 1:
                                 logger.info(f"Frame shape: {pixel_data.shape}")
@@ -195,6 +202,7 @@ class StreamHandler:
 
                 self.last_gaze = gaze
                 self._enqueue_latest(self._gaze_queue, gaze)
+                self._gaze_ready_event.set()  # Signal gaze available
 
                 if gaze_count % 100 == 1:  # Log every 100 gaze samples
                     logger.info(f"Gaze samples received: {gaze_count}")
@@ -228,6 +236,7 @@ class StreamHandler:
 
                 self.last_imu = imu
                 self._enqueue_latest(self._imu_queue, imu)
+                self._imu_ready_event.set()  # Signal IMU available
 
                 if imu_count % 100 == 1:
                     logger.info("IMU samples received: %d", imu_count)
@@ -261,6 +270,7 @@ class StreamHandler:
 
                 self.last_event = event
                 self._enqueue_latest(self._event_queue, event)
+                self._event_ready_event.set()  # Signal event available
 
                 if event_count % 50 == 1:
                     logger.info("Eye events received: %d", event_count)
@@ -304,6 +314,25 @@ class StreamHandler:
 
     async def next_event(self, timeout: Optional[float] = None) -> Optional[Any]:
         return await self._dequeue_with_timeout(self._event_queue, timeout)
+
+    # Event-driven methods (Phase 1.1 optimization)
+    async def wait_for_frame(self, timeout: Optional[float] = None) -> Optional[FramePacket]:
+        """Wait for frame to be available, then retrieve it (event-driven)"""
+        try:
+            await asyncio.wait_for(self._frame_ready_event.wait(), timeout=timeout)
+            self._frame_ready_event.clear()
+            return await self.next_frame(timeout=0)  # Non-blocking get
+        except asyncio.TimeoutError:
+            return None
+
+    async def wait_for_gaze(self, timeout: Optional[float] = None) -> Optional[Any]:
+        """Wait for gaze data to be available (event-driven)"""
+        try:
+            await asyncio.wait_for(self._gaze_ready_event.wait(), timeout=timeout)
+            self._gaze_ready_event.clear()
+            return await self.next_gaze(timeout=0)
+        except asyncio.TimeoutError:
+            return None
 
     @staticmethod
     def _enqueue_latest(queue: asyncio.Queue, item: Any) -> None:

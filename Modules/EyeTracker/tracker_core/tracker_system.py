@@ -67,6 +67,31 @@ class TrackerSystem(BaseSystem, RecordingStateMixin):
         else:  # headless (default fallback)
             return HeadlessMode(self)
 
+    # Phase 1.4: Pause/resume support
+    async def pause(self):
+        """Pause tracking to save CPU"""
+        if self.gaze_tracker is None:
+            logger.warning("Cannot pause: tracker not initialized")
+            return
+
+        await self.gaze_tracker.pause()
+        logger.info("Tracker system paused")
+
+    async def resume(self):
+        """Resume tracking"""
+        if self.gaze_tracker is None:
+            logger.warning("Cannot resume: tracker not initialized")
+            return
+
+        await self.gaze_tracker.resume()
+        logger.info("Tracker system resumed")
+
+    def is_paused(self) -> bool:
+        """Check if paused"""
+        if self.gaze_tracker is None:
+            return False
+        return self.gaze_tracker.is_paused
+
     async def cleanup(self) -> None:
         self.logger.info("Cleaning up tracker system")
         self.running = False

@@ -47,6 +47,50 @@ class CommandHandler(BaseCommandHandler):
             data["experiment_dir"] = str(self.system.recording_manager.current_experiment_dir)
         return data
 
+    async def handle_custom_command(self, command: str, command_data: Dict[str, Any]) -> bool:
+        """Handle Eye Tracker specific commands"""
+        if command == "pause_tracker":
+            await self.handle_pause_tracker(command_data)
+            return True
+        elif command == "resume_tracker":
+            await self.handle_resume_tracker(command_data)
+            return True
+        return False  # Not handled
+
+    async def handle_pause_tracker(self, command_data: Dict[str, Any]) -> None:
+        """Pause eye tracker frame processing (CPU saving mode)"""
+        try:
+            if not hasattr(self.system, 'pause'):
+                StatusMessage.send("error", {"message": "Pause not supported by this tracker"})
+                return
+
+            await self.system.pause()
+            StatusMessage.send("tracker_paused", {"paused": True})
+            self.logger.info("Eye tracker paused (CPU saving mode)")
+
+        except Exception as e:
+            self.logger.exception("Failed to pause tracker: %s", e)
+            StatusMessage.send("error", {
+                "message": f"Failed to pause tracker: {str(e)[:100]}"
+            })
+
+    async def handle_resume_tracker(self, command_data: Dict[str, Any]) -> None:
+        """Resume eye tracker frame processing"""
+        try:
+            if not hasattr(self.system, 'resume'):
+                StatusMessage.send("error", {"message": "Resume not supported by this tracker"})
+                return
+
+            await self.system.resume()
+            StatusMessage.send("tracker_resumed", {"paused": False})
+            self.logger.info("Eye tracker resumed")
+
+        except Exception as e:
+            self.logger.exception("Failed to resume tracker: %s", e)
+            StatusMessage.send("error", {
+                "message": f"Failed to resume tracker: {str(e)[:100]}"
+            })
+
     async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
         try:
             status_data = {
@@ -55,6 +99,10 @@ class CommandHandler(BaseCommandHandler):
                 "connected": hasattr(self.system, 'device_manager') and
                            self.system.device_manager.is_connected,
             }
+
+            # Add paused status if available
+            if hasattr(self.system, 'is_paused'):
+                status_data["paused"] = self.system.is_paused()
 
             if hasattr(self.system, 'frame_count'):
                 status_data["frame_count"] = self.system.frame_count
