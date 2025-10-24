@@ -14,6 +14,7 @@ from ..logger_system import LoggerSystem
 from ..module_process import ModuleState
 from ..config_manager import get_config_manager
 from ..paths import CONFIG_PATH
+from ..shutdown_coordinator import get_shutdown_coordinator
 from .timer_manager import TimerManager
 
 
@@ -281,6 +282,7 @@ class MainController:
             messagebox.showerror("Error", f"Failed to stop trial: {e}")
 
     def on_shutdown(self) -> None:
+        """Handle shutdown button click."""
         if self.logger_system.event_logger:
             asyncio.create_task(self.logger_system.event_logger.log_button_press("shutdown"))
 
@@ -292,53 +294,58 @@ class MainController:
             if not response:
                 return
 
-        self.logger.info("Shutting down logger (preserving module state)...")
+        self.logger.info("Shutdown requested from UI")
 
         self.shutdown_button.config(state='disabled')
         self.shutdown_button.config(text="Shutting Down...")
 
         self.running = False
 
-        asyncio.create_task(self._quit_async(save_running_modules=True))
+        # Register UI-specific cleanup and trigger shutdown
+        shutdown_coordinator = get_shutdown_coordinator()
+        shutdown_coordinator.register_cleanup(self._save_window_geometry)
+        shutdown_coordinator.register_cleanup(self._save_running_modules_state)
+        shutdown_coordinator.register_cleanup(self._stop_timers)
 
-    async def _quit_async(self, save_running_modules: bool = False) -> None:
+        asyncio.create_task(shutdown_coordinator.initiate_shutdown("UI button"))
+
+    async def _save_window_geometry(self) -> None:
+        """Save main window geometry to config."""
+        if not self.root:
+            return
+
         try:
-            if self.root:
-                try:
-                    from Modules.base import gui_utils
+            from Modules.base import gui_utils
 
-                    geometry_str = self.root.geometry()
-                    parsed = gui_utils.parse_geometry_string(geometry_str)
+            geometry_str = self.root.geometry()
+            parsed = gui_utils.parse_geometry_string(geometry_str)
 
-                    if parsed:
-                        width, height, x, y = parsed
+            if parsed:
+                width, height, x, y = parsed
 
-                        config_manager = get_config_manager()
-                        updates = {
-                            'window_x': x,
-                            'window_y': y,
-                            'window_width': width,
-                            'window_height': height,
-                        }
-                        if config_manager.write_config(CONFIG_PATH, updates):
-                            self.logger.info("Saved main logger window geometry: %dx%d+%d+%d", width, height, x, y)
-                        else:
-                            self.logger.warning("Failed to save window geometry")
-                    else:
-                        self.logger.warning("Failed to parse window geometry: %s", geometry_str)
-                except Exception as e:
-                    self.logger.error("Error saving window geometry: %s", e)
+                config_manager = get_config_manager()
+                updates = {
+                    'window_x': x,
+                    'window_y': y,
+                    'window_width': width,
+                    'window_height': height,
+                }
+                if config_manager.write_config(CONFIG_PATH, updates):
+                    self.logger.info("Saved main logger window geometry: %dx%d+%d+%d", width, height, x, y)
+                else:
+                    self.logger.warning("Failed to save window geometry")
+            else:
+                self.logger.warning("Failed to parse window geometry: %s", geometry_str)
+        except Exception as e:
+            self.logger.error("Error saving window geometry: %s", e)
 
-            if save_running_modules:
-                await self.logger_system.save_running_modules_state()
+    async def _save_running_modules_state(self) -> None:
+        """Save currently running modules to restore on next launch."""
+        await self.logger_system.save_running_modules_state()
 
-            await self.timer_manager.stop_all()
-
-            await self.logger_system.cleanup()
-        finally:
-            self.running = False
-            if self.root:
-                self.root.quit()
+    async def _stop_timers(self) -> None:
+        """Stop all active timers."""
+        await self.timer_manager.stop_all()
 
     async def _status_callback(self, module_name: str, state: ModuleState, status) -> None:
         if module_name in self.module_vars:
