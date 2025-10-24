@@ -20,7 +20,6 @@ import numpy as np
 
 from Modules.base.io_utils import get_versioned_filename
 from Modules.base.recording import RecordingManagerBase
-from Modules.base.metadata import GazeMetadata
 from ..config.tracker_config import TrackerConfig as Config
 
 logger = logging.getLogger(__name__)
@@ -657,14 +656,6 @@ class RecordingManager(RecordingManagerBase):
 
     async def cleanup(self):
         await self.stop_recording()
-
-    async def pause_recording(self):
-        """Pause not supported for eye tracker recording (raises NotImplementedError)"""
-        raise NotImplementedError("Pause not supported by eye tracker recording")
-
-    async def resume_recording(self):
-        """Resume not supported for eye tracker recording (raises NotImplementedError)"""
-        raise NotImplementedError("Resume not supported by eye tracker recording")
 
     def get_stats(self) -> dict:
         """Get current recording statistics"""

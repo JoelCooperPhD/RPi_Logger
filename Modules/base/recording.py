@@ -7,10 +7,8 @@ to ensure consistent API across modules.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 import numpy as np
-
-from .metadata import FrameMetadata
 
 
 class RecordingManagerBase(ABC):
@@ -82,16 +80,21 @@ class RecordingManagerBase(ABC):
     # === Data Writing ===
 
     @abstractmethod
-    def write_frame(self, frame: np.ndarray, metadata: FrameMetadata):
+    def write_frame(self, frame: Optional[np.ndarray], metadata: Any):
         """
         Write a single frame/sample with metadata.
 
         Args:
-            frame: Frame data (numpy array for video, audio buffer, etc.)
-            metadata: Standardized metadata
+            frame: Frame data (numpy array for video, audio buffer, etc.) or None
+            metadata: Module-specific metadata structure (e.g., FrameTimingMetadata)
 
         Raises:
             RuntimeError: If not currently recording
+
+        Note:
+            While base metadata classes (FrameMetadata, GazeMetadata, CameraMetadata)
+            are provided in Modules.base.metadata, modules may use their own
+            metadata structures for internal implementation.
         """
         pass
 

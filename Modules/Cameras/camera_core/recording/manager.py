@@ -11,7 +11,6 @@ import numpy as np
 
 from Modules.base.io_utils import get_versioned_filename
 from Modules.base.recording import RecordingManagerBase
-from Modules.base.metadata import CameraMetadata
 from ..camera_utils import FrameTimingMetadata
 from ..constants import DEFAULT_BITRATE_BPS, FPS_MIN, FPS_MAX, FFMPEG_TIMEOUT_SECONDS
 from .csv_logger import CSVLogger
@@ -212,14 +211,6 @@ class CameraRecordingManager(RecordingManagerBase):
             finally:
                 self._csv_stop_task = None
                 self._csv_logger = None
-
-    async def pause_recording(self):
-        """Pause not supported for camera recording (raises NotImplementedError)"""
-        raise NotImplementedError("Pause not supported by camera recording")
-
-    async def resume_recording(self):
-        """Resume not supported for camera recording (raises NotImplementedError)"""
-        raise NotImplementedError("Resume not supported by camera recording")
 
     def get_stats(self) -> dict:
         """Get current recording statistics"""
