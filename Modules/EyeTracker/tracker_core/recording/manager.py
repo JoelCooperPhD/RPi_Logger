@@ -19,6 +19,8 @@ import cv2
 import numpy as np
 
 from Modules.base.io_utils import get_versioned_filename
+from Modules.base.recording import RecordingManagerBase
+from Modules.base.metadata import GazeMetadata
 from ..config.tracker_config import TrackerConfig as Config
 
 logger = logging.getLogger(__name__)
@@ -46,11 +48,11 @@ class _QueuedFrame:
     metadata: FrameTimingMetadata
 
 
-class RecordingManager:
+class RecordingManager(RecordingManagerBase):
 
     def __init__(self, config: Config, *, use_ffmpeg: bool = True):
+        super().__init__(device_id="eye_tracker")
         self.config = config
-        self.recording = False
         self.ffmpeg_process: Optional[asyncio.subprocess.Process] = None
         self.recording_filename: Optional[str] = None
         self.gaze_filename: Optional[str] = None
@@ -96,17 +98,26 @@ class RecordingManager:
         self._current_experiment_label: Optional[str] = None
 
     async def toggle_recording(self):
-        if self.recording:
+        if self._is_recording:
             await self.stop_recording()
         else:
             await self.start_recording()
 
-    async def start_recording(self, trial_number: int = 1):
-        if self.recording:
-            return
+    async def start_recording(self, session_dir: Optional[Path] = None, trial_number: int = 1) -> Path:
+        if self._is_recording:
+            if self.recording_filename:
+                return Path(self.recording_filename)
+            raise RuntimeError("Already recording but no filename set")
 
-        target_dir = self._current_experiment_dir or self._output_root
+        # Use provided session_dir or fall back to experiment dir or output root
+        if session_dir is not None:
+            target_dir = session_dir
+            self._current_session_dir = session_dir
+        else:
+            target_dir = self._current_experiment_dir or self._output_root
+
         target_dir.mkdir(parents=True, exist_ok=True)
+        self._current_trial_number = trial_number
 
         dir_name = target_dir.name
         if "_" in dir_name:
@@ -214,7 +225,7 @@ class RecordingManager:
             self._next_frame_time = self._recording_start_time
             self._latest_frame = None
             self._latest_frame_metadata = None
-            self.recording = True
+            self._is_recording = True
 
             max_video_queue = max(int(self.config.fps * 2), 30)
             self._frame_queue = asyncio.Queue(maxsize=max_video_queue)
@@ -234,12 +245,14 @@ class RecordingManager:
                     self._current_experiment_dir.name,
                     self._recordings_this_experiment,
                 )
+            return Path(self.recording_filename)
         except Exception as exc:
             logger.error("Failed to start recording: %s", exc)
             await self._handle_start_failure()
+            raise
 
     def start_experiment(self, label: Optional[str] = None) -> Path:
-        if self.recording:
+        if self._is_recording:
             raise RuntimeError("Stop the active recording before starting a new experiment")
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -317,13 +330,26 @@ class RecordingManager:
         if self._frame_timer_task:
             self._frame_timer_task.cancel()
         self._frame_timer_task = None
-        self.recording = False
+        self._is_recording = False
 
-    async def stop_recording(self):
-        if not self.recording and self.ffmpeg_process is None and self._gaze_file is None:
-            return
+    async def stop_recording(self) -> dict:
+        if not self._is_recording and self.ffmpeg_process is None and self._gaze_file is None:
+            return {
+                'duration_seconds': 0.0,
+                'frames_written': 0,
+                'frames_dropped': 0,
+                'output_files': [],
+            }
 
-        self.recording = False
+        # Calculate stats before clearing
+        duration = 0.0
+        if self._recording_start_time is not None:
+            duration = time.perf_counter() - self._recording_start_time
+        frames_written = self._written_frames
+        frames_duplicated = self._duplicated_frames
+        output_files = []
+
+        self._is_recording = False
 
         if self.ffmpeg_process:
             try:
@@ -396,12 +422,16 @@ class RecordingManager:
                 await asyncio.to_thread(self._gaze_file.close)
                 self._gaze_file = None
             logger.info("Gaze data saved: %s", self.gaze_filename)
+            if self.gaze_filename:
+                output_files.append(Path(self.gaze_filename))
 
         if self._frame_timing_file:
             await asyncio.to_thread(self._frame_timing_file.flush)
             await asyncio.to_thread(self._frame_timing_file.close)
             self._frame_timing_file = None
             logger.info("Frame timing saved: %s", self.frame_timing_filename)
+            if self.frame_timing_filename:
+                output_files.append(Path(self.frame_timing_filename))
 
         if self._imu_file:
             try:
@@ -410,6 +440,8 @@ class RecordingManager:
                 await asyncio.to_thread(self._imu_file.close)
                 self._imu_file = None
             logger.info("IMU data saved: %s", self.imu_filename)
+            if self.imu_filename:
+                output_files.append(Path(self.imu_filename))
 
         if self._event_file:
             try:
@@ -418,6 +450,8 @@ class RecordingManager:
                 await asyncio.to_thread(self._event_file.close)
                 self._event_file = None
             logger.info("Eye events saved: %s", self.events_filename)
+            if self.events_filename:
+                output_files.append(Path(self.events_filename))
 
         self._last_gaze_timestamp = None
         self._last_write_monotonic = None
@@ -431,9 +465,17 @@ class RecordingManager:
 
         if self.recording_filename:
             logger.info("Recording saved: %s", self.recording_filename)
+            output_files.insert(0, Path(self.recording_filename))  # Video file first
+
+        return {
+            'duration_seconds': duration,
+            'frames_written': frames_written,
+            'frames_dropped': self._skipped_frames,
+            'output_files': output_files,
+        }
 
     def write_frame(self, frame: np.ndarray, metadata: Optional[FrameTimingMetadata] = None):
-        if not self.recording:
+        if not self._is_recording:
             return
 
         self._latest_frame = frame.copy()  # Make a copy to avoid race conditions
@@ -442,7 +484,7 @@ class RecordingManager:
         self._latest_frame_metadata = metadata
 
     def write_gaze_sample(self, gaze: Optional[Any]):
-        if not self.recording or self._gaze_file is None or gaze is None:
+        if not self._is_recording or self._gaze_file is None or gaze is None:
             return
 
         timestamp = getattr(gaze, "timestamp_unix_seconds", None)
@@ -467,7 +509,7 @@ class RecordingManager:
             self._enqueue_csv_line(self._gaze_queue, self._gaze_file, line)
 
     def write_imu_sample(self, imu: Optional[Any]):
-        if not self.recording or self._imu_file is None or imu is None:
+        if not self._is_recording or self._imu_file is None or imu is None:
             return
 
         timestamp = getattr(imu, "timestamp_unix_seconds", None)
@@ -490,7 +532,7 @@ class RecordingManager:
         self._enqueue_csv_line(self._imu_queue, self._imu_file, line)
 
     def write_event_sample(self, event: Optional[Any]):
-        if not self.recording or self._event_file is None or event is None:
+        if not self._is_recording or self._event_file is None or event is None:
             return
 
         timestamp = getattr(event, "timestamp_unix_seconds", None)
@@ -604,9 +646,6 @@ class RecordingManager:
                 _ = queue.get_nowait()
             queue.put_nowait(line)
 
-    @property
-    def is_recording(self) -> bool:
-        return self.recording
 
     @property
     def skipped_frames(self) -> int:
@@ -618,6 +657,33 @@ class RecordingManager:
 
     async def cleanup(self):
         await self.stop_recording()
+
+    async def pause_recording(self):
+        """Pause not supported for eye tracker recording (raises NotImplementedError)"""
+        raise NotImplementedError("Pause not supported by eye tracker recording")
+
+    async def resume_recording(self):
+        """Resume not supported for eye tracker recording (raises NotImplementedError)"""
+        raise NotImplementedError("Resume not supported by eye tracker recording")
+
+    def get_stats(self) -> dict:
+        """Get current recording statistics"""
+        duration = 0.0
+        if self._is_recording and self._recording_start_time is not None:
+            duration = time.perf_counter() - self._recording_start_time
+
+        return {
+            'is_recording': self._is_recording,
+            'duration_seconds': duration,
+            'frames_written': self._written_frames,
+            'frames_skipped': self._skipped_frames,
+            'frames_duplicated': self._duplicated_frames,
+            'recording_filename': self.recording_filename,
+            'gaze_filename': self.gaze_filename,
+            'frame_timing_filename': self.frame_timing_filename,
+            'imu_filename': self.imu_filename,
+            'events_filename': self.events_filename,
+        }
 
     async def _frame_writer_loop(self) -> None:
         assert self._frame_queue is not None
@@ -721,7 +787,7 @@ class RecordingManager:
         last_frame_used = None
 
         while True:
-            if not self.recording:
+            if not self._is_recording:
                 break
 
             frame_queue = self._frame_queue
