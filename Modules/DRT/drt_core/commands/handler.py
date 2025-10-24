@@ -30,7 +30,6 @@ class CommandHandler(BaseCommandHandler):
             logger.info(f"Updating session_dir to: {session_dir}")
             for port, handler in self.system.device_handlers.items():
                 handler.output_dir = session_dir
-                handler.reset_data_file()
                 logger.info(f"Updated output_dir for device {port} to: {session_dir}")
 
     def _get_recording_started_status_data(self, trial_number: int) -> dict:

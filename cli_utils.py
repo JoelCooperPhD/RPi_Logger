@@ -293,6 +293,7 @@ def setup_module_logging(
     configure_logging(args.log_level, str(log_file), console_output=args.console_output)
 
     args.session_dir = session_dir
+    args.log_file = log_file
     args.console_stdout = original_stdout
     args.command_stdout = original_stdout
 

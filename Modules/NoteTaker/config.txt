@@ -2,9 +2,9 @@
 
 # Module settings (managed by master logger)
 enabled = false
-window_x = 1832
-window_y = 335
-window_width = 770
+window_x = 1053
+window_y = 686
+window_width = 951
 window_height = 324
 
 # Output settings (used only in standalone mode; master logger overrides these)

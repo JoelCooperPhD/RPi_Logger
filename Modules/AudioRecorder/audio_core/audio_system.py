@@ -105,11 +105,12 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
     async def start_recording(self, trial_number: int = 1) -> bool:
         can_start, error_msg = self.validate_recording_start()
         if not can_start:
-            self.logger.warning("Cannot start recording: %s", error_msg)
+            self.logger.error("Cannot start recording: %s", error_msg)
             return False
 
         if not self.selected_devices:
-            self.logger.warning("No devices selected for recording")
+            self.logger.error("No devices selected for recording (available: %d, selected: %d)",
+                            len(self.available_devices), len(self.selected_devices))
             return False
 
         self.current_trial_number = trial_number

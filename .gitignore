@@ -39,6 +39,9 @@ examples_output/
 *.tmp
 *.log
 
+# Legacy data directory (no longer used - data goes to user-selected location)
+/data/
+
 # Development notes
 AGENTS.md
 debug_*.py

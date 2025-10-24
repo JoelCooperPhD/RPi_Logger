@@ -43,8 +43,8 @@ class TkinterMenuBase:
         menubar.add_cascade(label="File", menu=self.file_menu)
 
         self.file_menu.add_command(
-            label="Open Output Directory",
-            command=self._on_open_output_dir
+            label="Open Log File",
+            command=self._on_open_log_file
         )
 
         self.file_menu.add_separator()
@@ -190,6 +190,12 @@ class TkinterMenuBase:
             "Subclass must implement get_output_directory() or provide args.output_dir"
         )
 
+    def get_log_file(self) -> Path:
+        if hasattr(self, 'args') and hasattr(self.args, 'log_file'):
+            return Path(self.args.log_file)
+        raise NotImplementedError(
+            "Log file not available. Module must call setup_module_logging() and store log_file in args."
+        )
 
     def _load_view_state(self, config_key: str, default: bool) -> bool:
         if hasattr(self, 'system') and hasattr(self.system, 'config'):
@@ -257,6 +263,25 @@ class TkinterMenuBase:
             logger.info("Opened output directory: %s", output_dir)
         except Exception as e:
             logger.error("Failed to open output directory: %s", e)
+
+    def _on_open_log_file(self):
+        try:
+            log_file = self.get_log_file()
+
+            if not log_file.exists():
+                logger.warning("Log file does not exist: %s", log_file)
+                return
+
+            if sys.platform == 'linux':
+                subprocess.Popen(['xdg-open', str(log_file)])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(log_file)])
+            elif sys.platform == 'win32':
+                subprocess.Popen(['notepad.exe', str(log_file)])
+
+            logger.info("Opened log file: %s", log_file)
+        except Exception as e:
+            logger.error("Failed to open log file: %s", e)
 
     def _on_quit(self):
         if hasattr(self, 'handle_window_close'):

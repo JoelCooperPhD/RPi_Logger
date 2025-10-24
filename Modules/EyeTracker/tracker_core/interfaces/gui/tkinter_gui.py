@@ -34,7 +34,12 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         )
 
     def populate_module_menus(self):
-        self.add_recording_action("📷 Snapshot", self._take_snapshot, separator_before=True)
+        self.file_menu.insert_command(
+            0,
+            label="📷 Snapshot",
+            command=self._take_snapshot
+        )
+        self.file_menu.insert_separator(1)
 
     def on_start_recording(self):
         self._start_recording()

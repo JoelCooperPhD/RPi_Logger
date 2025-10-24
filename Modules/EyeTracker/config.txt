@@ -80,7 +80,7 @@ discovery_retry = 3.0        # Retry interval after device failure (seconds)
 enabled = false
 
 # Window position and size (saved automatically on window close)
-window_x = 1986
-window_y = 495
+window_x = 2007
+window_y = 730
 window_width = 962
 window_height = 278
