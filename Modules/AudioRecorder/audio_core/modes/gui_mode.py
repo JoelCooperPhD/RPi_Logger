@@ -27,6 +27,9 @@ class GUIMode(BaseGUIMode):
 
         gui.set_close_handler(self.on_closing)
 
+        # Set GUI reference in system so AudioHandler can update meters during recording
+        self.system.gui = gui
+
         if self.system.available_devices:
             self.capture_manager = AudioCaptureManager(gui, self.system.available_devices)
 
@@ -40,7 +43,7 @@ class GUIMode(BaseGUIMode):
         return gui
 
     def create_command_handler(self, gui: TkinterGUI) -> CommandHandler:
-        return CommandHandler(self.system, gui=gui)
+        return CommandHandler(self.system, gui=gui, mode=self)
 
     async def on_auto_start_recording(self) -> None:
         if await self.system.start_recording():

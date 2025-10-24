@@ -36,6 +36,7 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
         self.selected_devices: set = set()
         self._known_devices: set = set()
         self.current_trial_number: int = 1
+        self.gui = None  # Will be set by the mode
 
         self.feedback_queue = asyncio.Queue()
 
@@ -121,7 +122,7 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
         for device_id in self.selected_devices:
             device_info = self.available_devices[device_id]
 
-            handler = AudioHandler(device_id, device_info, self.sample_rate)
+            handler = AudioHandler(device_id, device_info, self.sample_rate, gui=self.gui)
 
             if handler.start_stream(self.feedback_queue):
                 if handler.start_recording():

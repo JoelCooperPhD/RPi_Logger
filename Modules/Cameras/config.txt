@@ -46,7 +46,7 @@ disable_mp4_conversion = false # Keep raw .h264 files (better for power-loss res
 
 # Preview windows (OpenCV)
 show_preview = true         # Show live preview windows (true/false)
-preview_preset = 6           # Preview size (0-7, smaller = lower CPU)
+preview_preset = 7           # Preview size (0-7, smaller = lower CPU)
 
 # Frame number overlay
 show_frame_number = true     # Display frame number on video/preview
@@ -95,10 +95,10 @@ enable_csv_timing_log = true # Save per-frame timing data for analysis
 ################################################################################
 
 # Auto-start this module when master logger starts
-enabled = false
+enabled = true
 
 # Window position and size (saved automatically on window close)
-window_x = 2014
-window_y = 32
+window_x = 1872
+window_y = 125
 window_width = 953
 window_height = 405

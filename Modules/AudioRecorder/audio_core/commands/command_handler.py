@@ -1,4 +1,5 @@
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Dict, Any
 
@@ -10,14 +11,34 @@ if TYPE_CHECKING:
 
 class CommandHandler(BaseCommandHandler):
 
-    def __init__(self, audio_system: 'AudioSystem', gui=None):
+    def __init__(self, audio_system: 'AudioSystem', gui=None, mode=None):
         super().__init__(audio_system, gui=gui)
+        self.mode = mode
 
     async def _start_recording_impl(self, command_data: Dict[str, Any], trial_number: int) -> bool:
+        capture_manager = getattr(self.mode, 'capture_manager', None) if self.mode else None
+
+        if capture_manager:
+            try:
+                for device_id in self.system.selected_devices:
+                    await capture_manager.stop_capture_for_device(device_id)
+                    self.logger.debug("Stopped capture for device %d before recording", device_id)
+
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                self.logger.error("Error stopping capture: %s", e, exc_info=True)
+
         return await self.system.start_recording(trial_number)
 
     async def _stop_recording_impl(self, command_data: Dict[str, Any]) -> bool:
         await self.system.stop_recording()
+
+        capture_manager = getattr(self.mode, 'capture_manager', None) if self.mode else None
+        if capture_manager:
+            for device_id in self.system.selected_devices:
+                await capture_manager.start_capture_for_device(device_id)
+                self.logger.debug("Restarted capture for device %d after recording", device_id)
+
         return True
 
     def _get_recording_started_status_data(self, trial_number: int) -> Dict[str, Any]:

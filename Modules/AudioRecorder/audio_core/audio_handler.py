@@ -1,6 +1,7 @@
 
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -21,13 +22,14 @@ logger = logging.getLogger(__name__)
 
 class AudioHandler:
 
-    def __init__(self, device_id: int, device_info: dict, sample_rate: int):
+    def __init__(self, device_id: int, device_info: dict, sample_rate: int, gui=None):
         self.logger = logging.getLogger(f"AudioDevice{device_id}")
         self.device_id = device_id
         self.device_info = device_info
         self.device_name = device_info['name']
         self.sample_rate = sample_rate
         self.recording = False
+        self.gui = gui
 
         self.stream: Optional[sd.InputStream] = None
 
@@ -47,6 +49,16 @@ class AudioHandler:
             return
 
         self.recording_manager.add_audio_chunk(indata)
+
+        # Update GUI level meters with audio data during recording
+        if self.gui and hasattr(self.gui, 'level_meters') and self.device_id in self.gui.level_meters:
+            try:
+                samples = indata.flatten().tolist()
+                timestamp = datetime.now().timestamp()
+                self.gui.level_meters[self.device_id].add_samples(samples, timestamp)
+            except Exception:
+                # Silently ignore meter update errors to avoid disrupting recording
+                pass
 
         self.frames_since_feedback += frames
         if self.frames_since_feedback >= (self.sample_rate * FEEDBACK_INTERVAL_SECONDS):
