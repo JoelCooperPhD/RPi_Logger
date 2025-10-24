@@ -13,15 +13,10 @@ DRT_COMMANDS = {
     'stim_on': 'stim_on',
     'stim_off': 'stim_off',
     'get_config': 'get_config',
-    'get_lowerISI': 'get_lowerISI',
     'set_lowerISI': 'set_lowerISI',
-    'get_upperISI': 'get_upperISI',
     'set_upperISI': 'set_upperISI',
-    'get_stimDur': 'get_stimDur',
     'set_stimDur': 'set_stimDur',
-    'get_intensity': 'get_intensity',
     'set_intensity': 'set_intensity',
-    'get_name': 'get_name',
 }
 
 ISO_PRESET_CONFIG = {

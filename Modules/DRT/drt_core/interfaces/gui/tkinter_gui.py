@@ -54,9 +54,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def set_close_handler(self, handler):
         self.root.protocol("WM_DELETE_WINDOW", handler)
 
-    def populate_module_menus(self):
-        pass
-
     def on_start_recording(self):
         self._start_recording()
 
@@ -239,9 +236,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 tab.plotter.update_stimulus_state(port, self.stimulus_state.get(port, 0))
 
     def update_display(self):
-        for tab in self.device_tabs.values():
-            if tab.plotter:
-                tab.plotter.update_display()
+        pass
 
     def update_window_title(self, recording: bool = False):
         base_title = "DRT Monitor"
