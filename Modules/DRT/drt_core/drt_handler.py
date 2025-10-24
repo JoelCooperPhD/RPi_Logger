@@ -83,9 +83,6 @@ class DRTHandler:
     async def stop_experiment(self) -> bool:
         return await self.send_command('exp_stop')
 
-    def reset_data_file(self) -> None:
-        logger.debug(f"reset_data_file called for {self.port} (no-op - filename calculated dynamically)")
-
     async def set_stimulus(self, enabled: bool) -> bool:
         command = 'stim_on' if enabled else 'stim_off'
         return await self.send_command(command)
@@ -120,17 +117,11 @@ class DRTHandler:
         finally:
             self._config_future = None
 
-    async def set_iso_standard(self) -> bool:
-        return await self.set_iso_params()
-
     async def set_iso_params(self) -> bool:
         logger.info(f"Setting ISO preset parameters on {self.port}")
         await self.send_command('set_lowerISI', str(ISO_PRESET_CONFIG['lowerISI']))
-        await asyncio.sleep(0.05)
         await self.send_command('set_upperISI', str(ISO_PRESET_CONFIG['upperISI']))
-        await asyncio.sleep(0.05)
         await self.send_command('set_stimDur', str(ISO_PRESET_CONFIG['stimDur']))
-        await asyncio.sleep(0.05)
         await self.send_command('set_intensity', str(ISO_PRESET_CONFIG['intensity']))
         return True
 
@@ -150,11 +141,10 @@ class DRTHandler:
             logger.error(f"Error in read loop for {self.port}: {e}")
 
     async def _process_response(self, response: str):
-        logger.info(f"RAW MESSAGE from {self.port}: {repr(response)}")
+        logger.debug(f"Response from {self.port}: {repr(response)}")
 
         try:
             parts = response.split('>')
-            logger.info(f"SPLIT PARTS: {parts}")
 
             if not parts:
                 return
@@ -168,26 +158,22 @@ class DRTHandler:
                     response_type = rtype
                     break
 
-            logger.info(f"MATCHED TYPE: {response_type} (key: {response_key})")
-
             if response_type == 'click':
                 data = self._parse_click(parts)
-                logger.info(f"PARSED CLICK: {data}")
             elif response_type == 'trial':
                 data = self._parse_trial(parts)
-                logger.info(f"PARSED TRIAL: {data}")
                 self._buffered_trial_data = data
-                logger.info(f"Buffered trial data - will write on next stimulus. Current clicks: {self._click_count}")
+                logger.debug(f"Buffered trial data, current clicks: {self._click_count}")
             elif response_type == 'experiment_end':
                 data = {'event': 'experiment_end', 'raw': response}
                 if self._buffered_trial_data:
-                    logger.info(f"Experiment ended - writing buffered trial data with {self._click_count} clicks")
+                    logger.debug(f"Experiment ended, writing buffered data")
                     await self._log_trial_data(self._buffered_trial_data)
                     self._buffered_trial_data = None
             elif response_type == 'stimulus':
                 data = self._parse_stimulus(parts)
                 if self._buffered_trial_data:
-                    logger.info(f"Stimulus detected - writing buffered trial data with {self._click_count} clicks")
+                    logger.debug(f"Stimulus detected, writing buffered data")
                     await self._log_trial_data(self._buffered_trial_data)
                     self._buffered_trial_data = None
             elif response_type == 'config':
@@ -232,7 +218,6 @@ class DRTHandler:
                     data['timestamp'] = int(values[0]) if values[0] else None
                     data['trial_number'] = int(values[1]) if values[1] else None
                     data['reaction_time'] = float(values[2]) if values[2] else None
-                logger.info(f"Parsed trial: Timestamp={data.get('timestamp')}, Trial#={data.get('trial_number')}, RT={data.get('reaction_time')}")
             except (ValueError, IndexError) as e:
                 logger.warning(f"Could not parse trial data: {e}")
 
@@ -285,8 +270,6 @@ class DRTHandler:
             filename = f"DRT_{port_name}_{session_timestamp}.csv"
             data_file = self.output_dir / filename
 
-            logger.debug(f"DRT data file path: {data_file}")
-
             await asyncio.to_thread(self.output_dir.mkdir, parents=True, exist_ok=True)
 
             file_exists = await asyncio.to_thread(data_file.exists)
@@ -297,9 +280,7 @@ class DRTHandler:
                         f.write("Device ID, Label, Unix time in UTC, Milliseconds Since Record, Trial Number, Responses, Reaction Time\n")
 
                 await asyncio.to_thread(write_header)
-                logger.info(f"✓ Created DRT data file: {data_file}")
-            else:
-                logger.debug(f"Appending to existing DRT file: {data_file.name}")
+                logger.info(f"Created DRT data file: {data_file.name}")
 
             port_clean = self.port.lstrip('/').replace('/', '_').replace('\\', '_')
             device_id = f"sDRT_{port_clean}"
@@ -327,9 +308,9 @@ class DRTHandler:
                     f.write(line)
 
             await asyncio.to_thread(append_line)
-            logger.info(f"✓ Logged trial data to {data_file.name}: Trial={trial_number}, Label='{label}', RT={rt}, Clicks={clicks}")
+            logger.debug(f"Logged trial: T={trial_number}, RT={rt}, Clicks={clicks}")
 
             self._click_count = 0
 
         except Exception as e:
-            logger.error(f"✗ Error logging trial data: {e}", exc_info=True)
+            logger.error(f"Error logging trial data: {e}", exc_info=True)
