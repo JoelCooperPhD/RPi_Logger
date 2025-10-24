@@ -28,6 +28,9 @@ class GazeTracker:
         self.running = False
         self.display_enabled = display_enabled  # Controls OpenCV window display
 
+        # Phase 1.4: Pause state
+        self._paused = False
+
         self.frame_count = 0
         self.start_time = None
         self.no_frame_timeouts = 0  # When no frames available from stream
@@ -43,6 +46,38 @@ class GazeTracker:
 
     async def connect(self) -> bool:
         return await self.device_manager.connect()
+
+    # Phase 1.4: Pause/resume methods
+    async def pause(self):
+        """
+        Pause frame processing to save CPU while keeping streams alive.
+
+        This is useful when the Eye Tracker module is visible in the UI
+        but not actively being monitored. Streams stay connected so
+        resume is fast.
+        """
+        if self._paused:
+            logger.debug("Already paused")
+            return
+
+        self._paused = True
+        logger.info("Eye tracker paused (CPU saving mode - streams remain connected)")
+
+    async def resume(self):
+        """
+        Resume normal frame processing after pause.
+        """
+        if not self._paused:
+            logger.debug("Already running")
+            return
+
+        self._paused = False
+        logger.info("Eye tracker resumed")
+
+    @property
+    def is_paused(self) -> bool:
+        """Check if currently paused"""
+        return self._paused
 
     async def run(self):
         if not self.device_manager.is_connected:
@@ -101,8 +136,22 @@ class GazeTracker:
 
         while self.running:
             try:
+                # Phase 1.4: Check pause state early in loop
+                if self._paused:
+                    # Idle sleep with minimal CPU usage
+                    # Streams stay alive in background
+                    await asyncio.sleep(0.1)
+
+                    # Update deadline to avoid burst processing on resume
+                    next_frame_deadline = time.perf_counter() + frame_interval
+                    continue
+
                 wait_timeout = max(0.0, next_frame_deadline - time.perf_counter())
-                frame_packet: Optional[FramePacket] = await self.stream_handler.next_frame(timeout=wait_timeout)
+                # Phase 1.1: Use event-driven wait instead of polling
+                try:
+                    frame_packet: Optional[FramePacket] = await self.stream_handler.wait_for_frame(timeout=wait_timeout)
+                except asyncio.TimeoutError:
+                    frame_packet = None
 
                 if frame_packet is None:
                     self.no_frame_timeouts += 1
@@ -160,10 +209,16 @@ class GazeTracker:
                     latest_event = next_event
                     self.recording_manager.write_event_sample(next_event)
 
-                # Use sync processing in GUI mode to avoid cv2/Tkinter threading conflicts
-                if self.display_enabled:
-                    display_frame = await self.frame_processor.add_overlays_async(
-                        processed_frame,
+                # Phase 1.2 & 1.3: Separate display and recording overlays with early scaling
+                display_frame = None
+                recording_frame = None
+
+                if self.display_enabled and self.recording_manager.is_recording:
+                    # Both display and recording: process both separately
+                    # Phase 1.3: Scale early for display (reduces overlay CPU)
+                    preview_frame = self.frame_processor.scale_for_preview(processed_frame)
+                    display_frame = await self.frame_processor.add_display_overlays_async(
+                        preview_frame,
                         self.frame_count,
                         current_camera_frames,
                         self.start_time,
@@ -175,10 +230,15 @@ class GazeTracker:
                         self.config.fps,
                         experiment_label=self.recording_manager.current_experiment_label,
                     )
-                else:
-                    # GUI mode: run synchronously in main thread to avoid Tkinter conflicts
-                    display_frame = self.frame_processor.add_overlays(
-                        processed_frame,
+                    # Minimal overlay for recording (just gaze circle)
+                    recording_frame = self.frame_processor.add_minimal_gaze(processed_frame.copy(), latest_gaze)
+
+                elif self.display_enabled:
+                    # Display only: full overlays with early scaling
+                    # Phase 1.3: Scale early for display (reduces overlay CPU)
+                    preview_frame = self.frame_processor.scale_for_preview(processed_frame)
+                    display_frame = await self.frame_processor.add_display_overlays_async(
+                        preview_frame,
                         self.frame_count,
                         current_camera_frames,
                         self.start_time,
@@ -190,11 +250,16 @@ class GazeTracker:
                         self.config.fps,
                         experiment_label=self.recording_manager.current_experiment_label,
                     )
-                    await asyncio.sleep(0)  # Yield to event loop
 
-                self._latest_display_frame = display_frame
+                elif self.recording_manager.is_recording:
+                    # Recording only (headless): minimal overlay
+                    recording_frame = self.frame_processor.add_minimal_gaze(processed_frame, latest_gaze)
 
-                if self.recording_manager.is_recording:
+                # Store display frame if generated
+                if display_frame is not None:
+                    self._latest_display_frame = display_frame
+
+                if self.recording_manager.is_recording and recording_frame is not None:
                     frame_metadata = FrameTimingMetadata(
                         capture_monotonic=frame_packet.received_monotonic,
                         capture_unix=frame_packet.timestamp_unix_seconds,
@@ -206,10 +271,10 @@ class GazeTracker:
                         requested_fps=self.config.fps,
                         gaze_timestamp=getattr(latest_gaze, "timestamp_unix_seconds", None),
                     )
-                    self.recording_manager.write_frame(display_frame, metadata=frame_metadata)
+                    self.recording_manager.write_frame(recording_frame, metadata=frame_metadata)
                     self.recording_manager.write_gaze_sample(latest_gaze)
 
-                if self.display_enabled:
+                if self.display_enabled and display_frame is not None:
                     self.frame_processor.display_frame(display_frame)
 
                     command = self.frame_processor.check_keyboard()
@@ -221,6 +286,11 @@ class GazeTracker:
                         break
                     elif command == 'record':
                         await self.recording_manager.toggle_recording()
+                    elif command == 'pause':  # Phase 1.4: Pause/resume toggle
+                        if self.is_paused:
+                            await self.resume()
+                        else:
+                            await self.pause()
 
                 await asyncio.sleep(0)
 
