@@ -175,18 +175,8 @@ class ModuleManager:
             process = self.module_processes[module_name]
 
             if process.is_running():
-                self.logger.info("Module %s still running, waiting for stop...", module_name)
-
-                for _ in range(50):  # 50 * 0.1s = 5s timeout
-                    if not process.is_running():
-                        break
-                    await asyncio.sleep(0.1)
-
-                # Force stop if still running after timeout
-                if process.is_running():
-                    self.logger.warning("Module %s still running after timeout, forcing stop", module_name)
-                    await process.stop()
-                    await asyncio.sleep(0.5)
+                self.logger.info("Module %s still running, stopping...", module_name)
+                await process.stop()
 
             self.module_processes.pop(module_name, None)
             self.selected_modules.discard(module_name)
@@ -251,7 +241,6 @@ class ModuleManager:
         try:
             if process.is_recording():
                 await process.pause()
-                await asyncio.sleep(0.5)  # Give it time to pause
 
             await process.stop()
 
@@ -266,6 +255,7 @@ class ModuleManager:
 
     async def stop_all(self) -> None:
         """Stop all running module processes."""
+        import time
         self.logger.info("Stopping all modules")
 
         stop_tasks = []
@@ -273,8 +263,10 @@ class ModuleManager:
             if process.is_running():
                 async def stop_module_task(name: str, proc: ModuleProcess):
                     try:
+                        module_start = time.time()
                         await proc.stop()
-                        self.logger.info("Module %s stopped", name)
+                        module_duration = time.time() - module_start
+                        self.logger.info("⏱️  Module %s stopped in %.3fs", name, module_duration)
                     except Exception as e:
                         self.logger.error("Error stopping %s: %s", name, e)
 

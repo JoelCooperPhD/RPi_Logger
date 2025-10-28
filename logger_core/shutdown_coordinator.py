@@ -79,6 +79,9 @@ class ShutdownCoordinator:
         Args:
             source: Description of what triggered shutdown (for logging)
         """
+        import time
+        shutdown_start = time.time()
+
         async with self._lock:
             if self._state != ShutdownState.RUNNING:
                 self.logger.debug("Shutdown already initiated (state=%s), ignoring request from %s",
@@ -86,22 +89,29 @@ class ShutdownCoordinator:
                 return
 
             self.logger.info("=" * 60)
-            self.logger.info("Shutdown initiated by: %s", source)
+            self.logger.info("⏱️  SHUTDOWN INITIATED by: %s (t=0.000s)", source)
             self.logger.info("=" * 60)
             self._state = ShutdownState.REQUESTED
 
         # Execute cleanup callbacks
+        cleanup_start = time.time()
         await self._execute_cleanup()
+        cleanup_duration = time.time() - cleanup_start
+        self.logger.info("⏱️  All cleanup completed in %.3fs", cleanup_duration)
 
         # Mark shutdown complete
         async with self._lock:
             self._state = ShutdownState.COMPLETE
             self._shutdown_event.set()
 
-        self.logger.info("Shutdown complete")
+        shutdown_duration = time.time() - shutdown_start
+        self.logger.info("⏱️  TOTAL SHUTDOWN TIME: %.3fs", shutdown_duration)
+        self.logger.info("=" * 60)
 
     async def _execute_cleanup(self) -> None:
         """Execute all registered cleanup callbacks."""
+        import time
+
         async with self._lock:
             self._state = ShutdownState.IN_PROGRESS
 
@@ -109,14 +119,16 @@ class ShutdownCoordinator:
 
         for i, callback in enumerate(self._cleanup_callbacks, 1):
             try:
-                self.logger.debug("Cleanup %d/%d: %s",
+                callback_start = time.time()
+                self.logger.info("⏱️  Starting cleanup %d/%d: %s",
                                 i, len(self._cleanup_callbacks), callback.__name__)
                 await callback()
+                callback_duration = time.time() - callback_start
+                self.logger.info("⏱️  Completed %s in %.3fs",
+                                callback.__name__, callback_duration)
             except Exception as e:
                 self.logger.error("Error in cleanup callback %s: %s",
                                 callback.__name__, e, exc_info=True)
-
-        self.logger.info("All cleanup callbacks complete")
 
     async def wait_for_shutdown(self) -> None:
         """

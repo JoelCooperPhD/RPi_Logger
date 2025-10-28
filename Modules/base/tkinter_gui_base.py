@@ -228,43 +228,19 @@ class TkinterGUIBase:
     def handle_window_close(self):
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
-        if not hasattr(self, 'system'):
-            raise AttributeError("TkinterGUIBase requires 'self.system' attribute")
 
-        logger.info("=" * 60)
-        logger.info("HANDLE_WINDOW_CLOSE: Starting close sequence")
-        current_geometry = self.root.geometry()
-        logger.info("HANDLE_WINDOW_CLOSE: Current window geometry: %s", current_geometry)
+        logger.info("Saving window geometry before shutdown")
 
-        logger.info("HANDLE_WINDOW_CLOSE: Step 1 - Saving geometry to local config...")
         try:
             self.save_window_geometry_to_config()
-            logger.info("HANDLE_WINDOW_CLOSE: Step 1 - ✓ Saved to local config")
+            logger.info("✓ Saved geometry to local config")
         except Exception as e:
-            logger.error("HANDLE_WINDOW_CLOSE: Step 1 - ✗ Failed to save: %s", e, exc_info=True)
+            logger.error("Failed to save geometry: %s", e, exc_info=True)
 
-        # Send final geometry to parent before quitting (for master logger mode)
-        logger.info("HANDLE_WINDOW_CLOSE: Step 2 - Sending geometry to parent...")
         try:
             self.send_geometry_to_parent()
-            logger.info("HANDLE_WINDOW_CLOSE: Step 2 - ✓ Sent to parent")
+            logger.info("✓ Sent geometry to parent")
         except Exception as e:
-            logger.error("HANDLE_WINDOW_CLOSE: Step 2 - ✗ Failed to send: %s", e, exc_info=True)
+            logger.debug("Failed to send geometry to parent: %s", e)
 
-        logger.info("HANDLE_WINDOW_CLOSE: Step 3 - Sending quitting status...")
         self.send_quitting_status()
-
-        logger.info("HANDLE_WINDOW_CLOSE: Step 4 - Withdrawing window...")
-        self.withdraw_window()
-
-        logger.info("HANDLE_WINDOW_CLOSE: Step 5 - Setting shutdown flags...")
-        self.system.running = False
-        self.system.shutdown_event.set()
-
-        logger.info("HANDLE_WINDOW_CLOSE: Step 6 - Quitting tkinter...")
-        try:
-            self.root.quit()
-            logger.info("HANDLE_WINDOW_CLOSE: ✓ Close sequence completed")
-        except Exception as e:
-            logger.error("HANDLE_WINDOW_CLOSE: Error quitting tkinter: %s", e)
-        logger.info("=" * 60)

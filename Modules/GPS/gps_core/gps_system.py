@@ -1,0 +1,129 @@
+import asyncio
+import logging
+import time
+from typing import Any, Optional
+from pathlib import Path
+
+from Modules.base import BaseSystem, RecordingStateMixin
+from .gps_handler import GPSHandler
+from .recording import GPSRecordingManager
+from .constants import SERIAL_PORT, BAUD_RATE
+
+logger = logging.getLogger(__name__)
+
+
+class GPSInitializationError(Exception):
+    pass
+
+
+class GPSSystem(BaseSystem, RecordingStateMixin):
+
+    DEFER_DEVICE_INIT_IN_GUI = True
+
+    def __init__(self, args):
+        super().__init__(args)
+        RecordingStateMixin.__init__(self)
+
+        self.auto_start_recording = getattr(args, "auto_start_recording", False)
+        self.gps_handler: Optional[GPSHandler] = None
+        self.recording_manager: Optional[GPSRecordingManager] = None
+        self.current_trial_number: int = 1
+
+    async def _initialize_devices(self) -> None:
+        logger.info("Initializing GPS receiver (timeout: %ds)...", self.device_timeout)
+
+        start_time = time.time()
+        self.initialized = False
+
+        while time.time() - start_time < self.device_timeout:
+            try:
+                self.gps_handler = GPSHandler(SERIAL_PORT, BAUD_RATE)
+                await self.gps_handler.start()
+
+                if await self.gps_handler.wait_for_fix(timeout=2.0):
+                    break
+            except Exception as e:
+                logger.debug("GPS initialization attempt failed: %s", e)
+                if self.gps_handler:
+                    await self.gps_handler.stop()
+                    self.gps_handler = None
+
+            if self.shutdown_event.is_set():
+                raise KeyboardInterrupt("Device discovery cancelled")
+
+            await asyncio.sleep(0.5)
+
+        if not self.gps_handler:
+            error_msg = f"No GPS receiver found on {SERIAL_PORT} within {self.device_timeout} seconds"
+            logger.warning(error_msg)
+            raise GPSInitializationError(error_msg)
+
+        self.recording_manager = GPSRecordingManager(self.gps_handler)
+        self.initialized = True
+        logger.info("GPS receiver initialized successfully")
+
+    async def start_recording(self, trial_number: int = 1) -> bool:
+        can_start, error_msg = self.validate_recording_start()
+        if not can_start:
+            logger.error("Cannot start recording: %s", error_msg)
+            return False
+
+        if not self.recording_manager:
+            logger.error("Recording manager not initialized")
+            return False
+
+        self.current_trial_number = trial_number
+        self._increment_recording_count()
+        self.recording = True
+
+        try:
+            await self.recording_manager.start_recording(self.session_dir, trial_number)
+            logger.info("Started GPS recording #%d (trial %d)", self.recording_count, trial_number)
+            return True
+        except Exception as e:
+            logger.error("Failed to start recording: %s", e)
+            self.recording = False
+            return False
+
+    async def stop_recording(self) -> bool:
+        can_stop, error_msg = self.validate_recording_stop()
+        if not can_stop:
+            logger.warning("Cannot stop recording: %s", error_msg)
+            return False
+
+        self.recording = False
+
+        if self.recording_manager:
+            try:
+                await self.recording_manager.stop_recording()
+                logger.info("Recording stopped")
+                return True
+            except Exception as e:
+                logger.error("Failed to stop recording: %s", e)
+                return False
+
+        return False
+
+    def _create_mode_instance(self, mode_name: str) -> Any:
+        if mode_name == "gui":
+            from .modes.gui_mode import GUIMode
+            return GUIMode(self, enable_commands=self.enable_gui_commands)
+        else:
+            raise ValueError(f"Unsupported mode: {mode_name}")
+
+    async def cleanup(self) -> None:
+        logger.info("GPS2 cleanup")
+        self.running = False
+        self.shutdown_event.set()
+
+        if self.recording:
+            await self.stop_recording()
+
+        if self.gps_handler:
+            await self.gps_handler.stop()
+
+        if self.recording_manager:
+            await self.recording_manager.cleanup()
+
+        self.initialized = False
+        logger.info("GPS2 cleanup completed")

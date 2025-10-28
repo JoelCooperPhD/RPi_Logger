@@ -27,22 +27,22 @@ def parse_geometry_string(geometry_str: str) -> Optional[Tuple[int, int, int, in
 
 
 def save_window_geometry(root_widget, config_path: Path) -> bool:
-    logger.info("=== Saving window geometry to config ===")
+    logger.debug("Saving window geometry to config")
 
     try:
         from Modules.base import ConfigLoader
 
         geometry_str = root_widget.geometry()
-        logger.info("Current geometry string: '%s'", geometry_str)
+        logger.debug("Current geometry string: '%s'", geometry_str)
 
         parsed = parse_geometry_string(geometry_str)
         if not parsed:
             return False
 
         width, height, x, y = parsed
-        logger.info("Parsed geometry: width=%d, height=%d, x=%d, y=%d", width, height, x, y)
+        logger.debug("Parsed geometry: width=%d, height=%d, x=%d, y=%d", width, height, x, y)
 
-        logger.info("Config path: %s", config_path)
+        logger.debug("Config path: %s", config_path)
         if not config_path.exists():
             logger.error("Config file not found at: %s", config_path)
             return False
@@ -53,15 +53,15 @@ def save_window_geometry(root_widget, config_path: Path) -> bool:
             'window_width': width,
             'window_height': height,
         }
-        logger.info("Calling ConfigLoader.update_config_values() with: %s", updates)
+        logger.debug("Calling ConfigLoader.update_config_values() with: %s", updates)
 
         result = ConfigLoader.update_config_values(config_path, updates)
-        logger.info("ConfigLoader.update_config_values() returned: %s", result)
+        logger.debug("ConfigLoader.update_config_values() returned: %s", result)
 
         if result:
-            logger.info("✓ Successfully saved window geometry: %dx%d+%d+%d", width, height, x, y)
+            logger.info("Saved window geometry: %dx%d+%d+%d", width, height, x, y)
         else:
-            logger.error("✗ ConfigLoader.update_config_values() returned False")
+            logger.error("ConfigLoader.update_config_values() returned False")
 
         return result
 
@@ -71,25 +71,23 @@ def save_window_geometry(root_widget, config_path: Path) -> bool:
     except Exception as e:
         logger.error("Unexpected exception in save_window_geometry(): %s", e, exc_info=True)
         return False
-    finally:
-        logger.info("=== Finished saving window geometry ===")
 
 
 def send_geometry_to_parent(root_widget) -> bool:
     try:
-        logger.info("SEND_TO_PARENT: Attempting to send geometry to parent process")
+        logger.debug("Sending geometry to parent process")
         from logger_core.commands import StatusMessage
 
         geometry_str = root_widget.geometry()
-        logger.info("SEND_TO_PARENT: Current geometry string: %s", geometry_str)
+        logger.debug("Current geometry string: %s", geometry_str)
 
         parsed = parse_geometry_string(geometry_str)
         if not parsed:
-            logger.error("SEND_TO_PARENT: ✗ Failed to parse geometry: '%s'", geometry_str)
+            logger.error("Failed to parse geometry: '%s'", geometry_str)
             return False
 
         width, height, x, y = parsed
-        logger.info("SEND_TO_PARENT: Parsed values: width=%d, height=%d, x=%d, y=%d", width, height, x, y)
+        logger.debug("Parsed values: width=%d, height=%d, x=%d, y=%d", width, height, x, y)
 
         payload = {
             "width": width,
@@ -97,16 +95,16 @@ def send_geometry_to_parent(root_widget) -> bool:
             "x": x,
             "y": y
         }
-        logger.info("SEND_TO_PARENT: Sending StatusMessage with payload: %s", payload)
+        logger.debug("Sending StatusMessage with payload: %s", payload)
         StatusMessage.send("geometry_changed", payload)
-        logger.info("SEND_TO_PARENT: ✓ Successfully sent geometry to parent: %dx%d+%d+%d", width, height, x, y)
+        logger.info("Sent geometry to parent: %dx%d+%d+%d", width, height, x, y)
         return True
 
     except ImportError as e:
-        logger.info("SEND_TO_PARENT: StatusMessage not available (standalone mode): %s", e)
+        logger.debug("StatusMessage not available (standalone mode): %s", e)
         return False
     except Exception as e:
-        logger.error("SEND_TO_PARENT: ✗ Failed to send geometry to parent: %s", e, exc_info=True)
+        logger.error("Failed to send geometry to parent: %s", e, exc_info=True)
         return False
 
 
@@ -117,7 +115,10 @@ def get_module_config_path(gui_file_path: Path) -> Path:
 
 def load_window_geometry_from_config(config: dict, current_geometry: Optional[str] = None) -> Optional[str]:
     if current_geometry:
+        logger.debug("Using command-line window geometry (overriding config): %s", current_geometry)
         return current_geometry
+
+    logger.debug("Loading window geometry from config")
 
     try:
         from cli_utils import get_config_int
@@ -132,7 +133,7 @@ def load_window_geometry_from_config(config: dict, current_geometry: Optional[st
             logger.debug("Loaded window geometry from config: %s", geometry_str)
             return geometry_str
         else:
-            logger.debug("Window geometry not fully specified in config (some values missing)")
+            logger.debug("Window geometry not fully specified in config")
             return None
 
     except ImportError as e:

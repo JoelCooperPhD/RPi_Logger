@@ -21,6 +21,7 @@ class GUIMode(BaseGUIMode):
         super().__init__(audio_system, enable_commands)
         self.capture_manager: Optional[AudioCaptureManager] = None
         self.current_usb_devices: Dict[int, str] = {}
+        self._display_loop_stopped = False
 
     def create_gui(self) -> TkinterGUI:
         gui = TkinterGUI(self.system, self.system.args)
@@ -88,9 +89,28 @@ class GUIMode(BaseGUIMode):
         if self.gui:
             self.gui.sync_recording_state()
 
+    def sync_cleanup(self) -> None:
+        """Synchronous cleanup - forcefully kill audio processes."""
+        self.logger.info("Audio sync cleanup - stopping display loop and killing processes")
+        self._display_loop_stopped = True
+
+        if self.capture_manager:
+            import signal
+            for device_id, process in list(self.capture_manager.audio_processes.items()):
+                try:
+                    process.kill()
+                    self.logger.info("Killed arecord for device %d (pid %s)", device_id, process.pid)
+                except Exception as e:
+                    self.logger.debug("Error killing process for device %d: %s", device_id, e)
+
+    def on_closing(self) -> None:
+        self.logger.info("Audio GUI closing - stopping display loop immediately")
+        self._display_loop_stopped = True
+        super().on_closing()
+
     async def cleanup(self) -> None:
         self.logger.info("Audio mode cleanup started")
-
+        self._display_loop_stopped = True
 
         if self.capture_manager:
             await self.capture_manager.stop_all_captures()
@@ -127,17 +147,21 @@ class GUIMode(BaseGUIMode):
                 )
 
     async def _display_update_loop(self):
-        while self.is_running() and self.gui:
+        while self.is_running() and self.gui and not self._display_loop_stopped:
             try:
-                if self.gui:
+                if self.gui and not self._display_loop_stopped and self.gui.root.winfo_exists():
                     for device_id in list(self.gui.level_canvases.keys()):
+                        if self._display_loop_stopped:
+                            break
                         self.gui.draw_level_meter(device_id)
 
                 await asyncio.sleep(0.05)
 
             except Exception as e:
-                self.logger.error("Display update loop error: %s", e)
-                await asyncio.sleep(0.05)
+                self.logger.debug("Display update loop error: %s", e)
+                break
+
+        self.logger.info("Display update loop stopped")
 
     async def _update_loop(self):
         usb_poll_counter = 0

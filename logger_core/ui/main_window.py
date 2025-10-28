@@ -536,21 +536,19 @@ class MainWindow:
             self.logger.error("Error saving window geometry: %s", e, exc_info=True)
 
     async def run(self) -> None:
-        self.controller.running = True
+        from async_tkinter_loop import main_loop
+
         self.build_ui()
 
         await self.timer_manager.start_clock()
 
-        await self.controller.auto_start_modules()
+        asyncio.create_task(self.controller.auto_start_modules())
 
-        while self.controller.running:
-            try:
-                self.root.update()
-                await asyncio.sleep(0.01)
-            except tk.TclError:
-                break
-            except Exception as e:
-                self.logger.error("UI loop error: %s", e)
-                break
+        try:
+            await main_loop(self.root)
+        except tk.TclError:
+            pass
+        except Exception as e:
+            self.logger.error("UI loop error: %s", e)
 
         self.logger.info("UI stopped")

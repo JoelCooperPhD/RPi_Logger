@@ -233,6 +233,22 @@ class BaseCommandHandler(ABC):
         if hasattr(self.system, 'running'):
             self.system.running = False
 
+        # CRITICAL: Destroy window to exit main_loop()
+        # main_loop() only exits on TclError from destroyed window
+        if self.gui:
+            window = None
+            if hasattr(self.gui, 'root'):
+                window = self.gui.root
+            elif hasattr(self.gui, 'window'):
+                window = self.gui.window
+
+            if window:
+                try:
+                    window.destroy()
+                    self.logger.info("QUIT_HANDLER: ✓ Destroyed window")
+                except Exception as e:
+                    self.logger.error("QUIT_HANDLER: ✗ Failed to destroy window: %s", e)
+
     async def handle_custom_command(self, command: str, command_data: Dict[str, Any]) -> bool:
         return False  # Not handled
 

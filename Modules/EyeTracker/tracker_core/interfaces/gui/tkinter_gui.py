@@ -113,9 +113,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         else:
             logger.warning("No frame available for snapshot")
 
-    def _on_closing(self):
-        self.handle_window_close()
-
     def save_window_geometry_to_config(self):
         from pathlib import Path
         from Modules.base import gui_utils

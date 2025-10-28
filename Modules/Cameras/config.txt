@@ -100,7 +100,7 @@ enable_csv_timing_log = true # Save per-frame timing data for analysis
 enabled = false
 
 # Window position and size (saved automatically on window close)
-window_x = 2414
-window_y = 595
+window_x = 2166
+window_y = 605
 window_width = 515
 window_height = 352
