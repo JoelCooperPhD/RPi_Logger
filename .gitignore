@@ -42,6 +42,9 @@ examples_output/
 # Legacy data directory (no longer used - data goes to user-selected location)
 /data/
 
+# GPS map tiles
+Modules/GPS/offline_tiles.db
+
 # Development notes
 AGENTS.md
 debug_*.py
