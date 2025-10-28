@@ -30,6 +30,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.device_active_vars: Dict[int, tk.BooleanVar] = {}
         self.level_meters: Dict[int, AudioLevelMeter] = {}
         self.recording_start_time: Optional[datetime] = None
+        self.canvas_items: Dict[int, dict] = {}  # Store canvas item IDs for updates
 
         # Use template method for GUI initialization
         self.initialize_gui_framework(
@@ -76,6 +77,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         for widget in self.meter_container.winfo_children():
             widget.destroy()
         self.level_canvases.clear()
+        self.canvas_items.clear()
 
         selected_device_ids = sorted(self.system.selected_devices)
 
@@ -181,8 +183,17 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         canvas = self.level_canvases[device_id]
 
+        # Safety check: verify canvas still exists before trying to draw
+        try:
+            if not canvas.winfo_exists():
+                return
+        except Exception:
+            return
+
         if hasattr(self, 'module_content_visible_var') and not self.module_content_visible_var.get():
             canvas.delete('all')
+            if device_id in self.canvas_items:
+                del self.canvas_items[device_id]
             width = canvas.winfo_width()
             height = canvas.winfo_height()
             if width > 10 and height > 10:
@@ -200,8 +211,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         if not meter.dirty:
             return
-
-        canvas.delete('all')
 
         width = canvas.winfo_width()
         height = canvas.winfo_height()
@@ -226,75 +235,113 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         yellow_width = ((yellow_threshold - green_threshold) / total_db_range) * (width - 2 * padding_x)
         red_width = ((db_max - yellow_threshold) / total_db_range) * (width - 2 * padding_x)
 
-        x_offset = padding_x  # Start at left
-        canvas.create_rectangle(
-            x_offset, meter_y,
-            x_offset + green_width, meter_y + meter_height,
-            fill='#1a3a1a', outline='#2a4a2a'
-        )
-        x_offset += green_width
-        canvas.create_rectangle(
-            x_offset, meter_y,
-            x_offset + yellow_width, meter_y + meter_height,
-            fill='#3a3a1a', outline='#4a4a2a'
-        )
-        x_offset += yellow_width
-        canvas.create_rectangle(
-            x_offset, meter_y,
-            x_offset + red_width, meter_y + meter_height,
-            fill='#3a1a1a', outline='#4a2a2a'
-        )
+        # Check if we need to create or recreate canvas items
+        needs_creation = device_id not in self.canvas_items
+        if not needs_creation:
+            items = self.canvas_items[device_id]
+            # Check if canvas dimensions changed (resize)
+            if items.get('width') != width or items.get('height') != height:
+                needs_creation = True
+                canvas.delete('all')
+                del self.canvas_items[device_id]
 
-        rms_position = max(db_min, min(rms_db, db_max))
-        rms_fraction = (rms_position - db_min) / total_db_range
-        rms_width = rms_fraction * (width - 2 * padding_x)
+        if needs_creation:
+            # Create all canvas items and store their IDs
+            items = {'width': width, 'height': height}
 
-        if rms_width > 0:
-            x_offset = padding_x  # Start at left
+            # Background rectangles
+            x_offset = padding_x
+            items['bg_green'] = canvas.create_rectangle(
+                x_offset, meter_y,
+                x_offset + green_width, meter_y + meter_height,
+                fill='#1a3a1a', outline='#2a4a2a'
+            )
+            x_offset += green_width
+            items['bg_yellow'] = canvas.create_rectangle(
+                x_offset, meter_y,
+                x_offset + yellow_width, meter_y + meter_height,
+                fill='#3a3a1a', outline='#4a4a2a'
+            )
+            x_offset += yellow_width
+            items['bg_red'] = canvas.create_rectangle(
+                x_offset, meter_y,
+                x_offset + red_width, meter_y + meter_height,
+                fill='#3a1a1a', outline='#4a2a2a'
+            )
+
+            # Level indicator rectangles
+            items['level_green'] = canvas.create_rectangle(0, 0, 0, 0, fill='#00ff00', outline='')
+            items['level_yellow'] = canvas.create_rectangle(0, 0, 0, 0, fill='#ffff00', outline='')
+            items['level_red'] = canvas.create_rectangle(0, 0, 0, 0, fill='#ff0000', outline='')
+
+            # Peak hold line
+            items['peak_line'] = canvas.create_line(0, 0, 0, 0, fill='#ffffff', width=2)
+
+            self.canvas_items[device_id] = items
+        else:
+            items = self.canvas_items[device_id]
+
+        # Update level indicators (wrap in try-except for shutdown safety)
+        try:
+            rms_position = max(db_min, min(rms_db, db_max))
+            rms_fraction = (rms_position - db_min) / total_db_range
+            rms_width = rms_fraction * (width - 2 * padding_x)
+
+            x_offset = padding_x
             remaining = rms_width
 
+            # Update green level
             green_fill = min(remaining, green_width)
             if green_fill > 0:
-                canvas.create_rectangle(
-                    x_offset, meter_y,
-                    x_offset + green_fill, meter_y + meter_height,
-                    fill='#00ff00', outline=''
-                )
+                canvas.coords(items['level_green'],
+                             x_offset, meter_y,
+                             x_offset + green_fill, meter_y + meter_height)
                 remaining -= green_fill
                 x_offset += green_fill
+            else:
+                canvas.coords(items['level_green'], 0, 0, 0, 0)
 
+            # Update yellow level
             if remaining > 0:
                 yellow_fill = min(remaining, yellow_width)
                 if yellow_fill > 0:
-                    canvas.create_rectangle(
-                        x_offset, meter_y,
-                        x_offset + yellow_fill, meter_y + meter_height,
-                        fill='#ffff00', outline=''
-                    )
+                    canvas.coords(items['level_yellow'],
+                                 x_offset, meter_y,
+                                 x_offset + yellow_fill, meter_y + meter_height)
                     remaining -= yellow_fill
                     x_offset += yellow_fill
+                else:
+                    canvas.coords(items['level_yellow'], 0, 0, 0, 0)
+            else:
+                canvas.coords(items['level_yellow'], 0, 0, 0, 0)
 
+            # Update red level
             if remaining > 0:
                 red_fill = min(remaining, red_width)
                 if red_fill > 0:
-                    canvas.create_rectangle(
-                        x_offset, meter_y,
-                        x_offset + red_fill, meter_y + meter_height,
-                        fill='#ff0000', outline=''
-                    )
+                    canvas.coords(items['level_red'],
+                                 x_offset, meter_y,
+                                 x_offset + red_fill, meter_y + meter_height)
+                else:
+                    canvas.coords(items['level_red'], 0, 0, 0, 0)
+            else:
+                canvas.coords(items['level_red'], 0, 0, 0, 0)
 
-        if peak_db > db_min:
-            peak_position = max(db_min, min(peak_db, db_max))
-            peak_fraction = (peak_position - db_min) / total_db_range
-            peak_x = padding_x + (peak_fraction * (width - 2 * padding_x))
+            # Update peak hold line
+            if peak_db > db_min:
+                peak_position = max(db_min, min(peak_db, db_max))
+                peak_fraction = (peak_position - db_min) / total_db_range
+                peak_x = padding_x + (peak_fraction * (width - 2 * padding_x))
+                canvas.coords(items['peak_line'],
+                             peak_x, meter_y,
+                             peak_x, meter_y + meter_height)
+            else:
+                canvas.coords(items['peak_line'], 0, 0, 0, 0)
 
-            canvas.create_line(
-                peak_x, meter_y,
-                peak_x, meter_y + meter_height,
-                fill='#ffffff', width=2
-            )
+        except Exception:
+            # Canvas is being destroyed, silently return
+            return
 
-        # Clear dirty flag after drawing
         meter.clear_dirty()
 
     def populate_device_toggles(self):

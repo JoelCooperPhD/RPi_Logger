@@ -40,7 +40,6 @@ class MainController:
         self.trial_label_var: Optional[tk.StringVar] = None
 
         self.trial_counter: int = 0
-        self.running = False
         self.session_active = False
         self.trial_active = False
 
@@ -302,11 +301,7 @@ class MainController:
 
         shutdown_coordinator = get_shutdown_coordinator()
 
-        async def shutdown_and_stop():
-            await shutdown_coordinator.initiate_shutdown("UI button")
-            self.running = False
-
-        asyncio.create_task(shutdown_and_stop())
+        asyncio.create_task(shutdown_coordinator.initiate_shutdown("UI button"))
 
     async def _status_callback(self, module_name: str, state: ModuleState, status) -> None:
         if module_name in self.module_vars:

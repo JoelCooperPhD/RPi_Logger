@@ -166,6 +166,7 @@ class LoggerSystem:
         module_info = next((m for m in modules if m.name == module_name), None)
 
         if not module_info or not module_info.config_path:
+            self.logger.debug("No config path for module %s", module_name)
             return None
 
         config = await self.config_manager.read_config_async(module_info.config_path)
@@ -175,9 +176,12 @@ class LoggerSystem:
         height = self.config_manager.get_int(config, 'window_height', default=None)
 
         if all(v is not None for v in [x, y, width, height]):
-            return WindowGeometry(x=x, y=y, width=width, height=height)
-
-        return None
+            geometry = WindowGeometry(x=x, y=y, width=width, height=height)
+            self.logger.debug("Loaded geometry for %s: %s", module_name, geometry.to_geometry_string())
+            return geometry
+        else:
+            self.logger.debug("No saved geometry found for %s (some values missing)", module_name)
+            return None
 
     async def stop_module(self, module_name: str) -> bool:
         """Stop a module."""
@@ -240,18 +244,24 @@ class LoggerSystem:
             request_geometry: If True, request geometry from modules before stopping.
                              Set to False during final shutdown to speed up exit.
         """
+        import time
         self.logger.info("Stopping all modules (request_geometry=%s)", request_geometry)
 
         if self.session_manager.recording:
+            pause_start = time.time()
             await self.pause_all()
-            await asyncio.sleep(1.0)
+            self.logger.info("⏱️  Paused all modules in %.3fs", time.time() - pause_start)
 
         # Request geometry from all running modules BEFORE shutting them down
         # (skip on final shutdown since modules save their own geometry on exit)
         if request_geometry:
+            geom_start = time.time()
             await self._request_geometries_from_all()
+            self.logger.info("⏱️  Requested geometries in %.3fs", time.time() - geom_start)
 
+        stop_start = time.time()
         await self.module_manager.stop_all()
+        self.logger.info("⏱️  Stopped all modules in %.3fs", time.time() - stop_start)
 
     async def _request_geometries_from_all(self) -> None:
         """Request window geometry from all running modules."""
@@ -271,10 +281,12 @@ class LoggerSystem:
 
         if get_geometry_tasks:
             await asyncio.gather(*get_geometry_tasks, return_exceptions=True)
-            await asyncio.sleep(0.3)
 
     async def save_running_modules_state(self) -> bool:
         """Save list of currently running modules for next launch."""
+        import time
+        save_start = time.time()
+
         try:
             running_modules = self.module_manager.get_running_modules()
 
@@ -296,7 +308,9 @@ class LoggerSystem:
 
             await asyncio.to_thread(write_json)
 
-            self.logger.info("Saved running modules state: %s", running_modules)
+            save_duration = time.time() - save_start
+            self.logger.info("⏱️  Saved running modules state in %.3fs: %s",
+                           save_duration, running_modules)
             return True
 
         except Exception as e:

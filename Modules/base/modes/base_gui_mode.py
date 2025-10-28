@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 from .base_mode import BaseMode
 from logger_core.commands import BaseCommandHandler, CommandMessage, StatusMessage
+from logger_core.async_bridge import AsyncBridge
 
 
 class BaseGUIMode(BaseMode, ABC):
@@ -18,6 +19,7 @@ class BaseGUIMode(BaseMode, ABC):
         super().__init__(system)
         self.enable_commands = enable_commands
         self.gui: Optional[Any] = None
+        self.async_bridge: Optional[AsyncBridge] = None
         self.command_handler: Optional[BaseCommandHandler] = None
         self.command_task: Optional[asyncio.Task] = None
         self.preview_task: Optional[asyncio.Task] = None
@@ -136,10 +138,12 @@ class BaseGUIMode(BaseMode, ABC):
             except asyncio.CancelledError:
                 self.logger.debug("Device retry loop cancelled")
                 raise
+            except KeyboardInterrupt:
+                self.logger.debug("Device detection cancelled by user")
+                return
             except Exception as e:
                 self.logger.debug("Device detection attempt failed: %s", e)
 
-            # Wait before next retry with frequent cancellation checks
             for _ in range(int(retry_interval * 10)):
                 if not self.system.running:
                     return
@@ -171,16 +175,36 @@ class BaseGUIMode(BaseMode, ABC):
         pass
 
     def on_closing(self) -> None:
+        self.logger.info("Window close requested")
+
+        self.system.running = False
+        self.system.shutdown_event.set()
+
+        if hasattr(self, 'sync_cleanup'):
+            try:
+                self.logger.info("Running synchronous cleanup")
+                self.sync_cleanup()
+            except Exception as e:
+                self.logger.error("Error during sync cleanup: %s", e, exc_info=True)
+
         if self.gui and hasattr(self.gui, 'handle_window_close'):
             try:
+                self.logger.info("Saving geometry")
                 self.gui.handle_window_close()
             except Exception as e:
-                self.logger.error("Error in handle_window_close: %s", e, exc_info=True)
-                self.system.running = False
-                self.system.shutdown_event.set()
-        else:
-            self.system.running = False
-            self.system.shutdown_event.set()
+                self.logger.error("Error saving geometry: %s", e, exc_info=True)
+
+        window = self.get_gui_window()
+        if window:
+            try:
+                self.logger.info("Destroying window")
+                window.destroy()
+            except Exception as e:
+                self.logger.debug("Error destroying window: %s", e)
+
+    def sync_cleanup(self) -> None:
+        """Synchronous cleanup - override in subclasses if needed."""
+        pass
 
     def get_gui_window(self) -> Optional[Any]:
         if self.gui:
@@ -191,121 +215,81 @@ class BaseGUIMode(BaseMode, ABC):
         return None
 
     async def run(self) -> None:
+        """
+        Run GUI mode using guest mode pattern.
+
+        Architecture:
+        - Tkinter mainloop runs in MAIN thread (blocking)
+        - AsyncIO event loop runs in BACKGROUND daemon thread
+        - AsyncBridge provides thread-safe communication
+        """
         self.system.running = True
 
         self.gui = self.create_gui()
+        window = self.get_gui_window()
+
+        if not window:
+            self.logger.error("Failed to create GUI window")
+            return
+
+        self.async_bridge = AsyncBridge(window)
+        self.async_bridge.start()
+
+        window.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.logger.info("Window close handler registered")
 
         if self.enable_commands:
             self.command_handler = self.create_command_handler(self.gui)
             self.logger.info("Starting GUI mode with parent command support")
+
+            self.command_task = self.async_bridge.run_coroutine(
+                self._start_command_listener()
+            )
         else:
             self.logger.info("Starting GUI mode (standalone)")
 
         if getattr(self.system, 'auto_start_recording', False):
             await self.on_auto_start_recording()
 
-        self.preview_task = asyncio.create_task(self._preview_update_loop())
+        self.async_bridge.run_coroutine(self._preview_update_loop())
 
-        if self.enable_commands:
-            reader = await self._setup_stdin_reader()
-            self.command_task = asyncio.create_task(self._command_listener(reader))
-
-        module_tasks = self.create_tasks()
+        if not self.system.initialized:
+            self.logger.info("Devices not detected - starting retry task in background")
+            self.device_retry_task = self.async_bridge.run_coroutine(self._device_retry_loop())
 
         try:
-            tasks = [
-                self._run_gui_async(),
-                self.preview_task,
-            ]
-
-            if self.command_task:
-                tasks.append(self.command_task)
-
-            tasks.extend(module_tasks)
-
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            task_names = ['GUI', 'Preview Loop', 'Command Listener'] + [f'Task {i}' for i in range(len(module_tasks))]
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    task_name = task_names[i] if i < len(task_names) else f"Task {i}"
-                    self.logger.exception(
-                        "%s task failed with exception: %s",
-                        task_name, result,
-                        exc_info=result
-                    )
+            self._run_gui_sync()
 
         finally:
-            if self.preview_task and not self.preview_task.done():
-                self.preview_task.cancel()
+            self.logger.info("GUI closed, stopping async tasks")
 
-            if self.command_task and not self.command_task.done():
-                self.command_task.cancel()
+            if self.async_bridge:
+                self.async_bridge.stop()
 
-            for task in module_tasks:
-                if task and not task.done():
-                    task.cancel()
+            await asyncio.sleep(0.1)
 
-            pending = []
-            if self.preview_task:
-                pending.append(self.preview_task)
-            if self.command_task:
-                pending.append(self.command_task)
-            pending.extend(module_tasks)
+            self.logger.info("Shutdown complete")
 
-            if pending:
-                results = await asyncio.gather(*pending, return_exceptions=True)
-                for i, result in enumerate(results):
-                    if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
-                        self.logger.exception(
-                            "Task cleanup failed with exception: %s",
-                            result,
-                            exc_info=result
-                        )
-
-            try:
-                await self.cleanup()
-            except Exception as e:
-                self.logger.exception("Cleanup failed: %s", e, exc_info=True)
-
-    async def _run_gui_async(self) -> None:
-        import tkinter as tk
-
-        loop = asyncio.get_event_loop()
+    def _run_gui_sync(self) -> None:
+        """
+        Run Tkinter mainloop in main thread (guest mode pattern).
+        This is NOT async - it blocks until the window is closed.
+        """
         window = self.get_gui_window()
 
         if not window:
             self.logger.error("No GUI window available")
             return
 
-        def update_gui():
-            try:
-                if window.winfo_exists():
-                    window.update()
-                    if self.system.running:
-                        loop.call_later(0.01, update_gui)  # 100 Hz GUI updates
-                else:
-                    self.system.running = False
-            except tk.TclError:
-                self.system.running = False
-            except Exception as e:
-                self.logger.error("GUI update error: %s", e)
-                self.system.running = False
+        self.logger.info("Starting Tkinter mainloop in main thread")
 
         try:
-            loop.call_soon(update_gui)
+            window.mainloop()
+            self.logger.info("GUI mainloop completed")
 
-            await self.system.shutdown_event.wait()
-
-        finally:
-            if self.gui:
-                try:
-                    if hasattr(self.gui, 'destroy'):
-                        self.gui.destroy()
-                    elif window:
-                        window.destroy()
-                except Exception as e:
-                    self.logger.debug("Error destroying GUI: %s", e)
+        except Exception as e:
+            self.logger.error("GUI mainloop error: %s", e, exc_info=True)
+            self.system.running = False
 
     async def _preview_update_loop(self) -> None:
         interval = self.get_preview_update_interval()
@@ -317,6 +301,9 @@ class BaseGUIMode(BaseMode, ABC):
                     window.after(0, self.update_preview)
 
                 await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                self.logger.debug("Preview update loop cancelled")
+                raise
             except Exception as e:
                 self.logger.debug("Preview update error: %s", e)
                 break
@@ -327,6 +314,11 @@ class BaseGUIMode(BaseMode, ABC):
         protocol = asyncio.StreamReaderProtocol(reader)
         await loop.connect_read_pipe(lambda: protocol, sys.stdin)
         return reader
+
+    async def _start_command_listener(self) -> None:
+        """Set up stdin reader and start command listener (runs in background thread)."""
+        stdin_reader = await self._setup_stdin_reader()
+        await self._command_listener(stdin_reader)
 
     async def _command_listener(self, reader: asyncio.StreamReader) -> None:
         self.logger.info("Command listener started (parent communication enabled)")
@@ -355,6 +347,9 @@ class BaseGUIMode(BaseMode, ABC):
                     else:
                         StatusMessage.send("error", {"message": "Invalid JSON"})
 
+            except asyncio.CancelledError:
+                self.logger.debug("Command listener cancelled")
+                raise
             except Exception as e:
                 StatusMessage.send("error", {"message": f"Command error: {e}"})
                 self.logger.error("Command listener error: %s", e)
@@ -374,10 +369,7 @@ class BaseGUIMode(BaseMode, ABC):
         if not continue_running:
             return False
 
-        # Sync GUI state after command execution (thread-safe via window.after)
-        window = self.get_gui_window()
-        if window and window.winfo_exists():
-            if cmd in ("start_recording", "stop_recording"):
-                window.after(0, self.sync_recording_state)
+        if cmd in ("start_recording", "stop_recording") and self.async_bridge:
+            self.async_bridge.call_in_gui(self.sync_recording_state)
 
         return True

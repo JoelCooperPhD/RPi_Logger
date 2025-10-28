@@ -150,15 +150,36 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     # Register cleanup callbacks in order
     async def cleanup_logger_system():
+        import time
+        logger.info("Starting logger system cleanup...")
+        state_start = time.time()
         await logger_system.save_running_modules_state()
+        logger.info("⏱️  Saved state in %.3fs", time.time() - state_start)
+
+        cleanup_start = time.time()
         await logger_system.cleanup(request_geometry=False)
+        logger.info("⏱️  Logger cleanup in %.3fs", time.time() - cleanup_start)
 
     async def cleanup_ui():
+        import time
+        logger.info("Starting UI cleanup...")
+
+        geom_start = time.time()
         ui.save_window_geometry()
+        logger.info("⏱️  Saved window geometry in %.3fs", time.time() - geom_start)
+
+        log_start = time.time()
         ui.cleanup_log_handler()
+        logger.info("⏱️  Cleaned up log handler in %.3fs", time.time() - log_start)
+
+        timer_start = time.time()
         await ui.timer_manager.stop_all()
+        logger.info("⏱️  Stopped timers in %.3fs", time.time() - timer_start)
+
         if ui.root:
-            ui.root.quit()
+            destroy_start = time.time()
+            ui.root.destroy()
+            logger.info("⏱️  Destroyed window in %.3fs", time.time() - destroy_start)
 
     shutdown_coordinator.register_cleanup(cleanup_logger_system)
     shutdown_coordinator.register_cleanup(cleanup_ui)

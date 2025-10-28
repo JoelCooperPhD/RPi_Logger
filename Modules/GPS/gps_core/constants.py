@@ -1,0 +1,6 @@
+MODULE_NAME = "GPS"
+MODULE_DESCRIPTION = "GPS Map Viewer with Recording"
+
+SERIAL_PORT = "/dev/serial0"
+BAUD_RATE = 9600
+DEVICE_TIMEOUT = 10.0
