@@ -1,7 +1,7 @@
 from typing import Type
 
 from Modules.base import BaseSupervisor
-from .gps2_system import GPSSystem, GPSInitializationError
+from .gps_system import GPSSystem, GPSInitializationError
 
 
 class GPSSupervisor(BaseSupervisor[GPSSystem, GPSInitializationError]):

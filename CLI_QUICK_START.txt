@@ -1,0 +1,47 @@
+RPi Logger - CLI Mode Quick Start
+====================================
+
+START CLI MODE:
+  DISPLAY=:0 python3 main_logger.py --mode interactive
+
+BASIC COMMANDS:
+  help       - Show all commands
+  list       - List modules
+  status     - Show status
+  quit       - Exit
+
+MODULE CONTROL:
+  start <module>  - Start module
+  stop <module>   - Stop module
+
+SESSION/TRIAL:
+  session start           - Start session (auto-named)
+  session start /path     - Start in specific directory
+  session stop            - Stop session
+  record [label]          - Start trial recording
+  pause                   - Stop trial recording
+
+EXAMPLE SESSION:
+  logger> session start
+  logger> record "Highway test"
+  logger> pause
+  logger> record "City driving"
+  logger> pause
+  logger> session stop
+  logger> quit
+
+REQUIREMENTS:
+  - Set DISPLAY=:0 (or use ssh -X)
+  - Enable modules in their config files (enabled=true)
+  - Ensure hardware is connected (GPS, Camera, Audio)
+
+FILES CREATED:
+  data/session_<timestamp>/
+    - <timestamp>_CONTROL.csv     (event log)
+    - <timestamp>_NOTES.txt        (notes)
+    - <timestamp>_*_trial###.*     (module data)
+
+DOCS:
+  - CLI_MODE.md         - Complete documentation
+  - TEST_SUMMARY.md     - Testing report
+  - CLAUDE.md           - Architecture overview

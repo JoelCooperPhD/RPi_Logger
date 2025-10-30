@@ -39,5 +39,5 @@ enabled = false
 
 window_x = 91
 window_y = 185
-window_width = 1171
-window_height = 516
+window_width = 1
+window_height = 1
