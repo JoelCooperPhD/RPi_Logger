@@ -154,6 +154,10 @@ class LoggerSystem:
         """Get the state of a module."""
         return self.module_manager.get_module_state(module_name)
 
+    def get_running_modules(self) -> List[str]:
+        """Get list of currently running module names."""
+        return self.module_manager.get_running_modules()
+
     async def start_module(self, module_name: str) -> bool:
         """Start a module."""
         # Load window geometry from config
