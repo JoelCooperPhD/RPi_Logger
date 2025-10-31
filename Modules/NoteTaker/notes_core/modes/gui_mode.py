@@ -21,7 +21,6 @@ class GUIMode(BaseGUIMode):
         from ..interfaces.gui.tkinter_gui import TkinterGUI
 
         gui = TkinterGUI(self.system, self.system.args)
-        gui.set_close_handler(self.on_closing)
         return gui
 
     def create_command_handler(self, gui: Any) -> CommandHandler:

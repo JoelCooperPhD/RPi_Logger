@@ -32,15 +32,25 @@ class GPSSystem(BaseSystem, RecordingStateMixin):
     async def _initialize_devices(self) -> None:
         logger.info("Initializing GPS receiver (timeout: %ds)...", self.device_timeout)
 
+        self.lifecycle_timer.mark_phase("device_discovery_start")
         start_time = time.time()
         self.initialized = False
 
+        discovery_attempts = 0
         while time.time() - start_time < self.device_timeout:
+            discovery_attempts += 1
             try:
+                if self._should_send_status() and discovery_attempts == 1:
+                    from logger_core.commands import StatusMessage
+                    StatusMessage.send("discovering", {"device_type": "gps_receiver", "timeout": self.device_timeout})
+
                 self.gps_handler = GPSHandler(SERIAL_PORT, BAUD_RATE)
                 await self.gps_handler.start()
 
                 if await self.gps_handler.wait_for_fix(timeout=2.0):
+                    if self._should_send_status():
+                        from logger_core.commands import StatusMessage
+                        StatusMessage.send("device_detected", {"device_type": "gps_receiver", "port": SERIAL_PORT})
                     break
             except Exception as e:
                 logger.debug("GPS initialization attempt failed: %s", e)
@@ -60,7 +70,20 @@ class GPSSystem(BaseSystem, RecordingStateMixin):
 
         self.recording_manager = GPSRecordingManager(self.gps_handler)
         self.initialized = True
+
+        self.lifecycle_timer.mark_phase("device_discovery_complete")
+        self.lifecycle_timer.mark_phase("initialized")
+
         logger.info("GPS receiver initialized successfully")
+
+        if self._should_send_status():
+            from logger_core.commands import StatusMessage
+            init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
+            StatusMessage.send_with_timing("initialized", init_duration, {
+                "device_type": "gps_receiver",
+                "port": SERIAL_PORT,
+                "discovery_attempts": discovery_attempts
+            })
 
     async def start_recording(self, trial_number: int = 1) -> bool:
         can_start, error_msg = self.validate_recording_start()

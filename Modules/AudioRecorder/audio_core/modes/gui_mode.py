@@ -26,8 +26,6 @@ class GUIMode(BaseGUIMode):
     def create_gui(self) -> TkinterGUI:
         gui = TkinterGUI(self.system, self.system.args)
 
-        gui.set_close_handler(self.on_closing)
-
         # Set GUI reference in system so AudioHandler can update meters during recording
         self.system.gui = gui
 

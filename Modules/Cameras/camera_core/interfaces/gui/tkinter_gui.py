@@ -27,6 +27,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.preview_image_refs: list = []  # Keep references to prevent GC
         self.camera_active_vars: list[tk.BooleanVar] = []
         self.camera_active_menu_items: list = []  # Menu checkboxes for camera toggles
+        self.recording_indicator_vars: list[tk.StringVar] = []  # Recording status text vars
 
         # Use template method for GUI initialization
         self.initialize_gui_framework(
@@ -63,14 +64,15 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.preview_canvases.clear()
         self.preview_image_refs.clear()
         self.camera_active_vars.clear()
+        self.recording_indicator_vars.clear()
 
         menu_size = self.sources_menu.index('end')
         if menu_size is not None:
             self.sources_menu.delete(0, menu_size)
         self.camera_active_menu_items.clear()
 
-        capture_width = self.args.width
-        capture_height = self.args.height
+        preview_width = self.args.preview_width
+        preview_height = self.args.preview_height
 
         self.preview_container.rowconfigure(0, weight=0)  # Label row (fixed)
         self.preview_container.rowconfigure(1, weight=1)  # Canvas row (expandable)
@@ -78,12 +80,24 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         for i in range(len(self.system.cameras)):
             self.preview_container.columnconfigure(i, weight=1)
 
-            label = ttk.Label(self.preview_container, text=f"Camera {i}")
-            label.grid(row=0, column=i, sticky='w', padx=5, pady=(5, 2))
+            # Create header frame for camera label + recording indicator
+            header_frame = ttk.Frame(self.preview_container)
+            header_frame.grid(row=0, column=i, sticky='w', padx=5, pady=(5, 2))
+
+            # Camera label
+            label = ttk.Label(header_frame, text=f"Camera {i}")
+            label.pack(side='left')
+
+            # Recording indicator (controlled by StringVar)
+            rec_var = tk.StringVar(value="")
+            rec_label = tk.Label(header_frame, textvariable=rec_var, fg='red', font=('TkDefaultFont', 9, 'bold'))
+            rec_label.pack(side='left')
+            self.recording_indicator_vars.append(rec_var)
+            logger.info(f"Created recording indicator for camera {i}, label exists: {rec_label is not None}")
 
             canvas = tk.Canvas(self.preview_container,
-                             width=capture_width,
-                             height=capture_height,
+                             width=preview_width,
+                             height=preview_height,
                              bg='black',
                              highlightthickness=1,
                              highlightbackground='gray')
@@ -112,6 +126,13 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.root.title(f"Camera System - ⬤ RECORDING - Session: {self.system.session_label}")
 
+        # Show recording indicators for all cameras
+        logger.info(f"Number of recording indicator vars: {len(self.recording_indicator_vars)}")
+        for i, rec_var in enumerate(self.recording_indicator_vars):
+            logger.info(f"Setting recording indicator {i} to 'RECORDING'")
+            rec_var.set(" RECORDING")
+            logger.info(f"Recording indicator {i} value is now: '{rec_var.get()}'")
+
         self.enable_sources_menu(False)
 
         logger.info("Recording started")
@@ -125,6 +146,10 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.system.recording = False
 
         self.root.title("Camera System")
+
+        # Hide recording indicators for all cameras
+        for rec_var in self.recording_indicator_vars:
+            rec_var.set("")
 
         # Re-enable camera toggles in Sources menu after recording (safety)
         self.enable_sources_menu(True)
@@ -167,8 +192,8 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 if success:
                     canvas = self.preview_canvases[camera_idx]
                     canvas.delete("all")
-                    w = canvas.winfo_width() or self.args.width
-                    h = canvas.winfo_height() or self.args.height
+                    w = canvas.winfo_width() or self.args.preview_width
+                    h = canvas.winfo_height() or self.args.preview_height
                     canvas.create_text(w//2, h//2,
                                       text="Camera Inactive",
                                       fill='gray',
@@ -206,30 +231,22 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     image = Image.fromarray(frame_rgb)
 
+                    preview_width = self.args.preview_width
+                    preview_height = self.args.preview_height
+
+                    if image.size != (preview_width, preview_height):
+                        image = image.resize((preview_width, preview_height), Image.Resampling.BILINEAR)
+
+                    photo = ImageTk.PhotoImage(image)
+
                     canvas = self.preview_canvases[i]
                     canvas_width = canvas.winfo_width()
                     canvas_height = canvas.winfo_height()
 
-                    if canvas_width > 1 and canvas_height > 1:
-                        img_width, img_height = image.size
+                    canvas.delete("all")
+                    canvas.create_image(canvas_width//2, canvas_height//2, anchor='center', image=photo)
 
-                        scale_w = canvas_width / img_width
-                        scale_h = canvas_height / img_height
-                        scale = min(scale_w, scale_h)  # Use smaller scale to fit within canvas
-
-                        new_width = int(img_width * scale)
-                        new_height = int(img_height * scale)
-
-                        if (new_width, new_height) != image.size:
-                            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-                        photo = ImageTk.PhotoImage(image)
-
-                        canvas.delete("all")
-                        canvas.create_image(canvas_width//2, canvas_height//2, anchor='center', image=photo)
-
-                        # Keep reference to prevent garbage collection
-                        self.preview_image_refs[i] = photo
+                    self.preview_image_refs[i] = photo
 
     def _show_waiting_message(self):
         for canvas in self.preview_canvases:
@@ -259,6 +276,23 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
     def run(self):
         self.root.mainloop()
+
+    def sync_recording_state(self):
+        """Called by CommandHandler to sync GUI state after recording state changes"""
+        is_recording = self.system.recording
+
+        if is_recording:
+            # Show recording indicators
+            for rec_var in self.recording_indicator_vars:
+                rec_var.set(" RECORDING")
+            self.root.title(f"Camera System - ⬤ RECORDING - Session: {self.system.session_label}")
+            logger.info("GUI synced: Recording indicators shown")
+        else:
+            # Hide recording indicators
+            for rec_var in self.recording_indicator_vars:
+                rec_var.set("")
+            self.root.title("Camera System")
+            logger.info("GUI synced: Recording indicators hidden")
 
     def destroy(self):
         try:

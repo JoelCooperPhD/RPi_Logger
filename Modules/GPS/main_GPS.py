@@ -80,7 +80,7 @@ async def main():
     loop = asyncio.get_running_loop()
 
     install_exception_handlers(logger, loop)
-    install_signal_handlers(supervisor, loop)
+    install_signal_handlers(supervisor, loop, track_shutdown_state=True)
 
     try:
         await supervisor.run()
@@ -90,6 +90,7 @@ async def main():
         logger.error("Fatal error: %s", e, exc_info=True)
         sys.exit(1)
     finally:
+        await supervisor.shutdown()
         log_module_shutdown(logger, MODULE_NAME)
 
 

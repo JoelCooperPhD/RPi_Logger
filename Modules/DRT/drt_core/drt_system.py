@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 class DRTSystem(BaseSystem, RecordingStateMixin):
 
+    DEFER_DEVICE_INIT_IN_GUI = True
+
     def __init__(self, args):
         super().__init__(args)
         RecordingStateMixin.__init__(self)
@@ -23,12 +25,17 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
     async def _initialize_devices(self) -> None:
         try:
             logger.info("Initializing DRT module...")
+            self.lifecycle_timer.mark_phase("device_discovery_start")
+
+            if self._should_send_status():
+                from logger_core.commands import StatusMessage
+                StatusMessage.send("discovering", {"device_type": "usb_drt", "timeout": self.device_timeout})
 
             self.session_dir.mkdir(parents=True, exist_ok=True)
             self.output_dir = self.session_dir
 
-            vid = int(self.args.device_vid, 16) if isinstance(self.args.device_vid, str) else self.args.device_vid
-            pid = int(self.args.device_pid, 16) if isinstance(self.args.device_pid, str) else self.args.device_pid
+            vid = int(self.args.device_vid) if isinstance(self.args.device_vid, str) else self.args.device_vid
+            pid = int(self.args.device_pid) if isinstance(self.args.device_pid, str) else self.args.device_pid
 
             device_config = USBDeviceConfig(
                 vid=vid,
@@ -46,7 +53,20 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             await self.usb_monitor.start()
 
             self.initialized = True
+            self.lifecycle_timer.mark_phase("device_discovery_complete")
+            self.lifecycle_timer.mark_phase("initialized")
+
             logger.info("DRT module initialized successfully, discovering devices...")
+
+            if self._should_send_status():
+                from logger_core.commands import StatusMessage
+                init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
+                StatusMessage.send_with_timing("initialized", init_duration, {
+                    "device_type": "usb_drt",
+                    "usb_monitor_active": True,
+                    "vid": hex(vid),
+                    "pid": hex(pid)
+                })
 
         except DRTInitializationError:
             raise
@@ -56,18 +76,26 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             raise DRTInitializationError(error_msg) from e
 
     async def _on_device_connected(self, device: USBSerialDevice):
-        logger.info(f"sDRT device connected on {device.port}")
+        logger.info(f"DRTSystem: sDRT device connected on {device.port}")
 
+        logger.info(f"DRTSystem: Creating handler for {device.port}")
         handler = DRTHandler(device, device.port, self.output_dir, system=self)
         handler.set_data_callback(self._on_device_data)
 
+        logger.info(f"DRTSystem: Initializing device {device.port}")
         await handler.initialize_device()
+        logger.info(f"DRTSystem: Starting handler for {device.port}")
         await handler.start()
 
         self.device_handlers[device.port] = handler
+        logger.info(f"DRTSystem: Handler registered for {device.port}")
 
         if self.mode_instance and hasattr(self.mode_instance, 'on_device_connected'):
+            logger.info(f"DRTSystem: Calling mode_instance.on_device_connected for {device.port}")
             await self.mode_instance.on_device_connected(device.port)
+            logger.info(f"DRTSystem: mode_instance.on_device_connected completed for {device.port}")
+        else:
+            logger.warning(f"DRTSystem: No mode_instance or on_device_connected method available")
 
     async def _on_device_disconnected(self, port: str):
         logger.info(f"sDRT device disconnected from {port}")
@@ -136,6 +164,13 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
     async def cleanup(self):
         logger.info("Cleaning up DRT system...")
 
+        self.running = False
+        self.shutdown_event.set()
+
+        if self.recording:
+            logger.info("Stopping recording before cleanup...")
+            await self.stop_recording()
+
         if self.usb_monitor:
             await self.usb_monitor.stop()
 
@@ -144,7 +179,8 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
 
         self.device_handlers.clear()
 
-        await super().cleanup()
+        self.initialized = False
+        logger.info("DRT cleanup completed")
 
     def get_connected_devices(self) -> Dict[str, USBSerialDevice]:
         if self.usb_monitor:

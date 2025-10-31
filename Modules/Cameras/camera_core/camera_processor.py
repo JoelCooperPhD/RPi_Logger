@@ -170,20 +170,9 @@ class CameraProcessor:
 
                 frame_bgr = raw_frame
 
-                overlay_fn = functools.partial(
-                    self._add_overlays_wrapper,
-                    frame_bgr,
-                    hardware_fps,
-                    processing_fps,
-                    captured_frames,
-                    hardware_frame_number if hardware_frame_number is not None else self.processed_frames,  # Use hardware frame number
-                    float(self.args.fps),
-                    self.recording_manager.is_recording,
-                    self.recording_manager.video_path.name if self.recording_manager.video_path else None,
-                    self.recording_manager.written_frames,
-                    self.session_dir.name if self.session_dir else "no_session",
-                )
-                frame_with_overlay = await loop.run_in_executor(None, overlay_fn)
+                # Preview optimization: Use raw frame without overlays (overlays only on recording stream)
+                # This saves ~1-2ms per frame × 30fps = significant CPU reduction
+                preview_frame = frame_bgr
 
                 # We only submit metadata for CSV timing logs.
                 if self.recording_manager.is_recording:
@@ -200,8 +189,6 @@ class CameraProcessor:
                     )
                     self._background_tasks.add(task)
                     task.add_done_callback(self._background_tasks.discard)
-
-                preview_frame = frame_with_overlay
 
                 self.display.update_frame(preview_frame)
 

@@ -68,17 +68,28 @@ class TrackerSystem(BaseSystem, RecordingStateMixin):
 
     async def _initialize_devices(self) -> None:
         self.logger.info("Initializing tracker system")
+        self.lifecycle_timer.mark_phase("device_discovery_start")
+
+        if self._should_send_status():
+            from logger_core.commands import StatusMessage
+            StatusMessage.send("discovering", {"device_type": "eye_tracker", "timeout": self.device_timeout})
 
         connected = await self.device_manager.connect()
         if not connected:
             raise TrackerInitializationError("Failed to connect to eye tracker device")
 
         self.initialized = True
+        self.lifecycle_timer.mark_phase("device_discovery_complete")
+        self.lifecycle_timer.mark_phase("initialized")
         self.logger.info("Tracker system initialized")
 
-        if self.slave_mode or self.enable_gui_commands:
+        if self._should_send_status():
             from logger_core.commands import StatusMessage
-            StatusMessage.send("initialized", {"device": "eye_tracker"})
+            init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
+            StatusMessage.send_with_timing("initialized", init_duration, {
+                "device_type": "eye_tracker",
+                "device_connected": True
+            })
 
     def _create_mode_instance(self, mode_name: str) -> Any:
         if mode_name in ('tkinter', 'gui', 'interactive'):
@@ -116,10 +127,12 @@ class TrackerSystem(BaseSystem, RecordingStateMixin):
     async def cleanup(self) -> None:
         self.logger.info("Cleaning up tracker system")
         self.running = False
+        self.shutdown_event.set()
 
         await self.stream_handler.stop_streaming()
         await self.recording_manager.cleanup()
         await self.device_manager.cleanup()
         self.frame_processor.destroy_windows()
 
+        self.initialized = False
         self.logger.info("Tracker system cleanup complete")

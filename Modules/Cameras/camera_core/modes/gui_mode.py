@@ -47,7 +47,7 @@ class GUIMode(BaseGUIMode):
         return super().create_tasks()
 
     async def cleanup(self) -> None:
-        pass
+        self.logger.info("Camera GUIMode cleanup")
 
     def _on_recording_state_changed(self, is_recording: bool) -> None:
         """

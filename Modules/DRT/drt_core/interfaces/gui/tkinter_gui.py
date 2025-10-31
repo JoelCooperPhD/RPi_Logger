@@ -38,6 +38,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.notebook: Optional[ttk.Notebook] = None
         self.device_tabs: Dict[str, DeviceTab] = {}
+        self.empty_state_label: Optional[ttk.Label] = None
 
         self.stimulus_state: Dict[str, int] = {}
         self.config_window: Optional[SDRTConfigWindow] = None
@@ -68,6 +69,16 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.notebook = ttk.Notebook(content_frame, width=160)
         self.notebook.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
+
+        self.empty_state_label = ttk.Label(
+            content_frame,
+            text="⚠ No sDRT devices connected\n\nPlease connect a device to begin",
+            font=('TkDefaultFont', 12),
+            justify='center',
+            foreground='gray'
+        )
+        self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
+        self.empty_state_label.lift()
 
     def _create_device_tab(self, port: str) -> DeviceTab:
         tab_frame = ttk.Frame(self.notebook)
@@ -170,12 +181,25 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             logger.warning("Config window not available")
 
     def on_device_connected(self, port: str):
-        logger.info(f"GUI: Device connected on {port}")
+        try:
+            logger.info(f"TkinterGUI: on_device_connected called for {port}")
+            logger.info(f"TkinterGUI: Current device_tabs: {list(self.device_tabs.keys())}")
 
-        if port not in self.device_tabs:
-            tab = self._create_device_tab(port)
-            self.device_tabs[port] = tab
-            logger.info(f"Created tab for device {port}")
+            if port not in self.device_tabs:
+                logger.info(f"TkinterGUI: Creating new tab for {port}")
+                tab = self._create_device_tab(port)
+                self.device_tabs[port] = tab
+                logger.info(f"TkinterGUI: Tab created and registered for {port}")
+            else:
+                logger.warning(f"TkinterGUI: Tab already exists for {port}")
+
+            if self.empty_state_label and self.device_tabs:
+                logger.info(f"TkinterGUI: Hiding empty state label (device count: {len(self.device_tabs)})")
+                self.empty_state_label.grid_remove()
+
+            logger.info(f"TkinterGUI: on_device_connected completed for {port}")
+        except Exception as e:
+            logger.error(f"TkinterGUI: Exception in on_device_connected: {e}", exc_info=True)
 
     def on_device_disconnected(self, port: str):
         logger.info(f"GUI: Device disconnected from {port}")
@@ -190,6 +214,10 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
             del self.device_tabs[port]
             logger.info(f"Removed tab for device {port}")
+
+        if self.empty_state_label and not self.device_tabs:
+            self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
+            self.empty_state_label.lift()
 
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         if port not in self.device_tabs:

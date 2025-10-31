@@ -23,12 +23,23 @@ class NotesSystem(BaseSystem, RecordingStateMixin):
     async def _initialize_devices(self) -> None:
         try:
             logger.info("Initializing NoteTaker module...")
+            self.lifecycle_timer.mark_phase("device_discovery_start")
 
             module_session_dir = self.session_dir / "NoteTaker"
             self.notes_handler = NotesHandler(module_session_dir)
 
             self.initialized = True
+            self.lifecycle_timer.mark_phase("initialized")
+
             logger.info("NoteTaker module initialized successfully")
+
+            if self._should_send_status():
+                from logger_core.commands import StatusMessage
+                init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
+                StatusMessage.send_with_timing("initialized", init_duration, {
+                    "device_type": "notes_handler",
+                    "session_dir": str(module_session_dir)
+                })
 
         except Exception as e:
             error_msg = f"Failed to initialize NoteTaker: {e}"
@@ -103,10 +114,12 @@ class NotesSystem(BaseSystem, RecordingStateMixin):
         logger.info("Cleaning up NoteTaker system...")
 
         try:
+            self.running = False
+            self.shutdown_event.set()
+
             if self.recording and self.notes_handler:
                 await self.stop_recording()
 
-            self.running = False
             self.initialized = False
 
             logger.info("NoteTaker cleanup completed")

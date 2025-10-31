@@ -159,47 +159,21 @@ class CameraHandler:
             await self.stop_recording()
             await self.recording_manager.cleanup()
 
-        try:
-            await asyncio.to_thread(self.picam2.stop)
-        except Exception as e:
-            self.logger.debug("Camera stop error (ignored): %s", e)
-
         self._running = False
 
-        try:
-            await asyncio.gather(
-                self.capture_loop.stop(),
-                self.processor.stop(),
-                return_exceptions=True
-            )
-        except Exception as e:
-            self.logger.debug("Error stopping loops: %s", e)
-
-        tasks = []
         if self._capture_task and not self._capture_task.done():
             self._capture_task.cancel()
-            tasks.append(self._capture_task)
         if self._processor_task and not self._processor_task.done():
             self._processor_task.cancel()
-            tasks.append(self._processor_task)
 
-        if tasks:
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True),
-                    timeout=CLEANUP_TIMEOUT_SECONDS
-                )
-            except asyncio.TimeoutError:
-                self.logger.warning("Task cancellation did not complete within %d seconds", CLEANUP_TIMEOUT_SECONDS)
+        asyncio.create_task(self._background_camera_cleanup())
 
-        try:
-            await asyncio.to_thread(self.picam2.stop_preview)
-        except Exception:
-            pass
+        self.logger.info("Cleanup initiated (camera hardware cleanup in background)")
 
+    async def _background_camera_cleanup(self):
         try:
             await asyncio.to_thread(self.picam2.close)
         except Exception as e:
             self.logger.debug("Camera close error: %s", e)
 
-        self.logger.info("Cleanup completed")
+        self.logger.debug("Background camera hardware cleanup completed")

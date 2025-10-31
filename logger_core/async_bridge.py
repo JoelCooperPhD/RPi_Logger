@@ -70,7 +70,13 @@ class AsyncBridge:
 
         This is thread-safe via Tkinter's after() mechanism.
         """
-        self.root.after(0, func, *args, **kwargs)
+        def wrapper():
+            try:
+                func(*args, **kwargs)
+            except Exception as e:
+                logger.error("Error in GUI callback %s: %s", func.__name__, e, exc_info=True)
+
+        self.root.after(0, wrapper)
 
     def stop(self) -> None:
         """Stop the AsyncIO event loop and cancel all tasks."""

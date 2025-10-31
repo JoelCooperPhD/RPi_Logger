@@ -47,6 +47,20 @@ class CameraOverlay:
         margin_left = cfg.get('margin_left', 10)
         line_start_y = cfg.get('line_start_y', 30)
 
+        border_thickness = thickness * 3
+        border_color = (0, 0, 0)
+
+        cv2.putText(
+            frame,
+            f"{collated_frames}",
+            (margin_left, line_start_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            border_color,
+            border_thickness,
+            cv2.LINE_AA
+        )
+
         cv2.putText(
             frame,
             f"{collated_frames}",

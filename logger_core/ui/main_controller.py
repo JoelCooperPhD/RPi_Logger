@@ -66,55 +66,40 @@ class MainController:
         self.trial_label_var = trial_label_var
 
     def on_module_menu_toggle(self, module_name: str) -> None:
-        current_state = self.module_vars[module_name].get()
+        desired_state = self.module_vars[module_name].get()
 
         if self.logger_system.event_logger:
-            action = "enable" if current_state else "disable"
+            action = "enable" if desired_state else "disable"
             asyncio.create_task(self.logger_system.event_logger.log_button_press(f"module_{module_name}", action))
 
-        self.logger_system.toggle_module_enabled(module_name, current_state)
+        self.logger_system.toggle_module_enabled(module_name, desired_state)
 
-        if current_state:
-            self.logger.info("Starting module: %s", module_name)
-            asyncio.create_task(self._start_module_async(module_name))
-        else:
-            self.logger.info("Stopping module: %s", module_name)
-            asyncio.create_task(self._stop_module_async(module_name))
+        self.logger.info("%s module: %s", "Starting" if desired_state else "Stopping", module_name)
+        asyncio.create_task(self._handle_module_toggle(module_name, desired_state))
 
-    async def _start_module_async(self, module_name: str) -> None:
+    async def _handle_module_toggle(self, module_name: str, desired_state: bool) -> None:
         try:
-            success = await self.logger_system.start_module(module_name)
+            success = await self.logger_system.set_module_enabled(module_name, desired_state)
 
             if not success:
-                self.module_vars[module_name].set(False)
+                self.module_vars[module_name].set(not desired_state)
+                action = "start" if desired_state else "stop"
                 messagebox.showerror(
-                    "Start Failed",
-                    f"Failed to start module: {module_name}\nCheck logs for details."
+                    f"{action.capitalize()} Failed",
+                    f"Failed to {action} module: {module_name}\nCheck logs for details."
                 )
             else:
-                self.logger.info("Module %s started successfully", module_name)
+                self.logger.info("Module %s %s successfully", module_name, "started" if desired_state else "stopped")
                 if self.logger_system.event_logger:
-                    await self.logger_system.event_logger.log_module_started(module_name)
+                    if desired_state:
+                        await self.logger_system.event_logger.log_module_started(module_name)
+                    else:
+                        await self.logger_system.event_logger.log_module_stopped(module_name)
 
         except Exception as e:
-            self.logger.error("Error starting module %s: %s", module_name, e, exc_info=True)
-            self.module_vars[module_name].set(False)
-            messagebox.showerror("Error", f"Failed to start {module_name}: {e}")
-
-    async def _stop_module_async(self, module_name: str) -> None:
-        try:
-            success = await self.logger_system.stop_module(module_name)
-
-            if not success:
-                self.logger.warning("Failed to stop module: %s", module_name)
-            else:
-                self.logger.info("Module %s stopped successfully", module_name)
-                if self.logger_system.event_logger:
-                    await self.logger_system.event_logger.log_module_stopped(module_name)
-
-        except Exception as e:
-            self.logger.error("Error stopping module %s: %s", module_name, e, exc_info=True)
-            messagebox.showerror("Error", f"Failed to stop {module_name}: {e}")
+            self.logger.error("Error toggling module %s: %s", module_name, e, exc_info=True)
+            self.module_vars[module_name].set(not desired_state)
+            messagebox.showerror("Error", f"Failed to toggle {module_name}: {e}")
 
     def on_toggle_session(self) -> None:
         if self.session_active:
@@ -140,6 +125,18 @@ class MainController:
 
                 config_manager.write_config(CONFIG_PATH, {'last_session_dir': session_dir})
                 self.logger.debug("Saved last session directory to config: %s", session_dir)
+
+                running_modules = self.logger_system.get_running_modules()
+                if not running_modules:
+                    response = messagebox.askyesno(
+                        "No Modules Running",
+                        "No modules are currently running. Start session anyway?\n\n"
+                        "You can start modules later, but no data will be recorded until they are running."
+                    )
+                    if not response:
+                        self.logger.info("Session start cancelled - no modules running")
+                        return
+                    self.logger.warning("User chose to start session with no modules running")
 
                 asyncio.create_task(self._start_session_async(Path(session_dir)))
             else:
@@ -321,9 +318,13 @@ class MainController:
     async def auto_start_modules(self) -> None:
         await asyncio.sleep(0.5)
 
-        for module_name in self.logger_system.get_selected_modules():
-            self.logger.info("Auto-starting module: %s", module_name)
-            await self._start_module_async(module_name)
+        for module_name, enabled in self.logger_system.get_module_enabled_states().items():
+            if enabled:
+                self.logger.info("Auto-starting module: %s", module_name)
+                success = await self.logger_system.set_module_enabled(module_name, True)
+                if not success:
+                    self.logger.error("Failed to auto-start module: %s", module_name)
+                    self.module_vars[module_name].set(False)
 
     def show_about(self) -> None:
         try:
