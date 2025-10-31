@@ -132,11 +132,17 @@ class USBDeviceMonitor:
 
     async def start(self):
         if self._running:
+            logger.warning(f"USB monitor for {self.config.device_name} already running")
             return
 
         self._running = True
+        logger.info(f"Starting USB device monitor for {self.config.device_name}")
+        logger.info(f"  Target VID: {self.config.vid} (0x{self.config.vid:04X})")
+        logger.info(f"  Target PID: {self.config.pid} (0x{self.config.pid:04X})")
+        logger.info(f"  Scan interval: {self._scan_interval}s")
+
         self._monitor_task = asyncio.create_task(self._monitor_loop())
-        logger.info(f"Started USB device monitor for {self.config.device_name}")
+        logger.info(f"Started USB device monitor for {self.config.device_name} - task created: {self._monitor_task}")
 
     async def stop(self):
         self._running = False
@@ -156,50 +162,78 @@ class USBDeviceMonitor:
         logger.info(f"Stopped USB device monitor for {self.config.device_name}")
 
     async def _monitor_loop(self):
+        logger.info(f"USB monitor loop started for {self.config.device_name}")
+        scan_count = 0
         try:
             while self._running:
+                scan_count += 1
+                logger.debug(f"USB scan #{scan_count} for {self.config.device_name}")
                 await self._scan_devices()
                 await asyncio.sleep(self._scan_interval)
         except asyncio.CancelledError:
+            logger.info(f"USB monitor loop cancelled for {self.config.device_name} (scans completed: {scan_count})")
             pass
+        except Exception as e:
+            logger.error(f"USB monitor loop error for {self.config.device_name}: {e}", exc_info=True)
+        finally:
+            logger.info(f"USB monitor loop exited for {self.config.device_name}")
 
     async def _scan_devices(self):
         try:
             ports = await asyncio.to_thread(serial.tools.list_ports.comports)
             current_ports = set()
 
+            logger.debug(f"Scanning {len(ports)} serial ports")
+
             for port_info in ports:
+                vid_str = f"0x{port_info.vid:04X}" if port_info.vid else "None"
+                pid_str = f"0x{port_info.pid:04X}" if port_info.pid else "None"
+
                 if self.config.matches_port(port_info):
                     port_name = port_info.device
                     current_ports.add(port_name)
+                    logger.info(f"Found matching {self.config.device_name}: {port_name} (VID={vid_str}, PID={pid_str})")
 
                     if port_name not in self._known_ports:
                         await self._handle_new_device(port_name)
+                else:
+                    if port_info.vid and port_info.pid:
+                        logger.debug(f"Port {port_info.device} does not match (VID={vid_str}, PID={pid_str})")
 
             disconnected_ports = self._known_ports - current_ports
             for port_name in disconnected_ports:
                 await self._handle_disconnected_device(port_name)
 
         except Exception as e:
-            logger.error(f"Error scanning USB devices: {e}")
+            logger.error(f"Error scanning USB devices: {e}", exc_info=True)
 
     async def _handle_new_device(self, port: str):
         logger.info(f"New {self.config.device_name} detected on {port}")
         self._known_ports.add(port)
 
         device = USBSerialDevice(port, self.config)
+        logger.info(f"Attempting to connect to {port}...")
         connected = await device.connect()
 
         if connected:
+            logger.info(f"Successfully connected to {port}")
             self._devices[port] = device
             if self.on_connect:
                 try:
+                    logger.info(f"Calling on_connect callback for {port}")
                     if asyncio.iscoroutinefunction(self.on_connect):
+                        logger.info(f"on_connect is async, awaiting...")
                         await self.on_connect(device)
                     else:
+                        logger.info(f"on_connect is sync, calling directly...")
                         self.on_connect(device)
+                    logger.info(f"on_connect callback completed for {port}")
                 except Exception as e:
-                    logger.error(f"Error in on_connect callback: {e}")
+                    logger.error(f"Error in on_connect callback: {e}", exc_info=True)
+            else:
+                logger.warning(f"No on_connect callback registered")
+        else:
+            logger.error(f"Failed to connect to {port}")
 
     async def _handle_disconnected_device(self, port: str):
         logger.info(f"{self.config.device_name} disconnected from {port}")

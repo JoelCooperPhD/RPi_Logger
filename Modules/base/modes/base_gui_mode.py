@@ -119,10 +119,13 @@ class BaseGUIMode(BaseMode, ABC):
 
     async def _device_retry_loop(self) -> None:
         retry_interval = self.get_device_retry_interval()
+        retry_attempt = 0
 
         while not self.system.initialized and self.system.running:
+            retry_attempt += 1
             try:
-                self.logger.info("Attempting to detect devices...")
+                self.logger.info("Attempting to detect devices (attempt %d)...", retry_attempt)
+                self.system.lifecycle_timer.mark_phase(f"retry_attempt_{retry_attempt}")
 
                 await self.system._initialize_devices()
 
@@ -131,7 +134,11 @@ class BaseGUIMode(BaseMode, ABC):
 
                 if hasattr(self.system, 'enable_gui_commands') and self.system.enable_gui_commands:
                     from logger_core.commands import StatusMessage
-                    StatusMessage.send("initialized", {"status": "connected"})
+                    init_duration = self.system.lifecycle_timer.get_duration("process_start", "initialized")
+                    StatusMessage.send_with_timing("initialized", init_duration, {
+                        "status": "connected",
+                        "retry_attempts": retry_attempt
+                    })
 
                 break
 
@@ -142,7 +149,7 @@ class BaseGUIMode(BaseMode, ABC):
                 self.logger.debug("Device detection cancelled by user")
                 return
             except Exception as e:
-                self.logger.debug("Device detection attempt failed: %s", e)
+                self.logger.debug("Device detection attempt %d failed: %s", retry_attempt, e)
 
             for _ in range(int(retry_interval * 10)):
                 if not self.system.running:
@@ -151,6 +158,7 @@ class BaseGUIMode(BaseMode, ABC):
 
         if self.system.initialized:
             try:
+                self.system.lifecycle_timer.mark_phase("gui_ready")
                 await self.on_devices_connected()
             except Exception as e:
                 self.logger.error("Failed to setup GUI after device initialization: %s", e)
@@ -176,14 +184,20 @@ class BaseGUIMode(BaseMode, ABC):
 
     def on_closing(self) -> None:
         self.logger.info("Window close requested")
+        self.system.lifecycle_timer.mark_phase("shutdown_start")
 
         self.system.running = False
         self.system.shutdown_event.set()
+
+        if self.system.enable_gui_commands:
+            from logger_core.commands import StatusMessage
+            StatusMessage.send("shutdown_started", {"reason": "user_closed_window"})
 
         if hasattr(self, 'sync_cleanup'):
             try:
                 self.logger.info("Running synchronous cleanup")
                 self.sync_cleanup()
+                self.system.lifecycle_timer.mark_phase("sync_cleanup_complete")
             except Exception as e:
                 self.logger.error("Error during sync cleanup: %s", e, exc_info=True)
 
@@ -191,6 +205,7 @@ class BaseGUIMode(BaseMode, ABC):
             try:
                 self.logger.info("Saving geometry")
                 self.gui.handle_window_close()
+                self.system.lifecycle_timer.mark_phase("geometry_saved")
             except Exception as e:
                 self.logger.error("Error saving geometry: %s", e, exc_info=True)
 
@@ -199,8 +214,17 @@ class BaseGUIMode(BaseMode, ABC):
             try:
                 self.logger.info("Destroying window")
                 window.destroy()
+                self.system.lifecycle_timer.mark_phase("window_destroyed")
             except Exception as e:
                 self.logger.debug("Error destroying window: %s", e)
+
+        if self.system.enable_gui_commands:
+            from logger_core.commands import StatusMessage
+            shutdown_duration = self.system.lifecycle_timer.get_duration("shutdown_start", "window_destroyed")
+            StatusMessage.send("quitting", {
+                "reason": "user_closed_window",
+                "shutdown_duration_ms": round(shutdown_duration, 1)
+            })
 
     def sync_cleanup(self) -> None:
         """Synchronous cleanup - override in subclasses if needed."""
@@ -234,6 +258,10 @@ class BaseGUIMode(BaseMode, ABC):
 
         self.async_bridge = AsyncBridge(window)
         self.async_bridge.start()
+
+        if hasattr(self, 'on_async_bridge_started'):
+            self.logger.info("Calling on_async_bridge_started hook...")
+            self.async_bridge.run_coroutine(self.on_async_bridge_started())
 
         window.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.logger.info("Window close handler registered")

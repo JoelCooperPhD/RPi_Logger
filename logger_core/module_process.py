@@ -338,6 +338,9 @@ class ModuleProcess:
     def is_running(self) -> bool:
         return self.process is not None and self.process.returncode is None
 
+    def is_initialized(self) -> bool:
+        return self.state in (ModuleState.IDLE, ModuleState.RECORDING)
+
     def is_recording(self) -> bool:
         return self.state == ModuleState.RECORDING
 

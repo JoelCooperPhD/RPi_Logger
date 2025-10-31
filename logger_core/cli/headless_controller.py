@@ -37,15 +37,16 @@ class HeadlessController:
         """Auto-start modules based on configuration."""
         await asyncio.sleep(0.5)
 
-        for module_name in self.logger_system.get_selected_modules():
-            self.logger.info("Auto-starting module: %s", module_name)
-            success = await self.logger_system.start_module(module_name)
-            if success:
-                self.logger.info("Module %s started successfully", module_name)
-                if self.logger_system.event_logger:
-                    await self.logger_system.event_logger.log_module_started(module_name)
-            else:
-                self.logger.error("Failed to start module: %s", module_name)
+        for module_name, enabled in self.logger_system.get_module_enabled_states().items():
+            if enabled:
+                self.logger.info("Auto-starting module: %s", module_name)
+                success = await self.logger_system.set_module_enabled(module_name, True)
+                if success:
+                    self.logger.info("Module %s started successfully", module_name)
+                    if self.logger_system.event_logger:
+                        await self.logger_system.event_logger.log_module_started(module_name)
+                else:
+                    self.logger.error("Failed to start module: %s", module_name)
 
     async def start_module(self, module_name: str) -> bool:
         """Start a specific module."""
@@ -55,7 +56,7 @@ class HeadlessController:
         self.logger_system.toggle_module_enabled(module_name, True)
         self.logger.info("Starting module: %s", module_name)
 
-        success = await self.logger_system.start_module(module_name)
+        success = await self.logger_system.set_module_enabled(module_name, True)
         if not success:
             self.logger.error("Failed to start module: %s", module_name)
             return False
@@ -73,7 +74,7 @@ class HeadlessController:
 
         self.logger.info("Stopping module: %s", module_name)
 
-        success = await self.logger_system.stop_module(module_name)
+        success = await self.logger_system.set_module_enabled(module_name, False)
         if not success:
             self.logger.warning("Failed to stop module: %s", module_name)
             return False

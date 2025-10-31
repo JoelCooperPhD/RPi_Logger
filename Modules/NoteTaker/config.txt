@@ -1,18 +1,5 @@
-# NoteTaker Module Configuration
-
-# Module settings (managed by master logger)
 enabled = false
-window_x = 1728
-window_y = 162
-window_width = 951
-window_height = 324
-
-# Output settings (used only in standalone mode; master logger overrides these)
-output_dir = data
-session_prefix = session
-log_level = info
-console_output = false
-
-# GUI settings
-gui_show_note_history = true
-max_displayed_notes = 100
+window_x = 1337
+window_y = 1378
+window_width = 600
+window_height = 500

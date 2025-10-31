@@ -62,6 +62,7 @@ class LoggerSystem:
         # State
         self.shutdown_event = asyncio.Event()
         self.event_logger: Optional['EventLogger'] = None
+        self._gracefully_quitting_modules: set[str] = set()
 
     async def async_init(self) -> None:
         """Complete async initialization. Must be called after construction."""
@@ -69,12 +70,10 @@ class LoggerSystem:
 
     async def _load_enabled_modules(self) -> None:
         """Load enabled modules asynchronously, avoiding blocking I/O."""
-        # First, check if we have running modules from last session
         running_modules_from_last_session = None
 
         if STATE_FILE.exists():
             try:
-                # Wrap blocking I/O in thread pool
                 def read_state():
                     with open(STATE_FILE, 'r') as f:
                         return json.load(f)
@@ -83,19 +82,15 @@ class LoggerSystem:
                 running_modules_from_last_session = set(state.get('running_modules', []))
                 self.logger.info("Loaded running modules from last session: %s", running_modules_from_last_session)
 
-                # Delete the state file after reading it (one-time use)
                 await asyncio.to_thread(STATE_FILE.unlink)
             except Exception as e:
                 self.logger.error("Failed to load running modules state: %s", e)
 
-        # Load module selection state
         if running_modules_from_last_session:
-            # Restore from last session
             for module_name in running_modules_from_last_session:
-                if self.module_manager.select_module(module_name):
-                    self.logger.info("Module %s will be restored from last session", module_name)
+                self.module_manager.module_enabled_state[module_name] = True
+                self.logger.info("Module %s will be restored from last session", module_name)
         else:
-            # Load from config files
             await self.module_manager.load_enabled_modules()
 
     async def _module_status_callback(self, process, status: Optional[StatusMessage]) -> None:
@@ -109,10 +104,25 @@ class LoggerSystem:
                 self.logger.info("Module %s started recording", module_name)
             elif status.get_status_type() == "recording_stopped":
                 self.logger.info("Module %s stopped recording", module_name)
+            elif status.get_status_type() == "quitting":
+                self.logger.info("Module %s is quitting", module_name)
+                self._gracefully_quitting_modules.add(module_name)
+                self.module_manager.cleanup_stopped_process(module_name)
+                await self.module_manager.set_module_enabled(module_name, False)
+                return
             elif status.is_error():
                 self.logger.error("Module %s error: %s",
                                 module_name,
                                 status.get_error_message())
+
+        if not process.is_running() and self.module_manager.is_module_enabled(module_name):
+            if module_name not in self._gracefully_quitting_modules:
+                self.logger.warning("Module %s crashed/stopped unexpectedly - unchecking", module_name)
+                self.module_manager.cleanup_stopped_process(module_name)
+                await self.module_manager.set_module_enabled(module_name, False)
+
+        if not process.is_running() and module_name in self._gracefully_quitting_modules:
+            self._gracefully_quitting_modules.discard(module_name)
 
         if self.ui_callback:
             try:
@@ -159,10 +169,25 @@ class LoggerSystem:
         return self.module_manager.get_running_modules()
 
     async def start_module(self, module_name: str) -> bool:
-        """Start a module."""
-        # Load window geometry from config
+        """Start a module (routes through state machine)."""
         window_geometry = await self._load_module_geometry(module_name)
-        return await self.module_manager.start_module(module_name, window_geometry)
+        self.module_manager.set_window_geometry(module_name, window_geometry)
+        return await self.module_manager.start_module(module_name)
+
+    async def set_module_enabled(self, module_name: str, enabled: bool) -> bool:
+        """Set module enabled state (central state machine entry point)."""
+        if enabled:
+            window_geometry = await self._load_module_geometry(module_name)
+            self.module_manager.set_window_geometry(module_name, window_geometry)
+        return await self.module_manager.set_module_enabled(module_name, enabled)
+
+    def is_module_enabled(self, module_name: str) -> bool:
+        """Check if module is enabled (checkbox state)."""
+        return self.module_manager.is_module_enabled(module_name)
+
+    def get_module_enabled_states(self) -> Dict[str, bool]:
+        """Get all module enabled states."""
+        return self.module_manager.get_module_enabled_states()
 
     async def _load_module_geometry(self, module_name: str) -> Optional[WindowGeometry]:
         """Load saved window geometry for a module."""

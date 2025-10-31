@@ -460,9 +460,6 @@ class TkinterGUI:
             except Exception as e:
                 logger.error("Failed to save map settings: %s", e, exc_info=True)
 
-        self.system.running = False
-        self.system.shutdown_event.set()
-
     def save_window_geometry_to_config(self):
         from pathlib import Path
         from Modules.base import gui_utils

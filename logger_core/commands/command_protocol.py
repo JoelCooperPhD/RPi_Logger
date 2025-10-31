@@ -125,6 +125,19 @@ class StatusMessage:
         output = StatusMessage.output_stream if StatusMessage.output_stream else sys.stdout
         print(json.dumps(message), file=output, flush=True)
 
+    @staticmethod
+    def send_with_timing(status: str, duration_ms: float, data: Optional[Dict[str, Any]] = None) -> None:
+        payload = data or {}
+        payload["duration_ms"] = round(duration_ms, 1)
+        StatusMessage.send(status, payload)
+
+    @staticmethod
+    def send_phase_complete(phase_name: str, duration_ms: float, data: Optional[Dict[str, Any]] = None) -> None:
+        payload = data or {}
+        payload["phase"] = phase_name
+        payload["duration_ms"] = round(duration_ms, 1)
+        StatusMessage.send("phase_complete", payload)
+
     def _parse(self) -> None:
         try:
             self.data = json.loads(self.raw)
@@ -179,13 +192,18 @@ class StatusMessage:
 class StatusType:
     INITIALIZING = "initializing"
     INITIALIZED = "initialized"
+    DISCOVERING = "discovering"
+    DEVICE_DETECTED = "device_detected"
     RECORDING_STARTED = "recording_started"
     RECORDING_STOPPED = "recording_stopped"
     SNAPSHOT_TAKEN = "snapshot_taken"
     STATUS_REPORT = "status_report"
     PREVIEW_FRAME = "preview_frame"
     PREVIEW_TOGGLED = "preview_toggled"
-    GEOMETRY_CHANGED = "geometry_changed"  # Window position/size changed
+    GEOMETRY_CHANGED = "geometry_changed"
+    PHASE_COMPLETE = "phase_complete"
+    SHUTDOWN_STARTED = "shutdown_started"
+    CLEANUP_COMPLETE = "cleanup_complete"
     ERROR = "error"
     WARNING = "warning"
     QUITTING = "quitting"

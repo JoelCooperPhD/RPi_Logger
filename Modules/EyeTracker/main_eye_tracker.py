@@ -238,7 +238,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
     loop = asyncio.get_running_loop()
 
     install_exception_handlers(logger, loop)
-    install_signal_handlers(supervisor, loop)
+    install_signal_handlers(supervisor, loop, track_shutdown_state=True)
 
     try:
         await supervisor.run()

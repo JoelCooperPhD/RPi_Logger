@@ -43,6 +43,7 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
     async def _initialize_devices(self) -> None:
         self.logger.info("Searching for cameras (timeout: %ds)...", self.device_timeout)
 
+        self.lifecycle_timer.mark_phase("device_discovery_start")
         start_time = time.time()
         cam_infos = []
 
@@ -50,10 +51,20 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
 
         loop = asyncio.get_event_loop()
 
+        discovery_attempts = 0
+        if self._should_send_status():
+            StatusMessage.send("discovering", {"device_type": "picamera2", "timeout": self.device_timeout})
+
         while time.time() - start_time < self.device_timeout:
+            discovery_attempts += 1
             try:
                 cam_infos = await loop.run_in_executor(None, Picamera2.global_camera_info)
                 if cam_infos:
+                    if self._should_send_status():
+                        StatusMessage.send("device_detected", {
+                            "device_type": "picamera2",
+                            "count": len(cam_infos)
+                        })
                     break
             except Exception as e:
                 self.logger.debug("Camera detection attempt failed: %s", e)
@@ -101,12 +112,17 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
 
             self.logger.info("Successfully initialized %d camera(s)", len(self.cameras))
 
-            if self.slave_mode or self.enable_gui_commands:
-                StatusMessage.send(
-                    "initialized",
-                    {"cameras": len(self.cameras), "session": self.session_label},
-                )
             self.initialized = True
+            self.lifecycle_timer.mark_phase("device_discovery_complete")
+            self.lifecycle_timer.mark_phase("initialized")
+
+            if self._should_send_status():
+                init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
+                StatusMessage.send_with_timing("initialized", init_duration, {
+                    "cameras": len(self.cameras),
+                    "session": self.session_label,
+                    "discovery_attempts": discovery_attempts
+                })
 
         except Exception as e:
             self.logger.error("Failed to initialize cameras: %s", e)
@@ -185,13 +201,10 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
             await self.stop_recording()
 
         if self.cameras:
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*[cam.cleanup() for cam in self.cameras], return_exceptions=True),
-                    timeout=THREAD_JOIN_TIMEOUT_SECONDS
-                )
-            except asyncio.TimeoutError:
-                self.logger.warning("Camera cleanup did not finish within %d seconds", THREAD_JOIN_TIMEOUT_SECONDS)
+            await asyncio.gather(
+                *[cam.cleanup() for cam in self.cameras],
+                return_exceptions=True
+            )
 
         self.cameras.clear()
         self.initialized = False

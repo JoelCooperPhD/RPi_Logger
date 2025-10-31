@@ -43,13 +43,24 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
     async def _initialize_devices(self) -> None:
         self.logger.info("Searching for audio devices (timeout: %ds)...", self.device_timeout)
 
+        self.lifecycle_timer.mark_phase("device_discovery_start")
         start_time = time.time()
         self.initialized = False
 
+        discovery_attempts = 0
+        if self._should_send_status():
+            StatusMessage.send("discovering", {"device_type": "audio_input", "timeout": self.device_timeout})
+
         while time.time() - start_time < self.device_timeout:
+            discovery_attempts += 1
             try:
                 self.available_devices = await DeviceDiscovery.get_audio_input_devices()
                 if self.available_devices:
+                    if self._should_send_status():
+                        StatusMessage.send("device_detected", {
+                            "device_type": "audio_input",
+                            "count": len(self.available_devices)
+                        })
                     break
             except Exception as e:
                 self.logger.debug("Device detection attempt failed: %s", e)
@@ -77,14 +88,19 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
             self.selected_devices.add(first_device)
             self.logger.info("Auto-selected device %d", first_device)
 
+        self.initialized = True
+        self.lifecycle_timer.mark_phase("device_discovery_complete")
+        self.lifecycle_timer.mark_phase("initialized")
+
         self.logger.info("Audio device discovery complete: %d devices available", len(self.available_devices))
 
-        if self.slave_mode or self.enable_gui_commands:
-            StatusMessage.send(
-                "initialized",
-                {"devices": len(self.available_devices), "session": self.session_label}
-            )
-        self.initialized = True
+        if self._should_send_status():
+            init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
+            StatusMessage.send_with_timing("initialized", init_duration, {
+                "devices": len(self.available_devices),
+                "session": self.session_label,
+                "discovery_attempts": discovery_attempts
+            })
 
     def select_device(self, device_id: int) -> bool:
         if device_id not in self.available_devices:

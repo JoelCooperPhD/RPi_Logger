@@ -8,6 +8,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+# Add venv to path if it exists (for packages like async_tkinter_loop)
+_venv_path = Path(__file__).parent / ".venv" / "lib" / "python3.13" / "site-packages"
+if _venv_path.exists() and str(_venv_path) not in sys.path:
+    sys.path.insert(0, str(_venv_path))
+
 from logger_core import LoggerSystem, get_shutdown_coordinator
 from logger_core.ui import MainWindow
 from logger_core.cli import HeadlessController, InteractiveShell

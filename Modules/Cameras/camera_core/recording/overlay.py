@@ -56,6 +56,20 @@ class FrameOverlayHandler:
                 if self._is_recording:
                     try:
                         with MappedArray(request, "main") as m:
+                            border_thickness = thickness * 3
+                            border_color = (0, 0, 0)
+
+                            cv2.putText(
+                                m.array,
+                                frame_text,
+                                (margin_left, line_start_y),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                font_scale,
+                                border_color,
+                                border_thickness,
+                                cv2.LINE_AA
+                            )
+
                             cv2.putText(
                                 m.array,
                                 frame_text,
