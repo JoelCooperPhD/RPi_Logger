@@ -55,6 +55,7 @@ class ModuleProcess:
         self.command_queue: asyncio.Queue = asyncio.Queue()
 
         self.shutdown_event = asyncio.Event()
+        self._was_forcefully_stopped = False
 
     async def start(self) -> bool:
         if self.process is not None:
@@ -68,16 +69,18 @@ class ModuleProcess:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
             venv_python = self._find_venv_python()
+            mode = self._determine_start_mode()
+
             base_args = [
-                "--mode", "gui",  # Use GUI mode with Tkinter interface
+                "--mode", mode,
                 "--output-dir", str(self.output_dir),
                 "--session-prefix", self.session_prefix,
                 "--log-level", self.log_level,
-                "--no-console",  # Disable console output (log to file only)
-                "--enable-commands",  # Enable parent process communication
+                "--no-console",
+                "--enable-commands",
             ]
 
-            if self.window_geometry:
+            if self.window_geometry and mode == "gui":
                 base_args.extend([
                     "--window-geometry", self.window_geometry.to_geometry_string()
                 ])
@@ -113,6 +116,7 @@ class ModuleProcess:
 
             asyncio.create_task(self._stdin_writer())
 
+            self._was_forcefully_stopped = False
             return True
 
         except Exception as e:
@@ -128,6 +132,25 @@ class ModuleProcess:
             return str(venv_python)
 
         return None
+
+    def _determine_start_mode(self) -> str:
+        """Determine which --mode argument to pass when launching the module.
+
+        Currently only the DRT module overrides the default GUI mode, so we keep
+        the logic scoped to DRT to avoid impacting other modules.
+        """
+        if self.module_info.name != "DRT":
+            return "gui"
+
+        config = self.load_module_config()
+        if not config:
+            return "gui"
+
+        mode = config.get('default_mode', '').strip().lower()
+        if not mode:
+            return "gui"
+
+        return mode
 
     def _find_uv(self) -> Optional[str]:
         import shutil
@@ -219,6 +242,7 @@ class ModuleProcess:
                     self.logger.error("Process crashed with exit code: %d", returncode)
                     self.state = ModuleState.CRASHED
                     self.error_message = f"Process exited with code {returncode}"
+                    self._was_forcefully_stopped = True
 
                 if self.status_callback:
                     await self.status_callback(self, None)
@@ -253,6 +277,7 @@ class ModuleProcess:
             self.state = ModuleState.STOPPED
             # This prevents _process_monitor() from marking it as CRASHED
             self.shutdown_event.set()
+            self._was_forcefully_stopped = False
             await self._update_enabled_state(False)
 
         if self.status_callback:
@@ -308,16 +333,19 @@ class ModuleProcess:
                 self.logger.info("Process stopped gracefully")
             except asyncio.TimeoutError:
                 self.logger.warning("Process did not exit gracefully, terminating...")
+                self._was_forcefully_stopped = True
                 self.process.terminate()
                 try:
                     await asyncio.wait_for(self.process.wait(), timeout=2.0)
                 except asyncio.TimeoutError:
                     self.logger.error("Process did not terminate, killing...")
+                    self._was_forcefully_stopped = True
                     self.process.kill()
                     await self.process.wait()
 
         except Exception as e:
             self.logger.error("Error stopping process: %s", e)
+            self._was_forcefully_stopped = True
         finally:
             self.shutdown_event.set()
             for task in [self.stdout_task, self.stderr_task, self.monitor_task]:
@@ -337,6 +365,10 @@ class ModuleProcess:
 
     def is_running(self) -> bool:
         return self.process is not None and self.process.returncode is None
+
+    @property
+    def was_forcefully_stopped(self) -> bool:
+        return self._was_forcefully_stopped
 
     def is_initialized(self) -> bool:
         return self.state in (ModuleState.IDLE, ModuleState.RECORDING)

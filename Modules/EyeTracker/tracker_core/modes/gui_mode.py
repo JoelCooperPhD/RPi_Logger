@@ -16,7 +16,7 @@ logger = logging.getLogger("GUIMode")
 
 class GUIMode(BaseGUIMode):
 
-    def __init__(self, tracker_system: 'TrackerSystem', enable_commands: bool = False):
+    def __init__(self, tracker_system: "TrackerSystem", enable_commands: bool = False):
         super().__init__(tracker_system, enable_commands)
         self.gaze_tracker = None
         self.tracker_task = None
@@ -24,18 +24,7 @@ class GUIMode(BaseGUIMode):
     def create_gui(self) -> TkinterGUI:
         gui = TkinterGUI(self.system, self.system.args)
 
-        from ..gaze_tracker import GazeTracker
-
-        self.gaze_tracker = GazeTracker(
-            self.system.config,
-            device_manager=self.system.device_manager,
-            stream_handler=self.system.stream_handler,
-            frame_processor=self.system.frame_processor,
-            recording_manager=self.system.recording_manager,
-            display_enabled=False  # GUI displays frames, not OpenCV window
-        )
-
-        self.system.gaze_tracker = self.gaze_tracker
+        self.gaze_tracker = self.system.tracker_handler.ensure_tracker(display_enabled=False)
 
         return gui
 
@@ -47,12 +36,12 @@ class GUIMode(BaseGUIMode):
 
         if not self.system.recording_manager.is_recording:
             self.logger.info("Auto-starting recording...")
-            await self.system.recording_manager.start_recording()
+            await self.system.start_recording()
         else:
             self.logger.info("Recording already started")
 
     async def on_devices_connected(self) -> None:
-        self.tracker_task = asyncio.create_task(self.gaze_tracker.run())
+        self.gaze_tracker = await self.system.tracker_handler.start_background(display_enabled=False)
 
         if self.gui and self.gui.root.winfo_exists():
             self.gui.root.title("Eye Tracker - Connected")
@@ -61,8 +50,9 @@ class GUIMode(BaseGUIMode):
         tasks = super().create_tasks()
 
         if self.system.initialized:
-            self.tracker_task = asyncio.create_task(self.gaze_tracker.run())
-            tasks.append(self.tracker_task)
+            tasks.append(asyncio.create_task(
+                self.system.tracker_handler.start_background(display_enabled=False)
+            ))
 
         return tasks
 
@@ -74,9 +64,4 @@ class GUIMode(BaseGUIMode):
         return 1.0 / getattr(self.system.args, 'gui_preview_update_hz', 10)
 
     async def cleanup(self) -> None:
-        if self.tracker_task and not self.tracker_task.done():
-            self.tracker_task.cancel()
-            try:
-                await self.tracker_task
-            except asyncio.CancelledError:
-                pass
+        await self.system.tracker_handler.stop()

@@ -10,6 +10,7 @@ from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
 from typing import Optional, Dict
 
+
 from ..logger_system import LoggerSystem
 from ..module_process import ModuleState
 from ..config_manager import get_config_manager
@@ -39,6 +40,7 @@ class MainController:
 
         self.trial_label_var: Optional[tk.StringVar] = None
 
+
         self.trial_counter: int = 0
         self.session_active = False
         self.trial_active = False
@@ -64,6 +66,7 @@ class MainController:
         self.trial_counter_label = trial_counter_label
         self.session_path_label = session_path_label
         self.trial_label_var = trial_label_var
+
 
     def on_module_menu_toggle(self, module_name: str) -> None:
         desired_state = self.module_vars[module_name].get()
@@ -314,6 +317,7 @@ class MainController:
                 if not var.get():
                     self.logger.info("Checking %s (state: %s)", module_name, state.value)
                     var.set(True)
+
 
     async def auto_start_modules(self) -> None:
         await asyncio.sleep(0.5)

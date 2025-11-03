@@ -62,7 +62,7 @@ class TkinterMenuBase:
         menubar.add_cascade(label="View", menu=self.view_menu)
 
         self.view_menu.add_checkbutton(
-            label="Show Logger",
+            label="Show System Log",
             variable=self.logger_visible_var,
             command=self._toggle_logger
         )
@@ -149,13 +149,38 @@ class TkinterMenuBase:
 
         var = tk.BooleanVar(value=initial_state)
 
+        grid_options = widget.grid_info()
+        if grid_options:
+            grid_options = grid_options.copy()
+            grid_options.pop('in', None)
+        else:
+            grid_options = {}
+
         def toggle():
             visible = var.get()
             if visible:
-                widget.grid()
+                if grid_options:
+                    regrid_kwargs = {}
+                    for key, value in grid_options.items():
+                        if isinstance(value, str) and value.isdigit():
+                            try:
+                                regrid_kwargs[key] = int(value)
+                                continue
+                            except ValueError:
+                                pass
+                        regrid_kwargs[key] = value
+                    widget.grid()
+                    widget.grid_configure(**regrid_kwargs)
+                else:
+                    widget.grid()
             else:
                 widget.grid_remove()
             self._save_view_state(config_key, visible)
+
+            try:
+                widget.winfo_toplevel().update_idletasks()
+            except Exception:
+                pass
 
         self.add_view_option(label, var, toggle)
 
@@ -201,9 +226,23 @@ class TkinterMenuBase:
         if hasattr(self, 'system') and hasattr(self.system, 'config'):
             config = self.system.config
             if isinstance(config, dict):
-                return config.get(config_key, default)
+                value = config.get(config_key, default)
+                if isinstance(value, str):
+                    value_lower = value.lower()
+                    if value_lower in ('true', 'yes', 'on', '1'):
+                        return True
+                    if value_lower in ('false', 'no', 'off', '0'):
+                        return False
+                return value if isinstance(value, bool) else default
             else:
-                return getattr(config, config_key, default)
+                value = getattr(config, config_key, default)
+                if isinstance(value, str):
+                    value_lower = value.lower()
+                    if value_lower in ('true', 'yes', 'on', '1'):
+                        return True
+                    if value_lower in ('false', 'no', 'off', '0'):
+                        return False
+                return value if isinstance(value, bool) else default
         return default
 
     def _save_view_state(self, config_key: str, visible: bool):
@@ -235,10 +274,10 @@ class TkinterMenuBase:
         if hasattr(self, 'log_frame'):
             if visible:
                 self.log_frame.grid()
-                logger.info("Logger shown")
+                logger.info("System log shown")
             else:
                 self.log_frame.grid_remove()
-                logger.info("Logger hidden")
+                logger.info("System log hidden")
 
         self._save_view_state('gui_logger_visible', visible)
 
@@ -284,16 +323,24 @@ class TkinterMenuBase:
             logger.error("Failed to open log file: %s", e)
 
     def _on_quit(self):
-        if hasattr(self, 'handle_window_close'):
-            self.handle_window_close()
-        elif hasattr(self, '_on_closing'):
-            self._on_closing()
-        elif hasattr(self, 'on_closing'):
-            self.on_closing()
-        else:
-            logger.warning("No close handler found, destroying window directly")
-            if hasattr(self, 'root'):
-                self.root.destroy()
+        handler = None
+
+        system = getattr(self, 'system', None)
+        if system is not None:
+            handler = getattr(getattr(system, 'mode_instance', None), 'on_closing', None)
+
+        if handler is None:
+            handler = getattr(self, 'on_closing', None)
+        if handler is None:
+            handler = getattr(self, '_on_closing', None)
+
+        if handler is not None:
+            handler()
+            return
+
+        logger.warning("No close handler found, destroying window directly")
+        if hasattr(self, 'root'):
+            self.root.destroy()
 
     def _show_about(self):
         try:

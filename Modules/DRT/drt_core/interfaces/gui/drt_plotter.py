@@ -110,8 +110,6 @@ class DRTPlotter:
                 cache_frame_data=False
             )
 
-        logger.info(f"Added device {port} to plotter")
-
     def _init_animation(self, port):
         if port in self._state_xy:
             self._state_xy[port][0].set_data(self._time_array, self._state_array[port])

@@ -84,6 +84,7 @@ class MainWindow:
         self.logger_visible_var: Optional[tk.BooleanVar] = None
         self.log_handler: Optional[logging.Handler] = None
 
+
     def build_ui(self) -> None:
         self.root = tk.Tk()
         self.root.title("RS Logger")
@@ -168,7 +169,7 @@ class MainWindow:
         menubar.add_cascade(label="View", menu=view_menu)
 
         view_menu.add_checkbutton(
-            label="Show Logger",
+            label="Show System Log",
             variable=self.logger_visible_var,
             command=self._toggle_logger
         )
@@ -249,11 +250,12 @@ class MainWindow:
         control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
         control_frame.columnconfigure(0, weight=0)
         control_frame.columnconfigure(1, weight=0)
-        control_frame.columnconfigure(2, weight=2)
+        control_frame.columnconfigure(2, weight=1)
         control_frame.rowconfigure(0, weight=1)
         control_frame.rowconfigure(1, weight=0)
 
         self._build_session_trial_controls(control_frame)
+
         self._build_info_panel(control_frame)
 
         self._build_shutdown_button(main_frame)
@@ -454,7 +456,7 @@ class MainWindow:
         self.shutdown_button.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 0))
 
     def _build_logger_frame(self) -> None:
-        self.logger_frame = ttk.LabelFrame(self.root, text="Logger", padding="3")
+        self.logger_frame = ttk.LabelFrame(self.root, text="System Log", padding="3")
         self.logger_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=5, pady=(0, 5))
         self.logger_frame.columnconfigure(0, weight=1)
 
@@ -485,7 +487,7 @@ class MainWindow:
 
         config_manager = get_config_manager()
         config_manager.write_config(CONFIG_PATH, {'gui_logger_visible': visible})
-        self.logger.debug("Logger visibility set to: %s", visible)
+        self.logger.debug("System log visibility set to: %s", visible)
 
     def _setup_log_handler(self) -> None:
         if self.logger_text is None:
@@ -497,7 +499,7 @@ class MainWindow:
         root_logger = logging.getLogger()
         root_logger.addHandler(self.log_handler)
 
-        self.logger.info("Logger display initialized")
+        self.logger.info("System log display initialized")
 
     def cleanup_log_handler(self) -> None:
         if self.log_handler:

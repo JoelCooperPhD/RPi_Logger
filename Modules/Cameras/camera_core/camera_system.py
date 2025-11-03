@@ -36,8 +36,12 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
         self.command_thread = None
 
         self.preview_enabled = []  # Will be populated dynamically based on detected cameras
+        self.cleanup_failed = False
+        self.cleanup_report: list = []
 
     def _ensure_session_dir(self) -> Path:
+        if self.session_dir is None:
+            raise RuntimeError("Session directory is not initialized")
         return self.session_dir
 
     async def _initialize_devices(self) -> None:
@@ -158,18 +162,29 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
             self.logger.warning("No cameras available for recording")
             return False
 
+        session_dir = self._ensure_session_dir()
+        trial_number = self.recording_count + 1
+
         try:
-            for cam in self.cameras:
-                cam.start_recording()
-
-            self.recording = True
-            self.logger.info("Recording started on %d cameras", len(self.cameras))
-            return True
-
+            await asyncio.gather(
+                *[
+                    cam.start_recording(session_dir, trial_number)
+                    for cam in self.cameras
+                ]
+            )
         except Exception as e:
-            self.logger.error("Failed to start recording: %s", e)
+            self.logger.error("Failed to start recording: %s", e, exc_info=True)
+            await asyncio.gather(
+                *[cam.stop_recording() for cam in self.cameras],
+                return_exceptions=True
+            )
             self.recording = False
             return False
+
+        self._increment_recording_count()
+        self.recording = True
+        self.logger.info("Recording started on %d cameras", len(self.cameras))
+        return True
 
     async def stop_recording(self) -> bool:
         can_stop, error_msg = self.validate_recording_stop()
@@ -178,16 +193,16 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
             return False
 
         try:
-            for cam in self.cameras:
-                cam.stop_recording()
-
-            self.recording = False
-            self.logger.info("Recording stopped")
-            return True
-
+            await asyncio.gather(
+                *[cam.stop_recording() for cam in self.cameras]
+            )
         except Exception as e:
-            self.logger.error("Failed to stop recording: %s", e)
+            self.logger.error("Failed to stop recording: %s", e, exc_info=True)
             return False
+
+        self.recording = False
+        self.logger.info("Recording stopped")
+        return True
 
     def send_status(self, status_type, data=None):
         if self.slave_mode:
@@ -197,16 +212,76 @@ class CameraSystem(BaseSystem, RecordingStateMixin):
         self.running = False
         self.shutdown_event.set()
 
-        if self.recording:
-            await self.stop_recording()
+        self.logger.warning("CameraSystem.cleanup entered; recording=%s cameras=%d",
+                            self.recording, len(self.cameras))
 
-        if self.cameras:
-            await asyncio.gather(
-                *[cam.cleanup() for cam in self.cameras],
-                return_exceptions=True
-            )
+        # Preserve any summaries captured during GUI synchronous cleanup so we can
+        # merge rather than discarding breadcrumb data that already exists.
+        existing_report = list(self.cleanup_report)
+        existing_failure = self.cleanup_failed
 
-        self.cameras.clear()
-        self.initialized = False
+        self.cleanup_failed = existing_failure
+        self.cleanup_report = existing_report
+        self._cleanup_complete = False
 
-        self.logger.info("Cleanup completed")
+        try:
+            if self.recording:
+                self.logger.warning("CameraSystem.cleanup stopping recording")
+                await self.stop_recording()
+
+            if self.cameras:
+                self.logger.warning("CameraSystem.cleanup awaiting handler cleanup for %d cameras", len(self.cameras))
+                handlers = list(self.cameras)
+                results = await asyncio.gather(
+                    *[cam.cleanup() for cam in handlers],
+                    return_exceptions=True
+                )
+
+                cleanup_summaries = []
+                for handler, result in zip(handlers, results):
+                    self.logger.warning("CameraSystem.cleanup handler result cam=%d -> %s",
+                                        handler.cam_num, result)
+                    if isinstance(result, Exception):
+                        summary = {
+                            "cam": handler.cam_num,
+                            "status": "error",
+                            "error": repr(result),
+                        }
+                        self.logger.error("Cleanup error for camera %d: %s", handler.cam_num, result, exc_info=True)
+                        self.cleanup_failed = True
+                    elif isinstance(result, dict):
+                        summary = result
+                        if not summary.get("success", summary.get("status") == "success"):
+                            self.cleanup_failed = True
+                            self.logger.error("Cleanup summary (camera %d) indicates failure: %s", handler.cam_num, summary)
+                        else:
+                            self.logger.info("Cleanup summary (camera %d): %s", handler.cam_num, summary)
+                    else:
+                        summary = {
+                            "cam": handler.cam_num,
+                            "status": "unknown",
+                            "detail": result,
+                        }
+                        self.logger.debug("Cleanup summary (camera %d) returned non-dict result: %s", handler.cam_num, result)
+
+                    cleanup_summaries.append(summary)
+
+                self.cleanup_report = cleanup_summaries
+            else:
+                if not self.cleanup_report and existing_report:
+                    self.logger.debug("Reusing %d pre-populated cleanup summaries", len(existing_report))
+                # Nothing to add; keep whatever pre-populated summaries we already have.
+
+            self.cameras.clear()
+            self.preview_enabled.clear()
+            self.initialized = False
+
+            for summary in self.cleanup_report:
+                self.logger.info("Camera cleanup summary: %s", summary)
+
+            self.logger.info("Cleanup completed")
+        finally:
+            self.logger.warning("CameraSystem.cleanup finalizing; cleanup_failed=%s", self.cleanup_failed)
+            self._cleanup_complete = not self.cleanup_failed
+            self.mark_cleanup_complete()
+            await self.cancel_shutdown_guard()

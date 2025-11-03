@@ -40,9 +40,16 @@ class GazeTracker:
         self._latest_display_frame = None
 
         self.device_manager = device_manager or DeviceManager()
+        self.device_manager.audio_stream_param = config.audio_stream_param
         self.stream_handler = stream_handler or StreamHandler()
         self.frame_processor = frame_processor or FrameProcessor(config)
-        self.recording_manager = recording_manager or RecordingManager(config)
+        self.recording_manager = recording_manager or RecordingManager(
+            config,
+            device_manager=self.device_manager,
+        )
+        self.stream_handler.set_imu_listener(self.recording_manager.write_imu_sample)
+        self.stream_handler.set_event_listener(self.recording_manager.write_event_sample)
+
 
     async def connect(self) -> bool:
         return await self.device_manager.connect()
@@ -110,6 +117,7 @@ class GazeTracker:
                 stream_urls["gaze"],
                 imu_url=stream_urls.get("imu"),
                 events_url=stream_urls.get("events"),
+                audio_url=stream_urls.get("audio"),
             ) or []
 
             frame_task = asyncio.create_task(self._process_frames(), name="frame-processor")
@@ -200,7 +208,6 @@ class GazeTracker:
                     if next_imu is None:
                         break
                     latest_imu = next_imu
-                    self.recording_manager.write_imu_sample(next_imu)
 
                 latest_event = self.stream_handler.get_latest_event()
                 while True:
@@ -208,7 +215,12 @@ class GazeTracker:
                     if next_event is None:
                         break
                     latest_event = next_event
-                    self.recording_manager.write_event_sample(next_event)
+
+                while True:
+                    next_audio = await self.stream_handler.next_audio(timeout=0)
+                    if next_audio is None:
+                        break
+                    self.recording_manager.write_audio_sample(next_audio)
 
                 # Phase 1.2 & 1.3: Separate display and recording overlays with early scaling
                 display_frame = None

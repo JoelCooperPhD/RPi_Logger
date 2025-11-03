@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, List, Tuple
 
 from Modules.base import BaseSystem, RecordingStateMixin, USBDeviceConfig, USBDeviceMonitor, USBSerialDevice
 from . import DRTInitializationError
@@ -94,8 +94,8 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             logger.info(f"DRTSystem: Calling mode_instance.on_device_connected for {device.port}")
             await self.mode_instance.on_device_connected(device.port)
             logger.info(f"DRTSystem: mode_instance.on_device_connected completed for {device.port}")
-        else:
-            logger.warning(f"DRTSystem: No mode_instance or on_device_connected method available")
+        elif self.mode_instance:
+            logger.warning("DRTSystem: mode_instance missing on_device_connected handler")
 
     async def _on_device_disconnected(self, port: str):
         logger.info(f"sDRT device disconnected from {port}")
@@ -106,6 +106,8 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
 
         if self.mode_instance and hasattr(self.mode_instance, 'on_device_disconnected'):
             await self.mode_instance.on_device_disconnected(port)
+        elif self.mode_instance:
+            logger.warning('DRTSystem: mode_instance missing on_device_disconnected handler')
 
     async def _on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         if self.mode_instance and hasattr(self.mode_instance, 'on_device_data'):
@@ -115,11 +117,13 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
         if mode_name == "gui":
             from .modes.gui_mode import GUIMode
             return GUIMode(self, enable_commands=self.enable_gui_commands)
-        elif mode_name == "headless":
+        if mode_name == "simple":
+            from .modes.simple_mode import SimpleMode
+            return SimpleMode(self, enable_commands=self.enable_gui_commands)
+        if mode_name == "headless":
             logger.error("Headless mode not implemented for DRT")
             raise ValueError(f"Unsupported mode: {mode_name}")
-        else:
-            raise ValueError(f"Unknown mode: {mode_name}")
+        raise ValueError(f"Unknown mode: {mode_name}")
 
     async def start_recording(self) -> bool:
         can_start, error_msg = self.validate_recording_start()
@@ -131,17 +135,33 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             logger.error("Cannot start recording - no devices connected")
             return False
 
-        try:
-            for handler in self.device_handlers.values():
-                await handler.start_experiment()
+        started_handlers: List[Tuple[str, DRTHandler]] = []
+        failures: List[str] = []
 
-            self.recording = True
-            logger.info("DRT recording started for all devices")
-            return True
+        for port, handler in self.device_handlers.items():
+            try:
+                success = await handler.start_experiment()
+            except Exception as exc:
+                logger.error("Exception starting experiment on %s: %s", port, exc, exc_info=True)
+                success = False
 
-        except Exception as e:
-            logger.error("Exception starting recording: %s", e, exc_info=True)
+            if success:
+                started_handlers.append((port, handler))
+            else:
+                failures.append(port)
+
+        if failures:
+            logger.error("Failed to start recording on ports: %s", ", ".join(failures))
+            for port, handler in started_handlers:
+                try:
+                    await handler.stop_experiment()
+                except Exception as exc:
+                    logger.warning("Rollback stop_experiment failed on %s: %s", port, exc, exc_info=True)
             return False
+
+        self.recording = True
+        logger.info("DRT recording started for all devices")
+        return True
 
     async def stop_recording(self) -> bool:
         can_stop, error_msg = self.validate_recording_stop()
@@ -149,17 +169,25 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             logger.warning("Cannot stop recording: %s", error_msg)
             return False
 
-        try:
-            for handler in self.device_handlers.values():
-                await handler.stop_experiment()
+        failures: List[str] = []
 
-            self.recording = False
-            logger.info("DRT recording stopped for all devices")
-            return True
+        for port, handler in self.device_handlers.items():
+            try:
+                success = await handler.stop_experiment()
+            except Exception as exc:
+                logger.error("Exception stopping experiment on %s: %s", port, exc, exc_info=True)
+                success = False
 
-        except Exception as e:
-            logger.error("Exception stopping recording: %s", e, exc_info=True)
+            if not success:
+                failures.append(port)
+
+        if failures:
+            logger.error("Failed to stop recording on ports: %s", ", ".join(failures))
             return False
+
+        self.recording = False
+        logger.info("DRT recording stopped for all devices")
+        return True
 
     async def cleanup(self):
         logger.info("Cleaning up DRT system...")
@@ -169,13 +197,18 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
 
         if self.recording:
             logger.info("Stopping recording before cleanup...")
-            await self.stop_recording()
+            stopped = await self.stop_recording()
+            if not stopped:
+                logger.warning("Recording did not stop cleanly during cleanup")
 
         if self.usb_monitor:
             await self.usb_monitor.stop()
 
         for handler in list(self.device_handlers.values()):
-            await handler.stop()
+            try:
+                await handler.stop()
+            except Exception as exc:
+                logger.warning("Error stopping handler for cleanup on %s: %s", getattr(handler, 'port', 'unknown'), exc, exc_info=True)
 
         self.device_handlers.clear()
 

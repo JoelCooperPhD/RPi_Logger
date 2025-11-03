@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    config = load_config_file()
+    config_path = Path(__file__).parent / "config.txt"
+    config = load_config_file(config_path)
 
     default_output = Path(get_config_str(config, 'output_dir', 'data'))
     default_session_prefix = get_config_str(config, 'session_prefix', 'session')
@@ -52,6 +53,8 @@ def parse_args(argv: Optional[list[str]] = None):
     logger.debug("Final window_geometry after config load: %s", args.window_geometry)
 
     args.enable_gui_commands = args.enable_commands
+    args.config = config
+    args.config_file_path = config_path
 
     return args
 

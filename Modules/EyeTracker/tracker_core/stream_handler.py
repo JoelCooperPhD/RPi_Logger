@@ -4,7 +4,7 @@ import contextlib
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Callable
 
 import numpy as np
 from pupil_labs.realtime_api import (
@@ -12,6 +12,7 @@ from pupil_labs.realtime_api import (
     receive_gaze_data,
     receive_imu_data,
     receive_eye_events_data,
+    receive_audio_frames,
 )
 from .rolling_fps import RollingFPS
 
@@ -36,23 +37,30 @@ class StreamHandler:
         self.last_gaze: Optional[Any] = None
         self.last_imu: Optional[Any] = None
         self.last_event: Optional[Any] = None
+        self.last_audio: Optional[Any] = None
+
+        self.imu_listener: Optional[Callable[[Any], None]] = None
+        self.event_listener: Optional[Callable[[Any], None]] = None
         self.camera_frames = 0
         self.tasks: List[asyncio.Task] = []
         self._video_task_active = False
         self._gaze_task_active = False
         self._imu_task_active = False
         self._event_task_active = False
+        self._audio_task_active = False
         self.camera_fps_tracker = RollingFPS(window_seconds=5.0)
         self._frame_queue: asyncio.Queue[FramePacket] = asyncio.Queue(maxsize=6)
         self._gaze_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=32)
         self._imu_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
         self._event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
+        self._audio_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=128)
 
         # Event-driven coordination (Phase 1.1 optimization)
         self._frame_ready_event = asyncio.Event()
         self._gaze_ready_event = asyncio.Event()
         self._imu_ready_event = asyncio.Event()
         self._event_ready_event = asyncio.Event()
+        self._audio_ready_event = asyncio.Event()
 
     def _update_running_flag(self) -> None:
         self.running = any(
@@ -61,6 +69,7 @@ class StreamHandler:
                 self._gaze_task_active,
                 self._imu_task_active,
                 self._event_task_active,
+                self._audio_task_active,
             )
         )
 
@@ -71,6 +80,7 @@ class StreamHandler:
         *,
         imu_url: Optional[str] = None,
         events_url: Optional[str] = None,
+        audio_url: Optional[str] = None,
     ):
         if self.running:
             return
@@ -79,6 +89,7 @@ class StreamHandler:
         self._gaze_task_active = True
         self._imu_task_active = bool(imu_url)
         self._event_task_active = bool(events_url)
+        self._audio_task_active = bool(audio_url)
         self._update_running_flag()
         logger.info(f"Video URL: {video_url}")
         logger.info(f"Gaze URL: {gaze_url}")
@@ -86,6 +97,8 @@ class StreamHandler:
             logger.info(f"IMU URL: {imu_url}")
         if events_url:
             logger.info(f"Events URL: {events_url}")
+        if audio_url:
+            logger.info(f"Audio URL: {audio_url}")
 
         self.tasks = [
             asyncio.create_task(self._stream_video_frames(video_url), name="video-stream"),
@@ -100,6 +113,10 @@ class StreamHandler:
             self.tasks.append(
                 asyncio.create_task(self._stream_eye_events(events_url), name="events-stream")
             )
+        if audio_url:
+            self.tasks.append(
+                asyncio.create_task(self._stream_audio_data(audio_url), name="audio-stream")
+            )
 
         return self.tasks
 
@@ -108,6 +125,7 @@ class StreamHandler:
         self._gaze_task_active = False
         self._imu_task_active = False
         self._event_task_active = False
+        self._audio_task_active = False
         self._update_running_flag()
 
         for task in self.tasks:
@@ -232,6 +250,13 @@ class StreamHandler:
                 self._enqueue_latest(self._imu_queue, imu)
                 self._imu_ready_event.set()  # Signal IMU available
 
+                listener = self.imu_listener
+                if listener is not None:
+                    try:
+                        listener(imu)
+                    except Exception as exc:
+                        logger.error("IMU listener error: %s", exc, exc_info=True)
+
                 if imu_count % 100 == 1:
                     logger.info("IMU samples received: %d", imu_count)
 
@@ -266,6 +291,13 @@ class StreamHandler:
                 self._enqueue_latest(self._event_queue, event)
                 self._event_ready_event.set()  # Signal event available
 
+                listener = self.event_listener
+                if listener is not None:
+                    try:
+                        listener(event)
+                    except Exception as exc:
+                        logger.error("Eye event listener error: %s", exc, exc_info=True)
+
                 if event_count % 50 == 1:
                     logger.info("Eye events received: %d", event_count)
 
@@ -277,6 +309,38 @@ class StreamHandler:
                 logger.error("Eye events stream error: %s", exc)
         finally:
             self._event_task_active = False
+            self._update_running_flag()
+
+    async def _stream_audio_data(self, audio_url: str):
+        logger.info("Starting audio stream...")
+
+        audio_count = 0
+        try:
+            async for audio in receive_audio_frames(audio_url):
+                if not self.running:
+                    break
+
+                audio_count += 1
+                if audio_count == 1:
+                    logger.info("First audio frame received!")
+                    logger.info(
+                        "Audio frame info: rate=%sHz channels=%s",
+                        getattr(audio.av_frame, "sample_rate", "?"),
+                        getattr(getattr(audio.av_frame, "layout", None), "nb_channels", "?"),
+                    )
+
+                self.last_audio = audio
+                self._enqueue_latest(self._audio_queue, audio)
+                self._audio_ready_event.set()
+
+        except asyncio.CancelledError:
+            logger.debug("Audio stream task cancelled")
+            raise
+        except Exception as exc:
+            if self.running:
+                logger.error("Audio stream error: %s", exc)
+        finally:
+            self._audio_task_active = False
             self._update_running_flag()
 
     def get_latest_frame(self) -> Optional[np.ndarray]:
@@ -294,6 +358,15 @@ class StreamHandler:
     def get_latest_event(self) -> Optional[Any]:
         return self.last_event
 
+    def set_imu_listener(self, listener: Optional[Callable[[Any], None]]) -> None:
+        self.imu_listener = listener
+
+    def set_event_listener(self, listener: Optional[Callable[[Any], None]]) -> None:
+        self.event_listener = listener
+
+    def get_latest_audio(self) -> Optional[Any]:
+        return self.last_audio
+
     def get_camera_fps(self) -> float:
         return self.camera_fps_tracker.get_fps()
 
@@ -308,6 +381,9 @@ class StreamHandler:
 
     async def next_event(self, timeout: Optional[float] = None) -> Optional[Any]:
         return await self._dequeue_with_timeout(self._event_queue, timeout)
+
+    async def next_audio(self, timeout: Optional[float] = None) -> Optional[Any]:
+        return await self._dequeue_with_timeout(self._audio_queue, timeout)
 
     # Event-driven methods (Phase 1.1 optimization)
     async def wait_for_frame(self, timeout: Optional[float] = None) -> Optional[FramePacket]:
@@ -326,6 +402,15 @@ class StreamHandler:
             await asyncio.wait_for(self._gaze_ready_event.wait(), timeout=timeout)
             self._gaze_ready_event.clear()
             return await self.next_gaze(timeout=0)
+        except asyncio.TimeoutError:
+            return None
+
+    async def wait_for_audio(self, timeout: Optional[float] = None) -> Optional[Any]:
+        """Wait for audio frame availability (event-driven)"""
+        try:
+            await asyncio.wait_for(self._audio_ready_event.wait(), timeout=timeout)
+            self._audio_ready_event.clear()
+            return await self.next_audio(timeout=0)
         except asyncio.TimeoutError:
             return None
 
@@ -350,7 +435,13 @@ class StreamHandler:
             return None
 
     def _drain_queues(self) -> None:
-        for queue in (self._frame_queue, self._gaze_queue, self._imu_queue, self._event_queue):
+        for queue in (
+            self._frame_queue,
+            self._gaze_queue,
+            self._imu_queue,
+            self._event_queue,
+            self._audio_queue,
+        ):
             while True:
                 try:
                     queue.get_nowait()

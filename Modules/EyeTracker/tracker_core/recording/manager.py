@@ -8,18 +8,23 @@ import datetime
 import io
 import json
 import logging
-import subprocess
 import time
+import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Any, TextIO
+from typing import Optional, Any, TextIO, TYPE_CHECKING
 
-import aiofiles
-import cv2
 import numpy as np
 
 from Modules.base.recording import RecordingManagerBase
 from ..config.tracker_config import TrackerConfig as Config
+from .async_csv_writer import AsyncCSVWriter
+from .video_encoder import VideoEncoder
+from pupil_labs.realtime_api.models import ConnectionType, SensorName, Status
+
+if TYPE_CHECKING:
+    from pupil_labs.realtime_api.streaming import AudioFrame
+    from ..device_manager import DeviceManager
 
 logger = logging.getLogger(__name__)
 
@@ -48,20 +53,21 @@ class _QueuedFrame:
 
 class RecordingManager(RecordingManagerBase):
 
-    def __init__(self, config: Config, *, use_ffmpeg: bool = True):
+    def __init__(self, config: Config, *, use_ffmpeg: bool = True, device_manager: Optional["DeviceManager"] = None):
         super().__init__(device_id="eye_tracker")
         self.config = config
-        self.ffmpeg_process: Optional[asyncio.subprocess.Process] = None
+        self.device_manager = device_manager
         self.recording_filename: Optional[str] = None
         self.gaze_filename: Optional[str] = None
         self.frame_timing_filename: Optional[str] = None
         self.imu_filename: Optional[str] = None
         self.events_filename: Optional[str] = None
+        self.advanced_gaze_filename: Optional[str] = None
+        self.audio_filename: Optional[str] = None
+        self.audio_timing_filename: Optional[str] = None
+        self.device_status_filename: Optional[str] = None
 
-        self._gaze_file: Optional[TextIO] = None
         self._frame_timing_file: Optional[TextIO] = None
-        self._imu_file: Optional[TextIO] = None
-        self._event_file: Optional[TextIO] = None
         self._last_gaze_timestamp: Optional[float] = None
         self._last_write_monotonic: Optional[float] = None
         self._written_frames = 0
@@ -75,19 +81,25 @@ class RecordingManager(RecordingManagerBase):
         self._frame_timer_task: Optional[asyncio.Task] = None
 
         self.use_ffmpeg = use_ffmpeg
-        self._opencv_writer: Optional[cv2.VideoWriter] = None
+        self._video_encoder = VideoEncoder(config.resolution, config.fps, use_ffmpeg=use_ffmpeg)
         self._frame_queue: Optional[asyncio.Queue[Any]] = None
         self._frame_writer_task: Optional[asyncio.Task] = None
         self._queue_sentinel: object = object()
-        self._gaze_queue: Optional[asyncio.Queue[str]] = None
-        self._gaze_writer_task: Optional[asyncio.Task] = None
-        self._gaze_queue_sentinel: object = object()
-        self._imu_queue: Optional[asyncio.Queue[str]] = None
-        self._imu_writer_task: Optional[asyncio.Task] = None
-        self._imu_queue_sentinel: object = object()
-        self._event_queue: Optional[asyncio.Queue[str]] = None
-        self._event_writer_task: Optional[asyncio.Task] = None
-        self._event_queue_sentinel: object = object()
+
+        self._gaze_writer: Optional[AsyncCSVWriter] = None
+        self._gaze_full_writer: Optional[AsyncCSVWriter] = None
+        self._imu_writer: Optional[AsyncCSVWriter] = None
+        self._event_writer: Optional[AsyncCSVWriter] = None
+        self._audio_timing_writer: Optional[AsyncCSVWriter] = None
+        self._device_status_writer: Optional[AsyncCSVWriter] = None
+
+        self._audio_frame_queue: Optional[asyncio.Queue[Any]] = None
+        self._audio_writer_task: Optional[asyncio.Task] = None
+        self._audio_queue_sentinel: object = object()
+        self._device_status_task: Optional[asyncio.Task] = None
+
+        self._imu_samples_written = 0
+        self._event_samples_written = 0
 
         self._output_root = Path(config.output_dir)
         self._output_root.mkdir(parents=True, exist_ok=True)
@@ -125,90 +137,128 @@ class RecordingManager(RecordingManagerBase):
             session_timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         w, h = self.config.resolution
-        self.recording_filename = str(target_dir / f"{session_timestamp}_GAZE_trial{trial_number:03d}_{w}x{h}_{self.config.fps}fps.mp4")
+        et_prefix = f"{session_timestamp}_ET"
+        self.recording_filename = str(target_dir / f"{et_prefix}_GAZE_trial{trial_number:03d}_{w}x{h}_{self.config.fps}fps.mp4")
 
-        self.gaze_filename = str(target_dir / f"{session_timestamp}_GAZEDATA.csv")
-        self.frame_timing_filename = str(target_dir / f"{session_timestamp}_FRAMETIMING.csv")
-        self.imu_filename = str(target_dir / f"{session_timestamp}_IMU.csv")
-        self.events_filename = str(target_dir / f"{session_timestamp}_EVENTS.csv")
+        self.gaze_filename = str(target_dir / f"{et_prefix}_GAZEDATA.csv")
+        self.frame_timing_filename = str(target_dir / f"{et_prefix}_FRAME.csv")
+        self.imu_filename = str(target_dir / f"{et_prefix}_IMU.csv")
+        self.events_filename = str(target_dir / f"{et_prefix}_EVENT.csv")
+        self.advanced_gaze_filename = (
+            str(target_dir / f"{et_prefix}_GAZE.csv")
+            if self.config.enable_advanced_gaze_logging
+            else None
+        )
+        self.audio_filename = (
+            str(target_dir / f"{session_timestamp}_AUDIO.wav")
+            if self.config.enable_audio_recording
+            else None
+        )
+        self.audio_timing_filename = (
+            str(target_dir / f"{session_timestamp}_AUDIO_TIMING.csv")
+            if self.config.enable_audio_recording
+            else None
+        )
+        self.device_status_filename = (
+            str(target_dir / f"{session_timestamp}_DEVICESTATUS.csv")
+            if self.config.enable_device_status_logging and self.device_manager is not None
+            else None
+        )
 
         try:
-            if self.use_ffmpeg:
-                ffmpeg_cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-f",
-                    "rawvideo",
-                    "-vcodec",
-                    "rawvideo",
-                    "-s",
-                    f"{w}x{h}",
-                    "-pix_fmt",
-                    "bgr24",
-                    "-r",
-                    str(self.config.fps),
-                    "-i",
-                    "-",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "ultrafast",
-                    "-crf",
-                    "23",
-                    self.recording_filename,
-                ]
+            await self._video_encoder.start(Path(self.recording_filename))
 
-                self.ffmpeg_process = await asyncio.create_subprocess_exec(
-                    *ffmpeg_cmd,
-                    stdin=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-            else:
-                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                self._opencv_writer = cv2.VideoWriter(
-                    self.recording_filename,
-                    fourcc,
-                    self.config.fps,
-                    (w, h),
-                )
-                if not self._opencv_writer.isOpened():
-                    raise RuntimeError("Failed to start OpenCV video writer")
-
-            # Open and initialize CSV files using asyncio.to_thread to avoid blocking
-            # Check if files exist and append if they do
-            from pathlib import Path
-            gaze_exists = await asyncio.to_thread(Path(self.gaze_filename).exists)
-            frame_timing_exists = await asyncio.to_thread(Path(self.frame_timing_filename).exists)
-            imu_exists = await asyncio.to_thread(Path(self.imu_filename).exists)
-            events_exists = await asyncio.to_thread(Path(self.events_filename).exists)
-
-            self._gaze_file = await asyncio.to_thread(open, self.gaze_filename, "a" if gaze_exists else "w", encoding="utf-8")
-            if not gaze_exists:
-                await asyncio.to_thread(self._gaze_file.write, "timestamp,x,y,worn\n")
-
-            self._frame_timing_file = await asyncio.to_thread(open, self.frame_timing_filename, "a" if frame_timing_exists else "w", encoding="utf-8")
+            frame_timing_path = Path(self.frame_timing_filename)
+            frame_timing_exists = await asyncio.to_thread(frame_timing_path.exists)
+            self._frame_timing_file = await asyncio.to_thread(
+                open,
+                frame_timing_path,
+                "a" if frame_timing_exists else "w",
+                encoding="utf-8",
+            )
             if not frame_timing_exists:
                 await asyncio.to_thread(
                     self._frame_timing_file.write,
                     "frame_number,write_time_unix,queue_delay,capture_latency,write_duration,queue_backlog_after,"
                     "camera_frame_index,display_frame_index,camera_timestamp_unix,gaze_timestamp_unix,"
-                    "available_camera_fps,dropped_frames_total,duplicates_total,is_duplicate\n"
+                    "available_camera_fps,dropped_frames_total,duplicates_total,is_duplicate\n",
                 )
 
-            self._imu_file = await asyncio.to_thread(open, self.imu_filename, "a" if imu_exists else "w", encoding="utf-8")
-            if not imu_exists:
-                await asyncio.to_thread(
-                    self._imu_file.write,
+            self._gaze_writer = AsyncCSVWriter(
+                header="timestamp,x,y,worn",
+                flush_threshold=32,
+                queue_size=512,
+            )
+            await self._gaze_writer.start(Path(self.gaze_filename))
+
+            if self.advanced_gaze_filename:
+                self._gaze_full_writer = AsyncCSVWriter(
+                    header=(
+                        "timestamp,timestamp_ns,stream_type,worn,x,y,"
+                        "left_x,left_y,right_x,right_y,"
+                        "pupil_diameter_left,pupil_diameter_right,"
+                        "eyeball_center_left_x,eyeball_center_left_y,eyeball_center_left_z,"
+                        "optical_axis_left_x,optical_axis_left_y,optical_axis_left_z,"
+                        "eyeball_center_right_x,eyeball_center_right_y,eyeball_center_right_z,"
+                        "optical_axis_right_x,optical_axis_right_y,optical_axis_right_z,"
+                        "eyelid_angle_top_left,eyelid_angle_bottom_left,eyelid_aperture_left,"
+                        "eyelid_angle_top_right,eyelid_angle_bottom_right,eyelid_aperture_right"
+                    ),
+                    flush_threshold=32,
+                    queue_size=512,
+                )
+                await self._gaze_full_writer.start(Path(self.advanced_gaze_filename))
+
+            self._imu_writer = AsyncCSVWriter(
+                header=(
                     "timestamp,timestamp_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,"
-                    "quat_w,quat_x,quat_y,quat_z,temperature\n"
+                    "quat_w,quat_x,quat_y,quat_z,temperature"
+                ),
+                flush_threshold=128,
+                queue_size=1024,
+            )
+            await self._imu_writer.start(Path(self.imu_filename))
+
+            event_header = "timestamp,timestamp_ns,event_type,event_subtype,confidence,duration,payload"
+            if self.config.expand_eye_event_details:
+                event_header += (
+                    ",start_time_ns,end_time_ns,rtp_timestamp,"
+                    "start_gaze_x,start_gaze_y,end_gaze_x,end_gaze_y,"
+                    "mean_gaze_x,mean_gaze_y,amplitude_pixels,amplitude_angle_deg,"
+                    "mean_velocity,max_velocity"
                 )
 
-            self._event_file = await asyncio.to_thread(open, self.events_filename, "a" if events_exists else "w", encoding="utf-8")
-            if not events_exists:
-                await asyncio.to_thread(
-                    self._event_file.write,
-                    "timestamp,timestamp_ns,event_type,event_subtype,confidence,duration,payload\n"
+            self._event_writer = AsyncCSVWriter(
+                header=event_header,
+                flush_threshold=64,
+                queue_size=512,
+            )
+            await self._event_writer.start(Path(self.events_filename))
+
+            if self.audio_filename and self.audio_timing_filename:
+                self._audio_frame_queue = asyncio.Queue(maxsize=max(int(self.config.fps * 6), 240))
+                self._audio_writer_task = asyncio.create_task(self._audio_writer_loop())
+
+                self._audio_timing_writer = AsyncCSVWriter(
+                    header="timestamp,timestamp_ns,sample_rate,num_samples,channels",
+                    flush_threshold=64,
+                    queue_size=512,
                 )
+                await self._audio_timing_writer.start(Path(self.audio_timing_filename))
+
+            if self.device_status_filename:
+                self._device_status_writer = AsyncCSVWriter(
+                    header=(
+                        "timestamp,timestamp_ns,battery_percent,battery_state,memory_bytes,memory_state,"
+                        "recording_action,recording_id,recording_duration_seconds,"
+                        "hardware_version,glasses_serial,module_serial,"
+                        "world_connected,gaze_connected,imu_connected,audio_connected"
+                    ),
+                    flush_threshold=8,
+                    queue_size=256,
+                )
+                await self._device_status_writer.start(Path(self.device_status_filename))
+                self._device_status_task = asyncio.create_task(self._device_status_loop())
 
             self._last_gaze_timestamp = None
             self._last_write_monotonic = None
@@ -216,6 +266,8 @@ class RecordingManager(RecordingManagerBase):
             self._recorded_frame_count = 0
             self._skipped_frames = 0
             self._duplicated_frames = 0
+            self._imu_samples_written = 0
+            self._event_samples_written = 0
             self._recording_start_time = time.perf_counter()
             self._next_frame_time = self._recording_start_time
             self._latest_frame = None
@@ -224,13 +276,7 @@ class RecordingManager(RecordingManagerBase):
 
             max_video_queue = max(int(self.config.fps * 2), 30)
             self._frame_queue = asyncio.Queue(maxsize=max_video_queue)
-            self._gaze_queue = asyncio.Queue(maxsize=512)
-            self._imu_queue = asyncio.Queue(maxsize=1024)
-            self._event_queue = asyncio.Queue(maxsize=512)
             self._frame_writer_task = asyncio.create_task(self._frame_writer_loop())
-            self._gaze_writer_task = asyncio.create_task(self._gaze_writer_loop())
-            self._imu_writer_task = asyncio.create_task(self._imu_writer_loop())
-            self._event_writer_task = asyncio.create_task(self._event_writer_loop())
             self._frame_timer_task = asyncio.create_task(self._frame_timer_loop())
             logger.info("Recording started: %s", self.recording_filename)
             if self._current_experiment_dir is not None:
@@ -282,53 +328,65 @@ class RecordingManager(RecordingManagerBase):
         return self._current_experiment_label
 
     async def _handle_start_failure(self) -> None:
-        if self.ffmpeg_process:
-            with contextlib.suppress(Exception):
-                self.ffmpeg_process.terminate()
-        self.ffmpeg_process = None
-        if self._opencv_writer is not None:
-            self._opencv_writer.release()
-        self._opencv_writer = None
-        if self._gaze_file:
-            self._gaze_file.close()
-        self._gaze_file = None
+        await self._video_encoder.cleanup()
+
         if self._frame_timing_file:
-            self._frame_timing_file.close()
-        self._frame_timing_file = None
-        if self._imu_file:
-            self._imu_file.close()
-        self._imu_file = None
-        if self._event_file:
-            self._event_file.close()
-        self._event_file = None
+            await asyncio.to_thread(self._frame_timing_file.close)
+            self._frame_timing_file = None
+
+        if self._gaze_writer:
+            await self._gaze_writer.cleanup()
+            self._gaze_writer = None
+
+        if self._gaze_full_writer:
+            await self._gaze_full_writer.cleanup()
+            self._gaze_full_writer = None
+
+        if self._imu_writer:
+            await self._imu_writer.cleanup()
+            self._imu_writer = None
+
+        if self._event_writer:
+            await self._event_writer.cleanup()
+            self._event_writer = None
+
+        if self._audio_timing_writer:
+            await self._audio_timing_writer.cleanup()
+            self._audio_timing_writer = None
+
+        if self._device_status_writer:
+            await self._device_status_writer.cleanup()
+            self._device_status_writer = None
+
         self.gaze_filename = None
         self.frame_timing_filename = None
         self.imu_filename = None
         self.events_filename = None
+        self.advanced_gaze_filename = None
+        self.audio_filename = None
+        self.audio_timing_filename = None
+        self.device_status_filename = None
+        self._imu_samples_written = 0
+        self._event_samples_written = 0
         if self._frame_writer_task:
             self._frame_writer_task.cancel()
         self._frame_writer_task = None
         self._frame_queue = None
-        if self._gaze_writer_task:
-            self._gaze_writer_task.cancel()
-        self._gaze_writer_task = None
-        self._gaze_queue = None
-        if self._imu_writer_task:
-            self._imu_writer_task.cancel()
-        self._imu_writer_task = None
-        self._imu_queue = None
-        if self._event_writer_task:
-            self._event_writer_task.cancel()
-        self._event_writer_task = None
-        self._event_queue = None
 
         if self._frame_timer_task:
             self._frame_timer_task.cancel()
         self._frame_timer_task = None
+        if self._audio_writer_task:
+            self._audio_writer_task.cancel()
+        self._audio_writer_task = None
+        self._audio_frame_queue = None
+        if self._device_status_task:
+            self._device_status_task.cancel()
+        self._device_status_task = None
         self._is_recording = False
 
     async def stop_recording(self) -> dict:
-        if not self._is_recording and self.ffmpeg_process is None and self._gaze_file is None:
+        if not self._is_recording and not self._video_encoder.is_running() and self._gaze_writer is None:
             return {
                 'duration_seconds': 0.0,
                 'frames_written': 0,
@@ -346,21 +404,7 @@ class RecordingManager(RecordingManagerBase):
 
         self._is_recording = False
 
-        if self.ffmpeg_process:
-            try:
-                self.ffmpeg_process.stdin.close()
-                await asyncio.wait_for(self.ffmpeg_process.wait(), timeout=5)
-            except asyncio.TimeoutError:  # pragma: no cover - defensive
-                self.ffmpeg_process.terminate()
-                await asyncio.wait_for(self.ffmpeg_process.wait(), timeout=2)
-            except Exception:  # pragma: no cover - defensive
-                self.ffmpeg_process.terminate()
-            finally:
-                self.ffmpeg_process = None
-
-        if self._opencv_writer is not None:
-            self._opencv_writer.release()
-            self._opencv_writer = None
+        await self._video_encoder.stop()
 
         if self._frame_queue is not None:
             try:
@@ -373,52 +417,19 @@ class RecordingManager(RecordingManagerBase):
                 await self._frame_writer_task
         self._frame_writer_task = None
         self._frame_queue = None
-
-        if self._gaze_queue is not None:
-            try:
-                await self._gaze_queue.put(self._gaze_queue_sentinel)
-            except RuntimeError:
-                self._gaze_queue.put_nowait(self._gaze_queue_sentinel)
-
-        if self._gaze_writer_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._gaze_writer_task
-        self._gaze_writer_task = None
-        self._gaze_queue = None
-
-        if self._imu_queue is not None:
-            try:
-                await self._imu_queue.put(self._imu_queue_sentinel)
-            except RuntimeError:
-                self._imu_queue.put_nowait(self._imu_queue_sentinel)
-
-        if self._imu_writer_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._imu_writer_task
-        self._imu_writer_task = None
-        self._imu_queue = None
-
-        if self._event_queue is not None:
-            try:
-                await self._event_queue.put(self._event_queue_sentinel)
-            except RuntimeError:
-                self._event_queue.put_nowait(self._event_queue_sentinel)
-
-        if self._event_writer_task is not None:
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._event_writer_task
-        self._event_writer_task = None
-        self._event_queue = None
-
-        if self._gaze_file:
-            try:
-                await asyncio.to_thread(self._gaze_file.flush)
-            finally:
-                await asyncio.to_thread(self._gaze_file.close)
-                self._gaze_file = None
+        if self._gaze_writer:
+            await self._gaze_writer.stop()
             logger.info("Gaze data saved: %s", self.gaze_filename)
             if self.gaze_filename:
                 output_files.append(Path(self.gaze_filename))
+            self._gaze_writer = None
+
+        if self._gaze_full_writer:
+            await self._gaze_full_writer.stop()
+            logger.info("Advanced gaze data saved: %s", self.advanced_gaze_filename)
+            if self.advanced_gaze_filename:
+                output_files.append(Path(self.advanced_gaze_filename))
+            self._gaze_full_writer = None
 
         if self._frame_timing_file:
             await asyncio.to_thread(self._frame_timing_file.flush)
@@ -428,25 +439,58 @@ class RecordingManager(RecordingManagerBase):
             if self.frame_timing_filename:
                 output_files.append(Path(self.frame_timing_filename))
 
-        if self._imu_file:
-            try:
-                await asyncio.to_thread(self._imu_file.flush)
-            finally:
-                await asyncio.to_thread(self._imu_file.close)
-                self._imu_file = None
-            logger.info("IMU data saved: %s", self.imu_filename)
+        if self._imu_writer:
+            await self._imu_writer.stop()
+            logger.info("IMU data saved (%d samples): %s", self._imu_samples_written, self.imu_filename)
             if self.imu_filename:
                 output_files.append(Path(self.imu_filename))
+            self._imu_writer = None
 
-        if self._event_file:
-            try:
-                await asyncio.to_thread(self._event_file.flush)
-            finally:
-                await asyncio.to_thread(self._event_file.close)
-                self._event_file = None
-            logger.info("Eye events saved: %s", self.events_filename)
+        if self._event_writer:
+            await self._event_writer.stop()
+            logger.info("Eye events saved (%d samples): %s", self._event_samples_written, self.events_filename)
             if self.events_filename:
                 output_files.append(Path(self.events_filename))
+            self._event_writer = None
+
+        if self._audio_frame_queue is not None:
+            try:
+                self._audio_frame_queue.put_nowait(self._audio_queue_sentinel)
+            except asyncio.QueueFull:
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    self._audio_frame_queue.get_nowait()
+                self._audio_frame_queue.put_nowait(self._audio_queue_sentinel)
+
+        if self._audio_writer_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._audio_writer_task
+        self._audio_writer_task = None
+        if self.audio_filename and Path(self.audio_filename).exists():
+            logger.info("Audio saved: %s", self.audio_filename)
+            output_files.append(Path(self.audio_filename))
+        elif self.audio_filename:
+            logger.info("No audio frames captured; skipping %s", self.audio_filename)
+        self._audio_frame_queue = None
+
+        if self._audio_timing_writer:
+            await self._audio_timing_writer.stop()
+            logger.info("Audio timing saved: %s", self.audio_timing_filename)
+            if self.audio_timing_filename:
+                output_files.append(Path(self.audio_timing_filename))
+            self._audio_timing_writer = None
+
+        if self._device_status_task is not None:
+            self._device_status_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._device_status_task
+        self._device_status_task = None
+
+        if self._device_status_writer:
+            await self._device_status_writer.stop()
+            logger.info("Device status saved: %s", self.device_status_filename)
+            if self.device_status_filename:
+                output_files.append(Path(self.device_status_filename))
+            self._device_status_writer = None
 
         self._last_gaze_timestamp = None
         self._last_write_monotonic = None
@@ -454,6 +498,8 @@ class RecordingManager(RecordingManagerBase):
         self._recorded_frame_count = 0
         self._skipped_frames = 0
         self._duplicated_frames = 0
+        self._imu_samples_written = 0
+        self._event_samples_written = 0
         self._recording_start_time = None
         self._next_frame_time = None
         self._latest_frame = None
@@ -486,7 +532,7 @@ class RecordingManager(RecordingManagerBase):
         self._latest_frame_metadata = metadata
 
     def write_gaze_sample(self, gaze: Optional[Any]):
-        if not self._is_recording or self._gaze_file is None or gaze is None:
+        if not self._is_recording or self._gaze_writer is None or gaze is None:
             return
 
         timestamp = getattr(gaze, "timestamp_unix_seconds", None)
@@ -508,10 +554,15 @@ class RecordingManager(RecordingManagerBase):
             logger.error("Failed to write gaze sample: %s", exc)
         else:
             self._last_gaze_timestamp = timestamp
-            self._enqueue_csv_line(self._gaze_queue, self._gaze_file, line)
+            self._gaze_writer.enqueue(line)
+
+        if self._gaze_full_writer is not None and gaze is not None:
+            detailed_line = self._advanced_gaze_csv_line(gaze)
+            if detailed_line is not None:
+                self._gaze_full_writer.enqueue(detailed_line)
 
     def write_imu_sample(self, imu: Optional[Any]):
-        if not self._is_recording or self._imu_file is None or imu is None:
+        if not self._is_recording or self._imu_writer is None or imu is None:
             return
 
         timestamp = getattr(imu, "timestamp_unix_seconds", None)
@@ -531,10 +582,13 @@ class RecordingManager(RecordingManagerBase):
             self._stringify(temperature),
         ]
         line = self._compose_csv_line(fields)
-        self._enqueue_csv_line(self._imu_queue, self._imu_file, line)
+        self._imu_writer.enqueue(line)
+        self._imu_samples_written += 1
+        if self._imu_samples_written == 1:
+            logger.info("First IMU sample recorded at %s", self._stringify(timestamp))
 
     def write_event_sample(self, event: Optional[Any]):
-        if not self._is_recording or self._event_file is None or event is None:
+        if not self._is_recording or self._event_writer is None or event is None:
             return
 
         timestamp = getattr(event, "timestamp_unix_seconds", None)
@@ -547,6 +601,20 @@ class RecordingManager(RecordingManagerBase):
 
         payload = self._event_payload_as_json(event)
 
+        start_time_ns = getattr(event, "start_time_ns", None)
+        end_time_ns = getattr(event, "end_time_ns", None)
+        rtp_timestamp = getattr(event, "rtp_ts_unix_seconds", None)
+        start_gaze_x = getattr(event, "start_gaze_x", None)
+        start_gaze_y = getattr(event, "start_gaze_y", None)
+        end_gaze_x = getattr(event, "end_gaze_x", None)
+        end_gaze_y = getattr(event, "end_gaze_y", None)
+        mean_gaze_x = getattr(event, "mean_gaze_x", None)
+        mean_gaze_y = getattr(event, "mean_gaze_y", None)
+        amplitude_pixels = getattr(event, "amplitude_pixels", None)
+        amplitude_angle_deg = getattr(event, "amplitude_angle_deg", None)
+        mean_velocity = getattr(event, "mean_velocity", None)
+        max_velocity = getattr(event, "max_velocity", None)
+
         fields = [
             self._stringify(timestamp),
             self._stringify(timestamp_ns),
@@ -556,8 +624,40 @@ class RecordingManager(RecordingManagerBase):
             self._stringify(duration),
             payload,
         ]
+        if self.config.expand_eye_event_details:
+            fields.extend(
+                [
+                    self._stringify(start_time_ns),
+                    self._stringify(end_time_ns),
+                    self._stringify(rtp_timestamp),
+                    self._stringify(start_gaze_x),
+                    self._stringify(start_gaze_y),
+                    self._stringify(end_gaze_x),
+                    self._stringify(end_gaze_y),
+                    self._stringify(mean_gaze_x),
+                    self._stringify(mean_gaze_y),
+                    self._stringify(amplitude_pixels),
+                    self._stringify(amplitude_angle_deg),
+                    self._stringify(mean_velocity),
+                    self._stringify(max_velocity),
+                ]
+            )
         line = self._compose_csv_line(fields)
-        self._enqueue_csv_line(self._event_queue, self._event_file, line)
+        self._event_writer.enqueue(line)
+        self._event_samples_written += 1
+        if self._event_samples_written == 1:
+            logger.info("First eye event recorded at %s", self._stringify(timestamp))
+
+    def write_audio_sample(self, audio: Optional["AudioFrame"]):
+        if not self._is_recording or self._audio_frame_queue is None or audio is None:
+            return
+
+        try:
+            self._audio_frame_queue.put_nowait(audio)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._audio_frame_queue.get_nowait()
+            self._audio_frame_queue.put_nowait(audio)
 
     @staticmethod
     def _stringify(value: Any) -> str:
@@ -623,31 +723,93 @@ class RecordingManager(RecordingManagerBase):
             safe_payload = {k: str(v) for k, v in payload.items()}
             return json.dumps(safe_payload)
 
+    def _advanced_gaze_csv_line(self, gaze: Any) -> Optional[str]:
+        try:
+            timestamp = getattr(gaze, "timestamp_unix_seconds", None)
+            timestamp_ns = getattr(gaze, "timestamp_unix_ns", None)
+            stream_type = type(gaze).__name__
+            worn_attr = getattr(gaze, "worn", None)
+            worn_value = int(bool(worn_attr)) if worn_attr is not None else None
+
+            x = getattr(gaze, "x", None)
+            y = getattr(gaze, "y", None)
+
+            left_x = left_y = right_x = right_y = None
+            left_point = getattr(gaze, "left", None)
+            if left_point is not None:
+                left_x = getattr(left_point, "x", None)
+                left_y = getattr(left_point, "y", None)
+            right_point = getattr(gaze, "right", None)
+            if right_point is not None:
+                right_x = getattr(right_point, "x", None)
+                right_y = getattr(right_point, "y", None)
+
+            pupil_diameter_left = getattr(gaze, "pupil_diameter_left", None)
+            pupil_diameter_right = getattr(gaze, "pupil_diameter_right", None)
+
+            eyeball_center_left_x = getattr(gaze, "eyeball_center_left_x", None)
+            eyeball_center_left_y = getattr(gaze, "eyeball_center_left_y", None)
+            eyeball_center_left_z = getattr(gaze, "eyeball_center_left_z", None)
+            optical_axis_left_x = getattr(gaze, "optical_axis_left_x", None)
+            optical_axis_left_y = getattr(gaze, "optical_axis_left_y", None)
+            optical_axis_left_z = getattr(gaze, "optical_axis_left_z", None)
+
+            eyeball_center_right_x = getattr(gaze, "eyeball_center_right_x", None)
+            eyeball_center_right_y = getattr(gaze, "eyeball_center_right_y", None)
+            eyeball_center_right_z = getattr(gaze, "eyeball_center_right_z", None)
+            optical_axis_right_x = getattr(gaze, "optical_axis_right_x", None)
+            optical_axis_right_y = getattr(gaze, "optical_axis_right_y", None)
+            optical_axis_right_z = getattr(gaze, "optical_axis_right_z", None)
+
+            eyelid_angle_top_left = getattr(gaze, "eyelid_angle_top_left", None)
+            eyelid_angle_bottom_left = getattr(gaze, "eyelid_angle_bottom_left", None)
+            eyelid_aperture_left = getattr(gaze, "eyelid_aperture_left", None)
+            eyelid_angle_top_right = getattr(gaze, "eyelid_angle_top_right", None)
+            eyelid_angle_bottom_right = getattr(gaze, "eyelid_angle_bottom_right", None)
+            eyelid_aperture_right = getattr(gaze, "eyelid_aperture_right", None)
+
+            fields = [
+                self._stringify(timestamp),
+                self._stringify(timestamp_ns),
+                self._stringify(stream_type),
+                self._stringify(worn_value),
+                self._stringify(x),
+                self._stringify(y),
+                self._stringify(left_x),
+                self._stringify(left_y),
+                self._stringify(right_x),
+                self._stringify(right_y),
+                self._stringify(pupil_diameter_left),
+                self._stringify(pupil_diameter_right),
+                self._stringify(eyeball_center_left_x),
+                self._stringify(eyeball_center_left_y),
+                self._stringify(eyeball_center_left_z),
+                self._stringify(optical_axis_left_x),
+                self._stringify(optical_axis_left_y),
+                self._stringify(optical_axis_left_z),
+                self._stringify(eyeball_center_right_x),
+                self._stringify(eyeball_center_right_y),
+                self._stringify(eyeball_center_right_z),
+                self._stringify(optical_axis_right_x),
+                self._stringify(optical_axis_right_y),
+                self._stringify(optical_axis_right_z),
+                self._stringify(eyelid_angle_top_left),
+                self._stringify(eyelid_angle_bottom_left),
+                self._stringify(eyelid_aperture_left),
+                self._stringify(eyelid_angle_top_right),
+                self._stringify(eyelid_angle_bottom_right),
+                self._stringify(eyelid_aperture_right),
+            ]
+            return self._compose_csv_line(fields)
+        except Exception as exc:
+            logger.error("Failed to serialize advanced gaze sample: %s", exc)
+            return None
+
     def _compose_csv_line(self, fields: list[str]) -> str:
         buffer = io.StringIO()
         writer = csv.writer(buffer, lineterminator="")
         writer.writerow(fields)
         return buffer.getvalue() + "\n"
-
-    def _enqueue_csv_line(
-        self,
-        queue: Optional[asyncio.Queue[str]],
-        file_obj: Optional[TextIO],
-        line: str,
-    ) -> None:
-        if file_obj is None:
-            return
-        if queue is None:
-            file_obj.write(line)
-            file_obj.flush()
-            return
-        try:
-            queue.put_nowait(line)
-        except asyncio.QueueFull:
-            with contextlib.suppress(asyncio.QueueEmpty):
-                _ = queue.get_nowait()
-            queue.put_nowait(line)
-
 
     @property
     def skipped_frames(self) -> int:
@@ -678,9 +840,15 @@ class RecordingManager(RecordingManagerBase):
             'frames_duplicated': self._duplicated_frames,
             'recording_filename': self.recording_filename,
             'gaze_filename': self.gaze_filename,
+            'advanced_gaze_filename': self.advanced_gaze_filename,
             'frame_timing_filename': self.frame_timing_filename,
             'imu_filename': self.imu_filename,
+            'imu_samples_written': self._imu_samples_written,
             'events_filename': self.events_filename,
+            'event_samples_written': self._event_samples_written,
+            'audio_filename': self.audio_filename,
+            'audio_timing_filename': self.audio_timing_filename,
+            'device_status_filename': self.device_status_filename,
         }
 
     async def _frame_writer_loop(self) -> None:
@@ -697,85 +865,161 @@ class RecordingManager(RecordingManagerBase):
             backlog_after = self._frame_queue.qsize()
 
             if self.use_ffmpeg:
-                await asyncio.to_thread(self._write_frame_impl, queued.frame)
+                await asyncio.to_thread(self._video_encoder.write_frame, queued.frame)
             else:
-                self._write_frame_impl(queued.frame)
+                self._video_encoder.write_frame(queued.frame)
 
             write_end_monotonic = time.perf_counter()
             await self._log_frame_timing(queued, write_time_unix, write_start_monotonic, write_end_monotonic, backlog_after)
 
-    def _write_frame_impl(self, frame: np.ndarray) -> None:
-        w, h = self.config.resolution
-        if frame.shape[:2] != (h, w):
-            frame = cv2.resize(frame, (w, h))
-
-        frame_data = np.ascontiguousarray(frame)
-
-        if self.use_ffmpeg:
-            if not self.ffmpeg_process or self.ffmpeg_process.returncode is not None:
-                return
-            try:
-                self.ffmpeg_process.stdin.write(frame_data.tobytes())
-                self.ffmpeg_process.stdin.flush()
-            except Exception:  # pragma: no cover - defensive
-                pass
-        else:
-            if self._opencv_writer is not None:
-                self._opencv_writer.write(frame_data)
-
-    async def _gaze_writer_loop(self) -> None:
-        assert self._gaze_queue is not None
-        buffer: list[str] = []
-        flush_threshold = 32
-        while True:
-            line = await self._gaze_queue.get()
-            if line is self._gaze_queue_sentinel:
-                break
-            buffer.append(line)
-            if len(buffer) >= flush_threshold:
-                await asyncio.to_thread(self._flush_lines, self._gaze_file, buffer)
-                buffer.clear()
-
-        if buffer:
-            await asyncio.to_thread(self._flush_lines, self._gaze_file, buffer)
-
-    async def _imu_writer_loop(self) -> None:
-        assert self._imu_queue is not None
-        buffer: list[str] = []
-        flush_threshold = 128
-        while True:
-            line = await self._imu_queue.get()
-            if line is self._imu_queue_sentinel:
-                break
-            buffer.append(line)
-            if len(buffer) >= flush_threshold:
-                await asyncio.to_thread(self._flush_lines, self._imu_file, buffer)
-                buffer.clear()
-
-        if buffer:
-            await asyncio.to_thread(self._flush_lines, self._imu_file, buffer)
-
-    async def _event_writer_loop(self) -> None:
-        assert self._event_queue is not None
-        buffer: list[str] = []
-        flush_threshold = 64
-        while True:
-            line = await self._event_queue.get()
-            if line is self._event_queue_sentinel:
-                break
-            buffer.append(line)
-            if len(buffer) >= flush_threshold:
-                await asyncio.to_thread(self._flush_lines, self._event_file, buffer)
-                buffer.clear()
-
-        if buffer:
-            await asyncio.to_thread(self._flush_lines, self._event_file, buffer)
-
-    def _flush_lines(self, file_obj: Optional[TextIO], lines: list[str]) -> None:
-        if file_obj is None or not lines:
+    async def _audio_writer_loop(self) -> None:
+        if self._audio_frame_queue is None or not self.audio_filename:
             return
-        file_obj.writelines(lines)
-        file_obj.flush()
+
+        wave_file: Optional[wave.Wave_write] = None
+        wave_path = Path(self.audio_filename)
+
+        try:
+            while True:
+                item = await self._audio_frame_queue.get()
+                if item is self._audio_queue_sentinel:
+                    break
+                audio_frame = item
+
+                (
+                    sample_rate,
+                    channels,
+                    pcm_chunks,
+                    timestamp,
+                    timestamp_ns,
+                    sample_count,
+                ) = await asyncio.to_thread(self._prepare_audio_frame, audio_frame)
+
+                if not pcm_chunks or sample_rate is None or channels is None:
+                    continue
+
+                if wave_file is None:
+                    wave_file = await asyncio.to_thread(
+                        self._open_wave_file,
+                        wave_path,
+                        channels,
+                        sample_rate,
+                    )
+
+                if self._audio_timing_writer is not None:
+                    timing_fields = [
+                        self._stringify(timestamp),
+                        self._stringify(timestamp_ns),
+                        self._stringify(sample_rate),
+                        self._stringify(sample_count),
+                        self._stringify(channels),
+                    ]
+                    self._audio_timing_writer.enqueue(self._compose_csv_line(timing_fields))
+
+                for chunk in pcm_chunks:
+                    await asyncio.to_thread(wave_file.writeframes, chunk)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Audio writer loop failed: %s", exc, exc_info=True)
+        finally:
+            if wave_file is not None:
+                await asyncio.to_thread(wave_file.close)
+
+    def _prepare_audio_frame(
+        self, audio_frame: "AudioFrame"
+    ) -> tuple[Optional[int], Optional[int], list[bytes], Optional[float], Optional[int], int]:
+        try:
+            sample_rate = getattr(audio_frame.av_frame, "sample_rate", None)
+            layout = getattr(audio_frame.av_frame, "layout", None)
+            channels = None
+            if layout is not None:
+                channels = getattr(layout, "nb_channels", None)
+                if channels is None:
+                    channel_list = getattr(layout, "channels", None)
+                    if channel_list is not None:
+                        channels = len(channel_list)
+            chunks: list[bytes] = []
+            total_samples = 0
+            last_array: Optional[np.ndarray] = None
+            for block in audio_frame.to_resampled_ndarray():
+                array = np.asarray(block, dtype=np.int16)
+                if array.ndim == 1:
+                    array = array.reshape(1, -1)
+                total_samples += array.shape[1]
+                chunks.append(np.ascontiguousarray(array.T).tobytes())
+                last_array = array
+
+            if channels is None and last_array is not None:
+                channels = last_array.shape[0]
+
+            timestamp = getattr(audio_frame, "timestamp_unix_seconds", None)
+            timestamp_ns = getattr(audio_frame, "timestamp_unix_ns", None)
+
+            return sample_rate, channels, chunks, timestamp, timestamp_ns, total_samples
+        except Exception as exc:
+            logger.error("Failed to prepare audio frame: %s", exc)
+            return None, None, [], None, None, 0
+
+    @staticmethod
+    def _open_wave_file(path: Path, channels: int, sample_rate: int) -> wave.Wave_write:
+        wave_file = wave.open(str(path), "wb")
+        wave_file.setnchannels(channels)
+        wave_file.setsampwidth(2)
+        wave_file.setframerate(sample_rate)
+        return wave_file
+
+    async def _device_status_loop(self) -> None:
+        if self.device_manager is None or self._device_status_writer is None:
+            return
+
+        interval = max(0.5, float(getattr(self.config, "device_status_poll_interval", 5.0)))
+
+        try:
+            while self._is_recording:
+                status = await self.device_manager.get_status(force_refresh=True)
+                if status is not None:
+                    line = self._compose_device_status_line(status)
+                    if line:
+                        self._device_status_writer.enqueue(line)
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Device status loop error: %s", exc)
+
+    def _compose_device_status_line(self, status: Status) -> str:
+        now = time.time()
+        recording = status.recording
+        hardware = status.hardware
+
+        def sensor_connected(name: SensorName) -> bool:
+            return any(
+                sensor.connected
+                for sensor in status.matching_sensors(name, ConnectionType.DIRECT)
+            )
+
+        fields = [
+            self._stringify(now),
+            self._stringify(int(now * 1e9)),
+            self._stringify(status.phone.battery_level),
+            self._stringify(status.phone.battery_state),
+            self._stringify(status.phone.memory),
+            self._stringify(status.phone.memory_state),
+            self._stringify(getattr(recording, "action", None)),
+            self._stringify(getattr(recording, "id", None)),
+            self._stringify(getattr(recording, "rec_duration_seconds", None)),
+            self._stringify(hardware.version),
+            self._stringify(hardware.glasses_serial),
+            self._stringify(hardware.module_serial),
+            self._stringify(int(sensor_connected(SensorName.WORLD))),
+            self._stringify(int(sensor_connected(SensorName.GAZE))),
+            self._stringify(int(sensor_connected(SensorName.IMU))),
+            self._stringify(int(sensor_connected(SensorName.AUDIO))),
+        ]
+
+        return self._compose_csv_line(fields)
 
     async def _frame_timer_loop(self) -> None:
         if self.config.fps <= 0:

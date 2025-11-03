@@ -4,8 +4,8 @@ from logger_core.commands import BaseCommandHandler, StatusMessage
 
 class CommandHandler(BaseCommandHandler):
 
-    def __init__(self, gps2_system, gui=None):
-        super().__init__(gps2_system, gui)
+    def __init__(self, gps_system, gui=None):
+        super().__init__(gps_system, gui)
 
     async def handle_get_status(self, command_data: Dict[str, Any]) -> None:
         status_data = {

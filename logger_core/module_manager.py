@@ -8,7 +8,7 @@ discovery, selection state, and process lifecycle management.
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Callable
+from typing import Dict, List, Optional, Callable, Set
 
 from .module_discovery import ModuleInfo, discover_modules
 from .module_process import ModuleProcess, ModuleState
@@ -47,6 +47,8 @@ class ModuleManager:
         self.module_processes: Dict[str, ModuleProcess] = {}
         self.state_change_callbacks: List[Callable] = []
         self.window_geometry_cache: Dict[str, Optional[WindowGeometry]] = {}
+        self._state_locks: Dict[str, asyncio.Lock] = {}
+        self.forcefully_stopped_modules: Set[str] = set()
 
         self.config_manager = get_config_manager()
 
@@ -109,6 +111,13 @@ class ModuleManager:
             except Exception as e:
                 self.logger.error("State change callback error: %s", e)
 
+    def _get_state_lock(self, module_name: str) -> asyncio.Lock:
+        lock = self._state_locks.get(module_name)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._state_locks[module_name] = lock
+        return lock
+
     async def set_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """
         CENTRAL STATE MACHINE: Set module enabled state and start/stop accordingly.
@@ -123,35 +132,38 @@ class ModuleManager:
         Returns:
             True if state change succeeded, False otherwise
         """
-        current_state = self.module_enabled_state.get(module_name, False)
-        is_running = self.is_module_running(module_name)
+        lock = self._get_state_lock(module_name)
 
-        if current_state == enabled and ((enabled and is_running) or (not enabled and not is_running)):
-            self.logger.debug("Module %s already in desired state: enabled=%s, running=%s",
-                            module_name, enabled, is_running)
-            return True
+        async with lock:
+            current_state = self.module_enabled_state.get(module_name, False)
+            is_running = self.is_module_running(module_name)
 
-        self.module_state_changing[module_name] = True
-        await self._notify_state_change_started(module_name, enabled)
+            if current_state == enabled and ((enabled and is_running) or (not enabled and not is_running)):
+                self.logger.debug("Module %s already in desired state: enabled=%s, running=%s",
+                                module_name, enabled, is_running)
+                return True
 
-        success = False
-        try:
-            if enabled:
-                success = await self._start_module_internal(module_name)
-            else:
-                success = await self._stop_module_internal(module_name)
+            self.module_state_changing[module_name] = True
+            await self._notify_state_change_started(module_name, enabled)
 
-            if success:
-                self.module_enabled_state[module_name] = enabled
-                self.logger.info("Module %s state changed to: %s", module_name, enabled)
-            else:
-                self.logger.warning("Failed to change %s state to: %s", module_name, enabled)
+            success = False
+            try:
+                if enabled:
+                    success = await self._start_module_internal(module_name)
+                else:
+                    success = await self._stop_module_internal(module_name)
+
+                if success:
+                    self.module_enabled_state[module_name] = enabled
+                    self.logger.info("Module %s state changed to: %s", module_name, enabled)
+                else:
+                    self.logger.warning("Failed to change %s state to: %s", module_name, enabled)
+
+            finally:
+                self.module_state_changing[module_name] = False
+                await self._notify_state_change_completed(module_name, enabled, success)
 
             return success
-
-        finally:
-            self.module_state_changing[module_name] = False
-            await self._notify_state_change_completed(module_name, enabled, success)
 
     def is_module_enabled(self, module_name: str) -> bool:
         """Check if a module is enabled (checkbox state)."""
@@ -310,11 +322,25 @@ class ModuleManager:
             if success:
                 self.module_processes[module_name] = process
                 self.logger.info("Module %s started successfully", module_name)
+                self.forcefully_stopped_modules.discard(module_name)
             else:
                 self.logger.error("Module %s failed to start", module_name)
             return success
         except Exception as e:
             self.logger.error("Exception starting %s: %s", module_name, e, exc_info=True)
+            return False
+
+    async def send_command(self, module_name: str, command: str) -> bool:
+        """Send a raw command string to a running module process."""
+        process = self.module_processes.get(module_name)
+        if not process or not process.is_running():
+            self.logger.warning("Cannot send command to %s - process not running", module_name)
+            return False
+        try:
+            await process.send_command(command)
+            return True
+        except Exception as exc:
+            self.logger.error("Failed to send command to %s: %s", module_name, exc)
             return False
 
     async def stop_module(self, module_name: str) -> bool:
@@ -341,11 +367,16 @@ class ModuleManager:
         """
         process = self.module_processes.get(module_name)
         if not process:
-            self.logger.warning("Module %s not found in processes", module_name)
-            return False
+            self.logger.info("Module %s already stopped (no active process)", module_name)
+            # Preserve existing force-stop knowledge when no process object is available
+            return True
 
         if not process.is_running():
-            self.logger.warning("Module %s not running", module_name)
+            self.logger.info("Module %s already stopped", module_name)
+            if process.was_forcefully_stopped:
+                self.forcefully_stopped_modules.add(module_name)
+            else:
+                self.forcefully_stopped_modules.discard(module_name)
             self.module_processes.pop(module_name, None)
             return True
 
@@ -355,12 +386,17 @@ class ModuleManager:
 
             await process.stop()
 
+            if process.was_forcefully_stopped:
+                self.forcefully_stopped_modules.add(module_name)
+            else:
+                self.forcefully_stopped_modules.discard(module_name)
             self.module_processes.pop(module_name, None)
 
             self.logger.info("Module %s stopped successfully", module_name)
             return True
         except Exception as e:
             self.logger.error("Error stopping %s: %s", module_name, e, exc_info=True)
+            self.forcefully_stopped_modules.add(module_name)
             return False
 
     async def stop_all(self) -> None:
@@ -377,8 +413,13 @@ class ModuleManager:
                         await proc.stop()
                         module_duration = time.time() - module_start
                         self.logger.info("⏱️  Module %s stopped in %.3fs", name, module_duration)
+                        if proc.was_forcefully_stopped:
+                            self.forcefully_stopped_modules.add(name)
+                        else:
+                            self.forcefully_stopped_modules.discard(name)
                     except Exception as e:
                         self.logger.error("Error stopping %s: %s", name, e)
+                        self.forcefully_stopped_modules.add(name)
 
                 stop_tasks.append(stop_module_task(module_name, process))
 
@@ -407,4 +448,8 @@ class ModuleManager:
             process = self.module_processes[module_name]
             if not process.is_running():
                 self.module_processes.pop(module_name, None)
+                if process.was_forcefully_stopped:
+                    self.forcefully_stopped_modules.add(module_name)
+                else:
+                    self.forcefully_stopped_modules.discard(module_name)
                 self.logger.info("Cleaned up stopped process: %s", module_name)

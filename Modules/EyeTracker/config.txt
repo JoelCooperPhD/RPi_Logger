@@ -1,122 +1,89 @@
 ################################################################################
-# EYE TRACKER SYSTEM CONFIGURATION
+# EYE TRACKER CONFIGURATION
 ################################################################################
-# Edit values below and restart the application for changes to take effect
-#
-# QUICK REFERENCE:
-#
-#   Preview Resolution Presets (4:3 aspect ratio - matches Pupil Labs scene camera):
-#     0 = 1600x1200  (Full - Native resolution, high quality)
-#     1 = 1280x960   (Large - High quality, 4:3)
-#     2 = 1024x768   (XGA - Good balance, 4:3)
-#     3 = 800x600    (SVGA - Standard quality, 4:3)
-#     4 = 640x480    (VGA - Balanced CPU/quality, 4:3)
-#     5 = 480x360    (Small - Low CPU usage, 4:3)
-#     6 = 320x240    (QVGA - Minimal CPU, 4:3)
-#     7 = 240x180    (Tiny - Very low CPU, 4:3)
-#     8 = 160x120    (Micro - Ultra minimal, 4:3)
-#
-#   Target FPS: 1-120 (recommended: 5-30 for eye tracking)
-#   Common FPS: 30=high quality, 10=balanced, 5=low CPU (default)
-#
-# NOTE: System automatically discovers Pupil Labs eye tracker devices
-# NOTE: Pupil Labs scene camera outputs 1600x1200 (4:3 aspect ratio)
+# Edit values below, then restart the module. CLI arguments override these defaults.
 ################################################################################
 
-
 ################################################################################
-# RECORDING SETTINGS
+# CORE CAPTURE
 ################################################################################
-
-# Frame rate (1-120 fps, recommended: 5-30)
+# Frame processing rate (1-120 fps; 5-30 recommended for eye tracking)
 target_fps = 10.0
 
-# Scene video resolution (WIDTHxHEIGHT)
+# Scene video resolution written to disk (WIDTH x HEIGHT)
 resolution_width = 1280
 resolution_height = 720
 
-# Output files (used only in standalone mode; master logger overrides these)
+# Output location (master logger overrides these automatically)
 output_dir = data
 session_prefix = session
 
+################################################################################
+# PREVIEW & GUI
+################################################################################
+# Preview resolution presets (4:3 – matches Pupil Labs scene camera)
+# 0=1600x1200  1=1280x960  2=1024x768  3=800x600  4=640x480
+# 5=480x360    6=320x240   7=240x180   8=160x120 (micro)
+preview_preset = 4
+
+# GUI refresh rate in Hz (lower = less GPU load)
+gui_preview_update_hz = 5
 
 ################################################################################
-# DISPLAY & PREVIEW
+# RECORDING OVERLAY (APPLIED TO SAVED VIDEO)
 ################################################################################
+enable_recording_overlay = true     # Toggle overlay entirely
+include_gaze_in_recording = true    # Draw gaze indicator on recorded video
 
-# Preview window size (0-8 presets, smaller = lower CPU)
-preview_preset = 6           # 640x480 VGA - Balanced CPU/quality (default)
+# Frame-number text appearance (RGB colours)
+overlay_font_scale = 0.6
+overlay_thickness = 2
+overlay_color_r = 255
+overlay_color_g = 255
+overlay_color_b = 255
+overlay_margin_left = 10
+overlay_line_start_y = 30
 
-
-################################################################################
-# RECORDING OVERLAY
-################################################################################
-
-# Frame number overlay on recorded video (for cross-referencing with timing logs)
-enable_recording_overlay = true   # Show frame number on video (true/false)
-include_gaze_in_recording = true  # Include gaze circle on recorded video (true/false)
-
-# Overlay appearance (matching camera module defaults)
-overlay_font_scale = 0.6          # Text size (0.3-2.0)
-overlay_thickness = 1             # Text thickness (1-3)
-overlay_color_r = 0               # Red component (0-255)
-overlay_color_g = 0               # Green component (0-255)
-overlay_color_b = 0               # Blue component (0-255, BGR format)
-overlay_margin_left = 10          # Left margin in pixels
-overlay_line_start_y = 30         # Vertical position from top in pixels
-
-# Gaze indicator settings (both display and recording)
-gaze_circle_radius = 10           # Circle radius in pixels (5-100)
-gaze_circle_thickness = 1         # Circle line thickness (1-10, -1=filled)
-gaze_center_radius = 1            # Center dot radius in pixels (1-10)
-gaze_shape = circle               # Shape: circle or cross
-gaze_color_worn_b = 255           # Color when worn - Blue (0-255)
-gaze_color_worn_g = 255           # Color when worn - Green (0-255)
-gaze_color_worn_r = 0             # Color when worn - Red (0-255, BGR=Yellow)
-gaze_color_not_worn_b = 0         # Color when not worn - Blue (0-255)
-gaze_color_not_worn_g = 0         # Color when not worn - Green (0-255)
-gaze_color_not_worn_r = 255       # Color when not worn - Red (0-255, BGR=Red)
-
+# Gaze indicator appearance (used for preview + recording)
+gaze_circle_radius = 10
+gaze_circle_thickness = 1
+gaze_center_radius = 1
+gaze_shape = circle        # circle | cross
+gaze_color_worn_b = 255    # Glasses worn → yellow indicator
+gaze_color_worn_g = 255
+gaze_color_worn_r = 0
+gaze_color_not_worn_b = 0  # Glasses off → red indicator
+gaze_color_not_worn_g = 0
+gaze_color_not_worn_r = 255
 
 ################################################################################
-# GUI SETTINGS (GUI Mode)
+# DATA EXPORT OPTIONS
 ################################################################################
-
-# GUI window startup size
-gui_start_minimized = true   # Start with minimal window size (true/false)
-                             # If false, window starts at capture resolution
-
-# Update rates (Hz)
-gui_preview_update_hz = 10   # Preview frame rate (1-30 Hz, higher = smoother but more CPU)
-
+enable_advanced_gaze_logging = false      # Extra per-eye metrics CSV
+expand_eye_event_details = true           # Detailed fixation/blink fields
+enable_audio_recording = false            # Capture headset microphone audio
+audio_stream_param = audio=scene          # RTSP query for audio stream
+enable_device_status_logging = false      # Battery / storage telemetry log
+device_status_poll_interval = 5.0
 
 ################################################################################
 # LOGGING
 ################################################################################
-
-# Log file: output_dir/session_YYYYMMDD_HHMMSS/session.log
-log_level = info             # Python log level (debug/info/warning/error/critical)
-console_output = false       # Also print to console (true/false)
-
+log_level = info          # debug | info | warning | error | critical
+console_output = false    # Mirror log output to console
 
 ################################################################################
-# ADVANCED
+# DEVICE DISCOVERY
 ################################################################################
-
-# Device discovery
-discovery_timeout = 5.0      # Maximum time to wait for device (seconds)
-discovery_retry = 3.0        # Retry interval after device failure (seconds)
-
+discovery_timeout = 5.0   # Seconds to wait for headset
+discovery_retry = 3.0     # Seconds between retries
 
 ################################################################################
-# WINDOW MANAGEMENT (Master Logger Integration)
+# MASTER LOGGER WINDOW STATE (AUTOSAVED)
 ################################################################################
-
-# Auto-start this module when master logger starts
-enabled = false
-
-# Window position and size (saved automatically on window close)
-window_x = 2397
-window_y = 44
-window_width = 558
-window_height = 461
+enabled = false           # Autostart from master logger
+window_x = 1010
+window_y = 349
+window_width = 1419
+window_height = 699
+################################################################################

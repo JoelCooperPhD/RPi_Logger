@@ -1,17 +1,16 @@
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 from typing import Optional
 
-import numpy as np
 from picamera2 import Picamera2
 
 from .recording import CameraRecordingManager
 from .camera_capture_loop import CameraCaptureLoop
 from .camera_processor import CameraProcessor
 from .config import ConfigLoader, CameraConfig
-from .constants import DEFAULT_EXECUTOR_WORKERS, CLEANUP_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +104,8 @@ class CameraHandler:
         if not self.session_dir:
             raise ValueError("No session directory available for recording")
 
+        self.logger.warning("CameraHandler.start_recording cam=%d trial=%d session_dir=%s",
+                            self.cam_num, trial_number, self.session_dir)
         await self.recording_manager.start_recording(self.session_dir, trial_number)
         if self.recording_manager.video_path:
             self.logger.info("Recording to %s", self.recording_manager.video_path)
@@ -113,6 +114,7 @@ class CameraHandler:
     async def stop_recording(self):
         if not self.recording:
             return
+        self.logger.warning("CameraHandler.stop_recording cam=%d invoked", self.cam_num)
         await self.recording_manager.stop_recording()
         if self.recording_manager.video_path:
             self.logger.info("Stopped recording: %s", self.recording_manager.video_path)
@@ -155,25 +157,131 @@ class CameraHandler:
         return self.active
 
     async def cleanup(self):
+        """Stop capture/processing loops and release camera resources."""
+        shutdown_id = f"{time.time():.0f}"
+        report = {
+            "cam": self.cam_num,
+            "shutdown_id": shutdown_id,
+            "steps": [],
+            "success": True,
+            "force_stop": False,
+        }
+
+        self.logger.warning("CameraHandler.cleanup entered cam=%d id=%s running=%s capture_task=%s processor_task=%s",
+                            self.cam_num, shutdown_id, self._running, self._capture_task, self._processor_task)
+        start_perf = time.perf_counter()
+
+        async def run_async_step(label: str, coro_factory, *, timeout: Optional[float] = None):
+            step = {
+                "label": label,
+                "start_ts": time.time(),
+            }
+            report["steps"].append(step)
+            self.logger.warning("Cleanup[%s][cam=%d] start step: %s", shutdown_id, self.cam_num, label)
+            step_start = time.perf_counter()
+            try:
+                awaitable = coro_factory()
+                if timeout:
+                    result = await asyncio.wait_for(awaitable, timeout=timeout)
+                else:
+                    result = await awaitable
+                step["status"] = "success"
+                step["duration_s"] = time.perf_counter() - step_start
+                self.logger.warning("Cleanup[%s][cam=%d] success step: %s (%.3fs)",
+                                 shutdown_id, self.cam_num, label, step["duration_s"])
+                return True, result
+            except asyncio.TimeoutError:
+                report["success"] = False
+                step["status"] = "timeout"
+                step["duration_s"] = timeout
+                self.logger.error("Cleanup[%s][cam=%d] timeout step: %s after %.1fs",
+                                  shutdown_id, self.cam_num, label, timeout)
+                return False, None
+            except Exception as exc:  # pragma: no cover - defensive logging
+                report["success"] = False
+                step["status"] = "error"
+                step["error"] = repr(exc)
+                step["duration_s"] = time.perf_counter() - step_start
+                self.logger.error("Cleanup[%s][cam=%d] failed step: %s (%s)",
+                                  shutdown_id, self.cam_num, label, exc, exc_info=True)
+                return False, None
+
+        async def run_blocking_step(label: str, func, *, timeout: float = 2.0):
+            loop = asyncio.get_running_loop()
+            return await run_async_step(label, lambda: loop.run_in_executor(None, func), timeout=timeout)
+
+        def run_sync_step(label: str, func) -> None:
+            step = {
+                "label": label,
+                "start_ts": time.time(),
+            }
+            report["steps"].append(step)
+            self.logger.warning("Cleanup[%s][cam=%d] start sync step: %s", shutdown_id, self.cam_num, label)
+            step_start = time.perf_counter()
+            try:
+                func()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                step["status"] = "error"
+                step["error"] = repr(exc)
+                step["duration_s"] = time.perf_counter() - step_start
+                report["success"] = False
+                self.logger.error("Cleanup[%s][cam=%d] failed step: %s (%s)",
+                                  shutdown_id, self.cam_num, label, exc, exc_info=True)
+            else:
+                step["status"] = "success"
+                step["duration_s"] = time.perf_counter() - step_start
+                self.logger.warning("Cleanup[%s][cam=%d] success sync step: %s (%.3fs)",
+                                 shutdown_id, self.cam_num, label, step["duration_s"])
+
+        async def await_task(label: str, task: Optional[asyncio.Task], *, timeout: float = 2.0):
+            if task is None:
+                return
+
+            async def _wait():
+                return await task
+
+            await run_async_step(label, _wait, timeout=timeout)
+
         if self.recording:
-            await self.stop_recording()
-            await self.recording_manager.cleanup()
+            await run_async_step("stop_recording", lambda: self.stop_recording(), timeout=5.0)
+
+        else:
+            self.logger.warning("Cleanup[%s][cam=%d] camera not recording", shutdown_id, self.cam_num)
+
+        await run_async_step("recording_manager.cleanup", lambda: self.recording_manager.cleanup(), timeout=5.0)
 
         self._running = False
 
-        if self._capture_task and not self._capture_task.done():
-            self._capture_task.cancel()
-        if self._processor_task and not self._processor_task.done():
-            self._processor_task.cancel()
+        # Proactively break capture wait loops before awaiting their stop tasks
+        run_sync_step("capture_loop.request_stop", self.capture_loop.request_stop)
+        run_sync_step("processor.request_stop", self.processor.request_stop)
 
-        asyncio.create_task(self._background_camera_cleanup())
+        stop_callable = getattr(self.picam2, "stop", None)
+        if callable(stop_callable):
+            self.logger.warning("Cleanup[%s][cam=%d] calling picam2.stop", shutdown_id, self.cam_num)
+            await run_blocking_step("picam2.stop", stop_callable, timeout=5.0)
+        else:
+            self.logger.warning("Cleanup[%s][cam=%d] picam2.stop missing", shutdown_id, self.cam_num)
 
-        self.logger.info("Cleanup initiated (camera hardware cleanup in background)")
+        await run_async_step("capture_loop.join", lambda: self.capture_loop.join(), timeout=5.0)
+        await run_async_step("processor.join", lambda: self.processor.join(), timeout=5.0)
 
-    async def _background_camera_cleanup(self):
-        try:
-            await asyncio.to_thread(self.picam2.close)
-        except Exception as e:
-            self.logger.debug("Camera close error: %s", e)
+        self.logger.warning("Cleanup[%s][cam=%d] awaiting capture_start_task=%s", shutdown_id, self.cam_num, self._capture_task)
+        await await_task("capture_start_task.done", self._capture_task, timeout=2.0)
+        self._capture_task = None
+        self.logger.warning("Cleanup[%s][cam=%d] awaiting processor_start_task=%s", shutdown_id, self.cam_num, self._processor_task)
+        await await_task("processor_start_task.done", self._processor_task, timeout=2.0)
+        self._processor_task = None
 
-        self.logger.debug("Background camera hardware cleanup completed")
+        close_callable = getattr(self.picam2, "close", None)
+        if callable(close_callable):
+            self.logger.warning("Cleanup[%s][cam=%d] calling picam2.close", shutdown_id, self.cam_num)
+            await run_blocking_step("picam2.close", close_callable, timeout=5.0)
+        else:
+            self.logger.warning("Cleanup[%s][cam=%d] picam2.close missing", shutdown_id, self.cam_num)
+
+        report["duration_s"] = time.perf_counter() - start_perf
+
+        self.logger.warning("Cleanup complete id=%s success=%s duration=%.3fs", shutdown_id, report["success"], report["duration_s"])
+        self.logger.warning("Cleanup summary id=%s cam=%d: %s", shutdown_id, self.cam_num, report)
+        return report

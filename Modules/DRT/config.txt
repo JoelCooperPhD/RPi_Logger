@@ -1,9 +1,10 @@
 enabled = false
+default_mode = gui
 window_geometry = 800x600+100+100
 device_vid = 9114
 device_pid = 32798
 baudrate = 9600
-window_x = 1301
-window_y = 704
-window_width = 1278
-window_height = 255
+window_x = 417
+window_y = 156
+window_width = 1317
+window_height = 402

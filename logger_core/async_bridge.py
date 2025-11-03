@@ -60,8 +60,10 @@ class AsyncBridge:
         """
         if self.loop is None:
             raise RuntimeError("AsyncIO loop not started")
-
-        return asyncio.run_coroutine_threadsafe(coro, self.loop)
+        logger.warning("AsyncBridge: scheduling coroutine %s on loop %s", coro, self.loop)
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        logger.warning("AsyncBridge: coroutine scheduled future=%s", future)
+        return future
 
     def call_in_gui(self, func, *args, **kwargs) -> None:
         """
@@ -72,11 +74,37 @@ class AsyncBridge:
         """
         def wrapper():
             try:
-                func(*args, **kwargs)
+                result = func(*args, **kwargs)
+                return result
             except Exception as e:
-                logger.error("Error in GUI callback %s: %s", func.__name__, e, exc_info=True)
+                logger.error(f"AsyncBridge ERROR in {func.__name__}: {e}", exc_info=True)
+                raise
 
         self.root.after(0, wrapper)
+
+    async def call_in_gui_async(self, func, *args, timeout: float | None = None, **kwargs):
+        """Awaitably schedule a GUI-thread callback from async code."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError as exc:  # Not in an asyncio context
+            raise RuntimeError("call_in_gui_async() must be awaited from an asyncio task") from exc
+
+        future = loop.create_future()
+
+        def wrapper():
+            try:
+                result = func(*args, **kwargs)
+            except Exception as error:  # pragma: no cover - GUI thread safety
+                loop.call_soon_threadsafe(future.set_exception, error)
+            else:
+                loop.call_soon_threadsafe(future.set_result, result)
+
+        self.root.after(0, wrapper)
+
+        if timeout is not None:
+            return await asyncio.wait_for(future, timeout)
+
+        return await future
 
     def stop(self) -> None:
         """Stop the AsyncIO event loop and cancel all tasks."""

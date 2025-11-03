@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    config = load_config_file()
+    config_path = Path(__file__).parent / "config.txt"
+    config = load_config_file(config_path)
 
     default_output = Path(get_config_str(config, 'output_dir', 'drt_data'))
     default_session_prefix = get_config_str(config, 'session_prefix', 'drt')
@@ -42,7 +43,7 @@ def parse_args(argv: Optional[list[str]] = None):
     add_common_cli_arguments(
         parser,
         default_output=default_output,
-        allowed_modes=["gui", "headless"],
+        allowed_modes=["gui", "simple"],
         default_mode="gui",
         default_session_prefix=default_session_prefix,
         default_console_output=default_console,
@@ -65,6 +66,9 @@ def parse_args(argv: Optional[list[str]] = None):
     args.device_vid = config.get('device_vid', 0x239A)
     args.device_pid = config.get('device_pid', 0x801F)
     args.baudrate = get_config_int(config, 'baudrate', 9600)
+
+    args.config = config
+    args.config_file_path = config_path
 
     return args
 

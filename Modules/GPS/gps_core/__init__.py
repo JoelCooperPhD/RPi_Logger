@@ -8,10 +8,12 @@ class GPSInitializationError(Exception):
     pass
 
 
-def load_config_file():
+def load_config_file(config_path=None):
     from pathlib import Path
     from logger_core.config_manager import get_config_manager
 
-    config_path = Path(__file__).parent.parent / "config.txt"
+    if config_path is None:
+        config_path = Path(__file__).parent.parent / "config.txt"
+
     config_manager = get_config_manager()
     return config_manager.read_config(config_path)

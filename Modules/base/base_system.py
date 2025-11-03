@@ -1,7 +1,9 @@
 
 import asyncio
 import logging
+import os
 import sys
+import traceback
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
@@ -25,6 +27,9 @@ class BaseSystem(ABC):
         self.recording = False
         self.shutdown_event = asyncio.Event()
         self.initialized = False
+        self._cleanup_complete = False
+        self._shutdown_guard_task: Optional[asyncio.Task] = None
+        self.shutdown_guard_timeout = getattr(args, "shutdown_timeout", 15.0)
 
         self.mode = getattr(args, "mode", "gui")
         self.mode_instance = None
@@ -35,6 +40,9 @@ class BaseSystem(ABC):
         self.enable_gui_commands = getattr(args, "enable_commands", False) or (
             self.gui_mode and not sys.stdin.isatty()
         )
+
+        self.config = getattr(args, "config", {})
+        self.config_file_path = getattr(args, "config_file_path", None)
 
         self.session_dir: Optional[Path] = getattr(args, "session_dir", None)
         if self.session_dir:
@@ -88,6 +96,52 @@ class BaseSystem(ABC):
     @abstractmethod
     async def cleanup(self) -> None:
         pass
+
+    async def start_shutdown_guard(self, timeout: float = 15.0) -> None:
+        if self._shutdown_guard_task and not self._shutdown_guard_task.done():
+            return
+
+        loop = asyncio.get_running_loop()
+
+        async def _guard() -> None:
+            try:
+                await asyncio.sleep(timeout)
+                if self._cleanup_complete:
+                    return
+
+                self.logger.error("Shutdown guard triggered after %.1fs; forcing exit", timeout)
+                try:
+                    tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+                    for task in tasks:
+                        self.logger.error("Pending task: %s state=%s", task, task._state)
+                        stack = task.get_stack()
+                        if stack:
+                            for frame in stack:
+                                formatted = ''.join(traceback.format_stack(frame))
+                                self.logger.error("  %s", formatted.strip())
+                except Exception as exc:  # pragma: no cover - defensive
+                    self.logger.error("Failed to dump task stacks: %s", exc)
+
+                os._exit(101)
+            except asyncio.CancelledError:
+                return
+
+        self._shutdown_guard_task = loop.create_task(_guard())
+
+    async def cancel_shutdown_guard(self) -> None:
+        task = self._shutdown_guard_task
+        if not task:
+            return
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._shutdown_guard_task = None
+
+    def mark_cleanup_complete(self) -> None:
+        self._cleanup_complete = True
 
     def _should_send_status(self) -> bool:
         return self.slave_mode or self.enable_gui_commands

@@ -17,6 +17,8 @@ dependencies = [
     "pupil-labs-realtime-api>=1.0.0",
     # Async file operations
     "aiofiles>=23.0.0",
+    # System metrics
+    "psutil>=5.9.0",
     # Optional but commonly needed
     "pandas>=2.0.0",
     "pillow>=10.0.0",

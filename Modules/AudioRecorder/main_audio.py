@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 def parse_args(argv: Optional[list[str]] = None):
     # Load config file first (import here to avoid loading audio libraries early)
     from audio_core import load_config_file
-    config = load_config_file()
+    config_path = Path(__file__).parent / "config.txt"
+    config = load_config_file(config_path)
 
     default_sample_rate = get_config_int(config, 'sample_rate', 48000)
     default_output = Path(get_config_str(config, 'output_dir', 'recordings'))
@@ -104,6 +105,9 @@ def parse_args(argv: Optional[list[str]] = None):
 
     from Modules.base import load_window_geometry_from_config
     args.window_geometry = load_window_geometry_from_config(config, args.window_geometry)
+
+    args.config = config
+    args.config_file_path = config_path
 
     return args
 

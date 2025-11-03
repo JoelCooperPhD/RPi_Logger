@@ -1,10 +1,16 @@
 
 import asyncio
+import json
 import logging
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
-from Modules.base import BaseSystem, ModuleInitializationError, RecordingStateMixin
+from Modules.base import (
+    BaseSystem,
+    ConfigLoader,
+    ModuleInitializationError,
+    RecordingStateMixin,
+)
 from .audio_handler import AudioHandler
 from .audio_utils import DeviceDiscovery
 from .commands import StatusMessage
@@ -35,10 +41,13 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
         self.available_devices: Dict[int, dict] = {}
         self.selected_devices: set = set()
         self._known_devices: set = set()
+        self._persisted_device_ids: Set[int] = set()
+        self._persisted_device_names: Set[str] = set()
         self.current_trial_number: int = 1
         self.gui = None  # Will be set by the mode
 
         self.feedback_queue = asyncio.Queue()
+        self._load_persisted_selection()
 
     async def _initialize_devices(self) -> None:
         self.logger.info("Searching for audio devices (timeout: %ds)...", self.device_timeout)
@@ -82,6 +91,9 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
             raise AudioInitializationError(error_msg)
 
         self._known_devices = set(self.available_devices.keys())
+
+        if not self.selected_devices:
+            self._restore_persisted_selection()
 
         if self.auto_select_new and not self.selected_devices:
             first_device = min(self.available_devices.keys())
@@ -199,6 +211,107 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
         else:  # gui or any other mode defaults to GUI
             return GUIMode(self, enable_commands=self.enable_gui_commands)
 
+    def _load_persisted_selection(self) -> None:
+        raw_value = self.config.get('selected_devices') if isinstance(self.config, dict) else None
+        if not raw_value:
+            return
+
+        ids, names = self._parse_saved_selection(raw_value)
+        if ids:
+            self._persisted_device_ids = ids
+        if names:
+            self._persisted_device_names = names
+
+    def _restore_persisted_selection(self) -> None:
+        restored = False
+
+        for device_id in sorted(self._persisted_device_ids):
+            if device_id in self.available_devices:
+                if self.select_device(device_id):
+                    restored = True
+
+        remaining_names = {
+            name for name in self._persisted_device_names
+            if not any(
+                device_id in self.selected_devices and
+                self.available_devices.get(device_id, {}).get('name', '').lower() == name.lower()
+                for device_id in self.selected_devices
+            )
+        }
+
+        if remaining_names:
+            for name in remaining_names:
+                match_id = next(
+                    (
+                        device_id
+                        for device_id, info in self.available_devices.items()
+                        if info.get('name', '').lower() == name.lower()
+                        and device_id not in self.selected_devices
+                    ),
+                    None,
+                )
+                if match_id is not None:
+                    if self.select_device(match_id):
+                        restored = True
+
+        if restored:
+            self.logger.info(
+                "Restored %d device(s) from previous session",
+                len(self.selected_devices),
+            )
+
+    @staticmethod
+    def _parse_saved_selection(raw_value: Any) -> tuple[Set[int], Set[str]]:
+        ids: Set[int] = set()
+        names: Set[str] = set()
+
+        if raw_value is None:
+            return ids, names
+
+        value = raw_value
+
+        if isinstance(raw_value, str):
+            stripped = raw_value.strip()
+            if not stripped:
+                return ids, names
+            try:
+                value = json.loads(stripped)
+            except json.JSONDecodeError:
+                parts = [part.strip() for part in stripped.split(',') if part.strip()]
+                for part in parts:
+                    try:
+                        ids.add(int(part))
+                    except ValueError:
+                        names.add(part)
+                return ids, names
+
+        if isinstance(value, dict):
+            value = [value]
+
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    if 'id' in item:
+                        try:
+                            ids.add(int(item['id']))
+                        except (TypeError, ValueError):
+                            pass
+                    name = item.get('name')
+                    if isinstance(name, str) and name.strip():
+                        names.add(name.strip())
+                elif isinstance(item, int):
+                    ids.add(int(item))
+                elif isinstance(item, str):
+                    token = item.strip()
+                    if not token:
+                        continue
+                    try:
+                        ids.add(int(token))
+                    except ValueError:
+                        names.add(token)
+
+        return ids, names
+
     async def cleanup(self) -> None:
         self.running = False
         self.shutdown_event.set()
@@ -213,5 +326,42 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
             )
             self.active_handlers.clear()
 
+        await self._save_selected_devices_to_config()
+
         self.initialized = False
         self.logger.info("Cleanup completed")
+
+    async def _save_selected_devices_to_config(self) -> None:
+        config_path = getattr(self, 'config_file_path', None)
+        if not config_path:
+            return
+
+        try:
+            selected_entries = []
+            for device_id in sorted(self.selected_devices):
+                device_info = self.available_devices.get(device_id, {})
+                selected_entries.append({
+                    "id": device_id,
+                    "name": device_info.get('name'),
+                })
+
+            serialized = json.dumps(selected_entries, separators=(',', ':'))
+
+            await asyncio.to_thread(
+                ConfigLoader.update_config_values,
+                config_path,
+                {"selected_devices": serialized},
+            )
+
+            if isinstance(self.config, dict):
+                self.config['selected_devices'] = serialized
+
+            self._persisted_device_ids = {entry['id'] for entry in selected_entries if 'id' in entry}
+            self._persisted_device_names = {
+                entry['name']
+                for entry in selected_entries
+                if isinstance(entry.get('name'), str) and entry['name']
+            }
+
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.debug("Failed to persist selected devices: %s", exc)

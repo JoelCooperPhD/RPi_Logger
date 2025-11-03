@@ -19,10 +19,10 @@ class TrackerConfig:
     enable_recording_overlay: bool = True
     include_gaze_in_recording: bool = True
     overlay_font_scale: float = 0.6
-    overlay_thickness: int = 1
-    overlay_color_r: int = 0
-    overlay_color_g: int = 0
-    overlay_color_b: int = 0
+    overlay_thickness: int = 2
+    overlay_color_r: int = 255
+    overlay_color_g: int = 255
+    overlay_color_b: int = 255
     overlay_margin_left: int = 10
     overlay_line_start_y: int = 30
 
@@ -37,6 +37,14 @@ class TrackerConfig:
     gaze_color_not_worn_b: int = 0
     gaze_color_not_worn_g: int = 0
     gaze_color_not_worn_r: int = 255
+
+    # Data export controls
+    enable_advanced_gaze_logging: bool = False
+    expand_eye_event_details: bool = True
+    enable_audio_recording: bool = False
+    audio_stream_param: str = "audio=scene"
+    enable_device_status_logging: bool = False
+    device_status_poll_interval: float = 5.0
 
     def __post_init__(self):
         """Calculate preview height to maintain aspect ratio"""

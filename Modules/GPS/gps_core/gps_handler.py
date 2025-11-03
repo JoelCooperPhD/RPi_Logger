@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections import deque
 from typing import Dict, Any, Optional
 import serial_asyncio
 
@@ -18,6 +19,7 @@ class GPSHandler:
         self.writer: Optional[asyncio.StreamWriter] = None
         self.read_task: Optional[asyncio.Task] = None
         self.running = False
+        self.recent_sentences: deque[str] = deque(maxlen=500)
 
     async def start(self) -> None:
         logger.info("Connecting to GPS on %s @ %d baud", self.port, self.baudrate)
@@ -78,6 +80,7 @@ class GPSHandler:
                 if sentence:
                     sentence_count += 1
                     logger.debug("RX [%d]: %s", sentence_count, sentence)
+                    self.recent_sentences.append(sentence)
                     self.parser.parse_sentence(sentence)
 
                     if sentence_count - last_log_count >= 50:
@@ -90,3 +93,10 @@ class GPSHandler:
             logger.error("GPS read loop error: %s", e, exc_info=True)
         finally:
             logger.info("GPS read loop stopped (received %d sentences)", sentence_count)
+
+    def get_recent_sentences(self, limit: Optional[int] = None) -> list[str]:
+        if limit is None or limit <= 0:
+            return list(self.recent_sentences)
+        if limit >= len(self.recent_sentences):
+            return list(self.recent_sentences)
+        return list(self.recent_sentences)[-limit:]

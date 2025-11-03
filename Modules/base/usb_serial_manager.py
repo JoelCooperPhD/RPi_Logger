@@ -81,6 +81,7 @@ class USBSerialDevice:
 
         try:
             await asyncio.to_thread(self._serial.write, data)
+            await asyncio.to_thread(self._serial.flush)
             return True
         except Exception as e:
             logger.error(f"Error writing to {self.port}: {e}")
@@ -129,6 +130,7 @@ class USBDeviceMonitor:
         self._running = False
         self._monitor_task: Optional[asyncio.Task] = None
         self._scan_interval = 1.0
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def start(self):
         if self._running:
@@ -136,15 +138,54 @@ class USBDeviceMonitor:
             return
 
         self._running = True
+        self._loop = asyncio.get_running_loop()
         logger.info(f"Starting USB device monitor for {self.config.device_name}")
         logger.info(f"  Target VID: {self.config.vid} (0x{self.config.vid:04X})")
         logger.info(f"  Target PID: {self.config.pid} (0x{self.config.pid:04X})")
         logger.info(f"  Scan interval: {self._scan_interval}s")
 
+        logger.info(f"Performing initial device scan for {self.config.device_name}...")
+        await self._scan_devices()
+
+        if self._devices:
+            logger.info(f"Initial scan complete: {len(self._devices)} device(s) connected")
+        else:
+            logger.info(f"Initial scan complete: no devices found, will continue monitoring")
+
         self._monitor_task = asyncio.create_task(self._monitor_loop())
         logger.info(f"Started USB device monitor for {self.config.device_name} - task created: {self._monitor_task}")
 
-    async def stop(self):
+    async def stop(self, timeout: float = 5.0):
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        target_loop = self._loop
+
+        if target_loop and current_loop is not target_loop:
+            if target_loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(self._stop_internal(), target_loop)
+                try:
+                    await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
+                    return
+                except (asyncio.TimeoutError, RuntimeError) as exc:
+                    logger.warning(
+                        "USB monitor stop timed out on original loop (%s); forcing cleanup on current loop",
+                        exc,
+                    )
+            else:
+                logger.debug(
+                    "USB monitor loop already stopped for %s; forcing cleanup on current loop",
+                    self.config.device_name,
+                )
+
+            await self._force_stop_from_current_loop()
+            return
+
+        await self._stop_internal()
+
+    async def _stop_internal(self):
         self._running = False
 
         if self._monitor_task:
@@ -153,13 +194,58 @@ class USBDeviceMonitor:
                 await self._monitor_task
             except asyncio.CancelledError:
                 pass
+            self._monitor_task = None
 
+        await self._disconnect_all_devices()
+
+        self._loop = None
+        logger.info(f"Stopped USB device monitor for {self.config.device_name}")
+
+    async def _force_stop_from_current_loop(self):
+        self._running = False
+
+        monitor_task = self._monitor_task
+        if monitor_task:
+            if monitor_task.done():
+                try:
+                    monitor_task.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.debug(
+                        "USB monitor task for %s completed with error during forced stop: %s",
+                        self.config.device_name,
+                        exc,
+                    )
+            else:
+                logger.debug(
+                    "USB monitor task still pending for %s but loop unavailable; marking as cancelled",
+                    self.config.device_name,
+                )
+            self._monitor_task = None
+
+        await self._disconnect_all_devices()
+
+        self._loop = None
+        logger.info(
+            "Force-stopped USB device monitor for %s (original loop unavailable)",
+            self.config.device_name,
+        )
+
+    async def _disconnect_all_devices(self):
         for device in list(self._devices.values()):
-            await device.disconnect()
+            try:
+                await device.disconnect()
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(
+                    "Error disconnecting %s during USB monitor stop: %s",
+                    getattr(device, "port", "unknown"),
+                    exc,
+                    exc_info=True,
+                )
 
         self._devices.clear()
         self._known_ports.clear()
-        logger.info(f"Stopped USB device monitor for {self.config.device_name}")
 
     async def _monitor_loop(self):
         logger.info(f"USB monitor loop started for {self.config.device_name}")
@@ -183,7 +269,7 @@ class USBDeviceMonitor:
             ports = await asyncio.to_thread(serial.tools.list_ports.comports)
             current_ports = set()
 
-            logger.debug(f"Scanning {len(ports)} serial ports")
+            logger.info(f"Scanning {len(ports)} serial ports for {self.config.device_name}")
 
             for port_info in ports:
                 vid_str = f"0x{port_info.vid:04X}" if port_info.vid else "None"
@@ -199,6 +285,9 @@ class USBDeviceMonitor:
                 else:
                     if port_info.vid and port_info.pid:
                         logger.debug(f"Port {port_info.device} does not match (VID={vid_str}, PID={pid_str})")
+
+            if not current_ports:
+                logger.info(f"No matching {self.config.device_name} devices found in scan")
 
             disconnected_ports = self._known_ports - current_ports
             for port_name in disconnected_ports:
@@ -218,6 +307,8 @@ class USBDeviceMonitor:
         if connected:
             logger.info(f"Successfully connected to {port}")
             self._devices[port] = device
+            logger.info(f"Device registered in monitor, total devices: {len(self._devices)}")
+
             if self.on_connect:
                 try:
                     logger.info(f"Calling on_connect callback for {port}")
@@ -227,11 +318,13 @@ class USBDeviceMonitor:
                     else:
                         logger.info(f"on_connect is sync, calling directly...")
                         self.on_connect(device)
-                    logger.info(f"on_connect callback completed for {port}")
+                    logger.info(f"on_connect callback completed successfully for {port}")
                 except Exception as e:
                     logger.error(f"Error in on_connect callback: {e}", exc_info=True)
             else:
                 logger.warning(f"No on_connect callback registered")
+
+            logger.info(f"Device {port} fully initialized and ready")
         else:
             logger.error(f"Failed to connect to {port}")
 

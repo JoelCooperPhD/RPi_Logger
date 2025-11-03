@@ -56,16 +56,27 @@ class CameraCaptureLoop:
         self.logger.info("Camera capture loop started")
 
     async def stop(self):
-        if not self._running:
-            return
-        self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        self.request_stop()
+        await self.join()
         self.logger.info("Camera capture loop stopped")
+
+    def request_stop(self) -> None:
+        """Signal the loop to stop and release any waiters."""
+        self.logger.warning("CameraCapture%d.request_stop called _running=%s", self.camera_id, self._running)
+        self._running = False
+        self._frame_ready_event.set()
+
+    async def join(self) -> None:
+        if self._task:
+            self.logger.warning("CameraCapture%d.join awaiting task=%s done=%s", self.camera_id, self._task, self._task.done())
+            task = self._task
+            if not task.done():
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self._task = None
+            self.logger.warning("CameraCapture%d.join completed", self.camera_id)
 
     async def pause(self):
         if not self._paused:
@@ -207,6 +218,7 @@ class CameraCaptureLoop:
                     self.latest_capture_monotonic, self.latest_sensor_timestamp_ns, self.latest_hardware_fps)
 
     async def wait_for_frame(self, timeout: float = 10.0):
+        self.logger.debug("CameraCapture%d.wait_for_frame waiting event _running=%s", self.camera_id, self._running)
         try:
             await asyncio.wait_for(self._frame_ready_event.wait(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -215,6 +227,7 @@ class CameraCaptureLoop:
 
         # Must be done AFTER wait returns and BEFORE getting frame data
         self._frame_ready_event.clear()
+        self.logger.debug("CameraCapture%d.wait_for_frame event received", self.camera_id)
 
         async with self._frame_lock:
             return (self.latest_frame, self.latest_metadata, self.latest_capture_time,

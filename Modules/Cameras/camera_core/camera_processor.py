@@ -1,6 +1,5 @@
 
 import asyncio
-import functools
 import logging
 import time
 from pathlib import Path
@@ -39,13 +38,7 @@ class CameraProcessor:
 
     async def _write_frame_metadata_async(self, frame, metadata) -> None:
         try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                self.recording_manager.write_frame,
-                frame,
-                metadata
-            )
+            self.recording_manager.write_frame(frame, metadata)
         except Exception as exc:
             self.logger.error("Error writing frame metadata: %s", exc)
 
@@ -73,27 +66,32 @@ class CameraProcessor:
         self.logger.info("Camera processor started")
 
     async def stop(self):
-        if not self._running:
-            return
+        self.request_stop()
+        await self.join()
+        self.logger.info("Camera processor stopped")
+
+    def request_stop(self) -> None:
+        self.logger.warning("CameraProcessor%d.request_stop running=%s", self.camera_id, self._running)
         self._running = False
+        self._paused = False
+
+    async def join(self) -> None:
         if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+            self.logger.warning("CameraProcessor%d.join awaiting task=%s done=%s", self.camera_id, self._task, self._task.done())
+            task = self._task
+            if not task.done():
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            self._task = None
+            self.logger.warning("CameraProcessor%d.join completed", self.camera_id)
 
         if self._background_tasks:
-            try:
-                await asyncio.wait_for(
-                    asyncio.gather(*self._background_tasks, return_exceptions=True),
-                    timeout=2.0
-                )
-            except asyncio.TimeoutError:
-                self.logger.warning("Background tasks did not complete within 2 seconds")
+            self.logger.warning("CameraProcessor%d.join awaiting %d background tasks", self.camera_id, len(self._background_tasks))
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-
-        self.logger.info("Camera processor stopped")
+            self.logger.warning("CameraProcessor%d.join background tasks done", self.camera_id)
 
     async def pause(self):
         if not self._paused:
@@ -123,7 +121,9 @@ class CameraProcessor:
                     self.logger.info("Frame %d: Waiting for frame from capture loop...", self.processed_frames)
 
                 try:
+                    self.logger.debug("CameraProcessor%d waiting for frame (processed=%d)", self.camera_id, self.processed_frames)
                     raw_frame, metadata, capture_time, capture_monotonic, sensor_timestamp_ns, _ = await self.capture_loop.wait_for_frame()
+                    self.logger.debug("CameraProcessor%d received frame (processed=%d)", self.camera_id, self.processed_frames)
 
                     if self.processed_frames < log_waits:
                         self.logger.info("Frame %d: Received frame from capture loop", self.processed_frames)
@@ -193,6 +193,7 @@ class CameraProcessor:
                 self.display.update_frame(preview_frame)
 
             except asyncio.CancelledError:
+                self.logger.warning("CameraProcessor%d._processing_loop cancelled", self.camera_id)
                 break
             except Exception as exc:
                 if self._running:

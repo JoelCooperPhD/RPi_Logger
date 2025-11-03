@@ -1,5 +1,4 @@
 
-import asyncio
 import logging
 import tkinter as tk
 from pathlib import Path
@@ -12,6 +11,7 @@ from .widgets import StatusIndicator
 
 if TYPE_CHECKING:
     from ...camera_system import CameraSystem
+    from logger_core.async_bridge import AsyncBridge
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.camera_active_vars: list[tk.BooleanVar] = []
         self.camera_active_menu_items: list = []  # Menu checkboxes for camera toggles
         self.recording_indicator_vars: list[tk.StringVar] = []  # Recording status text vars
+        self.async_bridge: Optional['AsyncBridge'] = None
 
         # Use template method for GUI initialization
         self.initialize_gui_framework(
@@ -119,42 +120,67 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         if self.system.recording:
             return
 
-        session_dir = self.system._ensure_session_dir()
-        for cam in self.system.cameras:
-            cam.start_recording(session_dir)
-        self.system.recording = True
+        if not self.async_bridge:
+            self._handle_recording_error("Async bridge not configured; cannot start recording")
+            return
 
-        self.root.title(f"Camera System - ⬤ RECORDING - Session: {self.system.session_label}")
+        future = self.async_bridge.run_coroutine(self.system.start_recording())
 
-        # Show recording indicators for all cameras
-        logger.info(f"Number of recording indicator vars: {len(self.recording_indicator_vars)}")
-        for i, rec_var in enumerate(self.recording_indicator_vars):
-            logger.info(f"Setting recording indicator {i} to 'RECORDING'")
-            rec_var.set(" RECORDING")
-            logger.info(f"Recording indicator {i} value is now: '{rec_var.get()}'")
+        def _on_complete(fut):
+            try:
+                success = fut.result()
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("GUI start recording failed: %s", exc, exc_info=True)
 
-        self.enable_sources_menu(False)
+                def _error_callback():
+                    self._handle_recording_error("Failed to start recording")
 
-        logger.info("Recording started")
+                self.async_bridge.call_in_gui(_error_callback)
+                return
+
+            def _apply_callback():
+                if success and self.system.recording:
+                    self._apply_recording_ui_state(True)
+                    logger.info("Recording started")
+                else:
+                    self._handle_recording_error("Unable to start recording")
+
+            self.async_bridge.call_in_gui(_apply_callback)
+
+        future.add_done_callback(_on_complete)
 
     def _stop_recording(self):
         if not self.system.recording:
             return
 
-        for cam in self.system.cameras:
-            cam.stop_recording()
-        self.system.recording = False
+        if not self.async_bridge:
+            self._handle_recording_error("Async bridge not configured; cannot stop recording")
+            return
 
-        self.root.title("Camera System")
+        future = self.async_bridge.run_coroutine(self.system.stop_recording())
 
-        # Hide recording indicators for all cameras
-        for rec_var in self.recording_indicator_vars:
-            rec_var.set("")
+        def _on_complete(fut):
+            try:
+                success = fut.result()
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("GUI stop recording failed: %s", exc, exc_info=True)
 
-        # Re-enable camera toggles in Sources menu after recording (safety)
-        self.enable_sources_menu(True)
+                def _error_callback():
+                    self._handle_recording_error("Failed to stop recording")
 
-        logger.info("Recording stopped")
+                self.async_bridge.call_in_gui(_error_callback)
+                return
+
+            def _apply_callback():
+                if success:
+                    self._apply_recording_ui_state(False)
+                    logger.info("Recording stopped")
+                else:
+                    self._handle_recording_error("Unable to stop recording")
+
+            self.async_bridge.call_in_gui(_apply_callback)
+
+        future.add_done_callback(_on_complete)
 
     def _take_snapshot(self):
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -178,33 +204,82 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         if camera_idx >= len(self.system.cameras):
             return
 
+        bridge = self.async_bridge
+        if bridge is None:
+            logger.error("Async bridge not configured; cannot toggle camera %d", camera_idx)
+            return
+
         camera = self.system.cameras[camera_idx]
 
         async def toggle_async():
-            if active:
-                success = await camera.resume_camera()
-                if success:
-                    logger.info("Camera %d resumed", camera_idx)
-                    canvas = self.preview_canvases[camera_idx]
-                    canvas.delete("all")
-            else:
-                success = await camera.pause_camera()
-                if success:
-                    canvas = self.preview_canvases[camera_idx]
-                    canvas.delete("all")
-                    w = canvas.winfo_width() or self.args.preview_width
-                    h = canvas.winfo_height() or self.args.preview_height
-                    canvas.create_text(w//2, h//2,
-                                      text="Camera Inactive",
-                                      fill='gray',
-                                      justify='center')
-                    logger.info("Camera %d paused (saving CPU)", camera_idx)
+            try:
+                if active:
+                    success = await camera.resume_camera()
+                    if success:
+                        logger.info("Camera %d resumed", camera_idx)
+                        bridge.call_in_gui(lambda: self._clear_camera_canvas(camera_idx))
+                    else:
+                        bridge.call_in_gui(lambda: self._restore_toggle_state(camera_idx, False))
                 else:
-                    self.camera_active_vars[camera_idx].set(True)
-                    logger.warning("Cannot pause camera %d", camera_idx)
+                    success = await camera.pause_camera()
+                    if success:
+                        logger.info("Camera %d paused (saving CPU)", camera_idx)
+                        bridge.call_in_gui(lambda: self._show_camera_inactive(camera_idx))
+                    else:
+                        bridge.call_in_gui(lambda: self._restore_toggle_state(camera_idx, True))
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.error("Toggle camera %d failed: %s", camera_idx, exc, exc_info=True)
+                bridge.call_in_gui(
+                    lambda: self._restore_toggle_state(camera_idx, camera.is_active)
+                )
 
-        import asyncio
-        asyncio.create_task(toggle_async())
+        bridge.run_coroutine(toggle_async())
+
+    def _apply_recording_ui_state(self, is_recording: bool):
+        if is_recording:
+            session_label = getattr(self.system, 'session_label', '')
+            title = "Camera System - ⬤ RECORDING"
+            if session_label:
+                title += f" - Session: {session_label}"
+            self.root.title(title)
+            for rec_var in self.recording_indicator_vars:
+                rec_var.set(" RECORDING")
+            self.enable_sources_menu(False)
+        else:
+            self.root.title("Camera System")
+            for rec_var in self.recording_indicator_vars:
+                rec_var.set("")
+            self.enable_sources_menu(True)
+
+    def _handle_recording_error(self, message: str):
+        logger.error(message)
+        self.root.title(f"Camera System - ⚠ {message}")
+        self.enable_sources_menu(not self.system.recording)
+        # Re-apply correct UI state after short delay in case the system state changes
+        self.root.after(2000, lambda: self._apply_recording_ui_state(self.system.recording))
+
+    def _clear_camera_canvas(self, camera_idx: int):
+        if camera_idx < len(self.preview_canvases):
+            canvas = self.preview_canvases[camera_idx]
+            canvas.delete("all")
+
+    def _show_camera_inactive(self, camera_idx: int):
+        if camera_idx < len(self.preview_canvases):
+            canvas = self.preview_canvases[camera_idx]
+            canvas.delete("all")
+            w = canvas.winfo_width() or self.args.preview_width
+            h = canvas.winfo_height() or self.args.preview_height
+            canvas.create_text(
+                w // 2,
+                h // 2,
+                text="Camera Inactive",
+                fill='gray',
+                justify='center'
+            )
+
+    def _restore_toggle_state(self, camera_idx: int, should_be_active: bool):
+        if camera_idx < len(self.camera_active_vars):
+            self.camera_active_vars[camera_idx].set(should_be_active)
 
     def save_window_geometry_to_config(self):
         from pathlib import Path

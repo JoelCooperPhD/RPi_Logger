@@ -4,10 +4,12 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 from typing import TYPE_CHECKING, Optional, Dict, Any
 from collections import deque
+from pathlib import Path
 
 from Modules.base import TkinterGUIBase, TkinterMenuBase
 from .drt_plotter import DRTPlotter
 from .sdrt_config_window import SDRTConfigWindow
+from .quick_status_panel import QuickStatusPanel
 
 if TYPE_CHECKING:
     from ...drt_system import DRTSystem
@@ -35,6 +37,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def __init__(self, drt_system: 'DRTSystem', args):
         self.system = drt_system
         self.args = args
+        self.async_bridge = None
 
         self.notebook: Optional[ttk.Notebook] = None
         self.device_tabs: Dict[str, DeviceTab] = {}
@@ -42,6 +45,8 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.stimulus_state: Dict[str, int] = {}
         self.config_window: Optional[SDRTConfigWindow] = None
+        self.quick_panel: Optional[QuickStatusPanel] = None
+        self.devices_panel_visible_var = None
 
         self.initialize_gui_framework(
             title="DRT Monitor",
@@ -50,7 +55,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             menu_bar_kwargs={'include_sources': False}
         )
 
-        self.config_window = SDRTConfigWindow(self.system)
+        self.config_window = None
 
     def set_close_handler(self, handler):
         self.root.protocol("WM_DELETE_WINDOW", handler)
@@ -62,16 +67,28 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self._stop_recording()
 
     def _create_widgets(self):
-        content_frame = self.create_standard_layout(logger_height=2, content_title="sDRT Monitor")
+        content_frame = self.create_standard_layout(logger_height=2, content_title="DRT Controls")
+
+        main_frame = content_frame.master
+        if main_frame is not None:
+            main_frame.columnconfigure(0, weight=1)
+            main_frame.rowconfigure(0, weight=1)
+            main_frame.rowconfigure(1, weight=0)
+            main_frame.rowconfigure(2, weight=0)
 
         content_frame.columnconfigure(0, weight=1)
         content_frame.rowconfigure(0, weight=1)
 
-        self.notebook = ttk.Notebook(content_frame, width=160)
+        notebook_container = ttk.Frame(content_frame)
+        notebook_container.grid(row=0, column=0, sticky='nsew', padx=5, pady=(5, 0))
+        notebook_container.columnconfigure(0, weight=1)
+        notebook_container.rowconfigure(0, weight=1)
+
+        self.notebook = ttk.Notebook(notebook_container, width=160)
         self.notebook.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
 
         self.empty_state_label = ttk.Label(
-            content_frame,
+            notebook_container,
             text="⚠ No sDRT devices connected\n\nPlease connect a device to begin",
             font=('TkDefaultFont', 12),
             justify='center',
@@ -79,6 +96,23 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         )
         self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
         self.empty_state_label.lift()
+
+        parent_for_logs = main_frame if main_frame is not None else content_frame
+
+        self.quick_panel = QuickStatusPanel(parent_for_logs)
+        quick_panel_frame = self.quick_panel.build(row=1, column=0)
+        quick_panel_frame.grid_configure(padx=0, pady=(0, 0), sticky='ew')
+
+        if hasattr(self, 'log_frame') and self.log_frame.winfo_manager():
+            self.log_frame.grid_configure(row=2, column=0, sticky='ew')
+
+        if hasattr(self, 'add_view_toggle'):
+            self.devices_panel_visible_var = self.add_view_toggle(
+                "Show Session Output",
+                quick_panel_frame,
+                "gui_show_session_output",
+                default_visible=True,
+            )
 
     def _create_device_tab(self, port: str) -> DeviceTab:
         tab_frame = ttk.Frame(self.notebook)
@@ -131,7 +165,10 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         return tab
 
     def _start_recording(self):
-        asyncio.create_task(self._start_recording_async())
+        if self.async_bridge:
+            self.async_bridge.run_coroutine(self._start_recording_async())
+        else:
+            logger.error("No async_bridge available to start recording")
 
     async def _start_recording_async(self):
         if await self.system.start_recording():
@@ -144,7 +181,10 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             logger.error("Failed to start recording")
 
     def _stop_recording(self):
-        asyncio.create_task(self._stop_recording_async())
+        if self.async_bridge:
+            self.async_bridge.run_coroutine(self._stop_recording_async())
+        else:
+            logger.error("No async_bridge available to stop recording")
 
     async def _stop_recording_async(self):
         if await self.system.stop_recording():
@@ -159,47 +199,54 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def _on_stimulus_on(self, port: str):
         handler = self.system.get_device_handler(port)
         if handler:
-            asyncio.create_task(handler.set_stimulus(True))
+            logger.info(f"Stimulus ON button pressed for {port}")
+
+            if self.async_bridge:
+                self.async_bridge.run_coroutine(handler.set_stimulus(True))
+            else:
+                logger.error("No async_bridge available to send command")
+
             self.stimulus_state[port] = 1
             if port in self.device_tabs and self.device_tabs[port].plotter:
                 self.device_tabs[port].plotter.update_stimulus_state(port, 1)
-            logger.info(f"Stimulus ON for {port}")
+            logger.info(f"Stimulus ON scheduled for {port}")
 
     def _on_stimulus_off(self, port: str):
         handler = self.system.get_device_handler(port)
         if handler:
-            asyncio.create_task(handler.set_stimulus(False))
+            logger.info(f"Stimulus OFF button pressed for {port}")
+
+            if self.async_bridge:
+                self.async_bridge.run_coroutine(handler.set_stimulus(False))
+            else:
+                logger.error("No async_bridge available to send command")
+
             self.stimulus_state[port] = 0
             if port in self.device_tabs and self.device_tabs[port].plotter:
                 self.device_tabs[port].plotter.update_stimulus_state(port, 0)
-            logger.info(f"Stimulus OFF for {port}")
+            logger.info(f"Stimulus OFF scheduled for {port}")
 
     def _on_configure(self, port: str):
-        if self.config_window:
-            self.config_window.show_for_device(port)
-        else:
-            logger.warning("Config window not available")
+        if not self.config_window:
+            self.config_window = SDRTConfigWindow(self.system, self.async_bridge)
+        self.config_window.show_for_device(port)
 
     def on_device_connected(self, port: str):
         try:
-            logger.info(f"TkinterGUI: on_device_connected called for {port}")
-            logger.info(f"TkinterGUI: Current device_tabs: {list(self.device_tabs.keys())}")
-
             if port not in self.device_tabs:
-                logger.info(f"TkinterGUI: Creating new tab for {port}")
                 tab = self._create_device_tab(port)
                 self.device_tabs[port] = tab
-                logger.info(f"TkinterGUI: Tab created and registered for {port}")
-            else:
-                logger.warning(f"TkinterGUI: Tab already exists for {port}")
 
             if self.empty_state_label and self.device_tabs:
-                logger.info(f"TkinterGUI: Hiding empty state label (device count: {len(self.device_tabs)})")
                 self.empty_state_label.grid_remove()
+                self.notebook.lift()
 
-            logger.info(f"TkinterGUI: on_device_connected completed for {port}")
+            if self.quick_panel:
+                self.quick_panel.device_connected(port)
+                if not self.system.recording:
+                    self.quick_panel.set_module_state("Ready")
         except Exception as e:
-            logger.error(f"TkinterGUI: Exception in on_device_connected: {e}", exc_info=True)
+            logger.error(f"Error in on_device_connected: {e}", exc_info=True)
 
     def on_device_disconnected(self, port: str):
         logger.info(f"GUI: Device disconnected from {port}")
@@ -219,13 +266,15 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
             self.empty_state_label.lift()
 
+        if self.quick_panel:
+            self.quick_panel.device_disconnected(port)
+            if not self.device_tabs and not self.system.recording:
+                self.quick_panel.set_module_state("Idle")
+
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
-        if port not in self.device_tabs:
-            return
+        tab = self.device_tabs.get(port)
 
-        tab = self.device_tabs[port]
-
-        if data_type == 'click':
+        if data_type == 'click' and tab:
             value = data.get('value', '')
             try:
                 click_count = int(value) if value else 0
@@ -233,7 +282,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             except ValueError:
                 pass
 
-        elif data_type == 'trial':
+        elif data_type == 'trial' and tab:
             trial_num = data.get('trial_number')
             rt = data.get('reaction_time')
 
@@ -249,7 +298,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 else:
                     tab.plotter.update_trial(port, abs(rt), is_hit=False)
 
-        elif data_type == 'stimulus':
+        elif data_type == 'stimulus' and tab:
             value = data.get('value', '')
             try:
                 state = int(value)
@@ -260,8 +309,15 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 elif 'off' in value.lower():
                     self.stimulus_state[port] = 0
 
-            if tab.plotter:
+            if tab and tab.plotter:
                 tab.plotter.update_stimulus_state(port, self.stimulus_state.get(port, 0))
+
+        elif data_type == 'experiment_end':
+            pass
+
+        elif data_type == 'trial_logged':
+            if self.quick_panel:
+                self.quick_panel.update_logged_trial(port, data)
 
     def update_display(self):
         pass
@@ -278,3 +334,17 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             self.update_window_title(recording=True)
         else:
             self.update_window_title(recording=False)
+
+        if self.quick_panel:
+            if self.system.recording:
+                self.quick_panel.set_module_state("Recording")
+            elif self.device_tabs:
+                self.quick_panel.set_module_state("Ready")
+            else:
+                self.quick_panel.set_module_state("Idle")
+
+    def save_window_geometry_to_config(self):
+        from Modules.base import gui_utils
+
+        config_path = gui_utils.get_module_config_path(Path(__file__))
+        gui_utils.save_window_geometry(self.root, config_path)

@@ -1,6 +1,8 @@
 
 import asyncio
+import io
 import logging
+import os
 import sys
 from abc import ABC, abstractmethod
 from typing import Any, Optional, TYPE_CHECKING
@@ -24,6 +26,11 @@ class BaseGUIMode(BaseMode, ABC):
         self.command_task: Optional[asyncio.Task] = None
         self.preview_task: Optional[asyncio.Task] = None
         self.device_retry_task: Optional[asyncio.Task] = None
+        self._closing = False
+        self._close_future = None
+        self._stdin_transport = None
+        self._stdin_pipe = None
+        self._stdin_reader: Optional[asyncio.StreamReader] = None
 
     @abstractmethod
     def create_gui(self) -> Any:
@@ -124,32 +131,45 @@ class BaseGUIMode(BaseMode, ABC):
         while not self.system.initialized and self.system.running:
             retry_attempt += 1
             try:
-                self.logger.info("Attempting to detect devices (attempt %d)...", retry_attempt)
-                self.system.lifecycle_timer.mark_phase(f"retry_attempt_{retry_attempt}")
+                if retry_attempt == 1:
+                    self.logger.info("Scanning for devices...")
+                else:
+                    self.logger.info("Retrying device detection (attempt %d)...", retry_attempt)
+                self.system.lifecycle_timer.mark_phase(f"device_scan_{retry_attempt}")
 
                 await self.system._initialize_devices()
 
                 self.system.initialized = True
-                self.logger.info("Devices detected successfully!")
+
+                if retry_attempt == 1:
+                    self.logger.info("Device(s) detected on first scan!")
+                else:
+                    self.logger.info("Device(s) detected after %d attempts!", retry_attempt)
 
                 if hasattr(self.system, 'enable_gui_commands') and self.system.enable_gui_commands:
                     from logger_core.commands import StatusMessage
                     init_duration = self.system.lifecycle_timer.get_duration("process_start", "initialized")
                     StatusMessage.send_with_timing("initialized", init_duration, {
                         "status": "connected",
-                        "retry_attempts": retry_attempt
+                        "scan_attempts": retry_attempt
                     })
 
                 break
 
             except asyncio.CancelledError:
-                self.logger.debug("Device retry loop cancelled")
+                self.logger.debug("Device scan cancelled")
                 raise
             except KeyboardInterrupt:
                 self.logger.debug("Device detection cancelled by user")
                 return
             except Exception as e:
-                self.logger.debug("Device detection attempt %d failed: %s", retry_attempt, e)
+                if retry_attempt == 1:
+                    self.logger.info("No devices found on initial scan: %s", e)
+                else:
+                    self.logger.debug("Device detection attempt %d failed: %s", retry_attempt, e)
+
+            if retry_attempt > 1:
+                self.logger.info("Waiting %ds before next scan...", retry_interval)
 
             for _ in range(int(retry_interval * 10)):
                 if not self.system.running:
@@ -182,49 +202,133 @@ class BaseGUIMode(BaseMode, ABC):
     async def on_auto_start_recording(self) -> None:
         pass
 
+    def _close_command_stream(self) -> None:
+        if self._stdin_transport is not None:
+            try:
+                self._stdin_transport.close()
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.debug("Failed to close stdin transport: %s", exc)
+            self._stdin_transport = None
+
+        if self._stdin_pipe is not None:
+            try:
+                self._stdin_pipe.close()
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.debug("Failed to close stdin pipe: %s", exc)
+            self._stdin_pipe = None
+
+        self._stdin_reader = None
+
     def on_closing(self) -> None:
+        if self._closing:
+            self.logger.debug("Close request ignored; shutdown already in progress")
+            return
+
+        self._closing = True
         self.logger.info("Window close requested")
         self.system.lifecycle_timer.mark_phase("shutdown_start")
 
         self.system.running = False
         self.system.shutdown_event.set()
+        self._close_command_stream()
 
         if self.system.enable_gui_commands:
-            from logger_core.commands import StatusMessage
             StatusMessage.send("shutdown_started", {"reason": "user_closed_window"})
-
-        if hasattr(self, 'sync_cleanup'):
-            try:
-                self.logger.info("Running synchronous cleanup")
-                self.sync_cleanup()
-                self.system.lifecycle_timer.mark_phase("sync_cleanup_complete")
-            except Exception as e:
-                self.logger.error("Error during sync cleanup: %s", e, exc_info=True)
-
-        if self.gui and hasattr(self.gui, 'handle_window_close'):
-            try:
-                self.logger.info("Saving geometry")
-                self.gui.handle_window_close()
-                self.system.lifecycle_timer.mark_phase("geometry_saved")
-            except Exception as e:
-                self.logger.error("Error saving geometry: %s", e, exc_info=True)
 
         window = self.get_gui_window()
         if window:
             try:
-                self.logger.info("Destroying window")
-                window.destroy()
-                self.system.lifecycle_timer.mark_phase("window_destroyed")
-            except Exception as e:
-                self.logger.debug("Error destroying window: %s", e)
+                window.title(f"{self.get_module_display_name()} - Closing…")
+                window.update_idletasks()
+            except Exception:
+                pass
 
-        if self.system.enable_gui_commands:
-            from logger_core.commands import StatusMessage
-            shutdown_duration = self.system.lifecycle_timer.get_duration("shutdown_start", "window_destroyed")
-            StatusMessage.send("quitting", {
-                "reason": "user_closed_window",
-                "shutdown_duration_ms": round(shutdown_duration, 1)
-            })
+        if not self.async_bridge or self.async_bridge.loop is None:
+            self.logger.warning("Async bridge unavailable; performing best-effort synchronous shutdown")
+
+            if hasattr(self, 'sync_cleanup'):
+                try:
+                    self.logger.info("Running synchronous cleanup without bridge")
+                    self.sync_cleanup()
+                    self.system.lifecycle_timer.mark_phase("sync_cleanup_complete")
+                except Exception as exc:
+                    self.logger.error("Error during sync cleanup: %s", exc, exc_info=True)
+
+            if self.gui and hasattr(self.gui, 'handle_window_close'):
+                try:
+                    self.gui.handle_window_close()
+                    self.system.lifecycle_timer.mark_phase("geometry_saved")
+                except Exception as exc:
+                    self.logger.error("Error saving geometry: %s", exc, exc_info=True)
+
+            if window:
+                try:
+                    window.destroy()
+                    self.system.lifecycle_timer.mark_phase("window_destroyed")
+                except Exception as exc:
+                    self.logger.debug("Error destroying window: %s", exc)
+
+            if self.system.enable_gui_commands:
+                shutdown_duration = self.system.lifecycle_timer.get_duration("shutdown_start", "window_destroyed")
+                StatusMessage.send("quitting", {
+                    "reason": "user_closed_window",
+                    "shutdown_duration_ms": round(shutdown_duration, 1)
+                })
+            return
+
+        self._close_future = self.async_bridge.run_coroutine(self._shutdown_sequence())
+
+    async def _shutdown_sequence(self) -> None:
+        try:
+            if self.system:
+                try:
+                    self.logger.debug("Starting shutdown guard")
+                    await self.system.start_shutdown_guard(self.system.shutdown_guard_timeout)
+                    self.logger.warning("BaseGUIMode.on_closing: shutdown guard scheduled")
+                except Exception as exc:  # pragma: no cover - defensive
+                    self.logger.error("Failed to start shutdown guard: %s", exc)
+
+            loop = asyncio.get_running_loop()
+
+            if hasattr(self, 'sync_cleanup'):
+                try:
+                    self.logger.info("Running synchronous cleanup in executor")
+                    await loop.run_in_executor(None, self.sync_cleanup)
+                    self.system.lifecycle_timer.mark_phase("sync_cleanup_complete")
+                except Exception as exc:
+                    self.logger.error("Error during sync cleanup: %s", exc, exc_info=True)
+
+            if self.gui and hasattr(self.gui, 'handle_window_close'):
+                try:
+                    self.logger.info("Saving geometry")
+                    await self.async_bridge.call_in_gui_async(self.gui.handle_window_close)
+                    self.system.lifecycle_timer.mark_phase("geometry_saved")
+                except Exception as exc:
+                    self.logger.error("Error saving geometry: %s", exc, exc_info=True)
+
+            window = self.get_gui_window()
+            if window:
+                try:
+                    self.logger.info("Destroying window")
+                    await self.async_bridge.call_in_gui_async(window.destroy)
+                    self.system.lifecycle_timer.mark_phase("window_destroyed")
+                except Exception as exc:
+                    self.logger.debug("Error destroying window: %s", exc)
+            else:
+                self.system.lifecycle_timer.mark_phase("window_destroyed")
+
+            if self.system.enable_gui_commands:
+                shutdown_duration = self.system.lifecycle_timer.get_duration("shutdown_start", "window_destroyed")
+                StatusMessage.send("quitting", {
+                    "reason": "user_closed_window",
+                    "shutdown_duration_ms": round(shutdown_duration, 1)
+                })
+        finally:
+            if self.system:
+                try:
+                    await self.system.cancel_shutdown_guard()
+                except Exception as exc:  # pragma: no cover - defensive
+                    self.logger.debug("Failed to cancel shutdown guard: %s", exc)
 
     def sync_cleanup(self) -> None:
         """Synchronous cleanup - override in subclasses if needed."""
@@ -259,6 +363,8 @@ class BaseGUIMode(BaseMode, ABC):
         self.async_bridge = AsyncBridge(window)
         self.async_bridge.start()
 
+        self.gui.async_bridge = self.async_bridge
+
         if hasattr(self, 'on_async_bridge_started'):
             self.logger.info("Calling on_async_bridge_started hook...")
             self.async_bridge.run_coroutine(self.on_async_bridge_started())
@@ -267,9 +373,8 @@ class BaseGUIMode(BaseMode, ABC):
         self.logger.info("Window close handler registered")
 
         if self.enable_commands:
-            self.command_handler = self.create_command_handler(self.gui)
             self.logger.info("Starting GUI mode with parent command support")
-
+            self.command_handler = self.create_command_handler(self.gui)
             self.command_task = self.async_bridge.run_coroutine(
                 self._start_command_listener()
             )
@@ -282,14 +387,23 @@ class BaseGUIMode(BaseMode, ABC):
         self.async_bridge.run_coroutine(self._preview_update_loop())
 
         if not self.system.initialized:
-            self.logger.info("Devices not detected - starting retry task in background")
-            self.device_retry_task = self.async_bridge.run_coroutine(self._device_retry_loop())
+            def start_device_detection():
+                self.logger.info("Starting device detection...")
+                self.device_retry_task = self.async_bridge.run_coroutine(self._device_retry_loop())
+
+            window.after(100, start_device_detection)
 
         try:
             self._run_gui_sync()
 
         finally:
             self.logger.info("GUI closed, stopping async tasks")
+
+            if self._close_future:
+                try:
+                    await asyncio.wrap_future(self._close_future)
+                except Exception as exc:
+                    self.logger.error("Shutdown sequence raised: %s", exc, exc_info=True)
 
             if self.async_bridge:
                 self.async_bridge.stop()
@@ -336,16 +450,54 @@ class BaseGUIMode(BaseMode, ABC):
                 self.logger.debug("Preview update error: %s", e)
                 break
 
-    async def _setup_stdin_reader(self) -> asyncio.StreamReader:
+    async def _setup_stdin_reader(self) -> Optional[asyncio.StreamReader]:
+        if self._stdin_transport and not self._stdin_transport.is_closing() and self._stdin_reader is not None:
+            return self._stdin_reader
+
+        if sys.stdin.closed:
+            self.logger.debug("stdin closed; skipping command listener setup")
+            return None
+
+        stream = getattr(sys.stdin, "buffer", sys.stdin)
+
+        try:
+            fileno = stream.fileno()
+        except (AttributeError, io.UnsupportedOperation, ValueError) as exc:
+            self.logger.warning("Command listener disabled (stdin has no file descriptor): %s", exc)
+            return None
+
         loop = asyncio.get_event_loop()
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
-        await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+
+        pipe = None
+        try:
+            dup_fd = os.dup(fileno)
+            pipe = os.fdopen(dup_fd, "rb", buffering=0)
+            transport, _ = await loop.connect_read_pipe(lambda: protocol, pipe)
+        except (PermissionError, NotImplementedError) as exc:
+            if pipe is not None:
+                pipe.close()
+            self.logger.warning("Command listener disabled: %s", exc)
+            return None
+        except Exception as exc:
+            if pipe is not None:
+                pipe.close()
+            self.logger.error("Failed to set up command listener: %s", exc, exc_info=True)
+            return None
+
+        self._stdin_transport = transport
+        self._stdin_pipe = pipe
+        self._stdin_reader = reader
         return reader
 
     async def _start_command_listener(self) -> None:
         """Set up stdin reader and start command listener (runs in background thread)."""
         stdin_reader = await self._setup_stdin_reader()
+        if stdin_reader is None:
+            self.logger.warning("Parent command interface unavailable; running in standalone GUI mode")
+            return
+
         await self._command_listener(stdin_reader)
 
     async def _command_listener(self, reader: asyncio.StreamReader) -> None:
@@ -384,6 +536,7 @@ class BaseGUIMode(BaseMode, ABC):
                 break
 
         self.logger.info("Command listener stopped")
+        self._close_command_stream()
 
     async def _handle_command_with_gui_sync(self, command_data: dict) -> bool:
         if not self.command_handler:

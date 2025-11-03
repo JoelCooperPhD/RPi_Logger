@@ -15,8 +15,9 @@ logger = logging.getLogger(__name__)
 
 class SDRTConfigWindow:
 
-    def __init__(self, drt_system: 'DRTSystem'):
+    def __init__(self, drt_system: 'DRTSystem', async_bridge):
         self.system = drt_system
+        self.async_bridge = async_bridge
         self.config_window: Optional[tk.Toplevel] = None
         self.current_port: Optional[str] = None
 
@@ -146,7 +147,10 @@ class SDRTConfigWindow:
             command=lambda: self._set_iso_preset(handler)
         ).grid(row=0, column=0, pady=5, padx=20, sticky='ew')
 
-        asyncio.create_task(self._load_current_config(handler))
+        if self.async_bridge:
+            self.async_bridge.run_coroutine(self._load_current_config(handler))
+        else:
+            logger.error("No async_bridge available to load config")
 
         self.config_window.update_idletasks()
         self.config_window.geometry(f"+{self.config_window.winfo_screenwidth()//2 - self.config_window.winfo_width()//2}+"
@@ -189,9 +193,12 @@ class SDRTConfigWindow:
             intensity = ceil(intensity_percent * 2.55)
             stim_dur = self._filter_entry(self.settings['stimDur'].get(), 1000, 0, 65535)
 
-            asyncio.create_task(self._send_config_and_reload(
-                handler, lower_isi, upper_isi, intensity, stim_dur
-            ))
+            if self.async_bridge:
+                self.async_bridge.run_coroutine(self._send_config_and_reload(
+                    handler, lower_isi, upper_isi, intensity, stim_dur
+                ))
+            else:
+                logger.error("No async_bridge available to upload config")
 
             logger.info(f"Uploading configuration to device on {self.current_port}")
         except Exception as e:
@@ -221,7 +228,10 @@ class SDRTConfigWindow:
             logger.error(f"Failed to send configuration: {e}", exc_info=True)
 
     def _set_iso_preset(self, handler: 'DRTHandler'):
-        asyncio.create_task(self._send_iso_preset(handler))
+        if self.async_bridge:
+            self.async_bridge.run_coroutine(self._send_iso_preset(handler))
+        else:
+            logger.error("No async_bridge available to set ISO preset")
 
     async def _send_iso_preset(self, handler: 'DRTHandler'):
         try:

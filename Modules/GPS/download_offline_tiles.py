@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Download offline map tiles for GPS2 module.
+Download offline map tiles for the GPS module.
 
 This creates a database of offline tiles that can be used without internet.
 Adjust the coordinates and zoom levels for your region.

@@ -111,26 +111,7 @@ class FrameProcessor:
         requested_fps: float = 30.0,
         experiment_label: Optional[str] = None,
     ) -> np.ndarray:
-        """Simplified display overlay matching camera style: frame number + gaze circle"""
-        # Use same minimal overlay style as recording (but not saved to video)
-        font_scale = self.config.overlay_font_scale
-        thickness = self.config.overlay_thickness
-        text_color = (self.config.overlay_color_b, self.config.overlay_color_g, self.config.overlay_color_r)
-        margin_left = self.config.overlay_margin_left
-        line_start_y = self.config.overlay_line_start_y
-
-        # Show display frame count
-        frame_text = f"{frame_count}"
-        cv2.putText(
-            frame,
-            frame_text,
-            (margin_left, line_start_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
-            text_color,
-            thickness,
-            cv2.LINE_AA
-        )
+        """Overlay for preview window (gaze indicator only)."""
 
         # Add gaze circle if available
         if last_gaze:
@@ -178,11 +159,30 @@ class FrameProcessor:
         # Use config values
         font_scale = self.config.overlay_font_scale
         thickness = self.config.overlay_thickness
-        text_color = (self.config.overlay_color_b, self.config.overlay_color_g, self.config.overlay_color_r)  # BGR format
+        text_color = (
+            self.config.overlay_color_r,
+            self.config.overlay_color_g,
+            self.config.overlay_color_b,
+        )
         margin_left = self.config.overlay_margin_left
         line_start_y = self.config.overlay_line_start_y
 
         frame_text = f"{frame_number}"
+
+        border_thickness = max(1, thickness * 3)
+        border_color = (0, 0, 0)
+
+        cv2.putText(
+            frame,
+            frame_text,
+            (margin_left, line_start_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            border_color,
+            border_thickness,
+            cv2.LINE_AA
+        )
+
         cv2.putText(
             frame,
             frame_text,

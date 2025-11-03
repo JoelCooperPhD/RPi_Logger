@@ -17,10 +17,10 @@ class HeadlessMode(BaseMode):
         self.system.running = True
         self.logger.info("Headless mode: starting continuous recording")
 
-        session_dir = self.system._ensure_session_dir()
-        for cam in self.system.cameras:
-            cam.start_recording(session_dir)
-        self.system.recording = True
+        started = await self.system.start_recording()
+        if not started:
+            self.logger.error("Headless mode unable to start recording; shutting down")
+            return
 
         try:
             while self.is_running():
@@ -30,7 +30,5 @@ class HeadlessMode(BaseMode):
                 await asyncio.sleep(0.001)
         finally:
             if self.system.recording:
-                for cam in self.system.cameras:
-                    cam.stop_recording()
-                self.system.recording = False
+                await self.system.stop_recording()
             self.logger.info("Headless mode ended")

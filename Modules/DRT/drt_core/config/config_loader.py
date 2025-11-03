@@ -14,7 +14,7 @@ DEFAULTS = {
     "window_height": 600,
 
     "device_vid": 0x239A,
-    "device_pid": 0x801F,
+    "device_pid": 0x801E,
     "baudrate": 9600,
 
     "output_dir": "drt_data",
@@ -23,6 +23,8 @@ DEFAULTS = {
     "console_output": False,
 
     "auto_start_recording": False,
+
+    "gui_show_session_output": True,
 }
 
 

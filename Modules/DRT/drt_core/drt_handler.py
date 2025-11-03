@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, Callable
 from datetime import datetime
 
 from Modules.base import USBSerialDevice
+from logger_core.commands import StatusMessage
 from .constants import DRT_COMMANDS, DRT_RESPONSE_TYPES, ISO_PRESET_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ class DRTHandler:
         self.output_dir = output_dir
         self.system = system
         self._read_task: Optional[asyncio.Task] = None
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._running = False
         self._data_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
         self._config_future: Optional[asyncio.Future] = None
@@ -31,20 +33,56 @@ class DRTHandler:
             return
 
         self._running = True
-        self._read_task = asyncio.create_task(self._read_loop())
+        loop = asyncio.get_running_loop()
+        self._loop = loop
+        self._read_task = loop.create_task(self._read_loop())
         logger.info(f"Started DRT handler for {self.port}")
 
     async def stop(self):
+        if not self._running and not self._read_task:
+            return
+
         self._running = False
 
-        if self._read_task:
-            self._read_task.cancel()
-            try:
-                await self._read_task
-            except asyncio.CancelledError:
-                pass
+        task = self._read_task
+        self._read_task = None
 
+        if task:
+            origin_loop = self._loop
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+
+            if origin_loop and origin_loop is not current_loop:
+                if origin_loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(self._cancel_read_task(task), origin_loop)
+                    try:
+                        await asyncio.wrap_future(future)
+                    except RuntimeError as exc:
+                        logger.warning(
+                            "Failed to await read loop task for %s on original loop: %s",
+                            self.port,
+                            exc,
+                        )
+                else:
+                    logger.debug(
+                        "Read loop task loop already stopped for %s; cancelling without await",
+                        self.port,
+                    )
+                    task.cancel()
+            else:
+                await self._cancel_read_task(task)
+
+        self._loop = None
         logger.info(f"Stopped DRT handler for {self.port}")
+
+    async def _cancel_read_task(self, task: asyncio.Task):
+        try:
+            task.cancel()
+            await task
+        except asyncio.CancelledError:
+            pass
 
     async def send_command(self, command: str, value: Optional[str] = None) -> bool:
         if command not in DRT_COMMANDS:
@@ -59,10 +97,13 @@ class DRTHandler:
             message = f"{cmd_string}\n\r"
 
         data = message.encode('utf-8')
+        logger.info(f"Sending command to {self.port}: {message.strip()}")
         success = await self.device.write(data)
 
         if success:
-            logger.debug(f"Sent command to {self.port}: {message.strip()}")
+            logger.info(f"Command sent successfully to {self.port}: {message.strip()}")
+        else:
+            logger.error(f"Failed to send command to {self.port}: {message.strip()}")
 
         return success
 
@@ -119,11 +160,21 @@ class DRTHandler:
 
     async def set_iso_params(self) -> bool:
         logger.info(f"Setting ISO preset parameters on {self.port}")
-        await self.send_command('set_lowerISI', str(ISO_PRESET_CONFIG['lowerISI']))
-        await self.send_command('set_upperISI', str(ISO_PRESET_CONFIG['upperISI']))
-        await self.send_command('set_stimDur', str(ISO_PRESET_CONFIG['stimDur']))
-        await self.send_command('set_intensity', str(ISO_PRESET_CONFIG['intensity']))
-        return True
+        commands = [
+            ('set_lowerISI', str(ISO_PRESET_CONFIG['lowerISI'])),
+            ('set_upperISI', str(ISO_PRESET_CONFIG['upperISI'])),
+            ('set_stimDur', str(ISO_PRESET_CONFIG['stimDur'])),
+            ('set_intensity', str(ISO_PRESET_CONFIG['intensity'])),
+        ]
+
+        success = True
+        for command, value in commands:
+            result = await self.send_command(command, value)
+            if not result:
+                logger.error(f"Failed to send {command} command to {self.port}")
+                success = False
+
+        return success
 
     async def _read_loop(self):
         try:
@@ -183,17 +234,32 @@ class DRTHandler:
             else:
                 data = {'raw': response}
 
-            if self._data_callback:
-                try:
-                    if asyncio.iscoroutinefunction(self._data_callback):
-                        await self._data_callback(self.port, response_type or 'unknown', data)
-                    else:
-                        self._data_callback(self.port, response_type or 'unknown', data)
-                except Exception as e:
-                    logger.error(f"Error in data callback: {e}")
+            await self._dispatch_data_event(response_type or 'unknown', data)
+
+            if self.system and getattr(self.system, 'enable_gui_commands', False):
+                payload = {'port': self.port}
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        if key != 'raw':
+                            payload[key] = value
+                if response_type:
+                    payload.setdefault('event', response_type)
+                StatusMessage.send('drt_event', payload)
 
         except Exception as e:
             logger.error(f"Error processing response from {self.port}: {e}")
+
+    async def _dispatch_data_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        if not self._data_callback:
+            return
+
+        try:
+            if asyncio.iscoroutinefunction(self._data_callback):
+                await self._data_callback(self.port, event_type, data)
+            else:
+                self._data_callback(self.port, event_type, data)
+        except Exception as exc:
+            logger.error(f"Error in data callback for {self.port}: {exc}")
 
     def _parse_click(self, parts: list) -> Dict[str, Any]:
         value = parts[1] if len(parts) > 1 else ''
@@ -202,12 +268,14 @@ class DRTHandler:
         return {
             'event': 'click',
             'value': value,
+            'click_count': self._click_count,
             'raw': '>'.join(parts)
         }
 
     def _parse_trial(self, parts: list) -> Dict[str, Any]:
         data = {
             'event': 'trial',
+            'responses': self._click_count,
             'raw': '>'.join(parts)
         }
 
@@ -295,7 +363,13 @@ class DRTHandler:
             device_timestamp = data.get('timestamp', '')
             rt_raw = data.get('reaction_time', '')
 
-            rt = int(rt_raw) if rt_raw != '' else ''
+            if rt_raw in ('', None):
+                rt = ''
+            else:
+                try:
+                    rt = int(float(rt_raw))
+                except (TypeError, ValueError):
+                    rt = rt_raw
 
             clicks = self._click_count
             if rt == -1 or rt == '-1':
@@ -309,6 +383,21 @@ class DRTHandler:
 
             await asyncio.to_thread(append_line)
             logger.debug(f"Logged trial: T={trial_number}, RT={rt}, Clicks={clicks}")
+
+            log_payload = {
+                'device_id': device_id,
+                'label': label,
+                'unix_time': unix_time,
+                'device_timestamp': device_timestamp,
+                'trial_number': trial_number,
+                'responses': clicks,
+                'reaction_time': rt,
+                'raw': line.strip(),
+                'line': line,
+                'file_path': str(data_file),
+            }
+
+            await self._dispatch_data_event('trial_logged', log_payload)
 
             self._click_count = 0
 

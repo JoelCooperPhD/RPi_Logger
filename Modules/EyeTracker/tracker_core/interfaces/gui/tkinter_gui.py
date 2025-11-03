@@ -21,6 +21,12 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.system = tracker_system
         self.args = args
 
+        self.preview_width = getattr(args, 'preview_width', 640) or 640
+        preview_height = getattr(args, 'preview_height', None)
+        if not preview_height:
+            preview_height = int(self.preview_width * 3 / 4)
+        self.preview_height = preview_height
+
         # Initialize module-specific attributes before GUI framework
         self.preview_canvas: Optional[tk.Canvas] = None
         self.preview_image_ref = None  # Keep reference to prevent GC
@@ -58,21 +64,26 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         label = ttk.Label(content_frame, text="Scene Camera (with Gaze Overlay)")
         label.grid(row=0, column=0, sticky='w', padx=5, pady=(5, 2))
 
-        self.preview_canvas = tk.Canvas(content_frame,
-                         width=self.args.width if hasattr(self.args, 'width') else 1280,
-                         height=self.args.height if hasattr(self.args, 'height') else 720,
-                         bg='black',
-                         highlightthickness=1,
-                         highlightbackground='gray')
+        self.preview_canvas = tk.Canvas(
+            content_frame,
+            width=self.preview_width,
+            height=self.preview_height,
+            bg='black',
+            highlightthickness=1,
+            highlightbackground='gray'
+        )
         self.preview_canvas.grid(row=1, column=0, sticky='nsew')
 
     def _start_recording(self):
         async def start_async():
-            if self.system.recording_manager.is_recording:
+            if self.system.recording:
                 logger.warning("Already recording")
                 return
 
-            await self.system.recording_manager.start_recording()
+            started = await self.system.start_recording()
+            if not started:
+                logger.error("Failed to start recording")
+                return
 
             experiment_label = self.system.recording_manager.current_experiment_label or "unknown"
             self.root.title(f"Eye Tracker - ⬤ RECORDING - {experiment_label}")
@@ -83,11 +94,14 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
     def _stop_recording(self):
         async def stop_async():
-            if not self.system.recording_manager.is_recording:
+            if not self.system.recording:
                 logger.warning("Not recording")
                 return
 
-            await self.system.recording_manager.stop_recording()
+            stopped = await self.system.stop_recording()
+            if not stopped:
+                logger.error("Failed to stop recording")
+                return
 
             self.root.title("Eye Tracker")
 
@@ -99,12 +113,12 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         session_dir = self.system.session_dir
 
-        latest_frame = self.system.frame_processor._latest_processed_frame if hasattr(self.system.frame_processor, '_latest_processed_frame') else None
+        latest_frame = self.system.tracker_handler.get_display_frame()
 
         if latest_frame is not None:
             import cv2
             filename = session_dir / f"snapshot_eyetracker_{ts}.jpg"
-            cv2.imwrite(str(filename), latest_frame)
+            cv2.imwrite(str(filename), latest_frame.copy())
             logger.info("Saved snapshot: %s", filename)
 
             original_title = self.root.title()
@@ -128,18 +142,9 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             self._show_waiting_message()
             return
 
-        if not hasattr(self.system, 'gaze_tracker') or self.system.gaze_tracker is None:
-            self._show_waiting_message()
+        frame = self.system.tracker_handler.get_display_frame()
+        if frame is None:
             return
-
-        tracker = self.system.gaze_tracker
-        if not hasattr(tracker, '_latest_display_frame'):
-            return
-
-        if tracker._latest_display_frame is None:
-            return
-
-        frame = tracker._latest_display_frame
 
         if frame is not None:
             from PIL import Image, ImageTk
@@ -147,32 +152,21 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             image = Image.fromarray(frame_rgb)
+            photo = ImageTk.PhotoImage(image)
 
-            canvas_width = self.preview_canvas.winfo_width()
-            canvas_height = self.preview_canvas.winfo_height()
+            canvas_width = self.preview_canvas.winfo_width() or self.preview_width
+            canvas_height = self.preview_canvas.winfo_height() or self.preview_height
 
-            if canvas_width > 1 and canvas_height > 1:
-                img_width, img_height = image.size
+            self.preview_canvas.delete("all")
+            self.preview_canvas.create_image(
+                canvas_width // 2,
+                canvas_height // 2,
+                anchor='center',
+                image=photo
+            )
 
-                scale_w = canvas_width / img_width
-                scale_h = canvas_height / img_height
-                scale = min(scale_w, scale_h)  # Use smaller scale to fit within canvas
-
-                new_width = int(img_width * scale)
-                new_height = int(img_height * scale)
-
-                if (new_width, new_height) != image.size:
-                    image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-                photo = ImageTk.PhotoImage(image)
-
-                self.preview_canvas.delete("all")
-                self.preview_canvas.create_image(canvas_width//2, canvas_height//2, anchor='center', image=photo)
-
-                # Keep reference to prevent garbage collection
-                self.preview_image_ref = photo
-
-                self.system.frame_processor._latest_processed_frame = frame
+            # Keep reference to prevent garbage collection
+            self.preview_image_ref = photo
 
     def _show_waiting_message(self):
         if not self.preview_canvas:

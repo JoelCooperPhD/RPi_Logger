@@ -1,5 +1,5 @@
 enabled = false
-window_x = 1337
-window_y = 1378
+window_x = 4855
+window_y = 1907
 window_width = 600
 window_height = 500

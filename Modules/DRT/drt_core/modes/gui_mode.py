@@ -17,18 +17,7 @@ class GUIMode(BaseGUIMode):
         super().__init__(system, enable_commands)
 
     async def on_async_bridge_started(self) -> None:
-        logger.info("Async bridge started, initializing USB device monitor...")
-        if not self.system.initialized:
-            try:
-                await self.system._initialize_devices()
-                logger.info("USB device monitor initialized successfully")
-
-                if self.enable_commands:
-                    from logger_core.commands import StatusMessage
-                    StatusMessage.send("initialized", {"status": "ready"})
-                    logger.info("Sent initialized status to parent")
-            except Exception as e:
-                logger.error("Failed to initialize USB device monitor: %s", e, exc_info=True)
+        logger.info("Async bridge started - device detection will begin after mainloop starts")
 
     def create_gui(self) -> Any:
         from ..interfaces.gui.tkinter_gui import TkinterGUI
@@ -55,13 +44,14 @@ class GUIMode(BaseGUIMode):
         logger.info(f"GUIMode: on_device_connected called for {port}")
         if self.gui and hasattr(self.gui, 'on_device_connected'):
             logger.info(f"GUIMode: GUI instance has on_device_connected method")
-            if self.async_bridge:
-                logger.info(f"GUIMode: Using async_bridge to call GUI update for {port}")
-                self.async_bridge.call_in_gui(self.gui.on_device_connected, port)
-                logger.info(f"GUIMode: Scheduled GUI update via async_bridge for {port}")
+
+            window = self.get_gui_window()
+            if window:
+                logger.info(f"GUIMode: Scheduling GUI update via window.after() for {port}")
+                window.after(0, lambda: self.gui.on_device_connected(port))
+                logger.info(f"GUIMode: Scheduled GUI update for {port}")
             else:
-                logger.warning(f"GUIMode: No async_bridge available, calling directly for {port}")
-                self.gui.on_device_connected(port)
+                logger.warning(f"GUIMode: No window available for {port}")
         else:
             logger.warning(f"GUIMode: GUI or on_device_connected method not available")
 

@@ -8,6 +8,8 @@ A professional eye tracking system for Raspberry Pi with Pupil Labs integration,
 📹 **Gaze Recording**: High-quality gaze data with scene video recording
 🎯 **Real-Time Preview**: OpenCV-based preview with gaze overlay in interactive mode
 ⏰ **Multi-Stream Capture**: Synchronized gaze, IMU, events, and video data
+🎧 **Optional Audio Capture**: Headset microphone stream saved to WAV with timing metadata
+📈 **Device Telemetry Logging**: Periodic battery, storage, and sensor status snapshots
 🔄 **Multiple Modes**: Standalone (interactive), headless, and slave (master logger) modes
 🖱️ **Interactive Controls**: Keyboard shortcuts in standalone mode (q=quit, r=record)
 ⚙️ **Flexible Configuration**: Configurable resolution (up to 1920x1080), processing FPS (1-120)
@@ -106,6 +108,14 @@ The `config.txt` file allows you to set default values for system settings witho
 - `auto_start_recording` - Automatically start recording on startup (true/false)
 - `output_dir`, `session_prefix` - Output configuration
 
+**Data Export:**
+- `enable_advanced_gaze_logging` - Write extended gaze CSV with per-eye metrics
+- `expand_eye_event_details` - Include fixation/saccade metrics in EVENTS CSV
+- `enable_audio_recording` - Capture headset microphone audio to WAV/CSV
+- `audio_stream_param` - RTSP query string used to locate the audio stream
+- `enable_device_status_logging` - Periodically log battery/memory/sensor status
+- `device_status_poll_interval` - Seconds between telemetry samples while recording
+
 **Display & Preview:**
 - `preview_width` - Preview window width in pixels
 
@@ -138,6 +148,12 @@ The `config.txt` file allows you to set default values for system settings witho
 | `--log-level` | info | Python logging verbosity (debug/info/warning/error/critical) |
 | `--discovery-timeout` | 5.0 | Device discovery timeout (seconds) |
 | `--discovery-retry` | 3.0 | Retry interval after device failure (seconds) |
+| `--advanced-gaze-logging` | config | Enable extended gaze CSV (use `--no-advanced-gaze-logging` to disable) |
+| `--enable-eye-event-details` | config | Include fixation/saccade metrics in EVENTS CSV (`--disable-eye-event-details` disables) |
+| `--enable-audio-recording` | config | Capture headset audio stream (`--disable-audio-recording` disables) |
+| `--audio-stream-param` | `audio=scene` | RTSP query parameter used to locate audio stream |
+| `--log-device-status` | config | Record periodic device telemetry (`--no-log-device-status` disables) |
+| `--device-status-interval` | 5.0 | Poll interval (seconds) for telemetry logging |
 
 > **Note**: Most settings can also be configured in `config.txt` to avoid passing CLI arguments. CLI arguments override config file values.
 
@@ -189,9 +205,13 @@ recordings/
     ├── session.log                           # System log file
     ├── scene_video_TIMESTAMP.mp4            # Scene camera video
     ├── gaze_data_TIMESTAMP.csv              # Gaze coordinates and timestamps
+    ├── gaze_full_TIMESTAMP.csv              # Extended gaze metrics (if enabled)
     ├── imu_data_TIMESTAMP.csv               # IMU sensor data (if available)
     ├── events_TIMESTAMP.csv                 # Eye tracking events (if available)
-    └── frame_timing_TIMESTAMP.csv           # Frame timing metadata
+    ├── audio_TIMESTAMP.wav                  # Headset audio track (if enabled)
+    ├── audio_timing_TIMESTAMP.csv           # Audio timing metadata (if enabled)
+    ├── frame_timing_TIMESTAMP.csv           # Frame timing metadata
+    └── device_status_TIMESTAMP.csv          # Device telemetry log (if enabled)
 ```
 
 **Log File:**
@@ -206,9 +226,13 @@ recordings/
 **Data Files:**
 - `scene_video_TIMESTAMP.mp4` — Scene camera video with gaze overlay
 - `gaze_data_TIMESTAMP.csv` — Gaze position data with timestamps
+- `gaze_full_TIMESTAMP.csv` — Per-eye gaze metrics (pupil diameter, eyelids, etc.)
 - `imu_data_TIMESTAMP.csv` — IMU sensor data (accelerometer, gyroscope)
 - `events_TIMESTAMP.csv` — Eye tracking events (blinks, fixations, etc.)
 - `frame_timing_TIMESTAMP.csv` — Frame timing diagnostics
+- `audio_TIMESTAMP.wav` — Raw headset microphone audio (AAC decoded to WAV)
+- `audio_timing_TIMESTAMP.csv` — Samples/clock metadata for audio stream
+- `device_status_TIMESTAMP.csv` — Battery/memory/sensor state snapshots during recording
 
 ## Architecture
 

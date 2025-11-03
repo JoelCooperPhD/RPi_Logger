@@ -38,7 +38,8 @@ logger = logging.getLogger(__name__)
 def parse_args(argv: Optional[list[str]] = None):
     # Load config file first (import here to avoid loading picamera2 early)
     from camera_core import load_config_file
-    config = load_config_file()
+    config_path = Path(__file__).parent / "config.txt"
+    config = load_config_file(config_path)
 
     # Handle resolution preset from config (must be number 0-7)
     from cli_utils import parse_resolution as parse_res_helper
@@ -148,6 +149,9 @@ def parse_args(argv: Optional[list[str]] = None):
 
     from Modules.base import load_window_geometry_from_config
     args.window_geometry = load_window_geometry_from_config(config, args.window_geometry)
+
+    args.config = config
+    args.config_file_path = config_path
 
     return args
 

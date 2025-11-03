@@ -135,7 +135,7 @@ class GPSSystem(BaseSystem, RecordingStateMixin):
             raise ValueError(f"Unsupported mode: {mode_name}")
 
     async def cleanup(self) -> None:
-        logger.info("GPS2 cleanup")
+        logger.info("GPS cleanup")
         self.running = False
         self.shutdown_event.set()
 
@@ -149,4 +149,4 @@ class GPSSystem(BaseSystem, RecordingStateMixin):
             await self.recording_manager.cleanup()
 
         self.initialized = False
-        logger.info("GPS2 cleanup completed")
+        logger.info("GPS cleanup completed")

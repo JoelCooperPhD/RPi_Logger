@@ -104,6 +104,23 @@ class GUIMode(BaseGUIMode):
     def on_closing(self) -> None:
         self.logger.info("Audio GUI closing - stopping display loop immediately")
         self._display_loop_stopped = True
+
+        use_sync_shutdown = (
+            self.async_bridge
+            and self.async_bridge.loop is not None
+            and (not self.capture_manager or not self.capture_manager.audio_processes)
+        )
+
+        if use_sync_shutdown:
+            self.logger.info("No active audio capture processes; using synchronous shutdown path")
+            bridge = self.async_bridge
+            self.async_bridge = None
+            try:
+                super().on_closing()
+            finally:
+                self.async_bridge = bridge
+            return
+
         super().on_closing()
 
     async def cleanup(self) -> None:

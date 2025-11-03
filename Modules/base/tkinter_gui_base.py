@@ -1,5 +1,6 @@
 
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -136,7 +137,7 @@ class TkinterGUIBase:
         self.log_frame = ttk.LabelFrame(parent_frame, text="Logger", padding="3")
 
         self.log_frame.columnconfigure(0, weight=1)
-        self.log_frame.rowconfigure(0, weight=0)
+        self.log_frame.rowconfigure(0, weight=1)
 
         self.log_text = scrolledtext.ScrolledText(
             self.log_frame,
@@ -145,7 +146,7 @@ class TkinterGUIBase:
             bg='#f5f5f5',
             fg='#333333'
         )
-        self.log_text.grid(row=0, column=0, sticky='ew')
+        self.log_text.grid(row=0, column=0, sticky='nsew')
         self.log_text.config(state='disabled')  # Read-only
 
         self._setup_log_handler()
@@ -170,16 +171,24 @@ class TkinterGUIBase:
 
             def emit(self, record):
                 msg = self.format(record) + '\n'
-                self.text_widget.after(0, self._append_log, msg)
+                try:
+                    self.text_widget.after(0, self._append_log, msg)
+                except (tk.TclError, RuntimeError):
+                    # Widget is gone / Tk main loop already shut down
+                    return
 
             def _append_log(self, msg):
-                self.text_widget.config(state='normal')
-                self.text_widget.insert(tk.END, msg)
-                self.text_widget.see(tk.END)  # Auto-scroll
-                lines = int(self.text_widget.index('end-1c').split('.')[0])
-                if lines > 500:
-                    self.text_widget.delete('1.0', f'{lines-500}.0')
-                self.text_widget.config(state='disabled')
+                try:
+                    self.text_widget.config(state='normal')
+                    self.text_widget.insert(tk.END, msg)
+                    self.text_widget.see(tk.END)  # Auto-scroll
+                    lines = int(self.text_widget.index('end-1c').split('.')[0])
+                    if lines > 500:
+                        self.text_widget.delete('1.0', f'{lines-500}.0')
+                    self.text_widget.config(state='disabled')
+                except (tk.TclError, RuntimeError):
+                    # Widget destroyed or Tk shutting down; nothing to do
+                    return
 
         text_handler = TextHandler(self.log_text)
         text_handler.setLevel(logging.INFO)

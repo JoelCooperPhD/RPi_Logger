@@ -6,15 +6,15 @@ from Modules.base.modes import BaseGUIMode
 from ..interfaces.gui import TkinterGUI
 
 if TYPE_CHECKING:
-    from ..gps2_system import GPSSystem
+    from ..gps_system import GPSSystem
 
 logger = logging.getLogger(__name__)
 
 
 class GUIMode(BaseGUIMode):
 
-    def __init__(self, gps2_system: 'GPSSystem', enable_commands: bool = False):
-        super().__init__(gps2_system, enable_commands)
+    def __init__(self, gps_system: 'GPSSystem', enable_commands: bool = False):
+        super().__init__(gps_system, enable_commands)
         self.gps_update_task: Optional[asyncio.Task] = None
 
     def create_gui(self) -> TkinterGUI:
@@ -51,12 +51,33 @@ class GUIMode(BaseGUIMode):
                     update_count += 1
 
                     if update_count % 50 == 0:
-                        logger.info("GPS update loop iteration %d: fix=%s, lat=%.6f, lon=%.6f",
-                                   update_count, data.get('fix_quality', 0),
-                                   data.get('latitude', 0.0), data.get('longitude', 0.0))
+                        logger.info(
+                            "GPS update loop iteration %d: fix=%s, lat=%.6f, lon=%.6f",
+                            update_count,
+                            data.get('fix_quality', 0),
+                            data.get('latitude', 0.0),
+                            data.get('longitude', 0.0)
+                        )
 
                     if self.gui.root.winfo_exists():
-                        self.gui.root.after(0, lambda d=data: self.gui.update_gps_display(d))
+                        sentences_snapshot: list[str] = []
+
+                        handler = self.system.gps_handler
+                        if handler is not None:
+                            try:
+                                if hasattr(handler, 'get_recent_sentences'):
+                                    sentences_snapshot = handler.get_recent_sentences(self.gui.NMEA_HISTORY_LIMIT)
+                                elif hasattr(handler, 'recent_sentences'):
+                                    sentences_snapshot = list(handler.recent_sentences)
+                            except Exception as exc:
+                                logger.debug("Failed to capture NMEA sentences for GUI: %s", exc)
+
+                        gui_data = data.copy() if isinstance(data, dict) else dict(data)
+
+                        self.gui.root.after(
+                            0,
+                            lambda d=gui_data, s=tuple(sentences_snapshot): self.gui.update_from_gps(d, list(s))
+                        )
                     else:
                         logger.warning("GUI root window does not exist!")
                 else:
@@ -73,7 +94,7 @@ class GUIMode(BaseGUIMode):
 
 
     async def cleanup(self) -> None:
-        logger.info("GPS2 mode cleanup")
+        logger.info("GPS mode cleanup")
 
         if self.gps_update_task and not self.gps_update_task.done():
             self.gps_update_task.cancel()
@@ -82,4 +103,4 @@ class GUIMode(BaseGUIMode):
             except asyncio.CancelledError:
                 pass
 
-        logger.info("GPS2 mode cleanup completed")
+        logger.info("GPS mode cleanup completed")

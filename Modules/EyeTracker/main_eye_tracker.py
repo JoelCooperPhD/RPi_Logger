@@ -39,7 +39,8 @@ logger = logging.getLogger("TrackerMain")
 
 def parse_args(argv: Optional[list[str]] = None):
     from tracker_core import load_config_file
-    config = load_config_file()
+    config_path = Path(__file__).parent / "config.txt"
+    config = load_config_file(config_path)
 
     # Preview resolution presets (4:3 aspect ratio - matches Pupil Labs 1600x1200 scene camera)
     PREVIEW_PRESETS = {
@@ -74,7 +75,6 @@ def parse_args(argv: Optional[list[str]] = None):
     default_console_output = get_config_bool(config, 'console_output', False)
     default_discovery_timeout = get_config_float(config, 'discovery_timeout', 5.0)
     default_discovery_retry = get_config_float(config, 'discovery_retry', 3.0)
-    default_gui_start_minimized = get_config_bool(config, 'gui_start_minimized', True)
     default_gui_preview_update_hz = get_config_int(config, 'gui_preview_update_hz', 10)
 
     # Recording overlay settings
@@ -99,6 +99,13 @@ def parse_args(argv: Optional[list[str]] = None):
     default_gaze_color_not_worn_b = get_config_int(config, 'gaze_color_not_worn_b', 0)
     default_gaze_color_not_worn_g = get_config_int(config, 'gaze_color_not_worn_g', 0)
     default_gaze_color_not_worn_r = get_config_int(config, 'gaze_color_not_worn_r', 255)
+
+    default_enable_advanced_gaze_logging = get_config_bool(config, 'enable_advanced_gaze_logging', False)
+    default_expand_eye_event_details = get_config_bool(config, 'expand_eye_event_details', True)
+    default_enable_audio_recording = get_config_bool(config, 'enable_audio_recording', False)
+    default_audio_stream_param = get_config_str(config, 'audio_stream_param', 'audio=scene')
+    default_enable_device_status_logging = get_config_bool(config, 'enable_device_status_logging', False)
+    default_device_status_poll_interval = get_config_float(config, 'device_status_poll_interval', 5.0)
 
     parser = argparse.ArgumentParser(description="Eye tracking system with Pupil Labs integration")
     add_common_cli_arguments(
@@ -146,21 +153,6 @@ def parse_args(argv: Optional[list[str]] = None):
         help="Device discovery retry interval (seconds)",
     )
 
-    gui_size_group = parser.add_mutually_exclusive_group()
-    gui_size_group.add_argument(
-        "--gui-minimized",
-        dest="gui_start_minimized",
-        action="store_true",
-        default=default_gui_start_minimized,
-        help="Start GUI with minimal window size (default from config)",
-    )
-    gui_size_group.add_argument(
-        "--gui-fullsize",
-        dest="gui_start_minimized",
-        action="store_false",
-        help="Start GUI at capture resolution",
-    )
-
     parser.add_argument(
         "--gui-preview-update-hz",
         dest="gui_preview_update_hz",
@@ -169,8 +161,82 @@ def parse_args(argv: Optional[list[str]] = None):
         help="GUI preview update rate in Hz (1-30)",
     )
 
+    parser.add_argument(
+        "--advanced-gaze-logging",
+        dest="enable_advanced_gaze_logging",
+        action="store_true",
+        help="Enable extended gaze CSV with per-eye metrics",
+    )
+    parser.add_argument(
+        "--no-advanced-gaze-logging",
+        dest="enable_advanced_gaze_logging",
+        action="store_false",
+        help="Disable extended gaze CSV output",
+    )
+
+    parser.add_argument(
+        "--enable-eye-event-details",
+        dest="expand_eye_event_details",
+        action="store_true",
+        help="Include detailed fixation/blink fields in event CSV",
+    )
+    parser.add_argument(
+        "--disable-eye-event-details",
+        dest="expand_eye_event_details",
+        action="store_false",
+        help="Write legacy compact eye events CSV",
+    )
+
+    parser.add_argument(
+        "--enable-audio-recording",
+        dest="enable_audio_recording",
+        action="store_true",
+        help="Record headset audio alongside gaze streams",
+    )
+    parser.add_argument(
+        "--disable-audio-recording",
+        dest="enable_audio_recording",
+        action="store_false",
+        help="Skip audio capture even if enabled in config",
+    )
+
+    parser.add_argument(
+        "--audio-stream-param",
+        dest="audio_stream_param",
+        default=default_audio_stream_param,
+        help="Custom RTSP query parameter for audio stream discovery (default: audio=scene)",
+    )
+
+    parser.add_argument(
+        "--log-device-status",
+        dest="enable_device_status_logging",
+        action="store_true",
+        help="Persist periodic device telemetry to CSV",
+    )
+    parser.add_argument(
+        "--no-log-device-status",
+        dest="enable_device_status_logging",
+        action="store_false",
+        help="Disable device telemetry logging",
+    )
+
+    parser.add_argument(
+        "--device-status-interval",
+        dest="device_status_poll_interval",
+        type=positive_float,
+        default=default_device_status_poll_interval,
+        help="Polling interval (s) when recording device status",
+    )
+
     parser.add_argument("--slave", dest="mode", action="store_const", const="slave", help=argparse.SUPPRESS)
     parser.add_argument("--tkinter", dest="mode", action="store_const", const="gui", help=argparse.SUPPRESS)
+
+    parser.set_defaults(
+        enable_advanced_gaze_logging=default_enable_advanced_gaze_logging,
+        expand_eye_event_details=default_expand_eye_event_details,
+        enable_audio_recording=default_enable_audio_recording,
+        enable_device_status_logging=default_enable_device_status_logging,
+    )
 
     args = parser.parse_args(argv)
 
@@ -205,6 +271,9 @@ def parse_args(argv: Optional[list[str]] = None):
 
     from Modules.base import load_window_geometry_from_config
     args.window_geometry = load_window_geometry_from_config(config, args.window_geometry)
+
+    args.config = config
+    args.config_file_path = config_path
 
     return args
 

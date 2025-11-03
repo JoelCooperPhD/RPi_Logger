@@ -8,6 +8,7 @@ from .device_manager import DeviceManager
 from .stream_handler import StreamHandler
 from .frame_processor import FrameProcessor
 from .gaze_tracker import GazeTracker
+from .tracker_handler import TrackerHandler
 
 from .config import ConfigLoader, load_config_file
 from .commands import CommandHandler, CommandMessage, StatusMessage
@@ -27,6 +28,7 @@ __all__ = [
     'StreamHandler',
     'FrameProcessor',
     'GazeTracker',
+    'TrackerHandler',
 
     'ConfigLoader',
     'load_config_file',

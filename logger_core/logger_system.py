@@ -63,6 +63,7 @@ class LoggerSystem:
         self.shutdown_event = asyncio.Event()
         self.event_logger: Optional['EventLogger'] = None
         self._gracefully_quitting_modules: set[str] = set()
+        self._shutdown_restart_candidates: List[str] = []
 
     async def async_init(self) -> None:
         """Complete async initialization. Must be called after construction."""
@@ -108,7 +109,8 @@ class LoggerSystem:
                 self.logger.info("Module %s is quitting", module_name)
                 self._gracefully_quitting_modules.add(module_name)
                 self.module_manager.cleanup_stopped_process(module_name)
-                await self.module_manager.set_module_enabled(module_name, False)
+                if not self.module_manager.is_module_state_changing(module_name):
+                    await self.module_manager.set_module_enabled(module_name, False)
                 return
             elif status.is_error():
                 self.logger.error("Module %s error: %s",
@@ -167,6 +169,13 @@ class LoggerSystem:
     def get_running_modules(self) -> List[str]:
         """Get list of currently running module names."""
         return self.module_manager.get_running_modules()
+
+
+    async def send_module_command(self, module_name: str, command: str, **kwargs) -> bool:
+        """Send a command to a running module via its command interface."""
+        from .commands import CommandMessage
+        payload = CommandMessage.create(command, **kwargs)
+        return await self.module_manager.send_command(module_name, payload)
 
     async def start_module(self, module_name: str) -> bool:
         """Start a module (routes through state machine)."""
@@ -312,25 +321,52 @@ class LoggerSystem:
             await asyncio.gather(*get_geometry_tasks, return_exceptions=True)
 
     async def save_running_modules_state(self) -> bool:
-        """Save list of currently running modules for next launch."""
+        """Persist snapshot of modules running at shutdown initiation."""
+        running_modules = self.module_manager.get_running_modules()
+        self._shutdown_restart_candidates = list(running_modules)
+        return await self._write_running_modules_state(self._shutdown_restart_candidates)
+
+    async def update_running_modules_state_after_cleanup(self) -> bool:
+        """Rewrite restart state excluding modules that failed to stop cleanly."""
+        if not self._shutdown_restart_candidates:
+            # Ensure stale state is removed if nothing was running
+            return await self._write_running_modules_state([])
+
+        filtered = [
+            module for module in self._shutdown_restart_candidates
+            if module not in self.module_manager.forcefully_stopped_modules
+        ]
+
+        excluded = set(self._shutdown_restart_candidates) - set(filtered)
+        if excluded:
+            self.logger.info(
+                "Excluding modules from auto-restart due to forceful stop: %s",
+                sorted(excluded)
+            )
+
+        self._shutdown_restart_candidates = filtered
+        return await self._write_running_modules_state(filtered)
+
+    async def _write_running_modules_state(self, modules: List[str]) -> bool:
         import time
         save_start = time.time()
 
         try:
-            running_modules = self.module_manager.get_running_modules()
-
-            if not running_modules:
-                self.logger.info("No running modules to save")
+            if not modules:
+                if STATE_FILE.exists():
+                    await asyncio.to_thread(STATE_FILE.unlink)
+                    self.logger.info("Cleared running modules state file")
+                else:
+                    self.logger.debug("No running modules; state file already absent")
                 return True
 
             await asyncio.to_thread(STATE_FILE.parent.mkdir, parents=True, exist_ok=True)
 
             state = {
                 'timestamp': datetime.datetime.now().isoformat(),
-                'running_modules': running_modules,
+                'running_modules': modules,
             }
 
-            # Offload JSON file write to thread pool to avoid blocking
             def write_json():
                 with open(STATE_FILE, 'w') as f:
                     json.dump(state, f, indent=2)
@@ -338,12 +374,12 @@ class LoggerSystem:
             await asyncio.to_thread(write_json)
 
             save_duration = time.time() - save_start
-            self.logger.info("⏱️  Saved running modules state in %.3fs: %s",
-                           save_duration, running_modules)
+            self.logger.info("⏱️  Updated running modules state in %.3fs: %s",
+                            save_duration, modules)
             return True
 
         except Exception as e:
-            self.logger.error("Failed to save running modules state: %s", e, exc_info=True)
+            self.logger.error("Failed to write running modules state: %s", e, exc_info=True)
             return False
 
     async def cleanup(self, request_geometry: bool = True) -> None:

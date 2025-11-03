@@ -133,6 +133,10 @@ async def run_gui(args, logger_system: LoggerSystem) -> None:
         await logger_system.cleanup(request_geometry=False)
         logger.info("⏱️  Logger cleanup in %.3fs", time.time() - cleanup_start)
 
+        update_start = time.time()
+        await logger_system.update_running_modules_state_after_cleanup()
+        logger.info("⏱️  Finalized restart state in %.3fs", time.time() - update_start)
+
     async def cleanup_ui():
         import time
         logger.info("Starting UI cleanup...")
@@ -204,6 +208,10 @@ async def run_cli(args, logger_system: LoggerSystem) -> None:
         cleanup_start = time.time()
         await logger_system.cleanup(request_geometry=True)
         logger.info("⏱️  Logger cleanup in %.3fs", time.time() - cleanup_start)
+
+        update_start = time.time()
+        await logger_system.update_running_modules_state_after_cleanup()
+        logger.info("⏱️  Finalized restart state in %.3fs", time.time() - update_start)
 
     shutdown_coordinator.register_cleanup(cleanup_logger_system)
 

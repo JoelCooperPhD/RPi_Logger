@@ -1,5 +1,4 @@
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -23,18 +22,8 @@ class SlaveMode(BaseSlaveMode, BaseMode):
         return CommandHandler(self.system)
 
     async def _main_loop(self) -> None:
-        from ..gaze_tracker import GazeTracker
-
-        tracker = GazeTracker(
-            self.system.config,
-            device_manager=self.system.device_manager,
-            stream_handler=self.system.stream_handler,
-            frame_processor=self.system.frame_processor,
-            recording_manager=self.system.recording_manager
-        )
-
         try:
-            await tracker.run()
+            await self.system.tracker_handler.run_foreground(display_enabled=False)
         except Exception as e:
             self.logger.error("Tracker error: %s", e, exc_info=True)
             StatusMessage.send("error", {"message": f"Tracker error: {str(e)[:100]}"})
