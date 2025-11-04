@@ -322,7 +322,18 @@ class LoggerSystem:
 
     async def save_running_modules_state(self) -> bool:
         """Persist snapshot of modules running at shutdown initiation."""
-        running_modules = self.module_manager.get_running_modules()
+        all_running = self.module_manager.get_running_modules()
+        running_modules = [
+            module
+            for module in all_running
+            if module not in self.module_manager.forcefully_stopped_modules
+        ]
+        skipped = set(all_running) - set(running_modules)
+        if skipped:
+            self.logger.info(
+                "Skipping force-stopped modules from restart snapshot: %s",
+                sorted(skipped)
+            )
         self._shutdown_restart_candidates = list(running_modules)
         return await self._write_running_modules_state(self._shutdown_restart_candidates)
 

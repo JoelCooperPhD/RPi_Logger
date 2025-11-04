@@ -18,6 +18,7 @@ import logging
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -53,7 +54,10 @@ async def find_trial_files(session_dir: Path, trial_number: int) -> dict:
     if audio_files:
         files['audio'] = audio_files[0]
 
-    video_files = list(session_dir.glob(f"{pattern_trial}*.mp4"))
+    video_files = [
+        path for path in session_dir.glob(f"{pattern_trial}*.mp4")
+        if "_AV_" not in path.name
+    ]
     if not video_files:
         h264_files = list(session_dir.glob(f"{pattern_trial}*.h264"))
         if h264_files:
@@ -66,7 +70,10 @@ async def find_trial_files(session_dir: Path, trial_number: int) -> dict:
 
             while asyncio.get_event_loop().time() - start_time < timeout_seconds:
                 await asyncio.sleep(0.5)
-                video_files = list(session_dir.glob(f"{pattern_trial}*.mp4"))
+                video_files = [
+                    path for path in session_dir.glob(f"{pattern_trial}*.mp4")
+                    if "_AV_" not in path.name
+                ]
 
                 if len(video_files) >= len(h264_files):
                     current_sizes = {f: f.stat().st_size for f in video_files if f.exists()}
@@ -82,14 +89,43 @@ async def find_trial_files(session_dir: Path, trial_number: int) -> dict:
                         last_file_sizes = current_sizes
 
             if not video_files or len(video_files) < len(h264_files):
-                logger.warning("MP4 conversion incomplete after %d seconds, using h264 files", timeout_seconds)
-                video_files = h264_files
+                logger.warning("MP4 conversion incomplete after %d seconds, converting h264 sources locally", timeout_seconds)
+                converted: list[tuple[int, Path]] = []
+                for h264_file in h264_files:
+                    match = re.search(r'CAM(\d+)', h264_file.name)
+                    if not match:
+                        continue
+                    cam_id = int(match.group(1))
+                    mp4_path = await _remux_h264_to_mp4(h264_file)
+                    if mp4_path is None:
+                        logger.warning(
+                            "Falling back to raw H264 for CAM%d; resulting mux may have unsynchronised audio",
+                            cam_id,
+                        )
+                        converted.append((cam_id, h264_file))
+                    else:
+                        converted.append((cam_id, mp4_path))
+                files['videos'].extend(converted)
 
-    for video_file in video_files:
-        match = re.search(r'CAM(\d+)', video_file.name)
-        if match:
+    if not files['videos']:
+        for video_file in video_files:
+            match = re.search(r'CAM(\d+)', video_file.name)
+            if not match:
+                continue
             cam_id = int(match.group(1))
-            files['videos'].append((cam_id, video_file))
+            if video_file.suffix.lower() == '.h264':
+                mp4_path = await _remux_h264_to_mp4(video_file)
+                if mp4_path is not None:
+                    files['videos'].append((cam_id, mp4_path))
+                else:
+                    logger.warning(
+                        "Unable to convert %s; using raw H264 for CAM%d",
+                        video_file.name,
+                        cam_id,
+                    )
+                    files['videos'].append((cam_id, video_file))
+            else:
+                files['videos'].append((cam_id, video_file))
 
     files['videos'].sort(key=lambda x: x[0])
 
@@ -109,6 +145,75 @@ async def find_trial_files(session_dir: Path, trial_number: int) -> dict:
         files['session_timestamp'] = session_name.split("_", 1)[1]
 
     return files
+
+
+def _extract_fps_from_name(video_path: Path) -> Optional[float]:
+    match = re.search(r'(\d+(?:\.\d+)?)fps', video_path.stem)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+async def _remux_h264_to_mp4(h264_path: Path) -> Optional[Path]:
+    if h264_path.suffix.lower() != '.h264':
+        return h264_path
+
+    mp4_path = h264_path.with_suffix('.mp4')
+
+    if await asyncio.to_thread(mp4_path.exists):
+        return mp4_path
+
+    fps = _extract_fps_from_name(h264_path) or 30.0
+
+    cmd = [
+        'ffmpeg', '-y',
+        '-r', f'{fps:.6f}',
+        '-i', str(h264_path),
+        '-c:v', 'copy',
+        str(mp4_path)
+    ]
+
+    logger.info("Converting %s to MP4 for muxing", h264_path.name)
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        try:
+            _, stderr = await asyncio.wait_for(process.communicate(), timeout=60)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            logger.error("ffmpeg remux timed out for %s", h264_path.name)
+            return None
+
+        if process.returncode != 0:
+            logger.error(
+                "ffmpeg remux failed for %s: %s",
+                h264_path.name,
+                stderr.decode('utf-8', errors='ignore')[:500]
+            )
+            return None
+
+        if not await asyncio.to_thread(mp4_path.exists):
+            logger.error(
+                "ffmpeg reported success but MP4 not found for %s",
+                h264_path.name
+            )
+            return None
+
+        logger.info("Created MP4 for muxing: %s", mp4_path.name)
+        return mp4_path
+
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.error("Failed to convert %s to MP4: %s", h264_path.name, exc)
+        return None
 
 
 async def extract_timing_from_csv(csv_path: Path, module_type: str) -> dict:

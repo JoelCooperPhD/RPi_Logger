@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import sys
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -27,7 +28,6 @@ class BaseGUIMode(BaseMode, ABC):
         self.preview_task: Optional[asyncio.Task] = None
         self.device_retry_task: Optional[asyncio.Task] = None
         self._closing = False
-        self._close_future = None
         self._stdin_transport = None
         self._stdin_pipe = None
         self._stdin_reader: Optional[asyncio.StreamReader] = None
@@ -48,6 +48,10 @@ class BaseGUIMode(BaseMode, ABC):
 
     def sync_recording_state(self) -> None:
         self._sync_gui_recording_state()
+
+    def enable_preview_loop(self) -> bool:
+        """Override to disable the default preview update coroutine."""
+        return True
 
     def _sync_gui_recording_state(self) -> None:
         window = self.get_gui_window()
@@ -243,92 +247,48 @@ class BaseGUIMode(BaseMode, ABC):
             except Exception:
                 pass
 
-        if not self.async_bridge or self.async_bridge.loop is None:
-            self.logger.warning("Async bridge unavailable; performing best-effort synchronous shutdown")
+        # Run module-specific sync cleanup (MUST NOT BLOCK)
+        if hasattr(self, 'sync_cleanup'):
+            try:
+                self.sync_cleanup()
+                self.system.lifecycle_timer.mark_phase("sync_cleanup_complete")
+            except Exception as exc:
+                self.logger.error("Sync cleanup error: %s", exc, exc_info=True)
 
-            if hasattr(self, 'sync_cleanup'):
-                try:
-                    self.logger.info("Running synchronous cleanup without bridge")
-                    self.sync_cleanup()
-                    self.system.lifecycle_timer.mark_phase("sync_cleanup_complete")
-                except Exception as exc:
-                    self.logger.error("Error during sync cleanup: %s", exc, exc_info=True)
-
-            if self.gui and hasattr(self.gui, 'handle_window_close'):
+        # Save geometry (fire-and-forget)
+        if self.gui and hasattr(self.gui, 'handle_window_close'):
+            if self.async_bridge:
+                self.async_bridge.call_in_gui(self.gui.handle_window_close)
+            else:
                 try:
                     self.gui.handle_window_close()
-                    self.system.lifecycle_timer.mark_phase("geometry_saved")
                 except Exception as exc:
-                    self.logger.error("Error saving geometry: %s", exc, exc_info=True)
+                    self.logger.debug("Error saving geometry: %s", exc)
 
-            if window:
+        # Hide window IMMEDIATELY so user sees instant response
+        if window:
+            try:
+                window.withdraw()
+            except Exception as exc:
+                self.logger.debug("Error withdrawing window: %s", exc)
+
+            # Then schedule destroy to run after callback completes
+            def _destroy_window():
                 try:
                     window.destroy()
                     self.system.lifecycle_timer.mark_phase("window_destroyed")
                 except Exception as exc:
                     self.logger.debug("Error destroying window: %s", exc)
 
-            if self.system.enable_gui_commands:
-                shutdown_duration = self.system.lifecycle_timer.get_duration("shutdown_start", "window_destroyed")
-                StatusMessage.send("quitting", {
-                    "reason": "user_closed_window",
-                    "shutdown_duration_ms": round(shutdown_duration, 1)
-                })
-            return
+            window.after(0, _destroy_window)
 
-        self._close_future = self.async_bridge.run_coroutine(self._shutdown_sequence())
-
-    async def _shutdown_sequence(self) -> None:
-        try:
-            if self.system:
-                try:
-                    self.logger.debug("Starting shutdown guard")
-                    await self.system.start_shutdown_guard(self.system.shutdown_guard_timeout)
-                    self.logger.warning("BaseGUIMode.on_closing: shutdown guard scheduled")
-                except Exception as exc:  # pragma: no cover - defensive
-                    self.logger.error("Failed to start shutdown guard: %s", exc)
-
-            loop = asyncio.get_running_loop()
-
-            if hasattr(self, 'sync_cleanup'):
-                try:
-                    self.logger.info("Running synchronous cleanup in executor")
-                    await loop.run_in_executor(None, self.sync_cleanup)
-                    self.system.lifecycle_timer.mark_phase("sync_cleanup_complete")
-                except Exception as exc:
-                    self.logger.error("Error during sync cleanup: %s", exc, exc_info=True)
-
-            if self.gui and hasattr(self.gui, 'handle_window_close'):
-                try:
-                    self.logger.info("Saving geometry")
-                    await self.async_bridge.call_in_gui_async(self.gui.handle_window_close)
-                    self.system.lifecycle_timer.mark_phase("geometry_saved")
-                except Exception as exc:
-                    self.logger.error("Error saving geometry: %s", exc, exc_info=True)
-
-            window = self.get_gui_window()
-            if window:
-                try:
-                    self.logger.info("Destroying window")
-                    await self.async_bridge.call_in_gui_async(window.destroy)
-                    self.system.lifecycle_timer.mark_phase("window_destroyed")
-                except Exception as exc:
-                    self.logger.debug("Error destroying window: %s", exc)
-            else:
-                self.system.lifecycle_timer.mark_phase("window_destroyed")
-
-            if self.system.enable_gui_commands:
-                shutdown_duration = self.system.lifecycle_timer.get_duration("shutdown_start", "window_destroyed")
-                StatusMessage.send("quitting", {
-                    "reason": "user_closed_window",
-                    "shutdown_duration_ms": round(shutdown_duration, 1)
-                })
-        finally:
-            if self.system:
-                try:
-                    await self.system.cancel_shutdown_guard()
-                except Exception as exc:  # pragma: no cover - defensive
-                    self.logger.debug("Failed to cancel shutdown guard: %s", exc)
+        # Send status
+        if self.system.enable_gui_commands:
+            shutdown_duration = self.system.lifecycle_timer.get_duration("shutdown_start", "window_destroyed")
+            StatusMessage.send("quitting", {
+                "reason": "user_closed_window",
+                "shutdown_duration_ms": round(shutdown_duration, 1)
+            })
 
     def sync_cleanup(self) -> None:
         """Synchronous cleanup - override in subclasses if needed."""
@@ -384,7 +344,8 @@ class BaseGUIMode(BaseMode, ABC):
         if getattr(self.system, 'auto_start_recording', False):
             await self.on_auto_start_recording()
 
-        self.async_bridge.run_coroutine(self._preview_update_loop())
+        if self.enable_preview_loop():
+            self.async_bridge.run_coroutine(self._preview_update_loop())
 
         if not self.system.initialized:
             def start_device_detection():
@@ -397,18 +358,25 @@ class BaseGUIMode(BaseMode, ABC):
             self._run_gui_sync()
 
         finally:
-            self.logger.info("GUI closed, stopping async tasks")
+            self.logger.info("GUI closed, finalizing cleanup")
 
-            if self._close_future:
-                try:
-                    await asyncio.wrap_future(self._close_future)
-                except Exception as exc:
-                    self.logger.error("Shutdown sequence raised: %s", exc, exc_info=True)
-
+            # Stop async bridge event loop
             if self.async_bridge:
                 self.async_bridge.stop()
 
-            await asyncio.sleep(0.1)
+                # Join thread with timeout (allows background cleanup to complete)
+                if self.async_bridge.thread and self.async_bridge.thread.is_alive():
+                    join_start = time.perf_counter()
+                    self.async_bridge.thread.join(timeout=3.0)
+                    join_duration = time.perf_counter() - join_start
+
+                    if self.async_bridge.thread.is_alive():
+                        self.logger.warning(
+                            "Async thread still running after %.1fs, exiting anyway",
+                            join_duration
+                        )
+                    else:
+                        self.logger.info("Async thread joined cleanly (%.1fs)", join_duration)
 
             self.logger.info("Shutdown complete")
 

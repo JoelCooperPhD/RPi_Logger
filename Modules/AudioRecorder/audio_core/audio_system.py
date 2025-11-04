@@ -328,6 +328,14 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
 
         await self._save_selected_devices_to_config()
 
+        remaining_tasks = self.task_manager.active_names()
+        if remaining_tasks:
+            self.logger.warning(
+                "Audio system cleanup leaving %d background task(s): %s",
+                len(remaining_tasks),
+                ", ".join(remaining_tasks),
+            )
+
         self.initialized = False
         self.logger.info("Cleanup completed")
 
@@ -347,11 +355,21 @@ class AudioSystem(BaseSystem, RecordingStateMixin):
 
             serialized = json.dumps(selected_entries, separators=(',', ':'))
 
-            await asyncio.to_thread(
-                ConfigLoader.update_config_values,
-                config_path,
-                {"selected_devices": serialized},
-            )
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(
+                        ConfigLoader.update_config_values,
+                        config_path,
+                        {"selected_devices": serialized},
+                    ),
+                    timeout=2.0,
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Timed out while persisting selected audio devices to %s",
+                    config_path,
+                )
+                return
 
             if isinstance(self.config, dict):
                 self.config['selected_devices'] = serialized

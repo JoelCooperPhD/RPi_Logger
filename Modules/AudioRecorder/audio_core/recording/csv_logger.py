@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+from Modules.base import AsyncTaskManager
 from ..constants import CSV_FLUSH_INTERVAL_CHUNKS, CSV_QUEUE_SIZE, CSV_LOGGER_STOP_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -35,14 +36,14 @@ class AudioCSVLogger:
 
         self._file = None
         self._queue: Optional[asyncio.Queue] = None
-        self._task: Optional[asyncio.Task] = None
         self._running = False
+        self._tasks = AsyncTaskManager(f"AudioCSVLogger{device_id}", logger)
 
         self._total_frames = 0
         self._queue_overflow_drops = 0
 
     def start(self) -> None:
-        if self._task is not None:
+        if self._running:
             raise RuntimeError("Audio CSV logger already started")
 
         try:
@@ -62,7 +63,7 @@ class AudioCSVLogger:
 
             try:
                 loop = asyncio.get_running_loop()
-                self._task = asyncio.create_task(self._logger_loop())
+                self._tasks.create(self._logger_loop(), name=f"csv_logger_{self.device_id}")
                 logger.debug("Audio device %d CSV logger started: %s", self.device_id, self.csv_path)
             except RuntimeError:
                 self._file.close()
@@ -78,19 +79,8 @@ class AudioCSVLogger:
             raise
 
     async def stop(self) -> None:
-        if self._task is None:
-            return
-
         self._running = False
-
-        if not self._task.done():
-            self._task.cancel()
-            try:
-                await asyncio.wait_for(self._task, timeout=CSV_LOGGER_STOP_TIMEOUT_SECONDS)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
-                pass
-
-        self._task = None
+        await self._tasks.shutdown(timeout=CSV_LOGGER_STOP_TIMEOUT_SECONDS)
         self._queue = None
 
         if self._file is not None:

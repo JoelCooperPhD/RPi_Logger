@@ -53,56 +53,26 @@ class GUIMode(BaseGUIMode):
         self.logger.info("Camera GUIMode cleanup")
 
     def sync_cleanup(self) -> None:
-        """Perform a best-effort sync cleanup so the Tkinter thread never blocks."""
+        """Fire-and-forget cleanup - GUI thread never blocks."""
         bridge = getattr(self, "async_bridge", None)
         if not bridge or bridge.loop is None:
-            self.logger.warning("Async bridge not available; skipping synchronous camera cleanup")
+            self.logger.warning("Async bridge not available; skipping camera cleanup")
             return
 
-        timeout_seconds = min(10.0, max(1.0, getattr(self.system, "shutdown_guard_timeout", 15.0) - 1.0))
+        cameras = getattr(self.system, "cameras", [])
+        active_cameras = [cam for cam in cameras if cam is not None]
 
-        try:
-            future = bridge.run_coroutine(self._async_sync_cleanup())
-            self.logger.warning("Camera sync_cleanup: coroutine scheduled (future=%s)", future)
-        except RuntimeError as exc:  # Bridge shutting down
-            self.logger.warning("Failed to schedule async camera cleanup: %s", exc)
-            setattr(self.system, "cleanup_failed", True)
+        if not active_cameras:
+            self.logger.info("No active cameras; instant shutdown (fast path)")
             return
 
-        start = time.perf_counter()
-        cleanup_failed = False
         try:
-            self.logger.warning("Camera sync_cleanup: waiting up to %.1fs for cleanup future", timeout_seconds)
-            result = future.result(timeout=timeout_seconds)
-            self.logger.warning("Camera sync_cleanup: future.result returned %s", result)
-            cleanup_failed = not bool(result)
-        except FutureTimeout:
-            cleanup_failed = True
-            self.logger.error("Camera cleanup timed out after %.1fs; continuing shutdown", timeout_seconds)
-            future.cancel()
-        except Exception as exc:
-            cleanup_failed = True
-            self.logger.error("Camera cleanup raised: %s", exc, exc_info=True)
-            future.cancel()
-        else:
-            duration = time.perf_counter() - start
-            self.logger.info("Camera sync cleanup finished in %.2fs", duration)
-        finally:
-            self.logger.warning("Camera sync_cleanup: future done=%s, cancelled=%s",
-                                future.done(), future.cancelled())
+            bridge.run_coroutine(self._async_sync_cleanup())
+            self.logger.info("Camera cleanup scheduled (non-blocking, %d cameras)", len(active_cameras))
+        except RuntimeError as exc:
+            self.logger.warning("Failed to schedule camera cleanup: %s", exc)
 
-        if cleanup_failed:
-            setattr(self.system, "cleanup_failed", True)
-            try:
-                StatusMessage.send("warning", {
-                    "module": "Camera",
-                    "event": "cleanup_failed",
-                    "message": "Camera GUI cleanup did not complete within timeout"
-                })
-            except Exception:
-                self.logger.debug("Unable to send cleanup warning status", exc_info=True)
-        else:
-            setattr(self.system, "cleanup_failed", False)
+        # Return immediately - window will close now, cleanup continues in background
 
     async def _async_sync_cleanup(self) -> None:
         cameras = [cam for cam in getattr(self.system, "cameras", []) if cam is not None]

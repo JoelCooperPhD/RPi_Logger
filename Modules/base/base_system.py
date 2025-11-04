@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .lifecycle_metrics import LifecycleTimer
+from .task_manager import AsyncTaskManager
 
 
 class ModuleInitializationError(RuntimeError):
@@ -30,6 +31,7 @@ class BaseSystem(ABC):
         self._cleanup_complete = False
         self._shutdown_guard_task: Optional[asyncio.Task] = None
         self.shutdown_guard_timeout = getattr(args, "shutdown_timeout", 15.0)
+        self.task_manager = AsyncTaskManager(f"{self.__class__.__name__}Tasks")
 
         self.mode = getattr(args, "mode", "gui")
         self.mode_instance = None
@@ -146,6 +148,10 @@ class BaseSystem(ABC):
     def _should_send_status(self) -> bool:
         return self.slave_mode or self.enable_gui_commands
 
+    def create_background_task(self, coro, *, name: Optional[str] = None):
+        """Schedule a background coroutine tied to the system lifecycle."""
+        return self.task_manager.create(coro, name=name)
+
     async def _cleanup_with_timeout(self, coro, timeout: float, operation_name: str) -> bool:
         try:
             await asyncio.wait_for(coro, timeout=timeout)
@@ -182,6 +188,11 @@ class BaseSystem(ABC):
             self.logger.error("Error during module-specific cleanup: %s", e, exc_info=True)
 
         self.initialized = False
+
+        try:
+            await self.task_manager.shutdown()
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.error("Error shutting down background tasks: %s", exc, exc_info=True)
 
         self.lifecycle_timer.mark_phase("cleanup_complete")
         self.lifecycle_timer.log_summary()

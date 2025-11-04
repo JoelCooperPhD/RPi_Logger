@@ -32,7 +32,6 @@ class AudioRecordingManager:
         self._recording_start_time_monotonic: Optional[float] = None
         self._chunk_counter = 0
         self._csv_logger: Optional[AudioCSVLogger] = None
-        self._csv_stop_task: Optional[asyncio.Task] = None
 
     def start_recording(self, session_dir: Optional[Path] = None, trial_number: Optional[int] = None, enable_csv_logging: bool = True) -> None:
         if self.recording:
@@ -106,9 +105,10 @@ class AudioRecordingManager:
 
         if self._csv_logger is not None:
             try:
-                loop = asyncio.get_running_loop()
-                self._csv_stop_task = asyncio.create_task(self._csv_logger.stop())
+                await self._csv_logger.stop()
             except RuntimeError:
+                pass
+            finally:
                 self._csv_logger = None
 
         def prepare_audio_data():
@@ -157,15 +157,14 @@ class AudioRecordingManager:
         self.audio_data.clear()
         self.frames_recorded = 0
 
-        if self._csv_stop_task is not None:
+        if self._csv_logger is not None:
             try:
-                await asyncio.wait_for(self._csv_stop_task, timeout=2.0)
+                await asyncio.wait_for(self._csv_logger.stop(), timeout=2.0)
             except asyncio.TimeoutError:
-                self.logger.warning("CSV logger stop task timed out after 2 seconds")
+                self.logger.warning("CSV logger stop timed out after 2 seconds")
             except Exception as e:
-                self.logger.warning("Error waiting for CSV logger stop: %s", e)
+                self.logger.warning("Error stopping CSV logger: %s", e)
             finally:
-                self._csv_stop_task = None
                 self._csv_logger = None
 
         self.logger.debug("Cleanup completed")

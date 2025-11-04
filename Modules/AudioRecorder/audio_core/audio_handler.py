@@ -143,7 +143,9 @@ class AudioHandler:
                     self.logger.debug("Stream close error: %s", e)
 
             try:
-                await asyncio.to_thread(_close_stream)
+                await asyncio.wait_for(asyncio.to_thread(_close_stream), timeout=2.0)
+            except asyncio.TimeoutError:
+                self.logger.warning("Timed out closing audio stream; continuing shutdown")
             finally:
                 self.stream = None
 

@@ -8,7 +8,7 @@ import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional, Dict
+from typing import Optional, Dict, Set
 
 
 from ..logger_system import LoggerSystem
@@ -44,6 +44,11 @@ class MainController:
         self.trial_counter: int = 0
         self.session_active = False
         self.trial_active = False
+
+        self._background_tasks: Set[asyncio.Task] = set()
+        self._mux_progress_window: Optional[tk.Toplevel] = None
+        self._mux_progress_label: Optional[ttk.Label] = None
+        self._mux_progress_bar: Optional[ttk.Progressbar] = None
 
     def set_widgets(
         self,
@@ -404,35 +409,152 @@ class MainController:
             self.logger.error("Failed to open issue tracker: %s", e)
 
     def _spawn_independent_mux_process(self, trial_number: int) -> None:
-        import subprocess
-        import sys
-        from pathlib import Path as PathType
+        task = asyncio.create_task(self._run_auto_mux_process(trial_number))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_mux_task_done)
+
+    async def _run_auto_mux_process(self, trial_number: int) -> None:
+        session_dir = self.logger_system.session_dir
+        if not session_dir:
+            self.logger.warning("Auto-mux skipped: session directory unavailable")
+            return
+
+        project_root = Path(__file__).parent.parent.parent
+        sync_and_mux_script = project_root / "utils" / "sync_and_mux.py"
+
+        if not sync_and_mux_script.exists():
+            self.logger.error("Auto-mux script not found: %s", sync_and_mux_script)
+            return
+
+        session_dir_path = Path(session_dir)
+
+        self._show_mux_progress_dialog(trial_number)
+
+        cmd = [
+            sys.executable,
+            str(sync_and_mux_script),
+            str(session_dir_path),
+            "--trial",
+            str(trial_number),
+        ]
+
+        error_message: Optional[str] = None
 
         try:
-            session_dir = self.logger_system.session_dir
-            project_root = PathType(__file__).parent.parent.parent
-            sync_and_mux_script = project_root / "utils" / "sync_and_mux.py"
-
-            if not sync_and_mux_script.exists():
-                self.logger.error("Auto-mux script not found: %s", sync_and_mux_script)
-                return
-
-            cmd = [
-                sys.executable,
-                str(sync_and_mux_script),
-                str(session_dir),
-                "--trial", str(trial_number)
-            ]
-
-            subprocess.Popen(
-                cmd,
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(project_root),
                 start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                cwd=str(project_root)
             )
 
             self.logger.info("Auto-mux process started for trial %d", trial_number)
 
-        except Exception as e:
-            self.logger.error("Failed to spawn auto-mux process: %s", e, exc_info=True)
+            stdout_data, stderr_data = await process.communicate()
+
+            if process.returncode != 0:
+                stderr_text = stderr_data.decode('utf-8', errors='ignore').strip()
+                if stderr_text:
+                    self.logger.error(
+                        "Auto-mux stderr for trial %d: %s",
+                        trial_number,
+                        stderr_text[:500],
+                    )
+                error_message = (
+                    f"Auto-mux failed for trial {trial_number:03d} (exit code {process.returncode}).\n"
+                    "Check logs for more details."
+                )
+                self.logger.error("Auto-mux process failed for trial %d", trial_number)
+            else:
+                stdout_text = stdout_data.decode('utf-8', errors='ignore').strip()
+                if stdout_text:
+                    self.logger.debug("Auto-mux stdout for trial %d: %s", trial_number, stdout_text[:500])
+                self.logger.info("Auto-mux process completed for trial %d", trial_number)
+
+        except Exception as exc:
+            error_message = f"Auto-mux error for trial {trial_number:03d}: {exc}"
+            self.logger.error("Failed to run auto-mux process: %s", exc, exc_info=True)
+
+        finally:
+            self._destroy_mux_progress_dialog()
+
+        if error_message:
+            self._show_mux_error(error_message)
+
+    def _show_mux_progress_dialog(self, trial_number: int) -> None:
+        if not self.root or not self.root.winfo_exists():
+            return
+
+        def _create_dialog() -> None:
+            if not self.root or not self.root.winfo_exists():
+                return
+
+            self._destroy_mux_progress_dialog_main_thread()
+
+            window = tk.Toplevel(self.root)
+            window.title("Auto-Mux In Progress")
+            window.transient(self.root)
+            window.resizable(False, False)
+            window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+            frame = ttk.Frame(window, padding=20)
+            frame.pack(fill='both', expand=True)
+
+            label = ttk.Label(frame, text=f"Muxing trial {trial_number:03d}…")
+            label.pack(pady=(0, 12))
+
+            progress = ttk.Progressbar(frame, mode='indeterminate', length=220)
+            progress.pack(fill='x')
+            progress.start(10)
+
+            window.update_idletasks()
+            window.lift()
+            window.attributes('-topmost', True)
+            window.after(200, lambda: window.attributes('-topmost', False))
+
+            self._mux_progress_window = window
+            self._mux_progress_label = label
+            self._mux_progress_bar = progress
+
+        self.root.after(0, _create_dialog)
+
+    def _destroy_mux_progress_dialog(self) -> None:
+        if not self.root or not self.root.winfo_exists():
+            return
+
+        self.root.after(0, self._destroy_mux_progress_dialog_main_thread)
+
+    def _destroy_mux_progress_dialog_main_thread(self) -> None:
+        if self._mux_progress_bar is not None:
+            try:
+                self._mux_progress_bar.stop()
+            except Exception:
+                pass
+
+        if self._mux_progress_window is not None and self._mux_progress_window.winfo_exists():
+            try:
+                self._mux_progress_window.destroy()
+            except Exception:
+                pass
+
+        self._mux_progress_window = None
+        self._mux_progress_label = None
+        self._mux_progress_bar = None
+
+    def _on_mux_task_done(self, task: asyncio.Task) -> None:
+        self._background_tasks.discard(task)
+        try:
+            task.result()
+        except Exception as exc:
+            self.logger.error("Auto-mux task raised an exception: %s", exc, exc_info=True)
+
+    def _show_mux_error(self, message: str) -> None:
+        if not self.root or not self.root.winfo_exists():
+            self.logger.error("Auto-mux error: %s", message)
+            return
+
+        def _show() -> None:
+            messagebox.showerror("Auto-Mux", message)
+
+        self.root.after(0, _show)

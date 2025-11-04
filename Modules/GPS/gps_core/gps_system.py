@@ -143,10 +143,20 @@ class GPSSystem(BaseSystem, RecordingStateMixin):
             await self.stop_recording()
 
         if self.gps_handler:
-            await self.gps_handler.stop()
+            handler = self.gps_handler
+            self.gps_handler = None
+            try:
+                await handler.stop()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("Failed to stop GPS handler cleanly: %s", exc, exc_info=True)
 
         if self.recording_manager:
-            await self.recording_manager.cleanup()
+            manager = self.recording_manager
+            self.recording_manager = None
+            try:
+                await manager.cleanup()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.error("Failed to cleanup GPS recording manager: %s", exc, exc_info=True)
 
         self.initialized = False
         logger.info("GPS cleanup completed")

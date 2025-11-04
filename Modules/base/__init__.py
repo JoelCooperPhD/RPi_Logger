@@ -3,6 +3,7 @@ from .base_supervisor import BaseSupervisor
 from .base_system import BaseSystem, ModuleInitializationError
 from .config_loader import ConfigLoader, load_config_file
 from .modes import BaseMode, BaseGUIMode
+from .task_manager import AsyncTaskManager
 from .recording_mixin import RecordingStateMixin
 from .async_utils import (
     save_file_async,
@@ -62,6 +63,7 @@ __all__ = [
     'BaseMode',
     'BaseGUIMode',
     'RecordingStateMixin',
+    'AsyncTaskManager',
     'save_file_async',
     'gather_with_logging',
     'gather_with_timeout',

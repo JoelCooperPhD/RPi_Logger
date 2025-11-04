@@ -3,8 +3,11 @@ import asyncio
 import logging
 import re
 import struct
+import time
 from datetime import datetime
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING
+
+from Modules.base import AsyncTaskManager
 
 if TYPE_CHECKING:
     from ..interfaces.gui import TkinterGUI
@@ -19,16 +22,9 @@ class AudioCaptureManager:
         self.available_devices = available_devices
         self.audio_processes: Dict[int, asyncio.subprocess.Process] = {}
         self.audio_sample_rate = 8000  # Capture at 8kHz for visualization
-        self.background_tasks: List[asyncio.Task] = []
         self.running = True
-
-    def _task_done_callback(self, task: asyncio.Task) -> None:
-        try:
-            task.result()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.exception("Background task failed: %s", e)
+        self._tasks = AsyncTaskManager("AudioCaptureTasks", logger)
+        self._capture_tasks: Dict[int, asyncio.Task] = {}
 
     async def start_capture_for_device(self, device_id: int):
         if device_id in self.audio_processes:
@@ -88,9 +84,15 @@ class AudioCaptureManager:
 
             logger.info("Started audio capture for device %d (pid: %s)", device_id, process.pid)
 
-            task = asyncio.create_task(self._capture_loop_for_device(device_id))
-            task.add_done_callback(self._task_done_callback)
-            self.background_tasks.append(task)
+            def _on_done(_: asyncio.Task, did: int = device_id) -> None:
+                self._capture_tasks.pop(did, None)
+
+            task = self._tasks.create(
+                self._capture_loop_for_device(device_id),
+                name=f"audio_capture_{device_id}",
+                done_callback=_on_done
+            )
+            self._capture_tasks[device_id] = task
 
         except Exception as e:
             logger.error("Failed to start audio capture for device %d: %s", device_id, e)
@@ -98,6 +100,12 @@ class AudioCaptureManager:
                 del self.audio_processes[device_id]
 
     async def stop_capture_for_device(self, device_id: int):
+        task_name = f"audio_capture_{device_id}"
+
+        capture_task = self._capture_tasks.get(device_id)
+
+        process_duration_ms: Optional[float] = None
+
         if device_id in self.audio_processes:
             process = self.audio_processes[device_id]
 
@@ -105,21 +113,44 @@ class AudioCaptureManager:
             del self.audio_processes[device_id]
             logger.debug("Removed device %d from audio_processes, stopping capture loop", device_id)
 
-            # Give the capture loop time to exit
-            await asyncio.sleep(0.1)
-
+            stop_started = time.perf_counter()
             try:
                 process.terminate()
                 logger.debug("Terminated arecord process for device %d, waiting for exit", device_id)
                 await asyncio.wait_for(process.wait(), timeout=2.0)
-                logger.info("Stopped audio capture for device %d", device_id)
+                process_duration_ms = (time.perf_counter() - stop_started) * 1000
+                logger.info(
+                    "Stopped audio capture for device %d in %.1f ms",
+                    device_id,
+                    process_duration_ms,
+                )
             except asyncio.TimeoutError:
                 logger.warning("Process for device %d didn't exit after terminate, killing", device_id)
                 process.kill()
-                await asyncio.sleep(0.1)
-                logger.info("Killed audio capture for device %d", device_id)
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=1.0)
+                    process_duration_ms = (time.perf_counter() - stop_started) * 1000
+                    logger.info(
+                        "Killed audio capture for device %d in %.1f ms",
+                        device_id,
+                        process_duration_ms,
+                    )
+                except asyncio.TimeoutError:
+                    logger.error("Process for device %d hung after kill", device_id)
             except Exception as e:
                 logger.error("Error stopping audio capture for device %d: %s", device_id, e)
+
+        # Best-effort cancellation for the capture loop task even if the process was missing
+        if capture_task and not capture_task.done():
+            cancelled = await self._tasks.cancel(task_name, timeout=1.5)
+            if not cancelled:
+                logger.warning("Background capture task for device %d did not exit cleanly", device_id)
+        else:
+            # Ensure stale bookkeeping is cleared
+            self._capture_tasks.pop(device_id, None)
+
+        if process_duration_ms is None and device_id not in self.audio_processes:
+            logger.debug("Audio capture process for device %d was already stopped", device_id)
 
     async def _read_audio_data_for_device(self, device_id: int):
         if device_id not in self.audio_processes:
@@ -185,8 +216,22 @@ class AudioCaptureManager:
         self.running = False
 
         if self.audio_processes:
+            stop_started = time.perf_counter()
             stop_tasks = [
                 self.stop_capture_for_device(device_id)
                 for device_id in list(self.audio_processes.keys())
             ]
             await asyncio.gather(*stop_tasks, return_exceptions=True)
+            total_ms = (time.perf_counter() - stop_started) * 1000
+            logger.info("Stopped all audio capture processes in %.1f ms", total_ms)
+
+        # Cancel any straggling capture tasks that were still registered
+        if self._capture_tasks:
+            await self._tasks.cancel_matching(
+                [f"audio_capture_{device_id}" for device_id in list(self._capture_tasks.keys())],
+                timeout=1.5,
+            )
+            self._capture_tasks.clear()
+
+    async def shutdown_tasks(self) -> None:
+        await self._tasks.shutdown(timeout=2.0)

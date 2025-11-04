@@ -26,6 +26,7 @@ class AsyncBridge:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.thread: Optional[threading.Thread] = None
         self._running = True
+        self._ready = threading.Event()
 
     def start(self) -> None:
         """Start AsyncIO event loop in background thread."""
@@ -33,8 +34,8 @@ class AsyncBridge:
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
 
-        while self.loop is None:
-            time.sleep(0.01)
+        if not self._ready.wait(timeout=5.0):
+            raise RuntimeError("AsyncIO loop failed to start within 5 seconds")
 
         logger.info("AsyncIO event loop running in background (thread %s)",
                    self.thread.ident)
@@ -45,6 +46,8 @@ class AsyncBridge:
         asyncio.set_event_loop(self.loop)
 
         logger.debug("AsyncIO loop started in thread %s", threading.get_ident())
+
+        self._ready.set()
 
         self.loop.run_forever()
 

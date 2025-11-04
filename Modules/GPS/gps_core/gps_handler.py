@@ -1,7 +1,10 @@
 import asyncio
+import contextlib
 import logging
 from collections import deque
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Dict, Any, Optional
+
 import serial_asyncio
 
 from .nmea_parser import NMEAParser
@@ -20,6 +23,7 @@ class GPSHandler:
         self.read_task: Optional[asyncio.Task] = None
         self.running = False
         self.recent_sentences: deque[str] = deque(maxlen=500)
+        self._stop_lock = asyncio.Lock()
 
     async def start(self) -> None:
         logger.info("Connecting to GPS on %s @ %d baud", self.port, self.baudrate)
@@ -35,21 +39,69 @@ class GPSHandler:
         logger.info("GPS connection established")
 
     async def stop(self) -> None:
-        logger.info("Stopping GPS handler")
-        self.running = False
+        async with self._stop_lock:
+            if not self.running and not self.read_task and not self.writer:
+                logger.debug("GPS handler already stopped")
+                return
 
-        if self.read_task:
-            self.read_task.cancel()
-            try:
-                await self.read_task
-            except asyncio.CancelledError:
-                pass
+            logger.info("Stopping GPS handler")
+            self.running = False
 
-        if self.writer:
-            self.writer.close()
-            await self.writer.wait_closed()
+            task = self.read_task
+            if task:
+                task_loop = task.get_loop()
+                task.cancel()
 
-        logger.info("GPS handler stopped")
+                async def _await_task_completion() -> None:
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await asyncio.wait_for(task, timeout=2.0)
+
+                try:
+                    current_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    current_loop = None
+
+                try:
+                    if current_loop is task_loop:
+                        await _await_task_completion()
+                    else:
+                        waiter = asyncio.run_coroutine_threadsafe(_await_task_completion(), task_loop)
+                        waiter.result(timeout=2.5)
+                except asyncio.TimeoutError:
+                    logger.warning("GPS read loop did not cancel within 2s; forcing close")
+                except FutureTimeoutError:
+                    logger.warning("GPS read loop did not cancel within 2s (cross-loop); forcing close")
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error("Failed while awaiting GPS read loop shutdown: %s", exc, exc_info=True)
+                finally:
+                    self.read_task = None
+
+            writer = self.writer
+            transport = getattr(writer, "transport", None) if writer else None
+            if writer:
+                try:
+                    writer.close()
+                except Exception as exc:
+                    logger.debug("Error closing GPS writer: %s", exc, exc_info=True)
+
+                wait_closed = getattr(writer, "wait_closed", None)
+                if wait_closed:
+                    try:
+                        await asyncio.wait_for(wait_closed(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("Timed out waiting for GPS writer to close; aborting transport")
+                        if transport:
+                            transport.close()
+                    except Exception as exc:  # pragma: no cover - defensive logging
+                        logger.debug("GPS writer wait_closed error: %s", exc, exc_info=True)
+                elif transport:
+                    transport.close()
+
+            self.reader = None
+            self.writer = None
+            self.running = False
+
+            logger.info("GPS handler stopped")
 
     async def wait_for_fix(self, timeout: float = 10.0) -> bool:
         start_time = asyncio.get_event_loop().time()

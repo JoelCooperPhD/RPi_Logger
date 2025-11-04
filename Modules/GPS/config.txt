@@ -1,5 +1,5 @@
-enabled = true
-window_x = 1240
-window_y = 339
+enabled = false
+window_x = 5628
+window_y = 1045
 window_width = 960
 window_height = 720

@@ -183,12 +183,7 @@ class ConfigLoader:
                     key = stripped.split('=', 1)[0].strip()
                     if key in updates:
                         indent = len(line) - len(line.lstrip())
-                        value = updates[key]
-
-                        if isinstance(value, bool):
-                            value_str = 'true' if value else 'false'
-                        else:
-                            value_str = str(value)
+                        value_str = ConfigLoader._format_config_value(updates[key])
 
                         if '#' in stripped.split('=', 1)[1]:
                             comment = '#' + stripped.split('#', 1)[1]
@@ -198,15 +193,43 @@ class ConfigLoader:
 
                         updated_keys.add(key)
 
+            missing_items = [
+                (key, ConfigLoader._format_config_value(updates[key]))
+                for key in updates
+                if key not in updated_keys
+            ]
+
+            if missing_items:
+                if lines and not lines[-1].endswith('\n'):
+                    lines[-1] = f"{lines[-1]}\n"
+
+                comment_text = '# Auto-generated settings (do not edit unless you know what you are doing)'
+                comment_line = f"{comment_text}\n"
+                has_comment = any(line.strip() == comment_text for line in lines)
+
+                if not has_comment:
+                    if lines and lines[-1].strip():
+                        lines.append('\n')
+                    lines.append(comment_line)
+
+                for key, value_str in missing_items:
+                    lines.append(f"{key} = {value_str}\n")
+
             with open(config_path, 'w') as f:
                 f.writelines(lines)
 
-            logger.info("Updated config file: %s (keys: %s)", config_path, updated_keys)
+            logger.info("Updated config file: %s (keys: %s)", config_path, updated_keys or {key for key, _ in missing_items})
             return True
 
         except Exception as e:
             logger.error("Failed to update config file: %s", e, exc_info=True)
             return False
+
+    @staticmethod
+    def _format_config_value(value: Any) -> str:
+        if isinstance(value, bool):
+            return 'true' if value else 'false'
+        return str(value)
 
 
 def load_config_file(
