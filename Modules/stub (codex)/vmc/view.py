@@ -321,6 +321,11 @@ class StubCodexView:
 
     async def run(self) -> float:
         logger.info("StubCodexView run loop starting")
+        if self._event_loop is None:
+            try:
+                self._event_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._event_loop = None
         if self._loop_running:
             return 0.0
         self._loop_running = True
@@ -395,7 +400,10 @@ class StubCodexView:
 
     def _schedule_geometry_persist(self, delay: Optional[float] = None) -> None:
         if self._event_loop is None:
-            return
+            try:
+                self._event_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
         self._cancel_geometry_save_handle()
 
         def callback() -> None:
