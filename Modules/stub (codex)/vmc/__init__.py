@@ -3,7 +3,7 @@
 from .model import StubCodexModel, ModuleState
 from .view import StubCodexView
 from .controller import StubCodexController
-from .supervisor import StubCodexSupervisor, LifecycleHooks
+from .supervisor import StubCodexSupervisor, LifecycleHooks, RetryPolicy
 
 __all__ = [
     "StubCodexModel",
@@ -11,5 +11,6 @@ __all__ = [
     "StubCodexController",
     "StubCodexSupervisor",
     "LifecycleHooks",
+    "RetryPolicy",
     "ModuleState",
 ]

@@ -30,6 +30,16 @@ class LifecycleHooks:
     after_shutdown: Optional[LifecycleHook] = None
 
 
+@dataclass(slots=True)
+class RetryPolicy:
+    """Configuration for asynchronous device retry monitoring."""
+
+    check: Callable[["StubCodexSupervisor"], Awaitable[bool] | bool]
+    check_interval: float = 3.0
+    on_missing: Optional[LifecycleHook] = None
+    on_recovered: Optional[LifecycleHook] = None
+
+
 class StubCodexSupervisor:
     """Owns model/controller/view lifecycle and orchestrates shutdown."""
 
@@ -39,17 +49,21 @@ class StubCodexSupervisor:
         module_dir: Path,
         logger: logging.Logger,
         hooks: Optional[LifecycleHooks] = None,
+        retry_policy: Optional[RetryPolicy] = None,
     ) -> None:
         start = time.perf_counter()
 
         self.args = args
         self.logger = logger
         self.hooks = hooks or LifecycleHooks()
+        self.retry_policy = retry_policy
         self.model = StubCodexModel(args, module_dir)
         self.controller = StubCodexController(args, self.model, logger)
         self.view: Optional[StubCodexView] = None
         self._shutdown_in_progress = False
         self._view_runtime_ms: float = 0.0
+        self._retry_task: Optional[asyncio.Task] = None
+        self._device_missing = False
 
         self.model.apply_initial_window_geometry()
 
@@ -74,6 +88,8 @@ class StubCodexSupervisor:
             self.view.attach_logging_handler()
 
         await self._run_hook(self.hooks.after_start, "after_start")
+
+        self._start_retry_monitor()
 
         tasks: list[asyncio.Task] = []
         shutdown_wait = asyncio.create_task(self.model.shutdown_event.wait(), name="StubCodexShutdownEvent")
@@ -103,6 +119,8 @@ class StubCodexSupervisor:
         self._shutdown_in_progress = True
 
         await self._run_hook(self.hooks.before_shutdown, "before_shutdown")
+
+        await self._stop_retry_monitor()
 
         await self.controller.stop()
 
@@ -141,3 +159,56 @@ class StubCodexSupervisor:
                 await result
         except Exception:
             self.logger.exception("Lifecycle hook '%s' failed", stage)
+
+    def _start_retry_monitor(self) -> None:
+        if not self.retry_policy or self._retry_task:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.logger.warning("Retry monitor unavailable: event loop missing")
+            return
+        self._retry_task = loop.create_task(self._run_retry_loop(), name="StubCodexRetryMonitor")
+
+    async def _stop_retry_monitor(self) -> None:
+        task = self._retry_task
+        if not task:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        self._retry_task = None
+        self._device_missing = False
+
+    async def _run_retry_loop(self) -> None:
+        policy = self.retry_policy
+        if not policy:
+            return
+        interval = max(0.2, float(policy.check_interval))
+        while not self.model.shutdown_event.is_set():
+            healthy = await self._evaluate_retry_check(policy)
+            if healthy:
+                if self._device_missing:
+                    self.logger.info("Device recovered; resuming normal operation")
+                    await self._run_hook(policy.on_recovered, "retry_on_recovered")
+                    self._device_missing = False
+            else:
+                if not self._device_missing:
+                    self._device_missing = True
+                    self.logger.warning("Device check failed; entering retry state")
+                    await self._run_hook(policy.on_missing, "retry_on_missing")
+            try:
+                await asyncio.wait_for(self.model.shutdown_event.wait(), timeout=interval)
+            except asyncio.TimeoutError:
+                continue
+        self._device_missing = False
+
+    async def _evaluate_retry_check(self, policy: RetryPolicy) -> bool:
+        try:
+            result = policy.check(self)
+            if inspect.isawaitable(result):
+                result = await result
+            return bool(result)
+        except Exception:
+            self.logger.exception("Retry check raised an exception")
+            return False
