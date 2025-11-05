@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from .constants import DISPLAY_NAME
 from .controller import StubCodexController
@@ -15,14 +17,34 @@ from .model import StubCodexModel
 from .view import StubCodexView
 
 
+LifecycleHook = Callable[["StubCodexSupervisor"], Optional[Awaitable[None]]]
+
+
+@dataclass(slots=True)
+class LifecycleHooks:
+    """Optional async-aware callbacks triggered around the supervisor lifecycle."""
+
+    before_start: Optional[LifecycleHook] = None
+    after_start: Optional[LifecycleHook] = None
+    before_shutdown: Optional[LifecycleHook] = None
+    after_shutdown: Optional[LifecycleHook] = None
+
+
 class StubCodexSupervisor:
     """Owns model/controller/view lifecycle and orchestrates shutdown."""
 
-    def __init__(self, args, module_dir: Path, logger: logging.Logger) -> None:
+    def __init__(
+        self,
+        args,
+        module_dir: Path,
+        logger: logging.Logger,
+        hooks: Optional[LifecycleHooks] = None,
+    ) -> None:
         start = time.perf_counter()
 
         self.args = args
         self.logger = logger
+        self.hooks = hooks or LifecycleHooks()
         self.model = StubCodexModel(args, module_dir)
         self.controller = StubCodexController(args, self.model, logger)
         self.view: Optional[StubCodexView] = None
@@ -45,10 +67,13 @@ class StubCodexSupervisor:
         self.logger.info("StubCodexSupervisor constructed in %.2f ms", elapsed)
 
     async def run(self) -> None:
+        await self._run_hook(self.hooks.before_start, "before_start")
         await self.controller.start()
 
         if self.view:
             self.view.attach_logging_handler()
+
+        await self._run_hook(self.hooks.after_start, "after_start")
 
         tasks: list[asyncio.Task] = []
         shutdown_wait = asyncio.create_task(self.model.shutdown_event.wait(), name="StubCodexShutdownEvent")
@@ -77,6 +102,8 @@ class StubCodexSupervisor:
             return
         self._shutdown_in_progress = True
 
+        await self._run_hook(self.hooks.before_shutdown, "before_shutdown")
+
         await self.controller.stop()
 
         if self.view:
@@ -100,5 +127,17 @@ class StubCodexSupervisor:
         self.model.send_runtime_report()
         self.model.emit_shutdown_logs(self.logger)
 
+        await self._run_hook(self.hooks.after_shutdown, "after_shutdown")
+
     async def request_shutdown(self, reason: str) -> None:
         await self.controller.request_shutdown(reason)
+
+    async def _run_hook(self, hook: Optional[LifecycleHook], stage: str) -> None:
+        if not hook:
+            return
+        try:
+            result = hook(self)
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            self.logger.exception("Lifecycle hook '%s' failed", stage)
