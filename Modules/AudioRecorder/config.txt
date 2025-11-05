@@ -59,7 +59,11 @@ discovery_retry = 3.0        # Retry interval after device failure (seconds)
 enabled = false
 
 # Window position and size (saved automatically on window close)
-window_x = 4474
-window_y = 2315
-window_width = 1277
-window_height = 173
+window_x = 5559
+window_y = 2756
+window_width = 1104
+window_height = 142
+
+# Auto-generated settings (do not edit unless you know what you are doing)
+gui_logger_visible = false
+selected_devices = [{"id":0,"name":"USB Microphoner: Audio (hw:2,0)"}]

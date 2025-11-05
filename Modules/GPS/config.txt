@@ -1,5 +1,13 @@
 enabled = false
-window_x = 5628
-window_y = 1045
-window_width = 960
-window_height = 720
+window_x = 4720
+window_y = 2932
+window_width = 1023
+window_height = 498
+
+# Auto-generated settings (do not edit unless you know what you are doing)
+gui_show_gps_nmea_stream = true
+gui_show_gps_session_log = true
+gui_logger_visible = true
+map_zoom = 11
+map_center_lat = 40.760799999999996
+map_center_lon = -111.891

@@ -176,6 +176,18 @@ wheels = [
 ]
 
 [[package]]
+name = "async-tkinter-loop"
+version = "0.10.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/71/0bbbf6f5d53e165f200e2b4015f210180282087a7719fb89cd27b2ce334e/async_tkinter_loop-0.10.2.tar.gz", hash = "sha256:d84a302c357794cf215e8e4ab9f749dc6a05323102f7176ca2d3b5fea47da0fb", size = 5213, upload-time = "2025-10-16T16:55:58.51Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/75/d0/01a81c450393e32d14ed0d1d040f01fb45cf019ca5cf83002440c0820c7e/async_tkinter_loop-0.10.2-py3-none-any.whl", hash = "sha256:8f87e1090c298f3cb0b66871e4f14669a7a82d438ef05a2046b2da37f907bd8b", size = 6061, upload-time = "2025-10-16T16:55:57.24Z" },
+]
+
+[[package]]
 name = "attrs"
 version = "25.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1918,6 +1930,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
+    { name = "async-tkinter-loop" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pandas" },
@@ -1934,6 +1947,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = ">=23.0.0" },
+    { name = "async-tkinter-loop", specifier = ">=0.10.2" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "opencv-python", specifier = ">=4.8.0" },
     { name = "pandas", specifier = ">=2.0.0" },

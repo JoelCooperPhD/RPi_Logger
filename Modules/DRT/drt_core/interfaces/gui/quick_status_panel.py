@@ -20,11 +20,21 @@ class QuickStatusPanel:
         row: int = 0,
         column: int = 0,
         rowspan: int = 1,
-        columnspan: int = 1
+        columnspan: int = 1,
+        *,
+        container: Optional[ttk.LabelFrame] = None
     ) -> ttk.LabelFrame:
-        frame = ttk.LabelFrame(self.parent, text="Session Output", padding="3")
-        frame.grid(row=row, column=column, rowspan=rowspan, columnspan=columnspan,
-                   sticky='ew')
+        if container is not None:
+            frame = container
+        else:
+            frame = ttk.LabelFrame(self.parent, text="Session Output", padding="3")
+            frame.grid(
+                row=row,
+                column=column,
+                rowspan=rowspan,
+                columnspan=columnspan,
+                sticky='ew'
+            )
         frame.columnconfigure(0, weight=1)
 
         text_widget = scrolledtext.ScrolledText(

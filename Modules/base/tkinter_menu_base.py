@@ -76,44 +76,6 @@ class TkinterMenuBase:
             command=self._show_help
         )
 
-        self.help_menu.add_separator()
-
-        self.help_menu.add_command(
-            label="About RED Scientific",
-            command=self._show_about
-        )
-
-        self.help_menu.add_command(
-            label="System Information",
-            command=self._show_system_info
-        )
-
-        self.help_menu.add_separator()
-
-        self.help_menu.add_command(
-            label="Open Logs Directory",
-            command=self._open_logs_directory
-        )
-
-        self.help_menu.add_separator()
-
-        self.help_menu.add_command(
-            label="View Config File",
-            command=self._open_config_file
-        )
-
-        self.help_menu.add_command(
-            label="Reset Settings",
-            command=self._reset_settings
-        )
-
-        self.help_menu.add_separator()
-
-        self.help_menu.add_command(
-            label="Report Issue",
-            command=self._report_issue
-        )
-
 
     def add_source_toggle(self, label: str, variable: tk.BooleanVar,
                          command: Callable) -> int:

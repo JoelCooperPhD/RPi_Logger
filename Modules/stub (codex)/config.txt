@@ -1,0 +1,5 @@
+# Stub (codex) shell module configuration
+# Starts disabled by default; module toggles itself off after exit.
+enabled = false
+display_name = stub (codex)
+window_geometry = 568x383+6751+2917

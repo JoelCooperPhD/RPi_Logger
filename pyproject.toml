@@ -25,6 +25,7 @@ dependencies = [
     "pyserial-asyncio>=0.6",
     "tkintermapview>=1.29",
     "soundfile>=0.13.1",
+    "async-tkinter-loop>=0.10.2",
 ]
 
 [build-system]

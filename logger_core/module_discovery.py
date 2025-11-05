@@ -145,6 +145,8 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
 
         config = load_module_config(module_dir)
         display_name = module_name  # Default to module name
+        if config and isinstance(config, dict):
+            display_name = config.get('display_name', display_name) or display_name
 
         info = ModuleInfo(
             name=module_name,

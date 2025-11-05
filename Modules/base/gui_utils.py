@@ -121,6 +121,12 @@ def load_window_geometry_from_config(config: dict, current_geometry: Optional[st
     logger.debug("Loading window geometry from config")
 
     try:
+        if 'window_geometry' in config:
+            geometry_str = config['window_geometry']
+            if geometry_str and isinstance(geometry_str, str):
+                logger.debug("Loaded window geometry from config (new format): %s", geometry_str)
+                return geometry_str
+
         from cli_utils import get_config_int
 
         window_x = get_config_int(config, 'window_x', None)
@@ -130,7 +136,7 @@ def load_window_geometry_from_config(config: dict, current_geometry: Optional[st
 
         if all(v is not None for v in [window_x, window_y, window_width, window_height]):
             geometry_str = f"{window_width}x{window_height}+{window_x}+{window_y}"
-            logger.debug("Loaded window geometry from config: %s", geometry_str)
+            logger.debug("Loaded window geometry from config (old format): %s", geometry_str)
             return geometry_str
         else:
             logger.debug("Window geometry not fully specified in config")

@@ -105,13 +105,17 @@ class TkinterGUIBase:
 
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(0, weight=1)  # Module content (expandable)
-        main_frame.rowconfigure(1, weight=0)  # Logger (fixed)
+        main_frame.rowconfigure(1, weight=0)  # Optional IO view (fixed)
+        main_frame.rowconfigure(2, weight=0)  # Logger (fixed)
 
         self.module_content_frame = ttk.LabelFrame(main_frame, text=content_title, padding="3")
         self.module_content_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 5))
 
+        self.io_view_frame = None
+        self.io_view_visible_var = None
+
         self.log_frame = self.create_logger_display(main_frame, height=logger_height)
-        self.log_frame.grid(row=1, column=0, sticky='ew')
+        self.log_frame.grid(row=2, column=0, sticky='ew')
 
         config_key = "gui_show_" + re.sub(r'[^a-zA-Z0-9]+', '_', content_title.lower()).strip('_')
         toggle_label = f"Show {content_title}"
@@ -125,6 +129,85 @@ class TkinterGUIBase:
             )
 
         return self.module_content_frame
+
+    def create_io_view_frame(
+        self,
+        title: str = "IO Stub",
+        *,
+        default_visible: bool = False,
+        menu_label: str | None = None,
+        config_key: str | None = None,
+        padding: str | tuple = "3",
+    ):
+        """Create an optional IO view frame above the logger and hook it into the View menu."""
+        from tkinter import ttk
+
+        if getattr(self, 'io_view_frame', None) is not None:
+            return self.io_view_frame
+
+        if not hasattr(self, 'log_frame') or self.log_frame is None:
+            raise AttributeError("IO view requires logger frame to be initialized via create_standard_layout().")
+
+        parent = self.log_frame.master
+        if parent is None:
+            raise AttributeError("IO view requires a grid-managed parent frame.")
+
+        sanitized_title = re.sub(r'[^a-zA-Z0-9]+', '_', title.lower()).strip('_') or 'io_stub'
+        if config_key is None:
+            config_key = f"gui_show_{sanitized_title}"
+        if menu_label is None:
+            menu_label = f"Show {title}"
+
+        self.io_view_frame = ttk.LabelFrame(parent, text=title, padding=padding)
+        self.io_view_frame.columnconfigure(0, weight=1)
+        self.io_view_frame.grid(row=1, column=0, sticky='ew', pady=(0, 5))
+        parent.rowconfigure(1, weight=0)
+
+        if hasattr(self, 'add_view_toggle'):
+            self.io_view_visible_var = self.add_view_toggle(
+                menu_label,
+                self.io_view_frame,
+                config_key,
+                default_visible=default_visible,
+            )
+        else:
+            self.io_view_visible_var = None
+            if not default_visible:
+                self.io_view_frame.grid_remove()
+
+        return self.io_view_frame
+
+    def set_io_view_title(self, title: str) -> None:
+        """Update the IO view label text after creation."""
+        if not getattr(self, 'io_view_frame', None):
+            raise AttributeError("IO view frame has not been created.")
+        self.io_view_frame.config(text=title)
+
+    def create_io_text_widget(self, height: int = 2):
+        """
+        Create a ScrolledText widget for the IO view frame with styling matching the logger.
+        Must be called after create_io_view_frame().
+
+        Returns:
+            ScrolledText widget configured with consistent styling
+        """
+        import tkinter as tk
+        from tkinter import scrolledtext
+
+        if not hasattr(self, 'io_view_frame') or self.io_view_frame is None:
+            raise AttributeError("IO text widget requires io_view_frame to be created first via create_io_view_frame().")
+
+        self.io_text = scrolledtext.ScrolledText(
+            self.io_view_frame,
+            height=height,
+            wrap=tk.WORD,
+            bg='#f5f5f5',
+            fg='#333333'
+        )
+        self.io_text.grid(row=0, column=0, sticky='nsew')
+        self.io_text.config(state='disabled')
+
+        return self.io_text
 
     def create_logger_display(self, parent_frame, height: int = 3):
         import tkinter as tk

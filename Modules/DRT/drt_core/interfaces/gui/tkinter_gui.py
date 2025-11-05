@@ -97,22 +97,22 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
         self.empty_state_label.lift()
 
-        parent_for_logs = main_frame if main_frame is not None else content_frame
-
-        self.quick_panel = QuickStatusPanel(parent_for_logs)
-        quick_panel_frame = self.quick_panel.build(row=1, column=0)
-        quick_panel_frame.grid_configure(padx=0, pady=(0, 0), sticky='ew')
+        io_frame = self.create_io_view_frame(
+            title="Session Output",
+            default_visible=True,
+            menu_label="Show Session Output",
+            config_key="gui_show_session_output",
+            padding="3",
+        )
+        self.devices_panel_visible_var = getattr(self, 'io_view_visible_var', None)
+        if io_frame is not None:
+            io_frame.grid_configure(padx=0, pady=(0, 0), sticky='ew')
 
         if hasattr(self, 'log_frame') and self.log_frame.winfo_manager():
             self.log_frame.grid_configure(row=2, column=0, sticky='ew')
 
-        if hasattr(self, 'add_view_toggle'):
-            self.devices_panel_visible_var = self.add_view_toggle(
-                "Show Session Output",
-                quick_panel_frame,
-                "gui_show_session_output",
-                default_visible=True,
-            )
+        self.quick_panel = QuickStatusPanel(io_frame)
+        self.quick_panel.build(container=io_frame)
 
     def _create_device_tab(self, port: str) -> DeviceTab:
         tab_frame = ttk.Frame(self.notebook)
