@@ -15,6 +15,7 @@ from logger_core.commands import CommandMessage, StatusMessage, StatusType
 
 from .constants import DISPLAY_NAME
 from .model import StubCodexModel
+from .runtime import ModuleRuntime
 
 
 class StubCodexController:
@@ -29,13 +30,14 @@ class StubCodexController:
         self._stdin_shutdown = threading.Event()
         self._command_queue: Optional[asyncio.Queue[str]] = None
         self._shutdown_requested = False
+        self._runtime: Optional[ModuleRuntime] = None
 
     async def start(self) -> None:
         await self.model.prepare_environment(self.logger)
 
         self.logger.info("%s module initializing", DISPLAY_NAME)
         StatusMessage.send(StatusType.INITIALIZING, {"message": f"{DISPLAY_NAME} starting"})
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0)
 
         ready_ms = self.model.mark_ready()
         self.logger.info("%s module ready and idle (%.1f ms)", DISPLAY_NAME, ready_ms)
@@ -67,16 +69,32 @@ class StubCodexController:
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> None:
         action = action or ""
+        handled = False
         if action == "start_recording":
             await self._handle_start_recording(kwargs)
+            handled = True
         elif action == "stop_recording":
             await self._handle_stop_recording()
+            handled = True
         elif action == "quit":
             await self._begin_shutdown("quit requested from view")
+            handled = True
         elif action == "start_session":
             await self._handle_start_session(kwargs)
+            handled = True
         elif action == "get_status":
             self._send_status_report("user_action")
+            handled = True
+
+        if not handled and self._runtime:
+            try:
+                handled = await self._runtime.handle_user_action(action, **kwargs)
+            except Exception:
+                self.logger.exception("Runtime user action handler failed [%s]", action)
+                handled = True
+
+        if not handled:
+            self.logger.debug("Unhandled user action: %s", action)
 
     async def _listen_for_commands(self) -> None:
         """Listen for commands from stdin in a background thread."""
@@ -129,18 +147,32 @@ class StubCodexController:
 
     async def _process_command(self, command: Dict[str, Any]) -> None:
         action = (command.get("command") or "").lower()
+        handled = False
         if action == "quit":
             self.logger.info("Received quit command from controller")
             await self._begin_shutdown("quit command received")
+            handled = True
         elif action == "get_status":
             self._send_status_report("command")
+            handled = True
         elif action == "start_session":
             await self._handle_start_session(command)
+            handled = True
         elif action == "start_recording":
             await self._handle_start_recording(command)
+            handled = True
         elif action == "stop_recording":
             await self._handle_stop_recording()
-        else:
+            handled = True
+
+        if not handled and self._runtime:
+            try:
+                handled = await self._runtime.handle_command(command)
+            except Exception:
+                self.logger.exception("Runtime command handler failed [%s]", action)
+                handled = True
+
+        if not handled:
             self.logger.warning("Unknown command: %s", action)
 
     async def _handle_start_session(self, command: Dict[str, Any]) -> None:
@@ -182,3 +214,7 @@ class StubCodexController:
             {"event": "shutdown_requested", "runtime_ms": round(now_ms, 1)},
         )
         self.model.request_shutdown(reason)
+
+    def attach_runtime(self, runtime: Optional[ModuleRuntime]) -> None:
+        """Allow the supervisor to register a runtime for command dispatch."""
+        self._runtime = runtime

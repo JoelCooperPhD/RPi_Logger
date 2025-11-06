@@ -15,6 +15,7 @@ from .constants import DISPLAY_NAME
 from .controller import StubCodexController
 from .model import StubCodexModel
 from .view import StubCodexView
+from .runtime import ModuleRuntime, RuntimeContext, RuntimeFactory
 
 
 LifecycleHook = Callable[["StubCodexSupervisor"], Optional[Awaitable[None]]]
@@ -40,6 +41,16 @@ class RetryPolicy:
     on_recovered: Optional[LifecycleHook] = None
 
 
+@dataclass(slots=True)
+class RuntimeRetryPolicy:
+    """Retry behaviour when constructing the domain runtime."""
+
+    interval: float = 3.0
+    max_attempts: Optional[int] = None
+    on_retry: Optional[LifecycleHook] = None
+    on_failure: Optional[LifecycleHook] = None
+
+
 class StubCodexSupervisor:
     """Owns model/controller/view lifecycle and orchestrates shutdown."""
 
@@ -50,6 +61,8 @@ class StubCodexSupervisor:
         logger: logging.Logger,
         hooks: Optional[LifecycleHooks] = None,
         retry_policy: Optional[RetryPolicy] = None,
+        runtime_factory: Optional[RuntimeFactory] = None,
+        runtime_retry_policy: Optional[RuntimeRetryPolicy] = None,
     ) -> None:
         start = time.perf_counter()
 
@@ -57,13 +70,18 @@ class StubCodexSupervisor:
         self.logger = logger
         self.hooks = hooks or LifecycleHooks()
         self.retry_policy = retry_policy
+        self.runtime_factory = runtime_factory
+        self.runtime_retry_policy = runtime_retry_policy
+        self.module_dir = module_dir
         self.model = StubCodexModel(args, module_dir)
         self.controller = StubCodexController(args, self.model, logger)
+        self.runtime: Optional[ModuleRuntime] = None
         self.view: Optional[StubCodexView] = None
         self._shutdown_in_progress = False
         self._view_runtime_ms: float = 0.0
         self._retry_task: Optional[asyncio.Task] = None
         self._device_missing = False
+        self._runtime_attempts = 0
 
         self.model.apply_initial_window_geometry()
 
@@ -83,6 +101,9 @@ class StubCodexSupervisor:
     async def run(self) -> None:
         await self._run_hook(self.hooks.before_start, "before_start")
         await self.controller.start()
+
+        if self.runtime_factory:
+            await self._start_runtime()
 
         if self.view:
             self.view.attach_logging_handler()
@@ -121,6 +142,8 @@ class StubCodexSupervisor:
         await self._run_hook(self.hooks.before_shutdown, "before_shutdown")
 
         await self._stop_retry_monitor()
+
+        await self._stop_runtime(reason="supervisor_shutdown")
 
         await self.controller.stop()
 
@@ -212,3 +235,102 @@ class StubCodexSupervisor:
         except Exception:
             self.logger.exception("Retry check raised an exception")
             return False
+
+    # ------------------------------------------------------------------
+    # Runtime management
+
+    async def _start_runtime(self) -> None:
+        if self.runtime_factory is None or self.runtime is not None:
+            return
+
+        retry_policy = self.runtime_retry_policy
+
+        while not self.model.shutdown_event.is_set():
+            self._runtime_attempts += 1
+            attempt = self._runtime_attempts
+
+            try:
+                context = self._build_runtime_context()
+                runtime = await self._call_runtime_factory(context)
+                self.controller.attach_runtime(runtime)
+                await runtime.start()
+                self.runtime = runtime
+                self._runtime_attempts = 0
+                self.logger.info("Module runtime started (attempt %d)", attempt)
+                return
+            except Exception as exc:
+                self.logger.exception("Runtime start attempt %d failed", attempt, exc_info=exc)
+                self.controller.attach_runtime(None)
+
+                if not retry_policy or not self._should_retry_runtime(attempt, retry_policy):
+                    if retry_policy and retry_policy.on_failure:
+                        await self._run_hook(retry_policy.on_failure, "runtime_failure")
+                    raise
+
+                await self._run_hook(retry_policy.on_retry, "runtime_retry")
+                await self._sleep_with_shutdown_awareness(max(0.1, float(retry_policy.interval)))
+
+        self.logger.warning("Runtime start aborted due to pending shutdown")
+
+    async def _stop_runtime(self, *, reason: str) -> None:
+        runtime = self.runtime
+        if not runtime:
+            return
+
+        self.logger.info("Stopping module runtime (%s)", reason)
+
+        try:
+            await runtime.shutdown()
+        except Exception:
+            self.logger.exception("Runtime shutdown handler failed")
+
+        try:
+            await runtime.cleanup()
+        except Exception:
+            self.logger.exception("Runtime cleanup failed")
+
+        self.controller.attach_runtime(None)
+        self.runtime = None
+
+    async def _call_runtime_factory(self, context: RuntimeContext) -> ModuleRuntime:
+        result = self.runtime_factory(context)
+        if inspect.isawaitable(result):
+            result = await result
+        if not isinstance(result, ModuleRuntime):
+            missing = [
+                name
+                for name in ("start", "shutdown", "cleanup")
+                if not hasattr(result, name)
+            ]
+            if missing:
+                raise TypeError(
+                    "Runtime factory must return an object implementing %s; got %r"
+                    % (", ".join(missing), type(result)),
+                )
+        return result  # type: ignore[return-value]
+
+    def _build_runtime_context(self) -> RuntimeContext:
+        return RuntimeContext(
+            args=self.args,
+            module_dir=self.module_dir,
+            logger=self.logger,
+            model=self.model,
+            controller=self.controller,
+            supervisor=self,
+        )
+
+    def _should_retry_runtime(self, attempt: int, policy: RuntimeRetryPolicy) -> bool:
+        max_attempts = policy.max_attempts
+        if max_attempts is not None and attempt >= max_attempts:
+            self.logger.error(
+                "Runtime failed after %d attempt(s); aborting",
+                attempt,
+            )
+            return False
+        return True
+
+    async def _sleep_with_shutdown_awareness(self, interval: float) -> None:
+        try:
+            await asyncio.wait_for(self.model.shutdown_event.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            return

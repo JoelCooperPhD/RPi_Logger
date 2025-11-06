@@ -3,7 +3,14 @@
 from .model import StubCodexModel, ModuleState
 from .view import StubCodexView
 from .controller import StubCodexController
-from .supervisor import StubCodexSupervisor, LifecycleHooks, RetryPolicy
+from .supervisor import (
+    StubCodexSupervisor,
+    LifecycleHooks,
+    RetryPolicy,
+    RuntimeRetryPolicy,
+)
+from .runtime import ModuleRuntime, RuntimeFactory, RuntimeContext
+from .runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
 __all__ = [
     "StubCodexModel",
@@ -12,5 +19,11 @@ __all__ = [
     "StubCodexSupervisor",
     "LifecycleHooks",
     "RetryPolicy",
+    "RuntimeRetryPolicy",
     "ModuleState",
+    "ModuleRuntime",
+    "RuntimeFactory",
+    "RuntimeContext",
+    "BackgroundTaskManager",
+    "ShutdownGuard",
 ]
