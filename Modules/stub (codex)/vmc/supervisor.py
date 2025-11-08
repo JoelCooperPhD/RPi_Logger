@@ -9,9 +9,9 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
-from .constants import DISPLAY_NAME
+from .constants import DISPLAY_NAME, MODULE_ID
 from .controller import StubCodexController
 from .model import StubCodexModel
 from .view import StubCodexView
@@ -63,18 +63,36 @@ class StubCodexSupervisor:
         retry_policy: Optional[RetryPolicy] = None,
         runtime_factory: Optional[RuntimeFactory] = None,
         runtime_retry_policy: Optional[RuntimeRetryPolicy] = None,
+        display_name: Optional[str] = None,
+        module_id: Optional[str] = None,
+        view_factory: Optional[Callable[..., StubCodexView]] = None,
+        view_kwargs: Optional[dict[str, Any]] = None,
     ) -> None:
         start = time.perf_counter()
 
         self.args = args
         self.logger = logger
+        self.display_name = display_name or DISPLAY_NAME
+        self.module_id = module_id or MODULE_ID
         self.hooks = hooks or LifecycleHooks()
         self.retry_policy = retry_policy
         self.runtime_factory = runtime_factory
         self.runtime_retry_policy = runtime_retry_policy
         self.module_dir = module_dir
-        self.model = StubCodexModel(args, module_dir)
-        self.controller = StubCodexController(args, self.model, logger)
+        self._view_factory = view_factory or StubCodexView
+        self._view_kwargs = dict(view_kwargs) if view_kwargs else {}
+        self.model = StubCodexModel(
+            args,
+            module_dir,
+            display_name=self.display_name,
+            module_id=self.module_id,
+        )
+        self.controller = StubCodexController(
+            args,
+            self.model,
+            logger,
+            display_name=self.display_name,
+        )
         self.runtime: Optional[ModuleRuntime] = None
         self.view: Optional[StubCodexView] = None
         self._shutdown_in_progress = False
@@ -87,16 +105,24 @@ class StubCodexSupervisor:
 
         if getattr(args, "mode", "gui") == "gui":
             try:
-                self.view = StubCodexView(args, self.model, action_callback=self.controller.handle_user_action)
-                self.logger.info("StubCodexSupervisor initialized in GUI mode")
+                view_kwargs = dict(self._view_kwargs)
+                view_kwargs.setdefault("logger", self.logger.getChild("View"))
+                self.view = self._view_factory(
+                    args,
+                    self.model,
+                    action_callback=self.controller.handle_user_action,
+                    display_name=self.display_name,
+                    **view_kwargs,
+                )
+                self.logger.info("%s supervisor initialized in GUI mode", self.display_name)
             except Exception as exc:
                 self.logger.warning("GUI unavailable (%s), falling back to headless mode", exc)
                 self.view = None
         else:
-            self.logger.info("StubCodexSupervisor initialized in headless mode")
+            self.logger.info("%s supervisor initialized in headless mode", self.display_name)
 
         elapsed = (time.perf_counter() - start) * 1000.0
-        self.logger.info("StubCodexSupervisor constructed in %.2f ms", elapsed)
+        self.logger.info("%s supervisor constructed in %.2f ms", self.display_name, elapsed)
 
     async def run(self) -> None:
         await self._run_hook(self.hooks.before_start, "before_start")
@@ -159,7 +185,7 @@ class StubCodexSupervisor:
         metrics = self.model.metrics
         self.logger.info(
             "%s module stopped (runtime %.1f ms | shutdown %.1f ms | window %.1f ms)",
-            DISPLAY_NAME,
+            self.display_name,
             metrics.runtime_ms,
             metrics.shutdown_ms,
             metrics.window_ms,
@@ -317,6 +343,9 @@ class StubCodexSupervisor:
             model=self.model,
             controller=self.controller,
             supervisor=self,
+            view=self.view,
+            display_name=self.display_name,
+            module_id=self.module_id,
         )
 
     def _should_retry_runtime(self, attempt: int, policy: RuntimeRetryPolicy) -> bool:

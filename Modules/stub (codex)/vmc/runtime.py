@@ -7,10 +7,13 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
 
+from .constants import DISPLAY_NAME, MODULE_ID
+
 if TYPE_CHECKING:  # pragma: no cover - type checking only
     from .controller import StubCodexController
     from .model import StubCodexModel
     from .supervisor import StubCodexSupervisor
+    from .view import StubCodexView
 
 
 class ModuleRuntime:
@@ -52,6 +55,9 @@ class RuntimeContext:
     model: "StubCodexModel"
     controller: "StubCodexController"
     supervisor: "StubCodexSupervisor"
+    view: Optional["StubCodexView"] = None
+    display_name: str = DISPLAY_NAME
+    module_id: str = MODULE_ID
 
 
 RuntimeFactory = Callable[[RuntimeContext], ModuleRuntime | Awaitable[ModuleRuntime]]

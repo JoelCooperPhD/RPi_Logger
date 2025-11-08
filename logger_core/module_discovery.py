@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .paths import MODULES_DIR
+from .logging_config import configure_logging
 
 logger = logging.getLogger("ModuleDiscovery")
 
@@ -171,7 +172,7 @@ def get_module_by_name(modules: List[ModuleInfo], name: str) -> Optional[ModuleI
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
+    configure_logging(level=logging.DEBUG, force=True)
     modules = discover_modules()
     print(f"\nDiscovered {len(modules)} modules:")
     for mod in modules:

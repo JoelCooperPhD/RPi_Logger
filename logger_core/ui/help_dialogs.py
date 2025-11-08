@@ -331,9 +331,13 @@ tasks, and annotations. All modules are controlled from a single interface.
 
    After recording, synchronize audio and video:
 
-   $ python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+   $ python muxing_tool.py
+     (select the session folder when prompted)
 
-   This creates synchronized MP4 files with frame-level accuracy (~30ms).
+   Advanced CLI:
+     python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+
+   These commands create synchronized MP4 files with frame-level accuracy (~30ms).
 
 
 ═══════════════════════════════════════════════════════════════════
@@ -383,7 +387,7 @@ data/session_20251024_120000/
 ✓ Verify adequate disk space before long sessions (check System Info)
 ✓ Let cameras/sensors warm up for 30 seconds after starting
 ✓ Use NoteTaker to annotate events during recording
-✓ Process recordings with sync_and_mux.py immediately after session
+✓ Process recordings with muxing_tool.py (or utils/sync_and_mux.py) immediately after session
 ✓ Check logs if modules fail: Help > Open Logs Directory
 ✓ Module windows auto-tile on launch for efficient workspace
 
@@ -406,7 +410,7 @@ Recording fails immediately:
 
 Audio/video out of sync:
   • Verify CSV timing files exist in session directory
-  • Re-run sync_and_mux.py with --all-trials flag
+  • Re-run muxing_tool.py for the session (or sync_and_mux.py --all-trials)
   • Check SYNC.json for reasonable offset values
 
 USB devices not detected:

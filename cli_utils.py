@@ -6,9 +6,10 @@ import contextlib
 import logging
 import signal
 import sys
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Iterable, Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple
+
+from logger_core.logging_config import configure_logging
 
 
 LOG_LEVELS: dict[str, int] = {
@@ -18,50 +19,6 @@ LOG_LEVELS: dict[str, int] = {
     "info": logging.INFO,
     "debug": logging.DEBUG,
 }
-
-
-def configure_logging(
-    level_name: str,
-    log_file: Optional[Path] = None,
-    *,
-    suppressed_loggers: Iterable[str] = (),
-    fmt: str = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    datefmt: str = "%Y-%m-%d %H:%M:%S",
-    console_output: bool = True,
-) -> None:
-    level = LOG_LEVELS.get(level_name.lower())
-    if level is None:
-        valid = ", ".join(sorted(LOG_LEVELS))
-        raise ValueError(f"Invalid log level '{level_name}'. Choose from: {valid}")
-
-    root = logging.getLogger()
-    for handler in list(root.handlers):
-        root.removeHandler(handler)
-        handler.close()
-
-    root.setLevel(level)
-
-    formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
-
-    if console_output:
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
-        root.addHandler(stream_handler)
-
-    if log_file:
-        log_file_path = Path(log_file) if not isinstance(log_file, Path) else log_file
-        log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = RotatingFileHandler(
-            log_file_path,
-            maxBytes=20 * 1024 * 1024,
-            backupCount=3,
-            encoding="utf-8"
-        )
-        file_handler.setFormatter(formatter)
-        root.addHandler(file_handler)
-
-    for name in suppressed_loggers:
-        logging.getLogger(name).setLevel(logging.ERROR)
 
 
 def add_common_cli_arguments(
@@ -292,7 +249,12 @@ def setup_module_logging(
         from logger_core.commands import StatusMessage
         StatusMessage.configure(original_stdout)
 
-    configure_logging(args.log_level, str(log_file), console_output=args.console_output)
+    configure_logging(
+        args.log_level,
+        force=True,
+        console=args.console_output,
+        log_file=log_file,
+    )
 
     args.session_dir = session_dir
     args.log_file = log_file
@@ -385,4 +347,3 @@ def log_module_shutdown(
     logger.info("=" * 60)
     logger.info(f"{module_name.title()} System Stopped")
     logger.info("=" * 60)
-

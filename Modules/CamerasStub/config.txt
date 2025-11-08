@@ -1,0 +1,11 @@
+# Cameras Stub module built on the stub (codex) runtime stack
+enabled = false
+display_name = Cameras (Stub)
+window_geometry = 1432x707+4611+2411
+preview_fps = unlimited
+save_width = 160
+save_height = 120
+save_fps = unlimited
+save_format = jpeg
+save_quality = 90
+preview_fraction = 1.0

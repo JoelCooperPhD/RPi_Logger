@@ -5,6 +5,8 @@ import tkinter as tk
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Optional
 
+from .logging_config import configure_logging
+
 logger = logging.getLogger("WindowManager")
 
 
@@ -146,7 +148,7 @@ class WindowManager:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    configure_logging(level=logging.INFO, force=True)
 
     wm = WindowManager()
 

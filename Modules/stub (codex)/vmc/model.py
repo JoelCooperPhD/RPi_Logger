@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from cli_utils import ensure_directory, log_module_shutdown, log_module_startup, setup_module_logging
 from logger_core.config_manager import get_config_manager
 from logger_core.commands import StatusMessage, StatusType
-from .constants import DISPLAY_NAME, MODULE_ID
+from .constants import DISPLAY_NAME, MODULE_ID, PLACEHOLDER_GEOMETRY
+
+
+logger = logging.getLogger(__name__)
 
 
 class ModuleState(Enum):
@@ -38,9 +42,18 @@ class RuntimeMetrics:
 class StubCodexModel:
     """Holds module state and orchestrates environment preparation."""
 
-    def __init__(self, args, module_dir: Path) -> None:
+    def __init__(
+        self,
+        args,
+        module_dir: Path,
+        *,
+        display_name: str = DISPLAY_NAME,
+        module_id: str = MODULE_ID,
+    ) -> None:
         self.args = args
         self.module_dir = module_dir
+        self.display_name = display_name
+        self.module_id = module_id
         self.shutdown_event = asyncio.Event()
         self.shutdown_reason: Optional[str] = None
         self.window_duration_ms: float = 0.0
@@ -50,7 +63,11 @@ class StubCodexModel:
         self.log_file: Optional[Path] = None
         self.logs_dir = module_dir / "logs"
         self.config_path = module_dir / "config.txt"
+        self.config_data: Dict[str, Any] = {}
         self.saved_window_geometry: Optional[str] = None
+        self.saved_preview_resolution: Optional[str] = None
+        self.saved_preview_width: Optional[int] = None
+        self.saved_preview_height: Optional[int] = None
         self._pending_window_geometry: Optional[str] = None
         self._state: ModuleState = ModuleState.INITIALIZING
         self._recording: bool = False
@@ -63,56 +80,101 @@ class StubCodexModel:
             config = get_config_manager().read_config(self.config_path)
         except Exception:
             config = {}
+        self.config_data = dict(config)
         self.saved_window_geometry = config.get("window_geometry")
+
+        resolution, width, height, _ = self._resolve_preview_preferences(config)
+        self.saved_preview_resolution = resolution
+        self.saved_preview_width = width
+        self.saved_preview_height = height
+        self._apply_preview_preferences_to_args(resolution, width, height)
 
     @property
     def startup_timestamp(self) -> float:
         return self._startup_timestamp
 
     async def prepare_environment(self, logger) -> None:
-        """Ensure filesystem layout and logging artefacts exist."""
-        self.args.output_dir = await asyncio.to_thread(ensure_directory, self.args.output_dir)
+        """Ensure filesystem layout and logging artefacts exist with minimal blocking."""
 
-        await asyncio.to_thread(self.logs_dir.mkdir, parents=True, exist_ok=True)
-        with contextlib.suppress(Exception):
-            await asyncio.to_thread(self.logs_dir.chmod, 0o777)
+        output_dir = Path(self.args.output_dir)
+        output_task = asyncio.create_task(asyncio.to_thread(ensure_directory, output_dir))
 
         config_manager = get_config_manager()
+        config: Dict[str, Any] = {}
+        config_exists = await asyncio.to_thread(self.config_path.exists)
 
-        if self.config_path.exists():
+        if config_exists:
             with contextlib.suppress(Exception):
                 await asyncio.to_thread(self.config_path.chmod, 0o666)
             config = await config_manager.read_config_async(self.config_path)
-            if config.get("display_name") != DISPLAY_NAME:
-                await config_manager.write_config_async(self.config_path, {"display_name": DISPLAY_NAME})
-            if "window_geometry" not in config:
-                await config_manager.write_config_async(
-                    self.config_path,
-                    {"window_geometry": PLACEHOLDER_GEOMETRY},
-                )
-            geometry = config.get("window_geometry") or PLACEHOLDER_GEOMETRY
-            self.saved_window_geometry = geometry
         else:
-            await config_manager.write_config_async(
-                self.config_path,
-                {
-                    "display_name": DISPLAY_NAME,
-                    "enabled": False,
-                    "window_geometry": PLACEHOLDER_GEOMETRY,
-                },
+            # Bootstrap minimal defaults so later updates succeed.
+            bootstrap = {
+                "display_name": self.display_name,
+                "enabled": False,
+                "window_geometry": PLACEHOLDER_GEOMETRY,
+                "preview_width": 640,
+                "preview_height": 480,
+                "preview_fps": "unlimited",
+                "save_width": 640,
+                "save_height": 480,
+                "save_fps": "unlimited",
+                "save_format": "jpeg",
+                "save_quality": 90,
+            }
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(
+                self.config_path.write_text,
+                "\n".join(f"{key} = {value}" for key, value in bootstrap.items()) + "\n",
+                "utf-8",
             )
-            self.saved_window_geometry = PLACEHOLDER_GEOMETRY
+            config = dict(bootstrap)
+            config_exists = True
+
+        config_updates: Dict[str, Any] = {}
+        if config.get("display_name") != self.display_name:
+            config_updates["display_name"] = self.display_name
+
+        geometry = config.get("window_geometry")
+        if not geometry:
+            geometry = PLACEHOLDER_GEOMETRY
+            config_updates["window_geometry"] = geometry
+
+        preview_resolution, preview_width, preview_height, preview_updates = self._resolve_preview_preferences(config)
+        if preview_updates:
+            config_updates.update(preview_updates)
+
+        if config_updates and config_exists:
+            success = await config_manager.write_config_async(self.config_path, config_updates)
+            if success:
+                config.update(config_updates)
+            else:
+                logger.warning(
+                    "Failed to persist config updates %s to %s",
+                    list(config_updates.keys()),
+                    self.config_path,
+                )
+
+        self.saved_window_geometry = geometry or PLACEHOLDER_GEOMETRY
+        self.saved_preview_resolution = preview_resolution
+        self.saved_preview_width = preview_width
+        self.saved_preview_height = preview_height
+        self._apply_preview_preferences_to_args(preview_resolution, preview_width, preview_height)
+        self.config_data = dict(config)
+
+        self.args.output_dir = await output_task
 
         session_name, log_file, _ = setup_module_logging(
             self.args,
-            module_name=MODULE_ID,
+            module_name=self.module_id,
             module_dir=self.module_dir,
-            default_prefix=MODULE_ID,
+            default_prefix=self.module_id,
         )
         self.session_name = session_name
         self.log_file = log_file
 
         with contextlib.suppress(Exception):
+            await asyncio.to_thread(self.logs_dir.chmod, 0o777)
             await asyncio.to_thread(log_file.chmod, 0o666)
 
         log_module_startup(
@@ -120,7 +182,7 @@ class StubCodexModel:
             session_name,
             log_file,
             self.args,
-            module_name=DISPLAY_NAME,
+            module_name=self.display_name,
         )
 
     def mark_ready(self) -> float:
@@ -128,7 +190,7 @@ class StubCodexModel:
         self.metrics.ready_ms = ready_elapsed_ms
         StatusMessage.send(
             StatusType.INITIALIZED,
-            {"message": f"{DISPLAY_NAME} ready", "ready_ms": round(ready_elapsed_ms, 1)},
+            {"message": f"{self.display_name} ready", "ready_ms": round(ready_elapsed_ms, 1)},
         )
         self.state = ModuleState.IDLE
         return ready_elapsed_ms
@@ -160,13 +222,14 @@ class StubCodexModel:
         self.metrics.shutdown_trigger_ms = shutdown_elapsed_ms
 
     def emit_shutdown_logs(self, logger) -> None:
-        log_module_shutdown(logger, DISPLAY_NAME)
+        log_module_shutdown(logger, self.display_name)
 
     def send_runtime_report(self) -> None:
         StatusMessage.send(
             StatusType.STATUS_REPORT,
             {
                 "event": "shutdown_timing",
+                "display_name": self.display_name,
                 "runtime_ms": round(self.metrics.runtime_ms, 1),
                 "shutdown_ms": round(self.metrics.shutdown_ms, 1),
                 "window_ms": round(self.metrics.window_ms, 1),
@@ -297,3 +360,207 @@ class StubCodexModel:
 
     def has_pending_window_geometry(self) -> bool:
         return bool(self._pending_window_geometry)
+
+    # Preview preference helpers ---------------------------------------------
+
+    async def persist_preview_size(self, selection: Any) -> None:
+        if selection is None:
+            return
+
+        resolution, width, height = self._normalize_preview_selection(selection)
+        if not resolution:
+            return
+
+        current_resolution = self.saved_preview_resolution or ""
+        if resolution == current_resolution:
+            width_match = width is None or width == self.saved_preview_width
+            height_match = height is None or height == self.saved_preview_height
+            if width_match and height_match:
+                return
+
+        updates: Dict[str, Any] = {"preview_resolution": resolution}
+        if width is not None and height is not None:
+            updates["preview_width"] = width
+            updates["preview_height"] = height
+
+        success = await get_config_manager().write_config_async(self.config_path, updates)
+        if not success:
+            logger.warning("Failed to persist preview selection: %s", updates)
+            return
+
+        self.saved_preview_resolution = resolution
+        self.saved_preview_width = width
+        self.saved_preview_height = height
+        self._apply_preview_preferences_to_args(resolution, width, height)
+
+    def _apply_preview_preferences_to_args(
+        self,
+        resolution: Optional[str],
+        width: Optional[int],
+        height: Optional[int],
+    ) -> None:
+        if not hasattr(self.args, "preview_width") or not hasattr(self.args, "preview_height"):
+            return
+
+        if resolution == "auto":
+            setattr(self.args, "preview_width", None)
+            setattr(self.args, "preview_height", None)
+        elif width is not None and height is not None:
+            setattr(self.args, "preview_width", width)
+            setattr(self.args, "preview_height", height)
+
+    def _resolve_preview_preferences(
+        self,
+        config: Dict[str, Any],
+    ) -> tuple[Optional[str], Optional[int], Optional[int], Dict[str, Any]]:
+        resolution_raw = config.get("preview_resolution")
+        resolution_source = str(resolution_raw).strip() if resolution_raw is not None else ""
+        resolution_lower = resolution_source.lower()
+
+        width_raw = config.get("preview_width")
+        height_raw = config.get("preview_height")
+        width_value = self._parse_int(width_raw)
+        height_value = self._parse_int(height_raw)
+
+        final_resolution = resolution_lower
+        final_width = width_value
+        final_height = height_value
+
+        if not final_resolution:
+            if width_value is not None and height_value is not None:
+                final_resolution = f"{width_value}x{height_value}"
+            else:
+                final_resolution = "auto"
+
+        if final_resolution == "auto":
+            final_width = None
+            final_height = None
+        else:
+            parsed_width, parsed_height = self._parse_resolution_string(final_resolution)
+            if parsed_width is not None and parsed_height is not None:
+                final_width = parsed_width
+                final_height = parsed_height
+                final_resolution = f"{parsed_width}x{parsed_height}"
+            elif width_value is not None and height_value is not None:
+                final_resolution = f"{width_value}x{height_value}"
+                final_width = width_value
+                final_height = height_value
+            else:
+                final_resolution = "auto"
+                final_width = None
+                final_height = None
+
+        updates: Dict[str, Any] = {}
+        if final_resolution and final_resolution != resolution_source:
+            updates["preview_resolution"] = final_resolution
+        if final_width is not None and final_width != width_value:
+            updates["preview_width"] = final_width
+        if final_height is not None and final_height != height_value:
+            updates["preview_height"] = final_height
+
+        return final_resolution or None, final_width, final_height, updates
+
+    def _normalize_preview_selection(self, selection: Any) -> tuple[Optional[str], Optional[int], Optional[int]]:
+        if isinstance(selection, str):
+            key = selection.strip().lower()
+            if not key:
+                return None, None, None
+            if key == "auto":
+                return "auto", None, None
+            width, height = self._parse_resolution_string(key)
+            if width is not None and height is not None:
+                return f"{width}x{height}", width, height
+            return None, None, None
+
+        if isinstance(selection, (tuple, list)) and len(selection) >= 2:
+            width = self._parse_int(selection[0])
+            height = self._parse_int(selection[1])
+            if width is not None and height is not None:
+                return f"{width}x{height}", width, height
+
+        return None, None, None
+
+    @staticmethod
+    def _parse_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _parse_resolution_string(value: str) -> tuple[Optional[int], Optional[int]]:
+        if not value:
+            return None, None
+        normalized = value.lower().replace(" ", "")
+        if "x" not in normalized:
+            return None, None
+        width_str, height_str = normalized.split("x", 1)
+        width = StubCodexModel._parse_int(width_str)
+        height = StubCodexModel._parse_int(height_str)
+        return width, height
+
+    @staticmethod
+    def _stringify_value(value: Any) -> str:
+        if isinstance(value, bool):
+            return str(value).lower()
+        return str(value)
+
+    def get_config_snapshot(self) -> Dict[str, Any]:
+        return dict(self.config_data)
+
+    async def persist_preferences(
+        self,
+        updates: Dict[str, Any],
+        *,
+        remove_keys: Optional[Set[str]] = None,
+    ) -> bool:
+        if not updates and not remove_keys:
+            return True
+        config_manager = get_config_manager()
+        success = True
+        if updates:
+            success = await config_manager.write_config_async(self.config_path, updates)
+            if success:
+                self.config_data.update({key: self._stringify_value(value) for key, value in updates.items()})
+            else:
+                logger.warning(
+                    "Failed to persist preferences %s to %s",
+                    list(updates.keys()),
+                    self.config_path,
+                )
+        if success and remove_keys:
+            await asyncio.to_thread(self._strip_keys_from_config, remove_keys)
+        return success
+
+    def persist_preferences_sync(self, updates: Dict[str, Any]) -> bool:
+        if not updates:
+            return True
+        config_manager = get_config_manager()
+        success = config_manager.write_config(self.config_path, updates)
+        if success:
+            self.config_data.update({key: self._stringify_value(value) for key, value in updates.items()})
+        return success
+
+    def _strip_keys_from_config(self, keys: Set[str]) -> None:
+        try:
+            if not self.config_path.exists():
+                return
+            lines = self.config_path.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            return
+        filtered: List[str] = []
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#') or '=' not in stripped:
+                filtered.append(line)
+                continue
+            key = stripped.split('=', 1)[0].strip()
+            if key in keys:
+                continue
+            filtered.append(line)
+        try:
+            self.config_path.write_text("\n".join(filtered) + "\n", encoding="utf-8")
+        except Exception:
+            return

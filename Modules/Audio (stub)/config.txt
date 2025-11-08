@@ -1,0 +1,14 @@
+# Audio (Stub) module configuration
+sample_rate = 48000
+output_dir = recordings
+session_prefix = experiment
+auto_select_new = false
+auto_start_recording = false
+console_output = false
+discovery_timeout = 5.0
+discovery_retry = 3.0
+enabled = false
+display_name = Audio (Stub)
+window_geometry = 1121x206+5641+3861
+preview_resolution = auto
+log_level = debug

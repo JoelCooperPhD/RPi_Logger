@@ -1,4 +1,0 @@
-# Auto-generated settings (do not edit unless you know what you are doing)
-display_name = stub (claude)
-window_geometry = 1706x371+5633+2585
-enabled = false

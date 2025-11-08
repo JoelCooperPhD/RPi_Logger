@@ -21,10 +21,18 @@ from .runtime import ModuleRuntime
 class StubCodexController:
     """Coordinates domain logic and command handling."""
 
-    def __init__(self, args, model: StubCodexModel, module_logger: logging.Logger) -> None:
+    def __init__(
+        self,
+        args,
+        model: StubCodexModel,
+        module_logger: logging.Logger,
+        *,
+        display_name: str = DISPLAY_NAME,
+    ) -> None:
         self.args = args
         self.model = model
         self.logger = module_logger
+        self.display_name = display_name
         self._command_task: Optional[asyncio.Task] = None
         self._stdin_thread: Optional[threading.Thread] = None
         self._stdin_shutdown = threading.Event()
@@ -35,12 +43,12 @@ class StubCodexController:
     async def start(self) -> None:
         await self.model.prepare_environment(self.logger)
 
-        self.logger.info("%s module initializing", DISPLAY_NAME)
-        StatusMessage.send(StatusType.INITIALIZING, {"message": f"{DISPLAY_NAME} starting"})
+        self.logger.info("%s module initializing", self.display_name)
+        StatusMessage.send(StatusType.INITIALIZING, {"message": f"{self.display_name} starting"})
         await asyncio.sleep(0)
 
         ready_ms = self.model.mark_ready()
-        self.logger.info("%s module ready and idle (%.1f ms)", DISPLAY_NAME, ready_ms)
+        self.logger.info("%s module ready and idle (%.1f ms)", self.display_name, ready_ms)
 
         if not self.args.enable_commands:
             self.logger.warning("Command channel disabled; initiating shutdown")
@@ -64,7 +72,7 @@ class StubCodexController:
             except asyncio.QueueFull:
                 pass
 
-        StatusMessage.send(StatusType.QUITTING, {"message": f"{DISPLAY_NAME} exiting"})
+        StatusMessage.send(StatusType.QUITTING, {"message": f"{self.display_name} exiting"})
         await asyncio.sleep(0.05)
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> None:
@@ -147,6 +155,21 @@ class StubCodexController:
 
     async def _process_command(self, command: Dict[str, Any]) -> None:
         action = (command.get("command") or "").lower()
+
+        # Normalize legacy logger commands to the runtime's canonical verbs so
+        # modules launched through the master controller continue to function.
+        legacy_aliases = {
+            "record": "start_recording",
+            "start_record": "start_recording",
+            "pause": "stop_recording",
+            "stop_record": "stop_recording",
+        }
+        canonical = legacy_aliases.get(action)
+        if canonical:
+            command = dict(command)
+            command["command"] = canonical
+            action = canonical
+
         handled = False
         if action == "quit":
             self.logger.info("Received quit command from controller")
@@ -158,11 +181,16 @@ class StubCodexController:
         elif action == "start_session":
             await self._handle_start_session(command)
             handled = True
+        elif action == "stop_session":
+            await self._handle_stop_session()
+            handled = True
         elif action == "start_recording":
             await self._handle_start_recording(command)
+            await self._forward_to_runtime(command)
             handled = True
         elif action == "stop_recording":
             await self._handle_stop_recording()
+            await self._forward_to_runtime(command)
             handled = True
 
         if not handled and self._runtime:
@@ -182,6 +210,12 @@ class StubCodexController:
         path = Path(session_dir)
         self.model.session_dir = path
         self.logger.info("Session directory set to %s", path)
+        runtime = self._runtime
+        if runtime and hasattr(runtime, "on_session_dir_available"):
+            try:
+                await runtime.on_session_dir_available(path)
+            except Exception:
+                self.logger.exception("Runtime session-dir handler failed")
 
     async def _handle_start_recording(self, command: Dict[str, Any]) -> None:
         trial_number = int(command.get("trial_number", 1))
@@ -197,6 +231,22 @@ class StubCodexController:
         self.logger.info("Recording stopped")
         self._send_status_report("recording_stopped")
 
+    async def _handle_stop_session(self) -> None:
+        await self._handle_stop_recording()
+        if self.model.session_dir is not None:
+            self.logger.info("Session directory cleared (stop_session command)")
+        self.model.session_dir = None
+
+    async def _forward_to_runtime(self, command: Dict[str, Any]) -> bool:
+        runtime = self._runtime
+        if not runtime:
+            return False
+        try:
+            return await runtime.handle_command(command)
+        except Exception:
+            self.logger.exception("Runtime command handler failed [%s]", command.get("command"))
+            return True
+
     def _send_status_report(self, source: str) -> None:
         payload = self.model.get_status_snapshot()
         payload["source"] = source
@@ -208,7 +258,7 @@ class StubCodexController:
         self._shutdown_requested = True
 
         now_ms = (time.perf_counter() - self.model.startup_timestamp) * 1000.0
-        StatusMessage.send(StatusType.SHUTDOWN_STARTED, {"message": f"{DISPLAY_NAME}: {reason}"})
+        StatusMessage.send(StatusType.SHUTDOWN_STARTED, {"message": f"{self.display_name}: {reason}"})
         StatusMessage.send(
             StatusType.STATUS_REPORT,
             {"event": "shutdown_requested", "runtime_ms": round(now_ms, 1)},

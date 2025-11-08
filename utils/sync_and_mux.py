@@ -18,18 +18,16 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from Modules.base.sync_metadata import SyncMetadataWriter
 from Modules.base.av_muxer import AVMuxer
 from Modules.base.constants import AV_MUXING_TIMEOUT_SECONDS, AV_DELETE_SOURCE_FILES
+from logger_core.logging_config import configure_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -297,6 +295,19 @@ async def generate_sync_metadata(session_dir: Path, trial_number: int) -> dict:
     }
 
 
+def discover_trial_numbers(session_dir: Path) -> list[int]:
+    """Return sorted trial numbers discovered within a session directory."""
+    trial_files = list(session_dir.glob("*trial*"))
+    trial_numbers: set[int] = set()
+
+    for path in trial_files:
+        match = re.search(r'trial(\d+)', path.name)
+        if match:
+            trial_numbers.add(int(match.group(1)))
+
+    return sorted(trial_numbers)
+
+
 async def process_trial(session_dir: Path, trial_number: int, mux: bool = True):
     """
     Process a single trial: generate sync file and optionally mux all cameras.
@@ -388,6 +399,33 @@ async def process_trial(session_dir: Path, trial_number: int, mux: bool = True):
     logger.info("Muxed %d/%d cameras for trial %d", success_count, len(camera_modules), trial_number)
 
 
+async def process_session(
+    session_dir: Path,
+    trial_numbers: Optional[Iterable[int]] = None,
+    mux: bool = True,
+) -> bool:
+    """Process one or more trials within a session directory."""
+
+    if not session_dir.exists():
+        logger.error("Session directory not found: %s", session_dir)
+        return False
+
+    if not session_dir.is_dir():
+        logger.error("Not a directory: %s", session_dir)
+        return False
+
+    numbers = list(dict.fromkeys(trial_numbers)) if trial_numbers else [1]
+
+    if not numbers:
+        logger.error("No trial numbers found in %s", session_dir)
+        return False
+
+    for trial_num in numbers:
+        await process_trial(session_dir, trial_num, mux=mux)
+
+    return True
+
+
 async def main():
     parser = argparse.ArgumentParser(
         description="Generate sync metadata and mux audio/video files"
@@ -399,38 +437,17 @@ async def main():
 
     args = parser.parse_args()
 
-    if not args.session_dir.exists():
-        logger.error("Session directory not found: %s", args.session_dir)
-        return 1
-
-    if not args.session_dir.is_dir():
-        logger.error("Not a directory: %s", args.session_dir)
-        return 1
-
     mux = not args.no_mux
 
+    trial_numbers: Optional[list[int]] = None
+
     if args.all_trials:
-        trial_files = list(args.session_dir.glob("*trial*"))
-        trial_numbers = set()
-        for f in trial_files:
-            match = re.search(r'trial(\d+)', f.name)
-            if match:
-                trial_numbers.add(int(match.group(1)))
-
-        if not trial_numbers:
-            logger.error("No trial files found in %s", args.session_dir)
-            return 1
-
-        for trial_num in sorted(trial_numbers):
-            await process_trial(args.session_dir, trial_num, mux=mux)
-
+        trial_numbers = discover_trial_numbers(args.session_dir)
     elif args.trial:
-        await process_trial(args.session_dir, args.trial, mux=mux)
+        trial_numbers = [args.trial]
 
-    else:
-        await process_trial(args.session_dir, 1, mux=mux)
-
-    return 0
+    success = await process_session(args.session_dir, trial_numbers, mux=mux)
+    return 0 if success else 1
 
 
 if __name__ == '__main__':

@@ -6,8 +6,6 @@ from typing import Optional, Dict
 
 from ..logger_system import LoggerSystem
 from ..module_process import ModuleState
-from ..config_manager import get_config_manager
-from ..paths import CONFIG_PATH
 from ..shutdown_coordinator import get_shutdown_coordinator
 
 
@@ -186,10 +184,10 @@ class HeadlessController:
             await self.logger_system.event_logger.log_button_press("trial_pause", f"trial={self.trial_counter}")
             await self.logger_system.event_logger.log_trial_stop(self.trial_counter)
 
-        self.logger.info("Trial %d stopped", self.trial_counter)
-
-        # Spawn auto-mux process
-        self._spawn_independent_mux_process(self.trial_counter)
+        self.logger.info(
+            "Trial %d stopped (run muxing_tool.py later to mux recordings)",
+            self.trial_counter,
+        )
 
         return True
 
@@ -220,38 +218,3 @@ class HeadlessController:
 
         shutdown_coordinator = get_shutdown_coordinator()
         await shutdown_coordinator.initiate_shutdown("HeadlessController")
-
-    def _spawn_independent_mux_process(self, trial_number: int) -> None:
-        """Spawn independent muxing process for trial."""
-        import subprocess
-        import sys
-        from pathlib import Path as PathType
-
-        try:
-            session_dir = self.logger_system.session_dir
-            project_root = PathType(__file__).parent.parent.parent
-            sync_and_mux_script = project_root / "utils" / "sync_and_mux.py"
-
-            if not sync_and_mux_script.exists():
-                self.logger.error("Auto-mux script not found: %s", sync_and_mux_script)
-                return
-
-            cmd = [
-                sys.executable,
-                str(sync_and_mux_script),
-                str(session_dir),
-                "--trial", str(trial_number)
-            ]
-
-            subprocess.Popen(
-                cmd,
-                start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                cwd=str(project_root)
-            )
-
-            self.logger.info("Auto-mux process started for trial %d", trial_number)
-
-        except Exception as e:
-            self.logger.error("Failed to spawn auto-mux process: %s", e, exc_info=True)

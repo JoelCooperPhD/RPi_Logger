@@ -8,10 +8,9 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+from logger_core.logging_config import configure_logging
+
+configure_logging()
 logger = logging.getLogger("LifecycleTest")
 
 

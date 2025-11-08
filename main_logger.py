@@ -2,7 +2,6 @@
 import argparse
 import asyncio
 import logging
-from logging.handlers import RotatingFileHandler
 import signal
 import sys
 from pathlib import Path
@@ -16,8 +15,9 @@ if _venv_path.exists() and str(_venv_path) not in sys.path:
 from logger_core import LoggerSystem, get_shutdown_coordinator
 from logger_core.ui import MainWindow
 from logger_core.cli import HeadlessController, InteractiveShell
-from logger_core.paths import CONFIG_PATH, LOGS_DIR, MASTER_LOG_FILE, ensure_directories
+from logger_core.paths import CONFIG_PATH, MASTER_LOG_FILE, ensure_directories
 from logger_core.config_manager import get_config_manager
+from logger_core.logging_config import configure_logging
 
 
 logger = logging.getLogger(__name__)
@@ -82,35 +82,6 @@ def parse_args(argv: Optional[list[str]] = None):
 
     args = parser.parse_args(argv)
     return args
-
-
-def configure_logging(log_level: str, log_file: Path, console_output: bool = True) -> None:
-    level = getattr(logging, log_level.upper(), logging.INFO)
-
-    formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-
-    file_handler = RotatingFileHandler(
-        log_file,
-        maxBytes=20 * 1024 * 1024,
-        backupCount=3,
-        encoding='utf-8'
-    )
-    file_handler.setLevel(level)
-    file_handler.setFormatter(formatter)
-
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    root_logger.addHandler(file_handler)
-
-    if console_output:
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(level)
-        console_handler.setFormatter(formatter)
-        root_logger.addHandler(console_handler)
-
 
 async def run_gui(args, logger_system: LoggerSystem) -> None:
     """Run in GUI mode with Tkinter interface."""
@@ -264,7 +235,12 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     ensure_directories()
 
-    configure_logging(args.log_level, MASTER_LOG_FILE, console_output=args.console_output)
+    configure_logging(
+        args.log_level,
+        force=True,
+        console=args.console_output,
+        log_file=MASTER_LOG_FILE,
+    )
 
     logger.info("=" * 60)
     logger.info("RPi Logger - Master System Starting")

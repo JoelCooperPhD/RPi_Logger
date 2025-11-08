@@ -67,7 +67,8 @@ python3 main_logger.py --data-dir ~/research_data --session-prefix experiment
 4. **Record Trial**: Click "Record" to begin trial recording
 5. **Stop Trial**: Click "Stop" to end trial (data saved automatically)
 6. **End Session**: Click "End Session" to finalize
-7. **Process Data**: Run `python utils/sync_and_mux.py <session_dir> --all-trials`
+7. **Process Data**: Run `python muxing_tool.py` and select the session folder
+   (CLI alternative: `python utils/sync_and_mux.py <session_dir> --all-trials`)
 
 ## Available Modules
 
@@ -266,7 +267,7 @@ The system implements **frame-level synchronization** (~30ms accuracy) through:
 1. **Timestamp Capture**: Each module captures `time.time()` at recording start
 2. **CSV Timing Logs**: Per-event timestamps for all data (frames, chunks, samples)
 3. **Sync Metadata**: Unified JSON file with timing for all modules
-4. **Automatic Muxing**: FFmpeg combines streams with calculated offset
+4. **Automatic Muxing**: `muxing_tool.py` (FFmpeg) combines streams with calculated offsets
 
 ### File Naming Convention
 
@@ -282,7 +283,10 @@ All files use consistent trial-based naming:
 ### Processing Recordings
 
 ```bash
-# Process all trials in a session
+# Interactive helper (select folder if --session omitted)
+python muxing_tool.py --session data/session_20251024_120000
+
+# Process all trials via CLI
 python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
 
 # Process specific trial
@@ -566,7 +570,7 @@ uv sync
 2. **Storage Space**: Verify adequate disk space before long sessions
 3. **Battery/Power**: Ensure stable power supply (UPS recommended)
 4. **Device Warmup**: Let cameras/sensors warm up for 30 seconds
-5. **Post-Session**: Process recordings with `sync_and_mux.py` immediately
+5. **Post-Session**: Process recordings with `muxing_tool.py` (or `utils/sync_and_mux.py`) immediately
 
 ### Configuration Management
 

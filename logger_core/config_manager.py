@@ -6,6 +6,8 @@ from typing import Any, Dict, Optional
 
 import aiofiles
 
+from .logging_config import configure_logging
+
 logger = logging.getLogger("ConfigManager")
 
 
@@ -252,7 +254,7 @@ def get_config_manager() -> ConfigManager:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
+    configure_logging(level=logging.DEBUG, force=True)
 
     from pathlib import Path
     import tempfile

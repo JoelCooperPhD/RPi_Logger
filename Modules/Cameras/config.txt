@@ -1,5 +1,0 @@
-enabled = false
-window_x = 5830
-window_y = 2554
-window_width = 562
-window_height = 546

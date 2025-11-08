@@ -32,9 +32,10 @@ def _install_cv2_stub() -> None:
 _install_cv2_stub()
 
 from Modules.Cameras.camera_core.camera_system import CameraSystem
-from Modules.Cameras.camera_core.camera_handler import CameraHandler
 from Modules.Cameras.camera_core.camera_processor import CameraProcessor
 from Modules.Cameras.camera_core.camera_utils import FrameTimingMetadata
+from Modules.Cameras.camera_core.handler.cleanup import HandlerCleanupRunner
+from Modules.Cameras.camera_core.runtime import FrameTimingCalculator
 
 
 class CameraSystemAsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -127,40 +128,91 @@ class CameraProcessorTests(unittest.IsolatedAsyncioTestCase):
 
 class CameraHandlerCleanupTests(unittest.IsolatedAsyncioTestCase):
 
-    async def test_cleanup_stops_loops_and_hardware(self):
-        handler = CameraHandler.__new__(CameraHandler)
-        handler.logger = logging.getLogger("CameraHandlerCleanupTests")
-        handler.recording = False
-        handler.recording_manager = SimpleNamespace(cleanup=AsyncMock(return_value=None))
-        handler.capture_loop = SimpleNamespace(stop=AsyncMock(return_value=None))
-        handler.processor = SimpleNamespace(stop=AsyncMock(return_value=None))
-        handler._background_camera_cleanup = AsyncMock(return_value=None)
-        handler.stop_recording = AsyncMock(return_value=None)
-        handler._capture_task = None
-        handler._processor_task = None
+    async def test_cleanup_dispatches_all_steps(self):
+        stop_calls = []
+        close_calls = []
 
-        await handler.cleanup()
+        class DummyLoop:
+            def __init__(self):
+                self.request_stop_called = False
+                self.join = AsyncMock(return_value=None)
+
+            def request_stop(self):
+                self.request_stop_called = True
+
+        capture_loop = DummyLoop()
+        processor_loop = DummyLoop()
+        loop_bundle = SimpleNamespace(
+            mark_stopped=lambda: None,
+            await_start_tasks=AsyncMock(return_value=None),
+        )
+
+        handler = SimpleNamespace(
+            cam_num=1,
+            logger=logging.getLogger("CameraHandlerCleanupTests"),
+            recording=False,
+            recording_manager=SimpleNamespace(cleanup=AsyncMock(return_value=None)),
+            capture_loop=capture_loop,
+            processor=processor_loop,
+            picam2=SimpleNamespace(
+                stop=lambda: stop_calls.append("stop"),
+                close=lambda: close_calls.append("close"),
+            ),
+            loop_bundle=loop_bundle,
+            stop_recording=AsyncMock(return_value=None),
+            active=True,
+        )
+
+        runner = HandlerCleanupRunner(handler)
+        report = await runner.run()
 
         handler.recording_manager.cleanup.assert_awaited_once()
-        handler.capture_loop.stop.assert_awaited_once()
-        handler.processor.stop.assert_awaited_once()
-        handler._background_camera_cleanup.assert_awaited_once()
+        self.assertTrue(capture_loop.request_stop_called)
+        self.assertTrue(processor_loop.request_stop_called)
+        self.assertEqual(stop_calls, ["stop"])
+        self.assertEqual(close_calls, ["close"])
+        self.assertFalse(handler.active)
+        self.assertTrue(report.get("success"))
 
     async def test_cleanup_stops_active_recording(self):
-        handler = CameraHandler.__new__(CameraHandler)
-        handler.logger = logging.getLogger("CameraHandlerCleanupActive")
-        handler.recording = True
-        handler.recording_manager = SimpleNamespace(cleanup=AsyncMock(return_value=None))
-        handler.capture_loop = SimpleNamespace(stop=AsyncMock(return_value=None))
-        handler.processor = SimpleNamespace(stop=AsyncMock(return_value=None))
-        handler._background_camera_cleanup = AsyncMock(return_value=None)
-        handler.stop_recording = AsyncMock(return_value=None)
-        handler._capture_task = None
-        handler._processor_task = None
+        capture_loop = SimpleNamespace(request_stop=lambda: None, join=AsyncMock(return_value=None))
+        processor_loop = SimpleNamespace(request_stop=lambda: None, join=AsyncMock(return_value=None))
+        loop_bundle = SimpleNamespace(mark_stopped=lambda: None, await_start_tasks=AsyncMock(return_value=None))
 
-        await handler.cleanup()
+        handler = SimpleNamespace(
+            cam_num=2,
+            logger=logging.getLogger("CameraHandlerCleanupActive"),
+            recording=True,
+            recording_manager=SimpleNamespace(cleanup=AsyncMock(return_value=None)),
+            capture_loop=capture_loop,
+            processor=processor_loop,
+            picam2=SimpleNamespace(stop=lambda: None, close=lambda: None),
+            loop_bundle=loop_bundle,
+            stop_recording=AsyncMock(return_value=None),
+            active=True,
+        )
+
+        runner = HandlerCleanupRunner(handler)
+        await runner.run()
 
         handler.stop_recording.assert_awaited_once()
+
+
+class FrameTimingCalculatorTests(unittest.TestCase):
+
+    def test_detects_dropped_frames(self):
+        calculator = FrameTimingCalculator()
+        logger = logging.getLogger("FrameTimingCalculatorTests")
+
+        meta1 = {'FrameDuration': 33333, 'SensorTimestamp': 1_000_000_000}
+        update1 = calculator.update(meta1, captured_frames=0, logger=logger, log_first_n=0)
+        self.assertEqual(update1.hardware_frame_number, 0)
+        self.assertEqual(update1.dropped_since_last, 0)
+
+        meta2 = {'FrameDuration': 33333, 'SensorTimestamp': 1_000_000_000 + 33_333_000 * 2}
+        update2 = calculator.update(meta2, captured_frames=1, logger=logger, log_first_n=0)
+        self.assertEqual(update2.hardware_frame_number, 2)
+        self.assertEqual(update2.dropped_since_last, 1)
 
 
 if __name__ == "__main__":  # pragma: no cover
