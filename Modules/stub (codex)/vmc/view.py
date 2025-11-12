@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from async_tkinter_loop import async_handler
 
@@ -38,7 +38,6 @@ class StubCodexView:
         action_callback: Optional[Callable[..., Awaitable[None]]] = None,
         *,
         display_name: str,
-        enable_camera_controls: bool = False,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         start = time.perf_counter()
@@ -47,7 +46,6 @@ class StubCodexView:
         self.model = model
         self.action_callback = action_callback
         self.display_name = display_name
-        self.enable_camera_controls = enable_camera_controls
         self.logger = logger or _BASE_LOGGER
         self._close_requested = False
         self._window_duration_ms: float = 0.0
@@ -58,14 +56,15 @@ class StubCodexView:
         self._geometry_save_delay = 0.25
         self.io_view_frame: Optional[ttk.LabelFrame] = None
         self.io_view_visible_var: Optional[tk.BooleanVar] = None
-        self.io_metrics_var: Optional[tk.StringVar] = None
-        self.io_metrics_label: Optional[ttk.Label] = None
         self.stub_frame: Optional[ttk.LabelFrame] = None
-        self.native_size = (1440, 1080)
         self._resize_active = False
         self._resize_reset_handle: Optional[str] = None
         self._resize_idle_delay = 0.15
         self._logged_first_configure = False
+        self._main_frame: Optional[ttk.Frame] = None
+        self._io_row_index = 1
+        self._help_menu_label = "Help"
+        self.help_menu: Optional[tk.Menu] = None
 
         try:
             self._event_loop = asyncio.get_running_loop()
@@ -110,32 +109,6 @@ class StubCodexView:
         self.io_view_visible_var = tk.BooleanVar(value=True)
         self.log_visible_var = tk.BooleanVar(value=True)
 
-        self.record_enabled_var: Optional[tk.BooleanVar] = None
-        self.record_resolution_var: Optional[tk.StringVar] = None
-        self.record_fps_var: Optional[tk.StringVar] = None
-        self.record_format_var: Optional[tk.StringVar] = None
-        self.record_quality_var: Optional[tk.StringVar] = None
-
-        if self.enable_camera_controls:
-            self.record_enabled_var = tk.BooleanVar(value=bool(getattr(self.args, "save_images", False)))
-            self.record_resolution_var = tk.StringVar(value=self._initial_record_resolution_key())
-            self.record_fps_var = tk.StringVar(value=self._initial_record_fps_key())
-            initial_format = str(getattr(self.args, "save_format", "jpeg")).lower()
-            if initial_format == "jpg":
-                initial_format = "jpeg"
-            self.record_format_var = tk.StringVar(value=initial_format)
-            self.record_quality_var = tk.StringVar(value=self._initial_record_quality_key())
-
-        self.capture_menu: Optional[tk.Menu] = None
-        self.capture_resolution_menu: Optional[tk.Menu] = None
-        self.capture_rate_menu: Optional[tk.Menu] = None
-        self.capture_format_menu: Optional[tk.Menu] = None
-        self.capture_quality_menu: Optional[tk.Menu] = None
-        self.capture_resolution_index: Optional[int] = None
-        self.capture_rate_index: Optional[int] = None
-        self.capture_format_index: Optional[int] = None
-        self.capture_quality_index: Optional[int] = None
-
         self.menubar: Optional[tk.Menu] = None
         self.view_menu: Optional[tk.Menu] = None
         self._create_menu_bar()
@@ -147,8 +120,9 @@ class StubCodexView:
         main_frame.grid(row=0, column=0, sticky="nsew")
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(0, weight=1)
-        main_frame.rowconfigure(1, weight=0)
+        main_frame.rowconfigure(self._io_row_index, weight=0)
         main_frame.rowconfigure(2, weight=0)
+        self._main_frame = main_frame
 
         self.stub_frame = ttk.LabelFrame(main_frame, text="Stub", padding="10")
         self.stub_frame.grid(row=0, column=0, sticky="nsew")
@@ -158,15 +132,7 @@ class StubCodexView:
         self.io_view_frame.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
         self.io_view_frame.columnconfigure(0, weight=1)
         self.io_view_frame.rowconfigure(0, weight=1)
-
-        self.io_metrics_var = tk.StringVar(value=self._default_io_metrics_text())
-        self.io_metrics_label = ttk.Label(
-            self.io_view_frame,
-            textvariable=self.io_metrics_var,
-            anchor="w",
-            font=("TkDefaultFont", 10),
-        )
-        self.io_metrics_label.grid(row=0, column=0, sticky="w")
+        self._set_io_row_visible(True)
 
         self.log_frame = ttk.LabelFrame(main_frame, text="Logger", padding="8")
         self.log_frame.grid(row=2, column=0, sticky="nsew", pady=(4, 0))
@@ -216,9 +182,6 @@ class StubCodexView:
         file_menu.add_separator()
         file_menu.add_command(label="Quit", command=self._on_quit_clicked)
 
-        if self.enable_camera_controls:
-            self._create_camera_menus(menubar)
-
         view_menu = tk.Menu(menubar, tearoff=0)
         self.view_menu = view_menu
         menubar.add_cascade(label="View", menu=view_menu)
@@ -234,14 +197,24 @@ class StubCodexView:
         )
 
         help_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Help", menu=help_menu)
+        menubar.add_cascade(label=self._help_menu_label, menu=help_menu)
         help_menu.add_command(label="Quick Start Guide", command=self._show_help)
+        self.help_menu = help_menu
 
     def add_menu(self, label: str, *, tearoff: int = 0) -> Optional[tk.Menu]:
         if self.menubar is None:
             return None
         menu = tk.Menu(self.menubar, tearoff=tearoff)
-        self.menubar.add_cascade(label=label, menu=menu)
+        help_index = None
+        if self.help_menu is not None and label != self._help_menu_label:
+            help_index = self._find_menu_index(self._help_menu_label)
+        try:
+            if help_index is None:
+                self.menubar.add_cascade(label=label, menu=menu)
+            else:
+                self.menubar.insert_cascade(help_index, label=label, menu=menu)
+        except tk.TclError:
+            return None
         return menu
 
     def add_view_submenu(self, label: str, *, tearoff: int = 0) -> Optional[tk.Menu]:
@@ -251,275 +224,89 @@ class StubCodexView:
         self.view_menu.add_cascade(label=label, menu=submenu)
         return submenu
 
-    def _create_camera_menus(self, menubar: tk.Menu) -> None:
-        if not self.enable_camera_controls:
-            return
-
-        if (
-            self.record_enabled_var is None
-            or self.record_resolution_var is None
-            or self.record_fps_var is None
-            or self.record_format_var is None
-            or self.record_quality_var is None
-        ):
-            self.logger.warning("Camera controls requested but not initialized; skipping menu setup")
-            return
-
-        capture_menu = tk.Menu(menubar, tearoff=0)
-        self.capture_menu = capture_menu
-        menubar.add_cascade(label="Settings", menu=capture_menu)
-        capture_menu.add_checkbutton(
-            label="Enable Frame Capture",
-            variable=self.record_enabled_var,
-            command=self._on_record_toggle,
-        )
-
-        self.capture_resolution_menu = tk.Menu(capture_menu, tearoff=0)
-        capture_menu.add_cascade(label="Resolution", menu=self.capture_resolution_menu)
-        self.capture_resolution_index = capture_menu.index("end")
-        for key, label, size in self._record_resolution_choices():
-            self.capture_resolution_menu.add_radiobutton(
-                label=label,
-                value=key,
-                variable=self.record_resolution_var,
-                command=lambda opt=key: self._on_record_resolution(opt),
-            )
-
-        self.capture_rate_menu = tk.Menu(capture_menu, tearoff=0)
-        capture_menu.add_cascade(label="Frame Rate", menu=self.capture_rate_menu)
-        self.capture_rate_index = capture_menu.index("end")
-        for key, label, fps in self._record_fps_choices():
-            self.capture_rate_menu.add_radiobutton(
-                label=label,
-                value=key,
-                variable=self.record_fps_var,
-                command=lambda opt=key: self._on_record_fps(opt),
-            )
-
-        self.capture_format_menu = tk.Menu(capture_menu, tearoff=0)
-        capture_menu.add_cascade(label="Format", menu=self.capture_format_menu)
-        self.capture_format_index = capture_menu.index("end")
-        for key, label in self._record_format_choices():
-            self.capture_format_menu.add_radiobutton(
-                label=label,
-                value=key,
-                variable=self.record_format_var,
-                command=lambda opt=key: self._on_record_format(opt),
-            )
-
-        self.capture_quality_menu = tk.Menu(capture_menu, tearoff=0)
-        capture_menu.add_cascade(label="Quality", menu=self.capture_quality_menu)
-        self.capture_quality_index = capture_menu.index("end")
-        for key, label, quality in self._record_quality_choices():
-            self.capture_quality_menu.add_radiobutton(
-                label=label,
-                value=key,
-                variable=self.record_quality_var,
-                command=lambda opt=key: self._on_record_quality(opt),
-            )
-
-        self._update_capture_menu_state()
-
-    def _record_resolution_choices(self) -> list[tuple[str, str, Optional[tuple[int, int]]]]:
-        return [
-            ("native", "Native (1440 × 1080)", None),
-            ("1280x960", "1280 × 960", (1280, 960)),
-            ("960x720", "960 × 720", (960, 720)),
-            ("720x540", "720 × 540", (720, 540)),
-            ("640x480", "640 × 480", (640, 480)),
-            ("480x360", "480 × 360", (480, 360)),
-            ("320x240", "320 × 240", (320, 240)),
-            ("160x120", "160 × 120", (160, 120)),
-        ]
-
-    def _record_fps_choices(self) -> list[tuple[str, str, Optional[float]]]:
-        return [
-            ("unlimited", "Unlimited", None),
-            ("60fps", "60 fps", 60.0),
-            ("30fps", "30 fps", 30.0),
-            ("15fps", "15 fps", 15.0),
-            ("5fps", "5 fps", 5.0),
-        ]
-
-    def _record_format_choices(self) -> list[tuple[str, str]]:
-        return [
-            ("jpeg", "JPEG"),
-            ("png", "PNG"),
-            ("webp", "WebP"),
-        ]
-
-    def _record_quality_choices(self) -> list[tuple[str, str, int]]:
-        return [
-            ("q95", "High (95)", 95),
-            ("q85", "Balanced (85)", 85),
-            ("q70", "Economy (70)", 70),
-        ]
-
-    def _initial_record_resolution_key(self) -> str:
-        width = getattr(self.args, "save_width", None)
-        height = getattr(self.args, "save_height", None)
-        key = self._match_resolution_key(width, height, self._record_resolution_choices())
-        return key or "native"
-
-    def _initial_record_fps_key(self) -> str:
-        fps = getattr(self.args, "save_fps", None)
-        if fps and float(fps) > 0:
-            key = self._match_fps_key(float(fps), self._record_fps_choices())
-            if key:
-                return key
-        return "unlimited"
-
-    def _initial_record_quality_key(self) -> str:
-        quality = getattr(self.args, "save_quality", 90)
-        if quality is None:
-            return "q85"
-        try:
-            quality = int(quality)
-        except (TypeError, ValueError):
-            quality = 90
-        for key, _label, value in self._record_quality_choices():
-            if value == quality:
-                return key
-        return "q85"
-
-    def _match_resolution_key(
-        self,
-        width: Optional[int],
-        height: Optional[int],
-        choices: list[tuple[str, str, Optional[tuple[int, int]]]],
-    ) -> Optional[str]:
-        if width is None or height is None:
+    def _find_menu_index(self, label: str) -> Optional[int]:
+        if self.menubar is None:
             return None
         try:
-            width = int(width)
-            height = int(height)
-        except (TypeError, ValueError):
+            end_index = self.menubar.index("end")
+        except tk.TclError:
             return None
-        native_width, native_height = self.native_size
-        for key, _label, size in choices:
-            if size and size[0] == width and size[1] == height:
-                return key
-            if size is None and width == native_width and height == native_height:
-                return key
-        return None
-
-    def _match_fps_key(
-        self,
-        fps: float,
-        choices: list[tuple[str, str, Optional[float]]],
-    ) -> Optional[str]:
-        for key, _label, value in choices:
-            if value is None:
+        if end_index is None:
+            return None
+        for index in range(end_index + 1):
+            try:
+                entry_label = self.menubar.entrycget(index, "label")
+            except tk.TclError:
                 continue
-            if abs(value - fps) < 0.1:
-                return key
+            if entry_label == label:
+                return index
         return None
-
-    def _update_capture_menu_state(self) -> None:
-        if (
-            not self.enable_camera_controls
-            or self.capture_menu is None
-            or self.record_enabled_var is None
-        ):
-            return
-        state = tk.NORMAL if self.record_enabled_var.get() else tk.DISABLED
-        for index in (
-            getattr(self, "capture_resolution_index", None),
-            getattr(self, "capture_rate_index", None),
-            getattr(self, "capture_format_index", None),
-            getattr(self, "capture_quality_index", None),
-        ):
-            if index is not None:
-                self.capture_menu.entryconfig(index, state=state)
-
-    def _record_resolution_value(self, key: str) -> Optional[tuple[int, int]] | str:
-        for option, _label, size in self._record_resolution_choices():
-            if option == key:
-                if size is None:
-                    return "native" if option == "native" else self.native_size
-                return size
-        return "native"
-
-    def _record_fps_value(self, key: str) -> float:
-        for option, _label, fps in self._record_fps_choices():
-            if option == key:
-                return 0.0 if fps in (None, 0) else float(fps)
-        return 0.0
-
-    def _record_quality_value(self, key: str) -> Optional[int]:
-        for option, _label, quality in self._record_quality_choices():
-            if option == key:
-                return quality
-        return None
-
-    def _on_record_toggle(self) -> None:
-        if not self.enable_camera_controls or self.record_enabled_var is None:
-            return
-        enabled = self.record_enabled_var.get()
-        payload: dict[str, Any] = {"enabled": enabled}
-        directory = getattr(self.args, "save_dir", None)
-        if enabled and directory:
-            payload["directory"] = str(directory)
-        self._dispatch_record_settings(payload)
-        self._update_capture_menu_state()
-
-    def _on_record_resolution(self, key: str) -> None:
-        if not self.enable_camera_controls:
-            return
-        value = self._record_resolution_value(key)
-        if value == "native":
-            self._dispatch_record_settings({"size": "native"})
-        else:
-            self._dispatch_record_settings({"size": value})
-
-    def _on_record_fps(self, key: str) -> None:
-        if not self.enable_camera_controls:
-            return
-        fps = self._record_fps_value(key)
-        self._dispatch_record_settings({"fps": fps})
-
-    def _on_record_format(self, key: str) -> None:
-        if not self.enable_camera_controls:
-            return
-        self._dispatch_record_settings({"format": key})
-
-    def _on_record_quality(self, key: str) -> None:
-        if not self.enable_camera_controls:
-            return
-        quality = self._record_quality_value(key)
-        if quality is not None:
-            self._dispatch_record_settings({"quality": quality})
-
-    @async_handler
-    async def _dispatch_record_settings(self, settings: dict[str, Any]) -> None:
-        if self.action_callback:
-            await self.action_callback("update_record_settings", **settings)
 
     # ------------------------------------------------------------------
     # IO view helpers
 
-    def _default_io_metrics_text(self) -> str:
-        return "Capture FPS: -- | Process FPS: -- | View FPS: -- | Save FPS: --"
+    def build_io_stub_content(self, builder: Callable[[tk.Widget], None]) -> None:
+        """Replace the IO stub frame contents using the provided builder."""
+
+        if self.io_view_frame is None:
+            return
+
+        for child in list(self.io_view_frame.winfo_children()):
+            child.destroy()
+
+        builder(self.io_view_frame)
+
+        try:
+            self.io_view_frame.update_idletasks()
+        except tk.TclError:
+            pass
+
+    def clear_io_stub_content(self) -> None:
+        if self.io_view_frame is None:
+            return
+        for child in list(self.io_view_frame.winfo_children()):
+            child.destroy()
+
+    def set_io_stub_title(self, title: str) -> None:
+        if self.io_view_frame is None:
+            return
+        try:
+            self.io_view_frame.config(text=title)
+        except tk.TclError:
+            pass
 
     def _toggle_io_view(self) -> None:
         if not self.io_view_frame or not self.io_view_visible_var:
             return
         if self.io_view_visible_var.get():
             self.io_view_frame.grid()
+            self._set_io_row_visible(True)
         else:
             self.io_view_frame.grid_remove()
+            self._set_io_row_visible(False)
 
     def show_io_stub(self) -> None:
         if not self.io_view_frame or not self.io_view_visible_var:
             return
         self.io_view_visible_var.set(True)
         self.io_view_frame.grid()
+        self._set_io_row_visible(True)
 
     def hide_io_stub(self) -> None:
         if not self.io_view_frame or not self.io_view_visible_var:
             return
         self.io_view_visible_var.set(False)
         self.io_view_frame.grid_remove()
+        self._set_io_row_visible(False)
+
+    def _set_io_row_visible(self, visible: bool) -> None:
+        if self._main_frame is None:
+            return
+        minsize = 70 if visible else 0
+        try:
+            self._main_frame.rowconfigure(self._io_row_index, minsize=minsize)
+        except tk.TclError:
+            pass
 
     def _log_tk_exception(self, exc_type, exc_value, exc_tb) -> None:
         self.logger.error(
