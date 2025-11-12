@@ -67,7 +67,6 @@ class ImagePipeline:
         self.metrics = PipelineMetrics()
         self._capture_counter = RollingFpsCounter(fps_window_seconds)
         self._process_counter = RollingFpsCounter(fps_window_seconds)
-        self._preview_counter = RollingFpsCounter(fps_window_seconds)
         self._storage_counter = RollingFpsCounter(fps_window_seconds)
 
     def update_view_resize_checker(self, checker: Optional[Callable[[], bool]]) -> None:
@@ -77,7 +76,6 @@ class ImagePipeline:
         self.metrics = PipelineMetrics()
         self._capture_counter.reset()
         self._process_counter.reset()
-        self._preview_counter.reset()
         self._storage_counter.reset()
         slot.capture_fps = 0.0
         slot.process_fps = 0.0
@@ -332,7 +330,6 @@ class ImagePipeline:
                 sensor_timestamp_ns=timing_result.sensor_timestamp_ns,
             )
             self._offer_queue(preview_queue, payload)
-            slot.preview_fps = self._preview_counter.tick()
 
         # Preview frames are emitted after storage so the stretch/skip logic never starves disk writes.
 

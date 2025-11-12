@@ -32,11 +32,13 @@ class CameraStubViewAdapter:
         self,
         view,
         *,
+        args,
         preview_size: tuple[int, int],
         task_manager,
         logger: logging.Logger,
     ) -> None:
         self.view = view
+        self.args = args
         self.preview_size = preview_size
         self.task_manager = task_manager
         self.logger = logger
@@ -53,6 +55,17 @@ class CameraStubViewAdapter:
         self._camera_menu: Optional[tk.Menu] = None
         self._camera_toggle_vars: dict[int, tk.BooleanVar] = {}
         self._camera_toggle_handlers: dict[int, Callable[[int, bool], Awaitable[None] | None]] = {}
+        self._settings_menu: Optional[tk.Menu] = None
+        self._capture_controls_ready = False
+        self._record_resolution_var: Optional[tk.StringVar] = None
+        self._record_fps_var: Optional[tk.StringVar] = None
+        self._capture_resolution_menu: Optional[tk.Menu] = None
+        self._capture_rate_menu: Optional[tk.Menu] = None
+        self._resolution_menu_index: Optional[int] = None
+        self._rate_menu_index: Optional[int] = None
+        self._preview_menu: Optional[tk.Menu] = None
+        self._io_metrics_var: Optional[tk.StringVar] = None
+        self._native_stub_size = (1440, 1080)
 
     # ------------------------------------------------------------------
     # Layout helpers
@@ -220,38 +233,27 @@ class CameraStubViewAdapter:
 
         if not self.view or tk is None:
             return
-        settings_menu = getattr(self.view, "capture_menu", None)
-
-        if settings_menu is None:
-            root = getattr(self.view, "root", None)
-            if root is None:
-                return
-            try:
-                menubar_name = root["menu"]
-            except Exception:
-                return
-            if not menubar_name:
-                return
-            try:
-                menubar = root.nametowidget(menubar_name)
-            except Exception:
-                return
-            settings_menu = self._locate_menu(menubar, "Settings")
-
+        settings_menu = self._ensure_settings_menu()
         if settings_menu is None:
             return
 
-        preview_menu = tk.Menu(settings_menu, tearoff=True)
+        if not self._menu_exists(self._preview_menu):
+            self._preview_menu = tk.Menu(settings_menu, tearoff=0)
+            settings_menu.add_cascade(label="Preview FPS", menu=self._preview_menu)
+        else:
+            try:
+                self._preview_menu.delete(0, "end")
+            except Exception:
+                pass
+
         var = self._ensure_preview_fps_var()
         for key, label, fraction in self._preview_fraction_options():
-            preview_menu.add_radiobutton(
+            self._preview_menu.add_radiobutton(
                 label=label,
                 value=key,
                 variable=var,
                 command=lambda value=fraction: self._handle_preview_fraction_selection(value),
             )
-
-        settings_menu.add_cascade(label="Preview FPS", menu=preview_menu)
 
     def refresh_preview_fps_ui(self) -> None:
         if not self._preview_fps_var or not self._preview_fraction_getter:
@@ -270,28 +272,35 @@ class CameraStubViewAdapter:
         self._preview_fps_var = tk.StringVar(master=master, value=current)
         return self._preview_fps_var
 
-    def _locate_menu(self, menubar: tk.Menu, label: str) -> Optional[tk.Menu]:
-        try:
-            end_index = menubar.index("end")
-        except Exception:
+    def _ensure_settings_menu(self) -> Optional[tk.Menu]:
+        if tk is None or not self.view:
             return None
-        if end_index is None:
-            return None
-        for index in range(end_index + 1):
-            try:
-                entry_label = menubar.entrycget(index, "label")
-            except Exception:
-                continue
-            if entry_label != label:
-                continue
-            try:
-                submenu_name = menubar.entrycget(index, "menu")
-                if not submenu_name:
-                    return None
-                return menubar.nametowidget(submenu_name)
-            except Exception:
+        if self._menu_exists(self._settings_menu):
+            return self._settings_menu
+
+        menu: Optional[tk.Menu] = None
+        add_menu = getattr(self.view, "add_menu", None)
+        if callable(add_menu):
+            menu = add_menu("Settings")
+
+        if menu is None:
+            menubar = getattr(self.view, "menubar", None)
+            if menubar is None:
                 return None
-        return None
+            menu = tk.Menu(menubar, tearoff=0)
+            menubar.add_cascade(label="Settings", menu=menu)
+
+        self._settings_menu = menu
+        return menu
+
+    def _menu_exists(self, menu: Optional[tk.Menu]) -> bool:
+        if menu is None:
+            return False
+        try:
+            return bool(menu.winfo_exists())
+        except Exception:
+            return False
+
 
     def _preview_fraction_options(self) -> list[tuple[str, str, float]]:
         return [
@@ -323,104 +332,246 @@ class CameraStubViewAdapter:
     # ------------------------------------------------------------------
     # Record toggle & capture menu
     # ------------------------------------------------------------------
-    def sync_record_toggle(self, enabled: bool, *, capture_disabled: bool) -> None:
-        if not self.view or tk is None:
-            return
-        record_var = getattr(self.view, "record_enabled_var", None)
-        if record_var is None:
-            return
-        try:
-            current = bool(record_var.get())
-        except Exception:
-            current = None
-        if current != enabled:
-            try:
-                record_var.set(enabled)
-            except Exception:  # pragma: no cover - defensive
-                pass
-
-        update_menu = getattr(self.view, "_update_capture_menu_state", None)
-        if callable(update_menu):
-            try:
-                update_menu()
-            except Exception:  # pragma: no cover - defensive
-                pass
-
-        self.set_capture_controls_enabled(not capture_disabled)
-
-    def set_capture_controls_enabled(self, enabled: bool) -> None:
-        if not self.view or tk is None:
-            return
-        menu = getattr(self.view, "capture_menu", None)
-        if menu is None:
-            return
-        state = tk.NORMAL if enabled else tk.DISABLED
-        for attr in ("capture_resolution_index", "capture_rate_index"):
-            index = getattr(self.view, attr, None)
-            if index is None:
-                continue
-            try:
-                menu.entryconfig(index, state=state)
-            except Exception:  # pragma: no cover - defensive
-                continue
-
     def configure_capture_menu(self) -> None:
         if not self.view or tk is None:
             return
-        menu = getattr(self.view, "capture_menu", None)
-        if menu is None:
+        if self._capture_controls_ready and self._menu_exists(self._settings_menu):
             return
 
-        try:
-            end_index = menu.index("end")
-        except Exception:
-            end_index = None
-
-        if end_index is None:
+        settings_menu = self._ensure_settings_menu()
+        if settings_menu is None:
             return
 
-        labels_to_remove = {"Enable Frame Capture", "Format", "Quality"}
-        removed_any = False
-        for index in range(end_index, -1, -1):
-            try:
-                label = menu.entrycget(index, "label")
-            except Exception:
+        master = self.view.root if hasattr(self.view, "root") else None
+
+        resolution_menu = tk.Menu(settings_menu, tearoff=0)
+        self._record_resolution_var = tk.StringVar(master=master, value=self._initial_record_resolution_key())
+        for key, label, _size in self._record_resolution_choices():
+            resolution_menu.add_radiobutton(
+                label=label,
+                value=key,
+                variable=self._record_resolution_var,
+                command=lambda option=key: self._on_record_resolution(option),
+            )
+        settings_menu.add_cascade(label="Resolution", menu=resolution_menu)
+        self._capture_resolution_menu = resolution_menu
+        self._resolution_menu_index = settings_menu.index("end")
+
+        rate_menu = tk.Menu(settings_menu, tearoff=0)
+        self._record_fps_var = tk.StringVar(master=master, value=self._initial_record_fps_key())
+        for key, label, _fps in self._record_fps_choices():
+            rate_menu.add_radiobutton(
+                label=label,
+                value=key,
+                variable=self._record_fps_var,
+                command=lambda option=key: self._on_record_fps(option),
+            )
+        settings_menu.add_cascade(label="Frame Rate", menu=rate_menu)
+        self._capture_rate_menu = rate_menu
+        self._rate_menu_index = settings_menu.index("end")
+
+        self._capture_controls_ready = True
+        self.set_capture_controls_enabled(True)
+
+    def sync_record_toggle(self, enabled: bool, *, capture_disabled: bool) -> None:
+        if tk is None:
+            return
+        self.set_capture_controls_enabled(not capture_disabled)
+
+    def set_capture_controls_enabled(self, enabled: bool) -> None:
+        if tk is None or not self._menu_exists(self._settings_menu):
+            return
+        state = tk.NORMAL if enabled else tk.DISABLED
+        settings_menu = self._settings_menu
+        if settings_menu is None:
+            return
+        for index in (self._resolution_menu_index, self._rate_menu_index):
+            if index is None:
                 continue
-            if label in labels_to_remove:
+            try:
+                settings_menu.entryconfig(index, state=state)
+            except Exception:  # pragma: no cover - defensive
+                continue
+
+    def _on_record_resolution(self, key: str) -> None:
+        value = self._record_resolution_value(key)
+        if value == "native":
+            self._dispatch_record_settings({"size": "native"})
+        elif value:
+            self._dispatch_record_settings({"size": value})
+
+    def _on_record_fps(self, key: str) -> None:
+        fps_value = self._record_fps_value(key)
+        self._dispatch_record_settings({"fps": fps_value})
+
+    def _record_resolution_choices(self) -> list[tuple[str, str, Optional[tuple[int, int]]]]:
+        return [
+            ("native", "Native (1440 × 1080)", None),
+            ("1280x960", "1280 × 960", (1280, 960)),
+            ("960x720", "960 × 720", (960, 720)),
+            ("720x540", "720 × 540", (720, 540)),
+            ("640x480", "640 × 480", (640, 480)),
+            ("480x360", "480 × 360", (480, 360)),
+            ("320x240", "320 × 240", (320, 240)),
+            ("160x120", "160 × 120", (160, 120)),
+        ]
+
+    def _record_fps_choices(self) -> list[tuple[str, str, Optional[float]]]:
+        return [
+            ("unlimited", "Unlimited", None),
+            ("60fps", "60 fps", 60.0),
+            ("30fps", "30 fps", 30.0),
+            ("15fps", "15 fps", 15.0),
+            ("5fps", "5 fps", 5.0),
+        ]
+
+    def _initial_record_resolution_key(self) -> str:
+        width = getattr(self.args, "save_width", None)
+        height = getattr(self.args, "save_height", None)
+        key = self._match_resolution_key(width, height, self._record_resolution_choices())
+        return key or "native"
+
+    def _initial_record_fps_key(self) -> str:
+        fps = getattr(self.args, "save_fps", None)
+        try:
+            fps_value = float(fps) if fps is not None else None
+        except (TypeError, ValueError):
+            fps_value = None
+        if fps_value and fps_value > 0:
+            key = self._match_fps_key(fps_value, self._record_fps_choices())
+            if key:
+                return key
+        return "unlimited"
+
+    def _match_resolution_key(
+        self,
+        width: Optional[int],
+        height: Optional[int],
+        choices: list[tuple[str, str, Optional[tuple[int, int]]]],
+    ) -> Optional[str]:
+        if width is None or height is None:
+            return None
+        try:
+            width = int(width)
+            height = int(height)
+        except (TypeError, ValueError):
+            return None
+        for key, _label, size in choices:
+            if size and size[0] == width and size[1] == height:
+                return key
+            if size is None and width == self._native_stub_size[0] and height == self._native_stub_size[1]:
+                return key
+        return None
+
+    def _match_fps_key(
+        self,
+        fps: float,
+        choices: list[tuple[str, str, Optional[float]]],
+    ) -> Optional[str]:
+        for key, _label, value in choices:
+            if value is None:
+                continue
+            if abs(value - fps) < 0.1:
+                return key
+        return None
+
+    def _record_resolution_value(self, key: str) -> Optional[tuple[int, int]] | str | None:
+        for option, _label, size in self._record_resolution_choices():
+            if option == key:
+                if size is None:
+                    return "native"
+                return size
+        return None
+
+    def _record_fps_value(self, key: str) -> float:
+        for option, _label, value in self._record_fps_choices():
+            if option == key:
+                return 0.0 if value in (None, 0) else float(value)
+        return 0.0
+
+    def _dispatch_record_settings(self, settings: dict[str, Any]) -> None:
+        if not self.view:
+            return
+        action_callback = getattr(self.view, "action_callback", None)
+        if not action_callback:
+            return
+        try:
+            result = action_callback("update_record_settings", **settings)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.error("Record settings dispatch failed: %s", exc)
+            return
+        if asyncio.iscoroutine(result):
+            if self.task_manager:
                 try:
-                    menu.delete(index)
-                except Exception:
-                    continue
-                removed_any = True
+                    self.task_manager.create(result, name="UpdateRecordSettings")
+                except RuntimeError:
+                    asyncio.create_task(result)
+            else:
+                asyncio.create_task(result)
 
-        if removed_any:
-            for attr in (
-                "capture_format_menu",
-                "capture_quality_menu",
-                "capture_format_index",
-                "capture_quality_index",
-            ):
-                if hasattr(self.view, attr):
-                    setattr(self.view, attr, None)
+    # ------------------------------------------------------------------
+    # IO metrics display
+    # ------------------------------------------------------------------
+    def install_io_metrics_panel(self) -> None:
+        if not self.view or tk is None or ttk is None:
+            return
+        builder = getattr(self.view, "build_io_stub_content", None)
+        if not callable(builder):
+            return
+        set_title = getattr(self.view, "set_io_stub_title", None)
+        if callable(set_title):
+            set_title("Pipeline Metrics")
 
-        try:
-            end_index = menu.index("end")
-        except Exception:
-            end_index = None
+        master = self.view.root if hasattr(self.view, "root") else None
 
-        if end_index is None:
+        def _builder(parent) -> None:
+            parent.columnconfigure(0, weight=1)
+            var = tk.StringVar(master=master, value=self._default_metrics_text())
+            label = ttk.Label(parent, textvariable=var, anchor="w", font=("TkDefaultFont", 10))
+            label.grid(row=0, column=0, sticky="ew")
+            self._io_metrics_var = var
+
+        builder(_builder)
+        self._last_metrics_text = None
+
+    def _default_metrics_text(self) -> str:
+        return "Capture FPS: -- | Process FPS: -- | View FPS: -- | Save FPS: --"
+
+    def update_pipeline_metrics(
+        self,
+        *,
+        capture_fps: float,
+        process_fps: float,
+        preview_fps: float,
+        storage_fps: float,
+    ) -> None:
+        if tk is None or self._io_metrics_var is None:
+            return
+        root = getattr(self.view, "root", None) if self.view else None
+        if root is None:
             return
 
-        label_to_index: dict[str, int] = {}
-        for idx in range(end_index + 1):
-            try:
-                label = menu.entrycget(idx, "label")
-            except Exception:
-                continue
-            label_to_index[label] = idx
+        text = self._format_pipeline_metrics(
+            capture_fps=capture_fps,
+            process_fps=process_fps,
+            preview_fps=preview_fps,
+            storage_fps=storage_fps,
+        )
 
-        self.view.capture_resolution_index = label_to_index.get("Resolution")
-        self.view.capture_rate_index = label_to_index.get("Frame Rate")
+        if text == self._last_metrics_text:
+            return
+        self._last_metrics_text = text
+
+        def _update() -> None:
+            try:
+                self._io_metrics_var.set(text)
+            except tk.TclError:  # pragma: no cover - defensive
+                pass
+
+        try:
+            root.after(0, _update)
+        except Exception:  # pragma: no cover - defensive
+            pass
 
     def show_camera_placeholder(self, slot, message: str) -> None:
         if tk is None:
@@ -495,47 +646,6 @@ class CameraStubViewAdapter:
 
         self._current_preview_columns = active_col
 
-    # ------------------------------------------------------------------
-    # IO metrics display
-    # ------------------------------------------------------------------
-    def update_pipeline_metrics(
-        self,
-        *,
-        capture_fps: float,
-        process_fps: float,
-        preview_fps: float,
-        storage_fps: float,
-    ) -> None:
-        if not self.view or tk is None:
-            return
-
-        var = getattr(self.view, "io_metrics_var", None)
-        root = getattr(self.view, "root", None)
-        if var is None or root is None:
-            return
-
-        text = self._format_pipeline_metrics(
-            capture_fps=capture_fps,
-            process_fps=process_fps,
-            preview_fps=preview_fps,
-            storage_fps=storage_fps,
-        )
-
-        if text == self._last_metrics_text:
-            return
-        self._last_metrics_text = text
-
-        def _update() -> None:
-            try:
-                var.set(text)
-            except tk.TclError:  # pragma: no cover - defensive
-                pass
-
-        try:
-            root.after(0, _update)
-        except Exception:  # pragma: no cover - defensive
-            pass
-
     def _format_pipeline_metrics(
         self,
         *,
@@ -566,51 +676,34 @@ class CameraStubViewAdapter:
                 return False
         return False
 
-    async def display_frame(self, slot, frame: Any, pixel_format: str) -> None:
+    async def display_frame(self, slot, frame: Any, pixel_format: str) -> bool:
         if self.view_is_resizing():
-            return
+            return False
         if not getattr(slot, "preview_enabled", True):
-            return
+            return False
+
         stream_size = getattr(slot, "preview_stream_size", None) or getattr(slot, "main_size", None)
-        image = await asyncio.to_thread(
-            convert_frame_to_image,
-            frame,
-            pixel_format,
-            size_hint=stream_size,
-        )
         target_size = getattr(slot, "size", self.preview_size) or self.preview_size
         if target_size[0] <= 0 or target_size[1] <= 0:
             target_size = self.preview_size
-
         native_size = getattr(slot, "preview_stream_size", None)
-        if native_size and (image.width > native_size[0] or image.height > native_size[1]):
-            crop_width = min(native_size[0], image.width)
-            crop_height = min(native_size[1], image.height)
-            image = image.crop((0, 0, crop_width, crop_height))
 
-        if image.size != target_size:
-            if slot.index not in self._frame_logged:
-                self.logger.info(
-                    "Camera %s frame size %s differs from preview slot %s; resizing",
-                    slot.index,
-                    image.size,
-                    target_size,
-                )
-                self._frame_logged.add(slot.index)
-            image = await asyncio.to_thread(image.resize, target_size, DEFAULT_RESAMPLE)
-        elif slot.index not in self._frame_logged:
-            self.logger.info(
-                "Camera %s frame size %s matches preview slot",
-                slot.index,
-                image.size,
-            )
-            self._frame_logged.add(slot.index)
+        image, source_size, resized = await asyncio.to_thread(
+            self._prepare_preview_image,
+            frame,
+            pixel_format,
+            stream_size,
+            target_size,
+            native_size,
+        )
+
+        self._log_preview_scaling(slot.index, source_size, target_size, resized)
 
         master = self.view.root if self.view else None
         photo = ImageTk.PhotoImage(image, master=master)
         widget = getattr(slot, "label", None)
         if widget is None:
-            return
+            return False
 
         def _update() -> None:
             if not widget.winfo_exists():
@@ -634,8 +727,56 @@ class CameraStubViewAdapter:
 
         try:
             widget.after(0, _update)
+            return True
         except Exception:  # pragma: no cover - defensive
-            pass
+            return False
+
+    def _prepare_preview_image(
+        self,
+        frame: Any,
+        pixel_format: str,
+        stream_size: Optional[tuple[int, int]],
+        target_size: tuple[int, int],
+        native_size: Optional[tuple[int, int]],
+    ) -> tuple[Image.Image, tuple[int, int], bool]:
+        image = convert_frame_to_image(frame, pixel_format, size_hint=stream_size)
+        source_size = image.size
+
+        if native_size and (image.width > native_size[0] or image.height > native_size[1]):
+            crop_width = min(native_size[0], image.width)
+            crop_height = min(native_size[1], image.height)
+            image = image.crop((0, 0, crop_width, crop_height))
+
+        resized = False
+        if image.size != target_size:
+            image = image.resize(target_size, DEFAULT_RESAMPLE)
+            resized = True
+
+        return image, source_size, resized
+
+    def _log_preview_scaling(
+        self,
+        index: int,
+        source_size: tuple[int, int],
+        target_size: tuple[int, int],
+        resized: bool,
+    ) -> None:
+        if index in self._frame_logged:
+            return
+        if resized:
+            self.logger.info(
+                "Camera %s frame size %s differs from preview slot %s; resizing",
+                index,
+                source_size,
+                target_size,
+            )
+        else:
+            self.logger.info(
+                "Camera %s frame size %s matches preview slot",
+                index,
+                source_size,
+            )
+        self._frame_logged.add(index)
 
     def _ensure_camera_menu(self) -> Optional[tk.Menu]:
         if self._camera_menu is not None:
