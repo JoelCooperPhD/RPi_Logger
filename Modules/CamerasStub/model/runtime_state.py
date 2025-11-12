@@ -103,6 +103,7 @@ class CapturedFrame:
     metadata: dict[str, Any]
     timestamp: float
     monotonic: float
+    preview_frame: Optional[Any] = None
 
 
 @dataclass(slots=True)
@@ -160,6 +161,7 @@ class CameraStubModel:
         self.logger = logger
         self.config_path = module_dir / "config.txt"
         self.overlay_config = dict(CAMERA_OVERLAY_DEFAULTS)
+        self.camera_aliases: dict[int, str] = {}
 
         self._status_message = "Initializing"
         self.ensure_module_config()
@@ -239,6 +241,8 @@ class CameraStubModel:
             "save_fps": "unlimited",
             "save_format": "jpeg",
             "save_quality": "90",
+            "camera_1_alias": "Camera 1",
+            "camera_2_alias": "Camera 2",
         }
         lines = [f"{key} = {value}" for key, value in defaults.items()]
         try:
@@ -248,10 +252,12 @@ class CameraStubModel:
 
     def apply_saved_preferences(self) -> None:
         config = self._read_module_config()
-        if not config:
-            return
-
         updates: dict[str, Any] = {}
+        if not config:
+            self._load_camera_aliases({}, updates)
+            if updates:
+                self._write_module_preferences_sync(updates)
+            return
 
         preview_fraction_raw = config.get("preview_fraction")
         preview_fraction_value = self._safe_float(preview_fraction_raw)
@@ -302,6 +308,8 @@ class CameraStubModel:
             if config.get("save_quality") != str(quality):
                 updates["save_quality"] = quality
 
+        self._load_camera_aliases(config, updates)
+
         if updates:
             self._write_module_preferences_sync(updates)
         self._strip_legacy_keys(self.config_path, {"preview_resolution", "preview_width", "preview_height"})
@@ -344,6 +352,9 @@ class CameraStubModel:
 
         updates["save_format"] = getattr(self.args, "save_format", self.save_format)
         updates["save_quality"] = getattr(self.args, "save_quality", self.save_quality)
+
+        for idx, alias in self.camera_aliases.items():
+            updates[f"camera_{idx + 1}_alias"] = alias
 
         if not updates:
             return
@@ -397,6 +408,41 @@ class CameraStubModel:
             path.write_text("\n".join(filtered) + "\n", encoding="utf-8")
         except Exception:  # pragma: no cover - defensive
             pass
+
+    # ------------------------------------------------------------------
+    # Camera alias helpers
+    # ------------------------------------------------------------------
+    def _load_camera_aliases(self, config: dict[str, Any], updates: dict[str, Any]) -> None:
+        alias_count = self._camera_alias_count()
+        aliases: dict[int, str] = {}
+        for idx in range(alias_count):
+            key = f"camera_{idx + 1}_alias"
+            raw_value = config.get(key)
+            alias = self._sanitize_alias(raw_value, idx)
+            aliases[idx] = alias
+            if not isinstance(raw_value, str) or raw_value.strip() != alias:
+                updates[key] = alias
+        self.camera_aliases = aliases
+
+    def _camera_alias_count(self) -> int:
+        max_cams = self._safe_int(getattr(self.args, "max_cameras", None))
+        if max_cams is None or max_cams <= 0:
+            max_cams = 2
+        return max(2, max_cams)
+
+    def _sanitize_alias(self, value: Any, index: int) -> str:
+        if isinstance(value, str):
+            cleaned = value.strip()
+            if cleaned:
+                return cleaned
+        return self._default_camera_alias(index)
+
+    @staticmethod
+    def _default_camera_alias(index: int) -> str:
+        return f"Camera {index + 1}"
+
+    def get_camera_alias(self, index: int) -> str:
+        return self.camera_aliases.get(index, self._default_camera_alias(index))
 
     # ------------------------------------------------------------------
     # Directory helpers

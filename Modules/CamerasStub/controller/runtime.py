@@ -387,9 +387,7 @@ class CameraStubController(ModuleRuntime):
 
     async def _handle_camera_toggle_request(self, index: int, enabled: bool) -> None:
         slot = self._slot_by_index(index)
-        if slot is None:
-            return
-        if slot.preview_enabled == enabled:
+        if slot is None or slot.preview_enabled == enabled:
             return
         slot.preview_enabled = enabled
         slot.snapshot_pending = enabled
@@ -402,12 +400,17 @@ class CameraStubController(ModuleRuntime):
             if self.view_adapter:
                 self.view_adapter.show_camera_hidden(slot)
         self._refresh_status()
+        self._refresh_preview_layout()
 
     def _slot_by_index(self, index: int) -> Optional[CameraSlot]:
         for slot in self._previews:
             if slot.index == index:
                 return slot
         return None
+
+    def _refresh_preview_layout(self) -> None:
+        if self.view_adapter:
+            self.view_adapter.refresh_preview_layout(self._previews)
 
     def _refresh_status(self) -> None:
         """Summarize current camera/save state for diagnostics/UI."""
@@ -705,7 +708,7 @@ class CameraStubController(ModuleRuntime):
         adapter = self.view_adapter
 
         for index, info in enumerate(camera_infos[:max_cams]):
-            title = info.get("Model", f"Camera {index}") if isinstance(info, dict) else f"Camera {index}"
+            title = self._state.get_camera_alias(index)
             if adapter is None:
                 self.logger.debug("Skipping preview construction for cam %s (no view)", index)
                 continue

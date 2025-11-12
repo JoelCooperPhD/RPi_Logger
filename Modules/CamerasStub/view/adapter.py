@@ -42,6 +42,9 @@ class CameraStubViewAdapter:
         self.logger = logger
         self._preview_row: Optional[ttk.Frame] = None
         self._preview_uniform_group = f"camera_preview_columns_{id(self)}"
+        self._preview_padx = 6
+        self._preview_pady = 6
+        self._current_preview_columns = 0
         self._preview_fps_var: Optional[tk.StringVar] = None
         self._preview_fraction_getter: Optional[Callable[[], Optional[float]]] = None
         self._preview_fraction_handler: Optional[Callable[[Optional[float]], Awaitable[None]]] = None
@@ -92,9 +95,22 @@ class CameraStubViewAdapter:
             highlightthickness=0,
             bd=0,
         )
-        frame.grid(row=0, column=index, sticky="nsew", padx=6, pady=6)
+        frame.grid(row=0, column=index, sticky="nsew", padx=self._preview_padx, pady=self._preview_pady)
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=0)
+        frame.rowconfigure(1, weight=1)
+
+        if tk is not None:
+            title_label = tk.Label(
+                frame,
+                text=title,
+                anchor="w",
+                bg=self.PREVIEW_BACKGROUND,
+                fg="#f5f5f5",
+                font=("TkDefaultFont", 11, "bold"),
+                padx=4,
+            )
+            title_label.grid(row=0, column=0, sticky="ew", pady=(0, 4))
 
         canvas = tk.Canvas(
             frame,
@@ -102,7 +118,7 @@ class CameraStubViewAdapter:
             highlightthickness=0,
             bd=0,
         )
-        canvas.grid(row=0, column=0, sticky="nsew")
+        canvas.grid(row=1, column=0, sticky="nsew")
         canvas.create_text(
             0,
             0,
@@ -436,12 +452,43 @@ class CameraStubViewAdapter:
             pass
 
     def show_camera_hidden(self, slot) -> None:
-        self.show_camera_placeholder(slot, "Camera disabled (View ▸ Cameras)")
+        title = getattr(slot, "title", "Camera")
+        self.show_camera_placeholder(slot, f"{title} disabled (View ▸ Cameras)")
 
     def show_camera_waiting(self, slot) -> None:
         title = getattr(slot, "title", "")
         message = f"Waiting for {title or 'camera'}…"
         self.show_camera_placeholder(slot, message)
+
+    def refresh_preview_layout(self, slots: list[Any]) -> None:
+        if tk is None or self._preview_row is None:
+            return
+
+        total_columns = max(self._current_preview_columns, len(slots))
+        for col in range(total_columns):
+            self._preview_row.columnconfigure(col, weight=0)
+
+        active_col = 0
+        for slot in slots:
+            frame = getattr(slot, "frame", None)
+            if frame is None:
+                continue
+            if getattr(slot, "preview_enabled", True):
+                frame.grid(
+                    row=0,
+                    column=active_col,
+                    sticky="nsew",
+                    padx=self._preview_padx,
+                    pady=self._preview_pady,
+                )
+                frame.columnconfigure(0, weight=1)
+                frame.rowconfigure(0, weight=1)
+                self._preview_row.columnconfigure(active_col, weight=1, uniform=self._preview_uniform_group)
+                active_col += 1
+            else:
+                frame.grid_remove()
+
+        self._current_preview_columns = active_col
 
     # ------------------------------------------------------------------
     # IO metrics display
