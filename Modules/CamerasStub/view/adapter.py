@@ -15,6 +15,8 @@ except Exception:  # pragma: no cover - defensive import
 
 from PIL import Image, ImageTk
 
+from ..utils import frame_to_image as convert_frame_to_image
+
 try:  # Pillow 10+
     DEFAULT_RESAMPLE = Image.Resampling.BILINEAR
 except AttributeError:  # pragma: no cover - legacy Pillow fallback
@@ -23,6 +25,8 @@ except AttributeError:  # pragma: no cover - legacy Pillow fallback
 
 class CameraStubViewAdapter:
     """Encapsulates interactions with the StubCodexView and Tk widgets."""
+
+    PREVIEW_BACKGROUND = "#111111"
 
     def __init__(
         self,
@@ -37,6 +41,7 @@ class CameraStubViewAdapter:
         self.task_manager = task_manager
         self.logger = logger
         self._preview_row: Optional[ttk.Frame] = None
+        self._preview_uniform_group = f"camera_preview_columns_{id(self)}"
         self._preview_fps_var: Optional[tk.StringVar] = None
         self._preview_fraction_getter: Optional[Callable[[], Optional[float]]] = None
         self._preview_fraction_handler: Optional[Callable[[Optional[float]], Awaitable[None]]] = None
@@ -47,27 +52,26 @@ class CameraStubViewAdapter:
     # Layout helpers
     # ------------------------------------------------------------------
     def build_camera_grid(self, max_columns: int) -> None:
-        if not self.view or tk is None or ttk is None:
+        if not self.view or tk is None:
             return
 
         def builder(parent: tk.Widget) -> None:
-            if not isinstance(parent, ttk.LabelFrame):
-                container = ttk.LabelFrame(parent, text="Cameras", padding="8")
+            if hasattr(parent, "columnconfigure"):
+                parent.columnconfigure(0, weight=1)
+            if hasattr(parent, "rowconfigure"):
+                parent.rowconfigure(0, weight=1)
+
+            if not isinstance(parent, tk.Frame):
+                container = tk.Frame(parent, background=self.PREVIEW_BACKGROUND, bd=0, highlightthickness=0)
                 container.grid(row=0, column=0, sticky="nsew")
-                container.columnconfigure(0, weight=1)
-                container.rowconfigure(0, weight=1)
             else:
                 container = parent
-                container.columnconfigure(0, weight=1)
-                container.rowconfigure(0, weight=1)
+            container.columnconfigure(0, weight=1)
+            container.rowconfigure(0, weight=1)
 
-            row = ttk.Frame(container)
+            row = tk.Frame(container, background=self.PREVIEW_BACKGROUND, bd=0, highlightthickness=0)
             row.grid(row=0, column=0, sticky="nsew")
 
-            total_columns = max(2, int(max_columns or 2))
-            uniform_group = "camera_preview_columns"
-            for col in range(total_columns):
-                row.columnconfigure(col, weight=1, uniform=uniform_group)
             row.rowconfigure(0, weight=1)
             self._preview_row = row
 
@@ -77,22 +81,42 @@ class CameraStubViewAdapter:
         if ttk is None or self._preview_row is None:
             raise RuntimeError("Preview grid not initialized")
 
-        frame = ttk.Frame(self._preview_row)
-        frame.grid(row=0, column=index, sticky="nsew", padx=4, pady=4)
+        self._preview_row.columnconfigure(index, weight=1, uniform=self._preview_uniform_group)
+
+        frame = tk.Frame(
+            self._preview_row,
+            background="#111111",
+            highlightthickness=0,
+            bd=0,
+        )
+        frame.grid(row=0, column=index, sticky="nsew", padx=6, pady=6)
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        holder = tk.Frame(frame, background="#000000", bd=1, relief=tk.SOLID)
-        holder.grid(row=0, column=0, sticky="nsew")
-        holder.columnconfigure(0, weight=1)
-        holder.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(
+            frame,
+            background="#000000",
+            highlightthickness=0,
+            bd=0,
+        )
+        canvas.grid(row=0, column=0, sticky="nsew")
+        canvas.create_text(
+            0,
+            0,
+            text="Waiting for frames…",
+            fill="#cccccc",
+            justify=tk.CENTER,
+            anchor=tk.CENTER,
+            tags="preview_text",
+        )
 
-        label = tk.Label(holder, background="#000000", anchor="center", justify=tk.CENTER)
-        label.grid(row=0, column=0, sticky="nsew")
-        label.configure(text="Waiting for frames…", fg="#cccccc", font=("TkDefaultFont", 10))
-        label._preview_title = title  # type: ignore[attr-defined]
+        def _center_text(event: Any) -> None:
+            canvas.coords("preview_text", event.width // 2, event.height // 2)
 
-        return frame, holder, label
+        canvas.bind("<Configure>", _center_text)
+        canvas._preview_title = title  # type: ignore[attr-defined]
+
+        return frame, canvas, canvas
 
     def bind_preview_resize(self, frame: Any, callback: Callable[[int, int], None]) -> None:
         if tk is None:
@@ -414,10 +438,22 @@ class CameraStubViewAdapter:
     async def display_frame(self, slot, frame: Any, pixel_format: str) -> None:
         if self.view_is_resizing():
             return
-        image = await asyncio.to_thread(self._frame_to_image, frame, pixel_format)
+        stream_size = getattr(slot, "preview_stream_size", None) or getattr(slot, "main_size", None)
+        image = await asyncio.to_thread(
+            convert_frame_to_image,
+            frame,
+            pixel_format,
+            size_hint=stream_size,
+        )
         target_size = getattr(slot, "size", self.preview_size) or self.preview_size
         if target_size[0] <= 0 or target_size[1] <= 0:
             target_size = self.preview_size
+
+        native_size = getattr(slot, "preview_stream_size", None)
+        if native_size and (image.width > native_size[0] or image.height > native_size[1]):
+            crop_width = min(native_size[0], image.width)
+            crop_height = min(native_size[1], image.height)
+            image = image.crop((0, 0, crop_width, crop_height))
 
         if image.size != target_size:
             if slot.index not in self._frame_logged:
@@ -439,44 +475,34 @@ class CameraStubViewAdapter:
 
         master = self.view.root if self.view else None
         photo = ImageTk.PhotoImage(image, master=master)
-        label = getattr(slot, "label", None)
-        if label is None:
+        widget = getattr(slot, "label", None)
+        if widget is None:
             return
 
         def _update() -> None:
-            if not label.winfo_exists():
+            if not widget.winfo_exists():
                 return
-            label.configure(image=photo, text="")
-            label.image = photo  # type: ignore[attr-defined]
+            if isinstance(widget, tk.Canvas):
+                width = widget.winfo_width() or target_size[0]
+                height = widget.winfo_height() or target_size[1]
+                widget.delete("preview_image")
+                widget.delete("preview_text")
+                widget.create_image(
+                    width // 2,
+                    height // 2,
+                    image=photo,
+                    anchor=tk.CENTER,
+                    tags="preview_image",
+                )
+                widget.image = photo  # type: ignore[attr-defined]
+            else:
+                widget.configure(image=photo, text="")
+                widget.image = photo  # type: ignore[attr-defined]
 
         try:
-            label.after(0, _update)
+            widget.after(0, _update)
         except Exception:  # pragma: no cover - defensive
             pass
-
-    def _frame_to_image(self, frame: Any, pixel_format: str) -> Image.Image:
-        pixel_format = (pixel_format or "").upper()
-
-        if getattr(frame, "ndim", 0) == 3 and frame.shape[2] == 3:
-            if pixel_format in {"BGR888", "RGB888"}:
-                return Image.fromarray(frame[..., ::-1], mode="RGB")
-            return Image.fromarray(frame, mode="RGB")
-
-        if getattr(frame, "ndim", 0) == 3 and frame.shape[2] == 4:
-            if pixel_format == "XBGR8888":
-                return Image.fromarray(frame[..., 1:4][..., ::-1], mode="RGB")
-            if pixel_format == "XRGB8888":
-                return Image.fromarray(frame[..., 1:4], mode="RGB")
-            if pixel_format == "ABGR8888":
-                return Image.fromarray(frame[..., [3, 2, 1]], mode="RGB")
-            if pixel_format == "ARGB8888":
-                return Image.fromarray(frame[..., 1:4], mode="RGB")
-            return Image.fromarray(frame, mode="RGBA").convert("RGB")
-
-        if getattr(frame, "ndim", 0) == 2:
-            return Image.fromarray(frame, mode="L")
-
-        return Image.fromarray(frame).convert("RGB")
 
 
 __all__ = ["CameraStubViewAdapter"]

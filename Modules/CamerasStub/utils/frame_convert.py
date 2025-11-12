@@ -9,47 +9,23 @@ followed by interleaved quarter-size U and V samples).
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Optional, Tuple
 
 import cv2
 import numpy as np
 from PIL import Image
 
-logger = logging.getLogger(__name__)
-
-_logged_formats: set[str] = set()
+from .color_convert import (
+    convert_rgb_frame,
+    log_frame_format,
+    normalize_pixel_format,
+)
 
 YUV_PLANAR_FORMATS = {
     "YUV420",
     "YUV420P",
     "I420",
 }
-
-# Picamera2 exposes RGB streams using OpenCV/DRM native layouts.  The real
-# Cameras module keeps everything in OpenCV's BGR order and only converts to RGB
-# right before sending a frame to Tkinter.  The stub needs to mimic that
-# behaviour, so we reuse Picamera2's own raw-mode lookup to decode RGB streams
-# correctly.
-RAW_MODE_LOOKUP = {
-    "RGB888": "BGR",
-    "BGR888": "RGB",
-    "XBGR8888": "RGBX",
-    "XRGB8888": "BGRX",
-    "ABGR8888": "RGBA",
-    "ARGB8888": "BGRA",
-}
-
-
-def _normalize_format(pixel_format: Optional[str]) -> str:
-    if not pixel_format:
-        return ""
-    fmt = str(pixel_format).strip().upper()
-    if not fmt:
-        return ""
-    fmt = fmt.split('/', 1)[0]
-    return fmt.strip()
-
 
 def _sanitize_even_dimension(value: Optional[Tuple[int, int] | int], index: Optional[int] = None) -> Optional[int]:
     """Best-effort helper to coerce width/height hints into even integers."""
@@ -78,8 +54,8 @@ def frame_to_image(
 ) -> Image.Image:
     """Convert a Picamera2 frame into a Pillow image suitable for preview/storage."""
 
-    fmt = _normalize_format(pixel_format)
-    _log_frame_diagnostics(frame, fmt)
+    fmt = normalize_pixel_format(pixel_format)
+    log_frame_format(frame, fmt)
 
     planar_candidate = getattr(frame, "ndim", None) == 2
     if planar_candidate and (fmt in YUV_PLANAR_FORMATS or _is_planar_yuv_candidate(frame, fmt)):
@@ -88,68 +64,14 @@ def frame_to_image(
             rgb = _convert_yuv420_to_rgb(array, size_hint)
             return Image.fromarray(rgb, mode="RGB")
 
-    if getattr(frame, "ndim", 0) == 3:
-        channels = frame.shape[2]
-        if channels in (3, 4):
-            pil_image = _rgb_from_interleaved(frame, fmt)
-            if pil_image is not None:
-                return pil_image
-        if channels == 3:
-            if frame.dtype == np.uint8:
-                return Image.fromarray(frame[..., ::-1], mode="RGB")
-            return Image.fromarray(frame, mode="RGB")
-        if channels == 4:
-            if frame.dtype == np.uint8:
-                return Image.fromarray(frame[..., [2, 1, 0, 3]], mode="RGBA").convert("RGB")
-            return Image.fromarray(frame, mode="RGBA").convert("RGB")
+    converted_rgb = convert_rgb_frame(frame, fmt)
+    if converted_rgb is not None:
+        return converted_rgb
 
     if getattr(frame, "ndim", 0) == 2:
         return Image.fromarray(frame, mode="L")
 
     return Image.fromarray(np.asarray(frame)).convert("RGB")
-
-
-def _rgb_from_interleaved(frame: np.ndarray, fmt: str) -> Optional[Image.Image]:
-    raw_mode = RAW_MODE_LOOKUP.get(fmt)
-    if raw_mode is None:
-        return None
-
-    buffer = frame if frame.flags.c_contiguous else np.ascontiguousarray(frame)
-    height, width = buffer.shape[:2]
-    stride = buffer.strides[0]
-
-    try:
-        image = Image.frombuffer(
-            "RGB",
-            (width, height),
-            buffer,
-            "raw",
-            raw_mode,
-            stride,
-            1,
-        )
-    except ValueError:
-        return None
-
-    if image.mode != "RGB":
-        return image.convert("RGB")
-    return image.copy()
-
-
-def _log_frame_diagnostics(frame: Any, fmt: str) -> None:
-    if fmt in _logged_formats:
-        return
-    shape = getattr(frame, "shape", None)
-    dtype = getattr(frame, "dtype", None)
-    ndim = getattr(frame, "ndim", None)
-    logger.info(
-        "frame_to_image format=%s ndim=%s shape=%s dtype=%s",
-        fmt or "(unknown)",
-        ndim,
-        shape,
-        dtype,
-    )
-    _logged_formats.add(fmt)
 
 
 def _is_planar_yuv_candidate(frame: Any, pixel_format: str) -> bool:
