@@ -233,7 +233,6 @@ async def main(argv: Optional[list[str]] = None) -> None:
         runtime_retry_policy=RuntimeRetryPolicy(interval=3.0, max_attempts=3),
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
-        view_kwargs={"enable_camera_controls": True},
     )
 
     try:

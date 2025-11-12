@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -162,6 +163,7 @@ class CameraStubModel:
         self.config_path = module_dir / "config.txt"
         self.overlay_config = dict(CAMERA_OVERLAY_DEFAULTS)
         self.camera_aliases: dict[int, str] = {}
+        self._camera_alias_slugs: dict[int, str] = {}
 
         self._status_message = "Initializing"
         self.ensure_module_config()
@@ -423,6 +425,7 @@ class CameraStubModel:
             if not isinstance(raw_value, str) or raw_value.strip() != alias:
                 updates[key] = alias
         self.camera_aliases = aliases
+        self._camera_alias_slugs = self._build_alias_slugs(aliases)
 
     def _camera_alias_count(self) -> int:
         max_cams = self._safe_int(getattr(self.args, "max_cameras", None))
@@ -443,6 +446,35 @@ class CameraStubModel:
 
     def get_camera_alias(self, index: int) -> str:
         return self.camera_aliases.get(index, self._default_camera_alias(index))
+
+    def get_camera_alias_slug(self, index: int) -> str:
+        if not self._camera_alias_slugs:
+            self._camera_alias_slugs = self._build_alias_slugs(self.camera_aliases)
+        return self._camera_alias_slugs.get(index, self._default_camera_slug(index))
+
+    def _build_alias_slugs(self, aliases: dict[int, str]) -> dict[int, str]:
+        seen: dict[str, int] = {}
+        slugs: dict[int, str] = {}
+        for idx, alias in aliases.items():
+            candidate = self._slugify_alias(alias)
+            if not candidate:
+                candidate = self._default_camera_slug(idx)
+            normalized = candidate.lower()
+            occurrence = seen.get(normalized, 0)
+            seen[normalized] = occurrence + 1
+            slug = candidate if occurrence == 0 else f"{candidate}_{occurrence + 1}"
+            slugs[idx] = slug
+        return slugs
+
+    @staticmethod
+    def _slugify_alias(alias: str) -> str:
+        if not isinstance(alias, str):
+            return ""
+        return re.sub(r"[^A-Za-z0-9]+", "_", alias).strip("_")
+
+    @staticmethod
+    def _default_camera_slug(index: int) -> str:
+        return f"Camera_{index + 1}"
 
     # ------------------------------------------------------------------
     # Directory helpers
@@ -485,7 +517,8 @@ class CameraStubModel:
         return await asyncio.to_thread(self.prepare_session_directory_sync, base_dir)
 
     def ensure_camera_dir_sync(self, camera_index: int, session_dir: Path) -> Path:
-        camera_dir = session_dir / f"cam{camera_index}"
+        camera_dir_name = self.get_camera_alias_slug(camera_index)
+        camera_dir = session_dir / camera_dir_name
         camera_dir.mkdir(parents=True, exist_ok=True)
         return camera_dir
 

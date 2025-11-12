@@ -1,0 +1,99 @@
+"""Per-camera slot state used by the Cameras stub controller."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Optional
+
+import numpy as np
+
+from ..frame_timing import StubFrameTimingTracker
+from ..model import CapturedFrame, FrameGate, FramePayload, ImagePipeline
+from ..storage import CameraStoragePipeline
+
+
+@dataclass(slots=True)
+class CameraSlot:
+    """Aggregates preview, storage, and pipeline state for a single camera."""
+
+    index: int
+    camera: Any
+    frame: Any
+    holder: Any
+    label: Any
+    size: tuple[int, int]
+    title: str
+    main_format: str = ""
+    preview_format: str = ""
+    main_size: Optional[tuple[int, int]] = None
+    preview_stream: str = "main"
+    main_stream: str = "main"
+    preview_stream_size: Optional[tuple[int, int]] = None
+    capture_queue: Optional[asyncio.Queue[Optional[CapturedFrame]]] = field(default=None, repr=False)
+    preview_queue: Optional[asyncio.Queue[FramePayload]] = field(default=None, repr=False)
+    storage_queue: Optional[asyncio.Queue[FramePayload]] = field(default=None, repr=False)
+    save_size: Optional[tuple[int, int]] = None
+    photo: Optional[Any] = field(default=None, repr=False)
+    preview_gate: FrameGate = field(default_factory=FrameGate, repr=False)
+    preview_stride: int = 1
+    preview_stride_offset: int = 0
+    frame_rate_gate: FrameGate = field(default_factory=FrameGate, repr=False)
+    last_preview_frame: Optional[np.ndarray] = field(default=None, repr=False)
+    last_preview_format: str = ""
+    snapshot_pending: bool = False
+    first_frame_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    capture_fps: float = 0.0
+    process_fps: float = 0.0
+    preview_fps: float = 0.0
+    storage_fps: float = 0.0
+    image_pipeline: Optional[ImagePipeline] = field(default=None, repr=False)
+    capture_task: Optional[asyncio.Task] = field(default=None, repr=False)
+    router_task: Optional[asyncio.Task] = field(default=None, repr=False)
+    preview_task: Optional[asyncio.Task] = field(default=None, repr=False)
+    storage_task: Optional[asyncio.Task] = field(default=None, repr=False)
+    saving_active: bool = False
+    preview_enabled: bool = True
+    frame_duration_us: Optional[int] = None
+    was_resizing: bool = False
+    capture_main_stream: bool = False
+    timing_tracker: StubFrameTimingTracker = field(default_factory=StubFrameTimingTracker, repr=False)
+    capture_index: int = 0
+    last_hardware_fps: float = 0.0
+    last_expected_interval_ns: Optional[int] = None
+    storage_pipeline: Optional[CameraStoragePipeline] = field(default=None, repr=False)
+    storage_drop_since_last: int = 0
+    storage_drop_total: int = 0
+    storage_queue_size: int = 1
+    last_video_frame_count: int = 0
+    video_stall_frames: int = 0
+    last_video_fps: float = 0.0
+    session_camera_dir: Optional[Path] = field(default=None, repr=False)
+    slow_capture_warnings: int = 0
+
+    def attach_queues(
+        self,
+        *,
+        capture_queue: Optional[asyncio.Queue[Optional[CapturedFrame]]],
+        preview_queue: Optional[asyncio.Queue[FramePayload]],
+        storage_queue: Optional[asyncio.Queue[FramePayload]],
+    ) -> None:
+        self.capture_queue = capture_queue
+        self.preview_queue = preview_queue
+        self.storage_queue = storage_queue
+
+    def reset_pipeline(self) -> None:
+        self.capture_task = None
+        self.router_task = None
+        self.preview_task = None
+        self.storage_task = None
+        self.image_pipeline = None
+
+    def drop_preview_cache(self) -> None:
+        self.last_preview_frame = None
+        self.last_preview_format = ""
+        self.snapshot_pending = False
+
+
+__all__ = ["CameraSlot"]

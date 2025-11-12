@@ -1,0 +1,90 @@
+################################################################################
+# EYE TRACKER CONFIGURATION
+################################################################################
+# Edit values below, then restart the module. CLI arguments override these defaults.
+################################################################################
+display_name = EyeT (Stub)
+
+################################################################################
+# CORE CAPTURE
+################################################################################
+# Frame processing rate (1-120 fps; 5-30 recommended for eye tracking)
+target_fps = 10.0
+
+# Scene video resolution written to disk (WIDTH x HEIGHT)
+resolution_width = 1280
+resolution_height = 720
+
+# Output location (master logger overrides these automatically)
+output_dir = data
+session_prefix = session
+
+################################################################################
+# PREVIEW & GUI
+################################################################################
+# Preview resolution presets (4:3 – matches Pupil Labs scene camera)
+# 0=1600x1200  1=1280x960  2=1024x768  3=800x600  4=640x480
+# 5=480x360    6=320x240   7=240x180   8=160x120 (micro)
+preview_preset = 4
+
+# GUI refresh rate in Hz (lower = less GPU load)
+gui_preview_update_hz = 5
+
+################################################################################
+# RECORDING OVERLAY (APPLIED TO SAVED VIDEO)
+################################################################################
+enable_recording_overlay = true     # Toggle overlay entirely
+include_gaze_in_recording = true    # Draw gaze indicator on recorded video
+
+# Frame-number text appearance (RGB colours)
+overlay_font_scale = 0.6
+overlay_thickness = 2
+overlay_color_r = 255
+overlay_color_g = 255
+overlay_color_b = 255
+overlay_margin_left = 10
+overlay_line_start_y = 30
+
+# Gaze indicator appearance (used for preview + recording)
+gaze_circle_radius = 10
+gaze_circle_thickness = 1
+gaze_center_radius = 1
+gaze_shape = circle        # circle | cross
+gaze_color_worn_b = 255    # Glasses worn → yellow indicator
+gaze_color_worn_g = 255
+gaze_color_worn_r = 0
+gaze_color_not_worn_b = 0  # Glasses off → red indicator
+gaze_color_not_worn_g = 0
+gaze_color_not_worn_r = 255
+
+################################################################################
+# DATA EXPORT OPTIONS
+################################################################################
+enable_advanced_gaze_logging = false      # Extra per-eye metrics CSV
+expand_eye_event_details = true           # Detailed fixation/blink fields
+enable_audio_recording = false            # Capture headset microphone audio
+audio_stream_param = audio=scene          # RTSP query for audio stream
+enable_device_status_logging = false      # Battery / storage telemetry log
+device_status_poll_interval = 5.0
+
+################################################################################
+# LOGGING
+################################################################################
+log_level = info          # debug | info | warning | error | critical
+console_output = false    # Mirror log output to console
+
+################################################################################
+# DEVICE DISCOVERY
+################################################################################
+discovery_timeout = 5.0   # Seconds to wait for headset
+discovery_retry = 3.0     # Seconds between retries
+
+################################################################################
+# MASTER LOGGER WINDOW STATE (AUTOSAVED)
+################################################################################
+enabled = false           # Autostart from master logger
+window_x = 1010
+window_y = 349
+window_width = 1419
+window_height = 699
+################################################################################

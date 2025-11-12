@@ -1,10 +1,8 @@
-"""
-Centralized path constants for the RPi Logger system.
+"""Centralized path constants for the RPi Logger system."""
 
-This module provides OS-agnostic path definitions for all critical
-directories and files used throughout the logger system.
-"""
+from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -24,19 +22,24 @@ STATE_FILE = PROJECT_ROOT / "running_modules.json"
 # Module directories
 MODULES_DIR = PROJECT_ROOT / "Modules"
 
+# User-specific state (allows running from read-only project directories)
+_USER_STATE_ENV = os.environ.get("RPI_LOGGER_STATE_DIR")
+USER_STATE_DIR = Path(_USER_STATE_ENV).expanduser() if _USER_STATE_ENV else (Path.home() / ".rpi_logger")
+USER_CONFIG_OVERRIDES_DIR = USER_STATE_DIR / "config_overrides"
+USER_MODULE_LOGS_DIR = USER_STATE_DIR / "module_logs"
+
 # UI assets
 UI_DIR = Path(__file__).parent / "ui"
 LOGO_PATH = UI_DIR / "logo_100.png"
 
 
 def ensure_directories() -> None:
-    """
-    Create necessary directories if they don't exist.
+    """Create necessary directories if they don't exist."""
 
-    Call this during application startup to ensure all required
-    directories are present.
-    """
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    USER_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    USER_CONFIG_OVERRIDES_DIR.mkdir(parents=True, exist_ok=True)
+    USER_MODULE_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 __all__ = [
@@ -46,6 +49,9 @@ __all__ = [
     'MASTER_LOG_FILE',
     'STATE_FILE',
     'MODULES_DIR',
+    'USER_STATE_DIR',
+    'USER_CONFIG_OVERRIDES_DIR',
+    'USER_MODULE_LOGS_DIR',
     'UI_DIR',
     'LOGO_PATH',
     'ensure_directories',

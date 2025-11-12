@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
 
 from logger_core.logging_config import configure_logging
+from logger_core.paths import USER_MODULE_LOGS_DIR
 
 
 LOG_LEVELS: dict[str, int] = {
@@ -225,6 +226,39 @@ def get_config_str(config: dict, key: str, default: str) -> str:
     return config.get(key, default)
 
 
+def _try_prepare_log_destination(directory: Path, filename: str) -> tuple[Path | None, Exception | None]:
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        log_file = directory / filename
+        log_file.touch(exist_ok=True)
+        return log_file, None
+    except Exception as exc:  # pragma: no cover - fallback path handles errors
+        return None, exc
+
+
+def _prepare_log_file(module_dir: Path, module_name: str) -> tuple[Path, bool, str | None]:
+    """Select a writable log destination, falling back to the user state dir."""
+
+    from Modules.base import sanitize_path_component
+
+    preferred_dir = module_dir / "logs"
+    filename = f"{module_name}.log"
+    preferred_log, preferred_error = _try_prepare_log_destination(preferred_dir, filename)
+    if preferred_log:
+        return preferred_log, False, None
+
+    fallback_dir = USER_MODULE_LOGS_DIR / sanitize_path_component(module_name or "module")
+    fallback_log, fallback_error = _try_prepare_log_destination(fallback_dir, filename)
+    if fallback_log:
+        reason = f"{preferred_dir}: {preferred_error}" if preferred_error else str(preferred_dir)
+        return fallback_log, True, reason
+
+    raise PermissionError(
+        "Unable to create module log file in %s (error: %s) or fallback %s (error: %s)"
+        % (preferred_dir, preferred_error, fallback_dir, fallback_error)
+    )
+
+
 def setup_module_logging(
     args: Any,
     module_name: str,
@@ -238,10 +272,7 @@ def setup_module_logging(
         default_prefix=default_prefix
     )
 
-    logs_dir = module_dir / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-
-    log_file = logs_dir / f"{module_name}.log"
+    log_file, used_fallback, fallback_reason = _prepare_log_file(module_dir, module_name)
 
     original_stdout = redirect_stderr_stdout(log_file)
 
@@ -255,6 +286,15 @@ def setup_module_logging(
         console=args.console_output,
         log_file=log_file,
     )
+
+    runtime_logger = logging.getLogger(module_name or __name__)
+    if used_fallback:
+        runtime_logger.warning(
+            "Module log directory not writable (%s). Using fallback path %s",
+            fallback_reason,
+            log_file.parent,
+        )
+    runtime_logger.info("Module logs will be written to %s", log_file)
 
     args.session_dir = session_dir
     args.log_file = log_file

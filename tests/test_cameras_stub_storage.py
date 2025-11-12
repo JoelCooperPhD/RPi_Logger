@@ -1,0 +1,126 @@
+import logging
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from types import ModuleType
+
+from PIL import Image
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+STUB_ROOT = PROJECT_ROOT / "Modules" / "stub (codex)"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if STUB_ROOT.exists() and str(STUB_ROOT) not in sys.path:
+    sys.path.insert(0, str(STUB_ROOT))
+
+
+def _ensure_cv2_stub() -> None:
+    """Provide a minimal cv2 stub so tests do not depend on OpenCV."""
+
+    if "cv2" in sys.modules:
+        return
+
+    cv2_stub = ModuleType("cv2")
+
+    class _VideoWriter:  # pragma: no cover - helper stub
+        def __init__(self, *args, **kwargs):
+            self._opened = True
+
+        def isOpened(self):
+            return self._opened
+
+        def write(self, frame):
+            return None
+
+        def release(self):
+            self._opened = False
+
+    cv2_stub.VideoWriter = _VideoWriter
+    cv2_stub.VideoWriter_fourcc = staticmethod(lambda *args: 0)
+    cv2_stub.FONT_HERSHEY_SIMPLEX = 0
+    cv2_stub.LINE_AA = 0
+    cv2_stub.COLOR_RGB2BGR = 0
+    cv2_stub.COLOR_BGR2RGB = 0
+    cv2_stub.putText = lambda *args, **kwargs: None  # pragma: no cover - helper stub
+    cv2_stub.cvtColor = lambda frame, flag=0: frame  # pragma: no cover - helper stub
+
+    sys.modules["cv2"] = cv2_stub
+
+
+_ensure_cv2_stub()
+
+if "async_tkinter_loop" not in sys.modules:
+    async_tk_stub = ModuleType("async_tkinter_loop")
+
+    def _passthrough(handler):  # pragma: no cover - helper stub
+        return handler
+
+    async_tk_stub.async_handler = _passthrough
+    sys.modules["async_tkinter_loop"] = async_tk_stub
+
+from Modules.CamerasStub.storage.pipeline import CameraStoragePipeline
+
+
+class PrepareImageOverlayTests(unittest.TestCase):
+    def test_prepare_image_with_overlay_invokes_burner(self) -> None:
+        pipeline = CameraStoragePipeline.__new__(CameraStoragePipeline)
+        calls = {}
+
+        def fake_burn(frame, frame_number, cfg):
+            calls["frame_number"] = frame_number
+            calls["cfg"] = cfg
+            calls["shape"] = getattr(frame, "shape", None)
+
+        pipeline._burn_frame_number = fake_burn  # type: ignore[attr-defined]
+
+        image = Image.new("RGB", (12, 8), color=(10, 20, 30))
+        overlay_cfg = {"text_color_r": 255, "text_color_g": 255, "text_color_b": 255}
+
+        result = pipeline._prepare_image_with_overlay(image, 42, overlay_cfg)
+
+        self.assertEqual(result.size, (12, 8))
+        self.assertEqual(result.mode, "RGB")
+        self.assertEqual(calls["frame_number"], 42)
+        self.assertEqual(calls["cfg"], overlay_cfg)
+        self.assertIsNotNone(calls["shape"])
+
+
+class SaveImageOverlayTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addAsyncCleanup(self._tmp.cleanup)
+        self.save_dir = Path(self._tmp.name)
+
+    async def test_save_image_applies_overlay_before_writing(self):
+        pipeline = CameraStoragePipeline.__new__(CameraStoragePipeline)
+        pipeline.save_dir = self.save_dir
+        pipeline.save_format = "jpeg"
+        pipeline.save_quality = 85
+        pipeline.overlay_config = {"text_color_r": 255, "text_color_g": 255, "text_color_b": 255}
+        pipeline._logger = logging.getLogger("CameraStoragePipelineTests")
+        pipeline.camera_slug = "cam0"
+
+        calls = []
+
+        def fake_prepare(image, frame_number, cfg):
+            calls.append((frame_number, cfg))
+            return image
+
+        pipeline._prepare_image_with_overlay = fake_prepare  # type: ignore[attr-defined]
+
+        image = Image.new("RGB", (6, 6), color=(0, 0, 0))
+        timestamp = 1_700_000_000.0
+
+        result = await pipeline._save_image(image, 7, timestamp)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 7)
+        self.assertEqual(calls[0][1], pipeline.overlay_config)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.exists())
+
+
+if __name__ == "__main__":  # pragma: no cover - convenience hook
+    unittest.main()

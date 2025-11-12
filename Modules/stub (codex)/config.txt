@@ -2,5 +2,5 @@
 # Starts disabled by default; module toggles itself off after exit.
 enabled = false
 display_name = stub (codex)
-window_geometry = 490x427+5359+4211
+window_geometry = 490x427+113+232
 preview_resolution = auto

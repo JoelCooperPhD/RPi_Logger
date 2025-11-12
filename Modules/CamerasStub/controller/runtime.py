@@ -181,6 +181,7 @@ class CameraStubController(ModuleRuntime):
         if self.view is not None:
             self.view_adapter = CameraStubViewAdapter(
                 self.view,
+                args=self.args,
                 preview_size=self._state.PREVIEW_SIZE,
                 task_manager=self.task_manager,
                 logger=self.logger,
@@ -235,6 +236,7 @@ class CameraStubController(ModuleRuntime):
 
         max_cams = getattr(self.args, "max_cameras", 2)
         self.view_adapter.build_camera_grid(max_cams)
+        self.view_adapter.install_io_metrics_panel()
         self.view_adapter.configure_capture_menu()
         self._install_view_hooks()
         self._sync_record_toggle()
@@ -925,9 +927,10 @@ class CameraStubController(ModuleRuntime):
         interval = self.save_frame_interval
         if interval and interval > 0:
             return interval
-        preview_interval = self.preview_frame_interval
-        if preview_interval and preview_interval > 0:
-            return preview_interval
+        # Keep the sensor free-running when recording is uncapped, letting the
+        # driver choose the fastest allowed cadence instead of inheriting any
+        # preview throttling. Preview FPS controls already drop frames via the
+        # FrameGate, so constraining the sensor would only reduce headroom.
         return None
 
     async def _sync_sensor_frame_rates(self) -> None:
@@ -1377,9 +1380,14 @@ class CameraStubController(ModuleRuntime):
             return
         slot.session_camera_dir = camera_dir
 
+        camera_alias = slot.title or self.state.get_camera_alias(slot.index)
+        camera_slug = self.state.get_camera_alias_slug(slot.index)
+
         pipeline = CameraStoragePipeline(
             slot.index,
             camera_dir,
+            camera_alias=camera_alias,
+            camera_slug=camera_slug,
             save_format=self.save_format,
             save_quality=self.save_quality,
             max_fps=self.MAX_SENSOR_FPS,
@@ -1391,8 +1399,8 @@ class CameraStubController(ModuleRuntime):
         await pipeline.start()
         slot.storage_pipeline = pipeline
         self.logger.info(
-            "Camera %s storage ready -> dir=%s | queue=%d",
-            slot.index,
+            "Storage ready for %s -> dir=%s | queue=%d",
+            camera_alias,
             camera_dir,
             slot.storage_queue_size,
         )

@@ -40,6 +40,7 @@ class StubCSVLogger:
         csv_path: Path,
         trial_number: int = 1,
         *,
+        camera_name: Optional[str] = None,
         flush_interval: int = CSV_FLUSH_INTERVAL_FRAMES,
         queue_size: int = CSV_QUEUE_SIZE,
     ) -> None:
@@ -48,6 +49,8 @@ class StubCSVLogger:
         self.trial_number = trial_number
         self.flush_interval = flush_interval
         self.queue_size = queue_size
+        resolved_name = (camera_name or f"Camera {camera_id}").strip() or f"Camera {camera_id}"
+        self.camera_name = resolved_name
 
         self._file: Optional[object] = None
         self._queue: Optional[asyncio.Queue[CSVLogEntry]] = None
@@ -79,7 +82,7 @@ class StubCSVLogger:
 
         loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._logger_loop(), name=f"CSVLoggerCam{self.camera_id}")
-        logger.info("Camera %d CSV logger started -> %s", self.camera_id, self.csv_path)
+        logger.info("%s CSV logger started -> %s", self.camera_name, self.csv_path)
 
     async def stop(self) -> None:
         if self._task is None:
@@ -98,7 +101,7 @@ class StubCSVLogger:
             try:
                 await asyncio.wait_for(queue.join(), timeout=CSV_LOGGER_STOP_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
-                logger.warning("Camera %d CSV queue did not drain before timeout", self.camera_id)
+                logger.warning("%s CSV queue did not drain before timeout", self.camera_name)
             self._queue = None
 
         if task and not task.done():
@@ -115,12 +118,12 @@ class StubCSVLogger:
 
         if self._queue_overflow_drops > 0:
             logger.warning(
-                "Camera %d CSV logger dropped %d entries due to queue overflow",
-                self.camera_id,
+                "%s CSV logger dropped %d entries due to queue overflow",
+                self.camera_name,
                 self._queue_overflow_drops,
             )
         else:
-            logger.info("Camera %d CSV logger stopped", self.camera_id)
+            logger.info("%s CSV logger stopped", self.camera_name)
 
     def log_frame(
         self,
@@ -152,8 +155,8 @@ class StubCSVLogger:
             self._queue_overflow_drops += 1
             if self._queue_overflow_drops % 10 == 1:
                 logger.warning(
-                    "Camera %d CSV logger queue full (size=%d), dropped %d entries",
-                    self.camera_id,
+                    "%s CSV logger queue full (size=%d), dropped %d entries",
+                    self.camera_name,
                     self.queue_size,
                     self._queue_overflow_drops,
                 )
@@ -188,7 +191,7 @@ class StubCSVLogger:
 
         # Final flush
         await loop.run_in_executor(None, self._flush_and_sync)
-        logger.debug("Camera %d CSV logger loop exited", self.camera_id)
+        logger.debug("%s CSV logger loop exited", self.camera_name)
 
     def _write_entry(self, entry: CSVLogEntry) -> None:
         if self._file is None:
@@ -196,8 +199,8 @@ class StubCSVLogger:
 
         if entry.frame_number < FRAME_LOG_COUNT:
             logger.info(
-                "Camera %d frame %d -> dropped=%s total_drops=%s sensor_ts=%s",
-                entry.camera_id,
+                "%s frame %d -> dropped=%s total_drops=%s sensor_ts=%s",
+                self.camera_name,
                 entry.frame_number,
                 entry.dropped_since_last,
                 entry.total_hardware_drops,
