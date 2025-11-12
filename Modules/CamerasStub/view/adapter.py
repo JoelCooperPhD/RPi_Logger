@@ -87,7 +87,7 @@ class CameraStubViewAdapter:
         if ttk is None or self._preview_row is None:
             raise RuntimeError("Preview grid not initialized")
 
-        self._preview_row.columnconfigure(index, weight=1, uniform=self._preview_uniform_group)
+        self._preview_row.columnconfigure(index, weight=1)
 
         frame = tk.Frame(
             self._preview_row,
@@ -465,8 +465,11 @@ class CameraStubViewAdapter:
             return
 
         total_columns = max(self._current_preview_columns, len(slots))
-        for col in range(total_columns):
-            self._preview_row.columnconfigure(col, weight=0)
+        for col in range(total_columns + 1):
+            self._preview_row.columnconfigure(col, weight=0, uniform=None)
+
+        active_frames = [slot for slot in slots if getattr(slot, "preview_enabled", True)]
+        use_uniform = len(active_frames) > 1
 
         active_col = 0
         for slot in slots:
@@ -482,8 +485,10 @@ class CameraStubViewAdapter:
                     pady=self._preview_pady,
                 )
                 frame.columnconfigure(0, weight=1)
-                frame.rowconfigure(0, weight=1)
-                self._preview_row.columnconfigure(active_col, weight=1, uniform=self._preview_uniform_group)
+                frame.rowconfigure(0, weight=0)
+                frame.rowconfigure(1, weight=1)
+                uniform_value = self._preview_uniform_group if use_uniform else None
+                self._preview_row.columnconfigure(active_col, weight=1, uniform=uniform_value)
                 active_col += 1
             else:
                 frame.grid_remove()
