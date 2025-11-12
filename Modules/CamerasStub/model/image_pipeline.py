@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Callable, Deque, Optional
 
-import cv2
+import numpy as np
 
 from .runtime_state import CapturedFrame, FramePayload
 from ..constants import FRAME_LOG_COUNT
@@ -48,6 +48,8 @@ class PipelineMetrics:
 
 class ImagePipeline:
     """Encapsulates the capture/processing queues for a single camera slot."""
+
+    ROUTER_IDLE_SLEEP = 0.001  # seconds to yield when the router has no blocking wait
 
     def __init__(
         self,
@@ -110,10 +112,22 @@ class ImagePipeline:
                 await asyncio.sleep(0.001)
                 continue
 
-            frame = None
+            main_frame = None
+            preview_frame = None
             metadata: dict[str, Any] = {}
+            preview_stream = getattr(slot, "preview_stream", slot.main_stream)
+
             try:
-                frame = request.make_array(slot.main_stream)
+                if getattr(slot, "capture_main_stream", True) and slot.main_stream:
+                    main_frame = self._copy_frame(request.make_array(slot.main_stream))
+                if preview_stream:
+                    if preview_stream == slot.main_stream and main_frame is not None:
+                        preview_frame = main_frame
+                    else:
+                        try:
+                            preview_frame = self._copy_frame(request.make_array(preview_stream))
+                        except Exception:
+                            preview_frame = main_frame
                 raw_metadata = request.get_metadata() or {}
                 metadata = raw_metadata if isinstance(raw_metadata, dict) else dict(raw_metadata)
             except Exception as exc:  # pragma: no cover - defensive
@@ -121,15 +135,17 @@ class ImagePipeline:
             finally:
                 request.release()
 
-            if frame is None:
+            payload_frame = main_frame if main_frame is not None else preview_frame
+            if payload_frame is None:
                 continue
 
             queue.put_nowait(
                 CapturedFrame(
-                    frame=frame,
+                    frame=payload_frame,
                     metadata=metadata,
                     timestamp=time.time(),
                     monotonic=time.perf_counter(),
+                    preview_frame=preview_frame,
                 )
             )
 
@@ -238,7 +254,7 @@ class ImagePipeline:
 
         storage_needed = bool(saving_active)
         preview_needed = bool(slot.snapshot_pending)
-        preview_ready = bool(preview_queue and not view_is_resizing)
+        preview_ready = bool(preview_queue and not view_is_resizing and slot.preview_enabled)
 
         if not storage_needed and not preview_ready:
             return
@@ -251,17 +267,17 @@ class ImagePipeline:
         if limiter is not None and not limiter.should_emit(monotonic):
             return
 
-        resize_target = (
-            getattr(slot, "save_size", None)
-            or getattr(slot, "preview_target_size", None)
-            or getattr(slot, "main_size", None)
-        )
-        processed_frame = self._resize_frame(main_array, resize_target)
+        preview_frame = captured.preview_frame if captured.preview_frame is not None else main_array
+        if preview_frame is not None:
+            self._record_stream_size(slot, preview_frame)
+        preview_pixel_format = slot.preview_format or slot.main_format
+        if preview_frame is main_array:
+            preview_pixel_format = slot.main_format or preview_pixel_format
 
         storage_enqueued = False
         if storage_queue and storage_needed:
             payload = FramePayload(
-                frame=processed_frame,
+                frame=main_array,
                 timestamp=timestamp,
                 monotonic=monotonic,
                 metadata=metadata,
@@ -291,8 +307,8 @@ class ImagePipeline:
         if not preview_needed and not storage_enqueued:
             return
 
-        if preview_needed:
-            target_frame = processed_frame
+        if preview_needed and preview_frame is not None:
+            target_frame = preview_frame
             if slot.snapshot_pending:
                 slot.last_preview_frame = (
                     target_frame.copy() if hasattr(target_frame, "copy") else target_frame
@@ -300,15 +316,15 @@ class ImagePipeline:
                 slot.snapshot_pending = False
             else:
                 slot.last_preview_frame = target_frame
-            slot.last_preview_format = slot.preview_format or slot.main_format
+            slot.last_preview_format = preview_pixel_format
 
-        if preview_queue and emit_preview:
+        if preview_queue and emit_preview and preview_frame is not None and slot.preview_enabled:
             payload = FramePayload(
-                frame=processed_frame,
+                frame=preview_frame,
                 timestamp=timestamp,
                 monotonic=monotonic,
                 metadata=metadata,
-                pixel_format=slot.preview_format or slot.main_format,
+                pixel_format=preview_pixel_format,
                 stream=slot.preview_stream,
                 capture_index=capture_index,
                 hardware_frame_number=timing_result.hardware_frame_number,
@@ -320,31 +336,30 @@ class ImagePipeline:
 
         # Preview frames are emitted after storage so the stretch/skip logic never starves disk writes.
 
-    def _resize_frame(self, frame: Any, target_size: Optional[tuple[int, int]]) -> Any:
-        if target_size is None:
-            return frame
-        try:
+    def _record_stream_size(self, slot: Any, frame: Any) -> None:
+        if getattr(slot, "preview_stream_size", None):
+            return
+        height = width = None
+        if getattr(frame, "ndim", 0) == 2:
+            rows, stride = frame.shape
+            width = stride - (stride % 2)
+            height = ((rows * 2) // 3)
+            height -= height % 2
+        elif getattr(frame, "ndim", 0) == 3:
             height, width = frame.shape[:2]
+        if width and height:
+            width = max(2, int(width))
+            height = max(2, int(height))
+            slot.preview_stream_size = (int(width), int(height))
+
+    @staticmethod
+    def _copy_frame(frame: Any) -> Any:
+        if frame is None:
+            return None
+        try:
+            return np.array(frame, copy=True)
         except Exception:
             return frame
-        target_width, target_height = target_size
-        if target_width <= 0 or target_height <= 0:
-            return frame
-        if width == target_width and height == target_height:
-            return frame
-        interpolation = cv2.INTER_AREA if target_width < width or target_height < height else cv2.INTER_LINEAR
-        try:
-            resized = cv2.resize(frame, (target_width, target_height), interpolation=interpolation)
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.debug(
-                "Camera %s failed to resize frame to %sx%s: %s",
-                self.camera_index,
-                target_width,
-                target_height,
-                exc,
-            )
-            return frame
-        return resized
 
     def _offer_queue(
         self,

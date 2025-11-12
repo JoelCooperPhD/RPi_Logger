@@ -137,6 +137,7 @@ class StubCodexView:
         self.capture_quality_index: Optional[int] = None
 
         self.menubar: Optional[tk.Menu] = None
+        self.view_menu: Optional[tk.Menu] = None
         self._create_menu_bar()
 
         self.root.columnconfigure(0, weight=1)
@@ -219,6 +220,7 @@ class StubCodexView:
             self._create_camera_menus(menubar)
 
         view_menu = tk.Menu(menubar, tearoff=0)
+        self.view_menu = view_menu
         menubar.add_cascade(label="View", menu=view_menu)
         view_menu.add_checkbutton(
             label="Show IO Stub",
@@ -241,6 +243,13 @@ class StubCodexView:
         menu = tk.Menu(self.menubar, tearoff=tearoff)
         self.menubar.add_cascade(label=label, menu=menu)
         return menu
+
+    def add_view_submenu(self, label: str, *, tearoff: int = 0) -> Optional[tk.Menu]:
+        if self.view_menu is None:
+            return None
+        submenu = tk.Menu(self.view_menu, tearoff=tearoff)
+        self.view_menu.add_cascade(label=label, menu=submenu)
+        return submenu
 
     def _create_camera_menus(self, menubar: tk.Menu) -> None:
         if not self.enable_camera_controls:

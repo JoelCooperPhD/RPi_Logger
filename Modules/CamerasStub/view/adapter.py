@@ -47,6 +47,9 @@ class CameraStubViewAdapter:
         self._preview_fraction_handler: Optional[Callable[[Optional[float]], Awaitable[None]]] = None
         self._last_metrics_text: Optional[str] = None
         self._frame_logged: set[int] = set()
+        self._camera_menu: Optional[tk.Menu] = None
+        self._camera_toggle_vars: dict[int, tk.BooleanVar] = {}
+        self._camera_toggle_handlers: dict[int, Callable[[int, bool], Awaitable[None] | None]] = {}
 
     # ------------------------------------------------------------------
     # Layout helpers
@@ -117,6 +120,45 @@ class CameraStubViewAdapter:
         canvas._preview_title = title  # type: ignore[attr-defined]
 
         return frame, canvas, canvas
+
+    def register_camera_toggle(
+        self,
+        index: int,
+        title: str,
+        enabled: bool,
+        handler: Callable[[int, bool], Awaitable[None] | None],
+    ) -> None:
+        if tk is None or self.view is None:
+            return
+        menu = self._ensure_camera_menu()
+        if menu is None:
+            return
+        var = self._camera_toggle_vars.get(index)
+        if var is None:
+            master = self.view.root if hasattr(self.view, "root") else None
+            var = tk.BooleanVar(master=master, value=enabled)
+            self._camera_toggle_vars[index] = var
+            self._camera_toggle_handlers[index] = handler
+            menu.add_checkbutton(
+                label=title,
+                variable=var,
+                command=lambda idx=index: self._handle_camera_toggle(idx),
+            )
+        else:
+            try:
+                var.set(enabled)
+            except tk.TclError:
+                pass
+            self._camera_toggle_handlers[index] = handler
+
+    def update_camera_toggle_state(self, index: int, enabled: bool) -> None:
+        var = self._camera_toggle_vars.get(index)
+        if not var:
+            return
+        try:
+            var.set(enabled)
+        except tk.TclError:
+            pass
 
     def bind_preview_resize(self, frame: Any, callback: Callable[[int, int], None]) -> None:
         if tk is None:
@@ -364,6 +406,43 @@ class CameraStubViewAdapter:
         self.view.capture_resolution_index = label_to_index.get("Resolution")
         self.view.capture_rate_index = label_to_index.get("Frame Rate")
 
+    def show_camera_placeholder(self, slot, message: str) -> None:
+        if tk is None:
+            return
+        widget = getattr(slot, "label", None)
+        if widget is None:
+            return
+
+        def _update() -> None:
+            if not widget.winfo_exists():
+                return
+            width = widget.winfo_width() or self.preview_size[0]
+            height = widget.winfo_height() or self.preview_size[1]
+            widget.delete("preview_image")
+            widget.delete("preview_text")
+            widget.create_text(
+                width // 2,
+                height // 2,
+                text=message,
+                fill="#cccccc",
+                justify=tk.CENTER,
+                anchor=tk.CENTER,
+                tags="preview_text",
+            )
+
+        try:
+            widget.after(0, _update)
+        except Exception:
+            pass
+
+    def show_camera_hidden(self, slot) -> None:
+        self.show_camera_placeholder(slot, "Camera disabled (View ▸ Cameras)")
+
+    def show_camera_waiting(self, slot) -> None:
+        title = getattr(slot, "title", "")
+        message = f"Waiting for {title or 'camera'}…"
+        self.show_camera_placeholder(slot, message)
+
     # ------------------------------------------------------------------
     # IO metrics display
     # ------------------------------------------------------------------
@@ -438,6 +517,8 @@ class CameraStubViewAdapter:
     async def display_frame(self, slot, frame: Any, pixel_format: str) -> None:
         if self.view_is_resizing():
             return
+        if not getattr(slot, "preview_enabled", True):
+            return
         stream_size = getattr(slot, "preview_stream_size", None) or getattr(slot, "main_size", None)
         image = await asyncio.to_thread(
             convert_frame_to_image,
@@ -503,6 +584,32 @@ class CameraStubViewAdapter:
             widget.after(0, _update)
         except Exception:  # pragma: no cover - defensive
             pass
+
+    def _ensure_camera_menu(self) -> Optional[tk.Menu]:
+        if self._camera_menu is not None:
+            return self._camera_menu
+        menu: Optional[tk.Menu] = None
+        if self.view is not None:
+            add_view_submenu = getattr(self.view, "add_view_submenu", None)
+            if callable(add_view_submenu):
+                menu = add_view_submenu("Cameras")
+            if menu is None and hasattr(self.view, "add_menu"):
+                menu = self.view.add_menu("Cameras")
+        self._camera_menu = menu
+        return menu
+
+    def _handle_camera_toggle(self, index: int) -> None:
+        handler = self._camera_toggle_handlers.get(index)
+        var = self._camera_toggle_vars.get(index)
+        if handler is None or var is None:
+            return
+        enabled = bool(var.get())
+        result = handler(index, enabled)
+        if asyncio.iscoroutine(result):
+            if self.task_manager:
+                self.task_manager.create(result, name=f"CameraToggle{index}")
+            else:
+                asyncio.create_task(result)
 
 
 __all__ = ["CameraStubViewAdapter"]

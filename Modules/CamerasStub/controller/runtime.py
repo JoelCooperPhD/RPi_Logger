@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
-import numpy as np
+import cv2
 
 from PIL import Image
 try:  # Pillow 10+
@@ -30,63 +30,11 @@ from ..constants import FRAME_LOG_COUNT
 from ..model import CameraStubModel, CapturedFrame, FrameGate, FramePayload
 from ..model.image_pipeline import ImagePipeline
 from ..view import CameraStubViewAdapter
-from ..frame_timing import FrameTimingResult, StubFrameTimingTracker
+from ..frame_timing import StubFrameTimingTracker
 from ..storage import CameraStoragePipeline, StorageWriteResult
-
-
-@dataclass(slots=True)
-class CameraPreview:
-    index: int
-    camera: Any
-    frame: Any
-    holder: Any
-    label: Any
-    size: tuple[int, int]
-    title: str
-    main_format: str = ""
-    preview_format: str = ""
-    main_size: Optional[tuple[int, int]] = None
-    preview_stream: str = "main"
-    main_stream: str = "main"
-    capture_queue: Optional[asyncio.Queue[Optional[CapturedFrame]]] = field(default=None, repr=False)
-    preview_queue: Optional[asyncio.Queue[FramePayload]] = field(default=None, repr=False)
-    storage_queue: Optional[asyncio.Queue[FramePayload]] = field(default=None, repr=False)
-    save_size: Optional[tuple[int, int]] = None
-    photo: Optional[Any] = field(default=None, repr=False)
-    preview_gate: FrameGate = field(default_factory=FrameGate, repr=False)
-    preview_stride: int = 1
-    preview_stride_offset: int = 0
-    frame_rate_gate: FrameGate = field(default_factory=FrameGate, repr=False)
-    last_preview_frame: Optional[np.ndarray] = field(default=None, repr=False)
-    last_preview_format: str = ""
-    snapshot_pending: bool = False
-    preview_target_size: Optional[tuple[int, int]] = None
-    first_frame_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
-    capture_fps: float = 0.0
-    process_fps: float = 0.0
-    preview_fps: float = 0.0
-    storage_fps: float = 0.0
-    image_pipeline: Optional[ImagePipeline] = field(default=None, repr=False)
-    capture_task: Optional[asyncio.Task] = field(default=None, repr=False)
-    router_task: Optional[asyncio.Task] = field(default=None, repr=False)
-    preview_task: Optional[asyncio.Task] = field(default=None, repr=False)
-    storage_task: Optional[asyncio.Task] = field(default=None, repr=False)
-    saving_active: bool = False
-    frame_duration_us: Optional[int] = None
-    was_resizing: bool = False
-    timing_tracker: StubFrameTimingTracker = field(default_factory=StubFrameTimingTracker, repr=False)
-    capture_index: int = 0
-    last_hardware_fps: float = 0.0
-    last_expected_interval_ns: Optional[int] = None
-    storage_pipeline: Optional[CameraStoragePipeline] = field(default=None, repr=False)
-    storage_drop_since_last: int = 0
-    storage_drop_total: int = 0
-    storage_queue_size: int = 1
-    last_video_frame_count: int = 0
-    video_stall_frames: int = 0
-    last_video_fps: float = 0.0
-    session_camera_dir: Optional[Path] = field(default=None, repr=False)
-    slow_capture_warnings: int = 0
+from ..utils import frame_to_image as convert_frame_to_image
+from .pipeline import PreviewConsumer, StorageConsumer, StorageHooks
+from .slot import CameraSlot
 
 
 class CameraStubController(ModuleRuntime):
@@ -239,12 +187,26 @@ class CameraStubController(ModuleRuntime):
             )
 
         self._stop_event = asyncio.Event()
-        self._previews: List[CameraPreview] = []
+        self._previews: List[CameraSlot] = []
+        self._storage_hooks = StorageHooks(
+            save_enabled=lambda: bool(self.save_enabled),
+            session_dir_provider=lambda: self.session_dir,
+            save_stills_enabled=lambda: bool(self.save_stills_enabled),
+            frame_to_image=lambda frame, fmt, size_hint=None: convert_frame_to_image(
+                frame,
+                fmt,
+                size_hint=size_hint,
+            ),
+            resolve_video_fps=self._resolve_video_fps,
+            on_frame_written=self._on_storage_result,
+            handle_failure=self._handle_storage_failure,
+        )
         self._sensor_mode_sizes: set[tuple[int, int]] = set()
         self._sensor_mode_bit_depths: dict[tuple[int, int], int] = {}
         self._metrics_task: Optional[asyncio.Task] = None
         self._saved_count = 0
         self._storage_failure_reported = False
+        self._sensor_sync_pending = False
         self.preview_fraction = self._clamp_preview_fraction(
             getattr(self.args, "preview_fraction", getattr(self._state, "preview_fraction", 1.0))
         )
@@ -288,6 +250,7 @@ class CameraStubController(ModuleRuntime):
             return
 
         await self._initialize_cameras()
+        await self._flush_sensor_sync()
         await self._await_first_frames(timeout=6.0)
 
     async def shutdown(self) -> None:
@@ -298,7 +261,7 @@ class CameraStubController(ModuleRuntime):
 
         slots = list(self._previews)
 
-        async def _stop_camera(slot: CameraPreview) -> None:
+        async def _stop_camera(slot: CameraSlot) -> None:
             camera = slot.camera
             if not camera:
                 return
@@ -307,7 +270,7 @@ class CameraStubController(ModuleRuntime):
             except Exception as exc:  # pragma: no cover - defensive
                 self.logger.warning("Error stopping camera %s: %s", slot.index, exc)
 
-        async def _close_camera(slot: CameraPreview) -> None:
+        async def _close_camera(slot: CameraSlot) -> None:
             camera = slot.camera
             if not camera:
                 return
@@ -411,6 +374,40 @@ class CameraStubController(ModuleRuntime):
             getter=lambda: self.preview_fraction,
             handler=self._handle_preview_fraction_selection,
         )
+
+    def _register_camera_toggle(self, slot: CameraSlot) -> None:
+        if not self.view_adapter:
+            return
+        self.view_adapter.register_camera_toggle(
+            index=slot.index,
+            title=slot.title,
+            enabled=slot.preview_enabled,
+            handler=self._handle_camera_toggle_request,
+        )
+
+    async def _handle_camera_toggle_request(self, index: int, enabled: bool) -> None:
+        slot = self._slot_by_index(index)
+        if slot is None:
+            return
+        if slot.preview_enabled == enabled:
+            return
+        slot.preview_enabled = enabled
+        slot.snapshot_pending = enabled
+        if enabled:
+            slot.preview_gate.configure(slot.preview_gate.period)
+            if self.view_adapter:
+                self.view_adapter.show_camera_waiting(slot)
+        else:
+            slot.drop_preview_cache()
+            if self.view_adapter:
+                self.view_adapter.show_camera_hidden(slot)
+        self._refresh_status()
+
+    def _slot_by_index(self, index: int) -> Optional[CameraSlot]:
+        for slot in self._previews:
+            if slot.index == index:
+                return slot
+        return None
 
     def _refresh_status(self) -> None:
         """Summarize current camera/save state for diagnostics/UI."""
@@ -578,7 +575,7 @@ class CameraStubController(ModuleRuntime):
         entry = " | ".join(components)
         self.logger.debug("Storage telemetry -> %s", entry)
 
-    def _handle_preview_resize(self, slot: CameraPreview, width: int, height: int) -> None:
+    def _handle_preview_resize(self, slot: CameraSlot, width: int, height: int) -> None:
         new_size = (width, height)
         if new_size == slot.size:
             return
@@ -677,11 +674,12 @@ class CameraStubController(ModuleRuntime):
             else:
                 setattr(self.args, "preview_fps", None)
         self._refresh_preview_fps_ui()
+        self._request_sensor_sync()
 
     async def _handle_preview_fraction_selection(self, fraction_value: Optional[float]) -> None:
         await self._update_preview_settings({"fraction": fraction_value})
 
-    def _configure_storage_gate(self, slot: CameraPreview) -> None:
+    def _configure_storage_gate(self, slot: CameraSlot) -> None:
         interval = self.save_frame_interval if self.save_frame_interval > 0 else 0.0
         slot.frame_rate_gate.configure(interval)
 
@@ -719,22 +717,26 @@ class CameraStubController(ModuleRuntime):
                 self._record_sensor_modes(camera)
                 native_size = self._resolve_sensor_resolution(camera)
                 capture_size = self._coerce_capture_size(native_size) or native_size or self.MAX_NATIVE_SIZE
-                main_config = {"size": capture_size, "format": "RGB888"}
+                lores_size = self._compute_lores_size(capture_size)
                 sensor_config = None
                 if capture_size and self._is_supported_sensor_size(capture_size):
                     bit_depth = self._sensor_mode_bit_depths.get(tuple(capture_size))
                     if bit_depth:
                         sensor_config = {"output_size": capture_size, "bit_depth": bit_depth}
-                config = camera.create_preview_configuration(
-                    main=main_config,
-                    display="main",
-                    sensor=sensor_config,
+
+                config = await asyncio.to_thread(
+                    self._build_camera_configuration,
+                    camera,
+                    capture_size,
+                    lores_size,
+                    sensor_config,
                 )
                 await asyncio.to_thread(camera.configure, config)
                 await asyncio.to_thread(camera.start)
 
                 actual_config = await asyncio.to_thread(camera.camera_configuration)
                 main_block = self._unwrap_config_block(actual_config, "main")
+                lores_block = self._unwrap_config_block(actual_config, "lores") if lores_size else None
 
                 main_format = str(main_block.get("format", "")) or "RGB888"
                 main_size = self._normalize_size(main_block.get("size")) or capture_size
@@ -758,7 +760,15 @@ class CameraStubController(ModuleRuntime):
                         stream_label,
                     )
 
-                slot = CameraPreview(
+                if lores_size and lores_block is not None:
+                    lores_size = self._normalize_size(lores_block.get("size")) or lores_size
+                    preview_stream = "lores"
+                    preview_format = str(lores_block.get("format", "")) or main_format
+                else:
+                    preview_stream = "main"
+                    preview_format = main_format
+                preview_native_size = lores_size if preview_stream == "lores" else main_size
+                slot = CameraSlot(
                     index=index,
                     camera=camera,
                     frame=frame,
@@ -767,12 +777,14 @@ class CameraStubController(ModuleRuntime):
                     size=preview_default,
                     title=title,
                     main_format=main_format,
-                    preview_format=main_format,
+                    preview_format=preview_format,
                     main_size=main_size,
-                    preview_stream="main",
+                    preview_stream=preview_stream,
                     main_stream="main",
+                    preview_stream_size=preview_native_size,
                     save_size=None,
                 )
+                slot.capture_main_stream = bool(self.save_enabled)
                 self._update_slot_targets(slot)
 
                 slot.capture_queue = asyncio.Queue()
@@ -813,6 +825,7 @@ class CameraStubController(ModuleRuntime):
                     await self._stop_storage_resources(slot)
 
                 self._previews.append(slot)
+                self._register_camera_toggle(slot)
 
                 if slot.image_pipeline:
                     slot.capture_task = self.task_manager.create(
@@ -838,16 +851,18 @@ class CameraStubController(ModuleRuntime):
                     )
 
                 if slot.preview_queue:
+                    preview_consumer = PreviewConsumer(
+                        stop_event=self._stop_event,
+                        view_adapter=self.view_adapter,
+                        logger=self.logger.getChild(f"PreviewCam{index}"),
+                    )
                     slot.preview_task = self.task_manager.create(
-                        self._run_preview_consumer(slot),
+                        preview_consumer.run(slot),
                         name=f"CameraPreview{index}",
                     )
 
                 if slot.storage_queue:
-                    slot.storage_task = self.task_manager.create(
-                        self._run_storage_consumer(slot),
-                        name=f"CameraStorage{index}",
-                    )
+                    self._start_storage_consumer(slot)
 
             except Exception as exc:
                 self.logger.exception("Failed to start preview for camera %s: %s", index, exc)
@@ -865,7 +880,7 @@ class CameraStubController(ModuleRuntime):
         else:
             self._refresh_status()
 
-    async def _apply_frame_rate(self, slot: CameraPreview) -> None:
+    async def _apply_frame_rate(self, slot: CameraSlot) -> None:
         camera = slot.camera
         if not camera:
             return
@@ -907,6 +922,9 @@ class CameraStubController(ModuleRuntime):
         interval = self.save_frame_interval
         if interval and interval > 0:
             return interval
+        preview_interval = self.preview_frame_interval
+        if preview_interval and preview_interval > 0:
+            return preview_interval
         return None
 
     async def _sync_sensor_frame_rates(self) -> None:
@@ -916,7 +934,27 @@ class CameraStubController(ModuleRuntime):
             except Exception as exc:  # pragma: no cover - defensive
                 self.logger.debug("Frame rate sync failed for cam %s: %s", slot.index, exc)
 
-    async def _teardown_slot(self, slot: CameraPreview) -> None:
+    async def _flush_sensor_sync(self) -> None:
+        if not self._sensor_sync_pending:
+            return
+        self._sensor_sync_pending = False
+        await self._sync_sensor_frame_rates()
+
+    def _request_sensor_sync(self) -> None:
+        if self._stop_event.is_set():
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            self._sensor_sync_pending = True
+            return
+        self.task_manager.create(
+            self._sync_sensor_frame_rates(),
+            name="CameraSensorSync",
+        )
+        self._sensor_sync_pending = False
+
+    async def _teardown_slot(self, slot: CameraSlot) -> None:
         self._shutdown_queue(slot.capture_queue)
         self._shutdown_queue(slot.preview_queue)
         self._shutdown_queue(slot.storage_queue)
@@ -997,152 +1035,6 @@ class CameraStubController(ModuleRuntime):
         await self._initialize_cameras()
         self._refresh_status()
 
-    async def _run_preview_consumer(self, slot: CameraPreview) -> None:
-        queue = slot.preview_queue
-        if not queue:
-            return
-
-        while True:
-            if self._stop_event.is_set() and queue.empty():
-                break
-            try:
-                payload = await asyncio.wait_for(queue.get(), timeout=0.5)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:  # pragma: no cover - cooperative cancellation
-                break
-
-            batch = [payload]
-            while True:
-                try:
-                    extra = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                batch.append(extra)
-
-            if any(item is None for item in batch):
-                for item in batch:
-                    queue.task_done()
-                break
-
-            latest = batch[-1]
-            for item in batch[:-1]:
-                queue.task_done()
-
-            try:
-                frame = latest.frame
-                if frame is None or not self.view_adapter:
-                    continue
-
-                await self.view_adapter.display_frame(
-                    slot,
-                    frame,
-                    latest.pixel_format or slot.preview_format or slot.main_format,
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                self.logger.warning("Preview consumer error (camera %s): %s", slot.index, exc)
-            finally:
-                queue.task_done()
-
-    async def _run_storage_consumer(self, slot: CameraPreview) -> None:
-        queue = slot.storage_queue
-        if not queue:
-            return
-
-        while True:
-            if self._stop_event.is_set() and queue.empty():
-                break
-            try:
-                payload = await asyncio.wait_for(queue.get(), timeout=0.5)
-            except asyncio.TimeoutError:
-                continue
-            except asyncio.CancelledError:  # pragma: no cover
-                break
-
-            batch = [payload]
-            while True:
-                try:
-                    extra = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-                batch.append(extra)
-
-            if any(item is None for item in batch):
-                for item in batch:
-                    queue.task_done()
-                break
-
-            latest = batch[-1]
-            for item in batch[:-1]:
-                queue.task_done()
-
-            try:
-                if not self.save_enabled or not self.session_dir:
-                    continue
-
-                frame = latest.frame
-                if frame is None:
-                    continue
-
-                pipeline = slot.storage_pipeline
-                if pipeline is None:
-                    continue
-
-                image = await asyncio.to_thread(
-                    self._frame_to_image,
-                    frame,
-                    latest.pixel_format or slot.main_format or slot.preview_format,
-                )
-                target_size = slot.save_size or slot.main_size
-                if target_size and image.size != target_size:
-                    image = await asyncio.to_thread(image.resize, target_size, DEFAULT_RESAMPLE)
-                if image.mode != "RGB":
-                    image = await asyncio.to_thread(image.convert, "RGB")
-                rgb_frame = np.asarray(image)
-                still_image = image if self.save_stills_enabled else None
-
-                fps_hint = self._resolve_video_fps(slot)
-                storage_result = await pipeline.write_frame(
-                    rgb_frame,
-                    latest,
-                    fps_hint=fps_hint,
-                    pil_image=still_image,
-                )
-
-                image_path = storage_result.image_path
-                if image_path is not None:
-                    self._saved_count += 1
-                    if self._saved_count <= 3 or self._saved_count % 25 == 0:
-                        self.logger.info(
-                            "Camera %s stored still %d -> %s (total saved %d)",
-                            slot.index,
-                            latest.capture_index,
-                            image_path,
-                            self._saved_count,
-                        )
-
-                pipeline.log_frame(latest, queue_drops=slot.storage_drop_since_last)
-                self._emit_frame_telemetry(
-                    slot,
-                    latest,
-                    image_path=image_path,
-                    video_written=storage_result.video_written,
-                    queue_drops=slot.storage_drop_since_last,
-                    video_fps=storage_result.video_fps,
-                )
-                stalled = self._update_storage_metrics(slot, storage_result)
-                slot.storage_drop_since_last = 0
-                if stalled:
-                    await self._handle_storage_failure(slot, "video writer stalled")
-                    break
-            except RuntimeError as exc:
-                await self._handle_storage_failure(slot, str(exc))
-                break
-            except Exception as exc:  # pragma: no cover - defensive
-                self.logger.warning("Storage consumer error (camera %s): %s", slot.index, exc)
-            finally:
-                queue.task_done()
-
     def _shutdown_queue(self, queue: Optional[asyncio.Queue]) -> None:
         if not queue:
             return
@@ -1159,7 +1051,7 @@ class CameraStubController(ModuleRuntime):
             except asyncio.QueueFull:
                 pass
 
-    def _log_capture_failure(self, slot: CameraPreview, elapsed: float, exc: Exception) -> None:
+    def _log_capture_failure(self, slot: CameraSlot, elapsed: float, exc: Exception) -> None:
         slot.slow_capture_warnings += 1
         if slot.slow_capture_warnings <= 5 or slot.slow_capture_warnings % 25 == 0:
             self.logger.warning(
@@ -1171,7 +1063,7 @@ class CameraStubController(ModuleRuntime):
                 exc,
             )
 
-    def _record_capture_latency(self, slot: CameraPreview, elapsed: float) -> None:
+    def _record_capture_latency(self, slot: CameraSlot, elapsed: float) -> None:
         if elapsed > self.CAPTURE_SLOW_REQUEST_THRESHOLD:
             slot.slow_capture_warnings += 1
             if slot.slow_capture_warnings <= 5 or slot.slow_capture_warnings % 25 == 0:
@@ -1186,31 +1078,7 @@ class CameraStubController(ModuleRuntime):
         elif slot.slow_capture_warnings and elapsed < self.CAPTURE_SLOW_REQUEST_THRESHOLD / 2:
             slot.slow_capture_warnings = 0
 
-    def _frame_to_image(self, frame: Any, pixel_format: str) -> Image.Image:
-        pixel_format = (pixel_format or "").upper()
-
-        if getattr(frame, "ndim", 0) == 3 and frame.shape[2] == 3:
-            if pixel_format in {"BGR888", "RGB888"}:
-                return Image.fromarray(frame[..., ::-1], mode="RGB")
-            return Image.fromarray(frame, mode="RGB")
-
-        if getattr(frame, "ndim", 0) == 3 and frame.shape[2] == 4:
-            if pixel_format == "XBGR8888":
-                return Image.fromarray(frame[..., 1:4][..., ::-1], mode="RGB")
-            if pixel_format == "XRGB8888":
-                return Image.fromarray(frame[..., 1:4], mode="RGB")
-            if pixel_format == "ABGR8888":
-                return Image.fromarray(frame[..., [3, 2, 1]], mode="RGB")
-            if pixel_format == "ARGB8888":
-                return Image.fromarray(frame[..., 1:4], mode="RGB")
-            return Image.fromarray(frame, mode="RGBA").convert("RGB")
-
-        if getattr(frame, "ndim", 0) == 2:
-            return Image.fromarray(frame, mode="L")
-
-        return Image.fromarray(frame).convert("RGB")
-
-    def _update_storage_metrics(self, slot: CameraPreview, result: StorageWriteResult) -> bool:
+    def _update_storage_metrics(self, slot: CameraSlot, result: StorageWriteResult) -> bool:
         pipeline = slot.storage_pipeline
         if pipeline is not None:
             slot.last_video_frame_count = pipeline.video_frame_count
@@ -1221,7 +1089,45 @@ class CameraStubController(ModuleRuntime):
         slot.video_stall_frames += 1
         return slot.video_stall_frames >= self.VIDEO_STALL_THRESHOLD
 
-    async def _handle_storage_failure(self, slot: CameraPreview, reason: str) -> None:
+    async def _on_storage_result(
+        self,
+        slot: CameraSlot,
+        payload: FramePayload,
+        storage_result: StorageWriteResult,
+        queue_drops: int,
+    ) -> bool:
+        image_path = storage_result.image_path
+        if image_path is not None:
+            self._saved_count += 1
+            if self._saved_count <= 3 or self._saved_count % 25 == 0:
+                self.logger.info(
+                    "Camera %s stored still %d -> %s (total saved %d)",
+                    slot.index,
+                    payload.capture_index,
+                    image_path,
+                    self._saved_count,
+                )
+
+        pipeline = slot.storage_pipeline
+        if pipeline is not None:
+            pipeline.log_frame(payload, queue_drops=queue_drops)
+
+        self._emit_frame_telemetry(
+            slot,
+            payload,
+            image_path=image_path,
+            video_written=storage_result.video_written,
+            queue_drops=queue_drops,
+            video_fps=storage_result.video_fps,
+        )
+
+        stalled = self._update_storage_metrics(slot, storage_result)
+        if stalled:
+            await self._handle_storage_failure(slot, "video writer stalled")
+            return False
+        return True
+
+    async def _handle_storage_failure(self, slot: CameraSlot, reason: str) -> None:
         if self._storage_failure_reported:
             return
         self._storage_failure_reported = True
@@ -1429,12 +1335,8 @@ class CameraStubController(ModuleRuntime):
         setattr(self.args, "save_width", int(width))
         setattr(self.args, "save_height", int(height))
 
-    def _update_slot_targets(self, slot: CameraPreview) -> None:
-        target = self._coerce_save_size(slot.main_size)
-        resolved = target or slot.main_size or self.MAX_NATIVE_SIZE
-        slot.save_size = resolved
-        base = resolved
-        slot.preview_target_size = target or base
+    def _update_slot_targets(self, slot: CameraSlot) -> None:
+        slot.save_size = self._coerce_save_size(slot.main_size) or slot.main_size or self.MAX_NATIVE_SIZE
 
     def _derive_interval(self, *, fps: Any = None, interval: Any = None) -> float:
         if fps is not None:
@@ -1457,7 +1359,7 @@ class CameraStubController(ModuleRuntime):
             return interval_val
         return 0.0
 
-    async def _start_storage_resources(self, slot: CameraPreview) -> None:
+    async def _start_storage_resources(self, slot: CameraSlot) -> None:
         if not self.session_dir:
             self.logger.error("Cannot start storage for camera %s: session directory unavailable", slot.index)
             return
@@ -1480,6 +1382,7 @@ class CameraStubController(ModuleRuntime):
             max_fps=self.MAX_SENSOR_FPS,
             overlay_config=dict(self.overlay_config),
             save_stills=self.save_stills_enabled,
+            camera=slot.camera,
             logger=self.logger.getChild(f"StorageCam{slot.index}"),
         )
         await pipeline.start()
@@ -1491,7 +1394,21 @@ class CameraStubController(ModuleRuntime):
             slot.storage_queue_size,
         )
 
-    async def _stop_storage_resources(self, slot: CameraPreview) -> None:
+    def _start_storage_consumer(self, slot: CameraSlot) -> None:
+        if slot.storage_queue is None or slot.storage_task is not None:
+            return
+
+        storage_consumer = StorageConsumer(
+            stop_event=self._stop_event,
+            hooks=self._storage_hooks,
+            logger=self.logger.getChild(f"StorageCam{slot.index}"),
+        )
+        slot.storage_task = self.task_manager.create(
+            storage_consumer.run(slot),
+            name=f"CameraStorage{slot.index}",
+        )
+
+    async def _stop_storage_resources(self, slot: CameraSlot) -> None:
         pipeline = slot.storage_pipeline
         slot.storage_pipeline = None
         if pipeline is None:
@@ -1499,7 +1416,39 @@ class CameraStubController(ModuleRuntime):
 
         await pipeline.stop()
 
-    def _resolve_video_fps(self, slot: CameraPreview) -> float:
+    async def _activate_storage_for_all_slots(self) -> None:
+        for slot in self._previews:
+            slot.saving_active = True
+            slot.capture_main_stream = True
+            if slot.storage_queue is None:
+                slot.storage_queue = asyncio.Queue(maxsize=self.storage_queue_size)
+                slot.storage_queue_size = self.storage_queue_size
+            self._start_storage_consumer(slot)
+            await self._start_storage_resources(slot)
+
+    async def _deactivate_storage_for_all_slots(self) -> None:
+        shutdown_tasks: list[asyncio.Task] = []
+        pending_slots: list[CameraSlot] = []
+
+        for slot in self._previews:
+            slot.saving_active = False
+            slot.capture_main_stream = False
+            queue = slot.storage_queue
+            if queue is not None:
+                self._shutdown_queue(queue)
+            if slot.storage_task is not None:
+                shutdown_tasks.append(slot.storage_task)
+            pending_slots.append(slot)
+
+        if shutdown_tasks:
+            await asyncio.gather(*shutdown_tasks, return_exceptions=True)
+
+        for slot in pending_slots:
+            await self._stop_storage_resources(slot)
+            slot.storage_queue = None
+            slot.storage_task = None
+
+    def _resolve_video_fps(self, slot: CameraSlot) -> float:
         if slot.last_hardware_fps and slot.last_hardware_fps > 0:
             return min(float(slot.last_hardware_fps), self.MAX_SENSOR_FPS)
         if slot.last_expected_interval_ns and slot.last_expected_interval_ns > 0:
@@ -1547,20 +1496,11 @@ class CameraStubController(ModuleRuntime):
             self.save_dir = base_dir
         self.session_dir = session_dir
         self.save_enabled = True
+        self.capture_preferences_enabled = True
         self._storage_failure_reported = False
         self._saved_count = 0
-        for slot in self._previews:
-            slot.saving_active = True
-            if slot.storage_queue is None:
-                slot.storage_queue = asyncio.Queue(maxsize=self.storage_queue_size)
-                slot.storage_queue_size = self.storage_queue_size
-            if slot.storage_task is None and slot.storage_queue is not None:
-                slot.storage_task = self.task_manager.create(
-                    self._run_storage_consumer(slot),
-                    name=f"CameraStorage{slot.index}",
-                )
-            await self._start_storage_resources(slot)
-        self.capture_preferences_enabled = True
+        await self._activate_storage_for_all_slots()
+        self._request_sensor_sync()
         self._sync_record_toggle()
         self._refresh_status()
         rate_desc = (
@@ -1582,37 +1522,20 @@ class CameraStubController(ModuleRuntime):
     async def _disable_saving(self) -> None:
         if not self.save_enabled:
             return
-        shutdown_tasks: list[asyncio.Task] = []
-        pending_slots: list[CameraPreview] = []
-
-        for slot in self._previews:
-            slot.saving_active = False
-            queue = slot.storage_queue
-            if queue is not None:
-                self._shutdown_queue(queue)
-            task = slot.storage_task
-            if task is not None:
-                shutdown_tasks.append(task)
-            pending_slots.append(slot)
-
-        if shutdown_tasks:
-            await asyncio.gather(*shutdown_tasks, return_exceptions=True)
-
-        for slot in pending_slots:
-            await self._stop_storage_resources(slot)
-            slot.storage_queue = None
-            slot.storage_task = None
-
+        total_drops = sum(slot.storage_drop_total for slot in self._previews)
+        saved_frames = self._saved_count
+        await self._deactivate_storage_for_all_slots()
         self.save_enabled = False
         self.capture_preferences_enabled = False
         self.session_dir = None
         self._storage_failure_reported = False
+        self._request_sensor_sync()
         self._sync_record_toggle()
         self._refresh_status()
         self.logger.info(
             "Recording disabled (saved %d frames, drops=%d)",
-            self._saved_count,
-            sum(slot.storage_drop_total for slot in self._previews),
+            saved_frames,
+            total_drops,
         )
 
     async def _update_save_directory(self, directory: Any) -> None:
@@ -1750,6 +1673,26 @@ class CameraStubController(ModuleRuntime):
         mapping = {1.0: 1, 0.5: 2, 1 / 3: 3, 0.25: 4}
         return mapping.get(fraction, 1)
 
+    def _compute_lores_size(self, main_size: tuple[int, int]) -> Optional[tuple[int, int]]:
+        """Compute lores stream size that is <= main size and suitable for preview."""
+        if not main_size:
+            return None
+
+        main_width, main_height = main_size
+        preview_width, preview_height = self.PREVIEW_SIZE
+
+        if preview_width >= main_width or preview_height >= main_height:
+            return None
+
+        target_width = min(preview_width, main_width)
+        target_height = min(preview_height, main_height)
+
+        if target_width < 160 or target_height < 120:
+            return None
+
+        target_width, target_height = self._ensure_even_dimensions(target_width, target_height)
+        return (target_width, target_height)
+
     def _clamp_resolution(self, width: int, height: int, native: Optional[tuple[int, int]]) -> tuple[int, int]:
         return self.state.clamp_resolution(width, height, native)
 
@@ -1763,5 +1706,25 @@ class CameraStubController(ModuleRuntime):
     @staticmethod
     def _normalize_size(value: Any) -> Optional[tuple[int, int]]:
         return CameraStubModel.normalize_size(value)
+
+    def _build_camera_configuration(
+        self,
+        camera,
+        capture_size: tuple[int, int],
+        lores_size: Optional[tuple[int, int]],
+        sensor_config: Optional[dict],
+    ):
+        main_config = {"size": capture_size, "format": "YUV420"}
+        kwargs: dict[str, Any] = {
+            "main": main_config,
+            "sensor": sensor_config,
+            "encode": "main",
+        }
+        if lores_size:
+            kwargs["lores"] = {"size": lores_size, "format": "RGB888"}
+            kwargs["display"] = "lores"
+        else:
+            kwargs["display"] = "main"
+        return camera.create_video_configuration(**kwargs)
 
 __all__ = ["CamerasStubRuntime"]
