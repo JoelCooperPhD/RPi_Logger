@@ -2,7 +2,7 @@
 
 Lightweight audio capture module built entirely on the codex stack. The module
 provides a GUI level meter when a Tk view is available and falls back to
-headless operation otherwise.
+command-line interaction otherwise.
 
 ## Architecture
 

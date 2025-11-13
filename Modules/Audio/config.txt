@@ -12,4 +12,4 @@ display_name = Audio
 window_geometry = 1198x211+778+1320
 preview_resolution = auto
 log_level = debug
-selected_devices = [{"id":2,"name":"pulse"}]
+selected_devices = [{"id":2,"name":"USB Microphoner: Audio (hw:2,0)"}]

@@ -1,7 +1,8 @@
 """Service layer for the audio module."""
 
+from .device_recorder import AudioDeviceRecorder
 from .discovery import DeviceDiscoveryService
-from .recorder import AudioDeviceRecorder, RecorderService
+from .recorder_service import RecorderService
 from .session import SessionService
 
 __all__ = [

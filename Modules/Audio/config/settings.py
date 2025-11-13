@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 
+INTERACTION_MODES: tuple[str, str] = ("gui", "cli")
+
+
 @dataclass(slots=True)
 class AudioSettings:
     """Normalized configuration derived from CLI args and config file."""
@@ -46,8 +49,10 @@ class AudioSettings:
 
         session_prefix = getattr(args, "session_prefix", defaults.session_prefix) or defaults.session_prefix
 
+        mode = _normalize_mode(getattr(args, "mode", defaults.mode))
+
         return cls(
-            mode=str(getattr(args, "mode", defaults.mode)),
+            mode=mode,
             output_dir=output_dir,
             session_prefix=str(session_prefix),
             log_level=str(getattr(args, "log_level", defaults.log_level)),
@@ -130,11 +135,13 @@ def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
     defaults = AudioSettings()
     parser = argparse.ArgumentParser(description="Audio module")
 
+    default_mode = _normalize_mode(_config_value(config, "mode", defaults.mode))
+
     parser.add_argument(
         "--mode",
-        choices=("gui", "headless"),
-        default=_config_value(config, "mode", defaults.mode),
-        help="Execution mode set by the module manager",
+        choices=INTERACTION_MODES,
+        default=default_mode,
+        help="Interaction mode: 'gui' enables the Tk panel, 'cli' runs command-line controls only",
     )
     parser.add_argument(
         "--output-dir",
@@ -249,3 +256,12 @@ def parse_cli_args(
     config = read_config_file(config_path)
     parser = build_arg_parser(config)
     return parser.parse_args(argv)
+
+
+def _normalize_mode(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text == "headless":
+        return "cli"
+    if text in INTERACTION_MODES:
+        return text
+    return INTERACTION_MODES[0]

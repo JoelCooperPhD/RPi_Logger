@@ -1,6 +1,7 @@
 """Backward compatible shim for the legacy module path."""
 
-from .state import AudioDevice, AudioDeviceInfo, AudioModel, AudioSnapshot, AudioState
+from .entities import AudioDeviceInfo, AudioSnapshot
+from .state import AudioDevice, AudioModel, AudioState
 
 __all__ = [
     "AudioDevice",
