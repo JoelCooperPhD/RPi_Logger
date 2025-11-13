@@ -24,7 +24,7 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor
 
 from logger_core.logging_config import configure_logging
-from modules.audio.config import parse_cli_args
+from Modules.Audio.config import parse_cli_args
 
 from audio_runtime import AudioRuntime
 

@@ -61,12 +61,12 @@ if "vmc" not in sys.modules:
     sys.modules["vmc.runtime"] = vmc_runtime
     sys.modules["vmc.runtime_helpers"] = vmc_helpers
 
-from modules.audio.config import AudioSettings
-from modules.audio.level_meter import LevelMeter
-from modules.audio.services.recorder import RecorderService
-from modules.audio.startup import PersistedSelection
-from modules.audio.state import AudioDeviceInfo, AudioState
-from modules.audio.app import RecordingManager
+from Modules.Audio.config import AudioSettings
+from Modules.Audio.level_meter import LevelMeter
+from Modules.Audio.services.recorder import RecorderService
+from Modules.Audio.startup import PersistedSelection
+from Modules.Audio.state import AudioDeviceInfo, AudioState
+from Modules.Audio.app import RecordingManager
 
 
 MODULE_DIR = PROJECT_ROOT / "Modules" / "Audio"

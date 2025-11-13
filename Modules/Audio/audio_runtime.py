@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from modules.audio.runtime import AudioRuntime  # noqa: F401
+from Modules.Audio.runtime import AudioRuntime  # noqa: F401
 
 __all__ = ["AudioRuntime"]
