@@ -8,8 +8,8 @@ cd /home/rs-pi-2/Development/RPi_Logger
 uv run python main_logger.py
 ```
 
-### 2. Enable Camera Stub Module
-- In the logger GUI, enable the "Cameras (Stub)" module
+### 2. Enable Cameras Module
+- In the logger GUI, enable the "Cameras" module
 - Click "Start Recording" to begin a session
 
 ### 3. Monitor CPU Usage
@@ -152,7 +152,7 @@ Check that still images:
 If optimization causes issues:
 
 1. Stop the logger
-2. Edit `Modules/CamerasStub/controller/runtime.py` line 1486:
+2. Edit `Modules/Cameras/controller/runtime.py` line 1486:
    ```python
    # Change:
    camera=slot.camera,

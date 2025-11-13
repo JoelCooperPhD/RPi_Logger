@@ -1,4 +1,4 @@
-"""Image acquisition and frame-routing helpers for the Cameras stub model."""
+"""Image acquisition and frame-routing helpers for the Cameras model."""
 
 from __future__ import annotations
 
@@ -248,10 +248,8 @@ class ImagePipeline:
         elif slot.was_resizing:
             slot.was_resizing = False
             slot.preview_gate.configure(slot.preview_gate.period)
-            slot.snapshot_pending = True
 
         storage_needed = bool(saving_active)
-        preview_needed = bool(slot.snapshot_pending)
         preview_ready = bool(preview_queue and not view_is_resizing and slot.preview_enabled)
 
         if not storage_needed and not preview_ready:
@@ -297,24 +295,10 @@ class ImagePipeline:
         emit_preview = False
         if preview_ready:
             stride = max(1, slot.preview_stride)
-            stride_hit = ((capture_index - slot.preview_stride_offset) % stride) == 0
-            if stride_hit:
-                emit_preview = True
-                preview_needed = True
+            emit_preview = ((capture_index - slot.preview_stride_offset) % stride) == 0
 
-        if not preview_needed and not storage_enqueued:
+        if not storage_enqueued and not emit_preview:
             return
-
-        if preview_needed and preview_frame is not None:
-            target_frame = preview_frame
-            if slot.snapshot_pending:
-                slot.last_preview_frame = (
-                    target_frame.copy() if hasattr(target_frame, "copy") else target_frame
-                )
-                slot.snapshot_pending = False
-            else:
-                slot.last_preview_frame = target_frame
-            slot.last_preview_format = preview_pixel_format
 
         if preview_queue and emit_preview and preview_frame is not None and slot.preview_enabled:
             payload = FramePayload(

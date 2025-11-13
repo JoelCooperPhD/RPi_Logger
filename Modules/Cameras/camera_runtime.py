@@ -1,4 +1,4 @@
-"""Cameras stub runtime delegating to the MVC controller."""
+"""Cameras runtime delegating to the MVC controller."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ from typing import Any
 
 from vmc import ModuleRuntime, RuntimeContext
 
-from .controller import CameraStubController
+from .controller import CameraController
 
 
-class CamerasStubRuntime(ModuleRuntime):
+class CamerasRuntime(ModuleRuntime):
     """Thin adapter that wires the stub supervisor into the controller layer."""
 
     def __init__(self, context: RuntimeContext) -> None:
-        self._controller = CameraStubController(context)
+        self._controller = CameraController(context)
 
     async def start(self) -> None:
         await self._controller.start()
@@ -34,4 +34,4 @@ class CamerasStubRuntime(ModuleRuntime):
         return await self._controller.healthcheck()
 
 
-__all__ = ["CamerasStubRuntime"]
+__all__ = ["CamerasRuntime"]

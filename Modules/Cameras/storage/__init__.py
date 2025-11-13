@@ -1,4 +1,4 @@
-"""Storage utilities for Cameras stub and compatible modules."""
+"""Storage utilities for Cameras and compatible modules."""
 
 from .pipeline import CameraStoragePipeline, StorageWriteResult
 

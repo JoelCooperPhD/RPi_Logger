@@ -1,4 +1,4 @@
-"""Per-camera slot state used by the Cameras stub controller."""
+"""Per-camera slot state used by the Cameras controller."""
 
 from __future__ import annotations
 
@@ -7,9 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-import numpy as np
-
-from ..frame_timing import StubFrameTimingTracker
+from ..frame_timing import FrameTimingTracker
 from ..model import CapturedFrame, FrameGate, FramePayload, ImagePipeline
 from ..storage import CameraStoragePipeline
 
@@ -40,9 +38,6 @@ class CameraSlot:
     preview_stride: int = 1
     preview_stride_offset: int = 0
     frame_rate_gate: FrameGate = field(default_factory=FrameGate, repr=False)
-    last_preview_frame: Optional[np.ndarray] = field(default=None, repr=False)
-    last_preview_format: str = ""
-    snapshot_pending: bool = False
     first_frame_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     capture_fps: float = 0.0
     process_fps: float = 0.0
@@ -58,7 +53,7 @@ class CameraSlot:
     frame_duration_us: Optional[int] = None
     was_resizing: bool = False
     capture_main_stream: bool = False
-    timing_tracker: StubFrameTimingTracker = field(default_factory=StubFrameTimingTracker, repr=False)
+    timing_tracker: FrameTimingTracker = field(default_factory=FrameTimingTracker, repr=False)
     capture_index: int = 0
     last_hardware_fps: float = 0.0
     last_expected_interval_ns: Optional[int] = None
@@ -89,11 +84,5 @@ class CameraSlot:
         self.preview_task = None
         self.storage_task = None
         self.image_pipeline = None
-
-    def drop_preview_cache(self) -> None:
-        self.last_preview_frame = None
-        self.last_preview_format = ""
-        self.snapshot_pending = False
-
 
 __all__ = ["CameraSlot"]

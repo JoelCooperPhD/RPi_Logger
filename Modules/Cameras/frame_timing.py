@@ -1,4 +1,4 @@
-"""Frame timing utilities used by the Cameras stub runtime."""
+"""Frame timing utilities used by the Cameras runtime."""
 
 from __future__ import annotations
 
@@ -127,8 +127,8 @@ class FrameTimingCalculator:
         return None
 
 
-class StubFrameTimingTracker:
-    """Adapter that mirrors the production calculator interface for the stub runtime."""
+class FrameTimingTracker:
+    """Adapter that mirrors the production calculator interface for the Cameras runtime."""
 
     def __init__(self) -> None:
         self._calculator = FrameTimingCalculator()
@@ -158,4 +158,4 @@ class StubFrameTimingTracker:
         )
 
 
-__all__ = ['FrameTimingResult', 'StubFrameTimingTracker', 'FrameTimingCalculator', 'TimingUpdate']
+__all__ = ['FrameTimingResult', 'FrameTimingTracker', 'FrameTimingCalculator', 'TimingUpdate']

@@ -1,4 +1,4 @@
-"""Asynchronous CSV logger for the Cameras stub runtime."""
+"""Asynchronous CSV logger for the Cameras runtime."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ class CSVLogEntry:
     storage_queue_drops: int
 
 
-class StubCSVLogger:
+class CameraCSVLogger:
     """Queue-based CSV writer mirroring the production camera module."""
 
     def __init__(
@@ -128,9 +128,10 @@ class StubCSVLogger:
     def log_frame(
         self,
         frame_number: int,
+        *,
+        frame_time_unix: Optional[float] = None,
         sensor_timestamp_ns: Optional[int],
         dropped_since_last: Optional[int],
-        *,
         storage_queue_drops: int = 0,
     ) -> None:
         if self._queue is None:
@@ -139,10 +140,13 @@ class StubCSVLogger:
         if dropped_since_last is not None and dropped_since_last > 0:
             self._total_hardware_drops += dropped_since_last
 
+        if frame_time_unix is None:
+            frame_time_unix = time.time()
+
         entry = CSVLogEntry(
             camera_id=self.camera_id,
             frame_number=frame_number,
-            write_time_unix=time.time(),
+            write_time_unix=frame_time_unix,
             sensor_timestamp_ns=sensor_timestamp_ns,
             dropped_since_last=dropped_since_last,
             total_hardware_drops=self._total_hardware_drops,
@@ -225,4 +229,4 @@ class StubCSVLogger:
         os.fsync(self._file.fileno())
 
 
-__all__ = ['StubCSVLogger']
+__all__ = ['CameraCSVLogger']

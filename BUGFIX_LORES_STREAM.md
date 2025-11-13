@@ -68,5 +68,5 @@ The fix gracefully handles all resolution configurations:
 | 160x120      | None       | Single | Main           |
 
 ## Files Modified
-- `Modules/CamerasStub/controller/runtime.py` - Added lores size validation
-- `Modules/CamerasStub/config.txt` - Updated default resolution to 1280x720
+- `Modules/Cameras/controller/runtime.py` - Added lores size validation
+- `Modules/Cameras/config.txt` - Updated default resolution to 1280x720

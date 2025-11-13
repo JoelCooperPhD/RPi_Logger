@@ -1,4 +1,4 @@
-"""Cameras stub module entry point leveraging the stub (codex) VMC stack."""
+"""Cameras module entry point leveraging the stub (codex) VMC stack."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 if __package__ in {None, ""}:
-    __package__ = "Modules.CamerasStub"
+    __package__ = "Modules.Cameras"
 
 STUB_ROOT = MODULE_DIR.parent / "stub (codex)"
 if STUB_ROOT.exists() and str(STUB_ROOT) not in sys.path:
@@ -28,11 +28,11 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 from vmc.constants import PLACEHOLDER_GEOMETRY
 
-from .camera_runtime import CamerasStubRuntime
+from .camera_runtime import CamerasRuntime
 
-DISPLAY_NAME = "Cameras (Stub)"
-MODULE_ID = "cameras_stub"
-DEFAULT_OUTPUT_SUBDIR = Path("cameras-stub")
+DISPLAY_NAME = "Cameras"
+MODULE_ID = "cameras"
+DEFAULT_OUTPUT_SUBDIR = Path("cameras")
 
 logger = logging.getLogger(__name__)
 
@@ -213,14 +213,14 @@ def parse_args(argv: Optional[list[str]] = None):
 
 
 def build_runtime(context):
-    return CamerasStubRuntime(context)
+    return CamerasRuntime(context)
 
 
 async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
 
     if not args.enable_commands:
-        logger.error("Cameras stub module must be launched by the logger controller.")
+        logger.error("Cameras module must be launched by the logger controller.")
         return
 
     module_dir = MODULE_DIR

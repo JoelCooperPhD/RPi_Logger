@@ -1,4 +1,4 @@
-"""Utility helpers shared by the Cameras stub runtime."""
+"""Utility helpers shared by the Cameras runtime."""
 
 from .frame_convert import frame_to_image
 

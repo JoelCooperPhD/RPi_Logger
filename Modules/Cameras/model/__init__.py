@@ -1,15 +1,15 @@
-"""Model package for the Cameras stub runtime."""
+"""Model package for the Cameras runtime."""
 
 from .image_pipeline import ImagePipeline, PipelineMetrics, RollingFpsCounter
 from .runtime_state import (
-    CameraStubModel,
+    CameraModel,
     CapturedFrame,
     FrameGate,
     FramePayload,
 )
 
 __all__ = [
-    "CameraStubModel",
+    "CameraModel",
     "CapturedFrame",
     "FrameGate",
     "FramePayload",

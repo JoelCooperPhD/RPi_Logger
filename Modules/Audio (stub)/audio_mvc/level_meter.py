@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Tuple
 
 import numpy as np
@@ -17,6 +17,10 @@ class LevelMeter:
     """Track RMS/peak levels for a single audio stream."""
 
     peak_hold_time: float = 2.0
+    _rms_db: float = field(init=False, default=DB_MIN)
+    _peak_db: float = field(init=False, default=DB_MIN)
+    _peak_timestamp: float = field(init=False, default=0.0)
+    dirty: bool = field(init=False, default=False)
 
     def __post_init__(self) -> None:
         self._rms_db: float = DB_MIN

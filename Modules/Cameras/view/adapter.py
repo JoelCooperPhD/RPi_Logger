@@ -1,4 +1,4 @@
-"""Tkinter view adapter for the Cameras stub runtime."""
+"""Tkinter view adapter for the Cameras runtime."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ except AttributeError:  # pragma: no cover - legacy Pillow fallback
     DEFAULT_RESAMPLE = Image.BILINEAR  # type: ignore[attr-defined]
 
 
-class CameraStubViewAdapter:
+class CameraViewAdapter:
     """Encapsulates interactions with the StubCodexView and Tk widgets."""
 
     PREVIEW_BACKGROUND = "#111111"
@@ -75,6 +75,12 @@ class CameraStubViewAdapter:
             return
 
         def builder(parent: tk.Widget) -> None:
+            if hasattr(parent, "configure"):
+                try:
+                    parent.configure(text="Camera Feeds")
+                except tk.TclError:
+                    pass
+
             if hasattr(parent, "columnconfigure"):
                 parent.columnconfigure(0, weight=1)
             if hasattr(parent, "rowconfigure"):
@@ -805,4 +811,4 @@ class CameraStubViewAdapter:
                 asyncio.create_task(result)
 
 
-__all__ = ["CameraStubViewAdapter"]
+__all__ = ["CameraViewAdapter"]

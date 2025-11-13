@@ -1,4 +1,4 @@
-"""Stub-local fallbacks for camera module constants."""
+"""Local fallbacks for camera module constants."""
 
 from __future__ import annotations
 

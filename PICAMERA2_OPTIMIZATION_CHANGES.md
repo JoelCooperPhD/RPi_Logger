@@ -7,7 +7,7 @@ This optimization leverages Picamera2's native features to reduce CPU/GPU usage 
 ## Key Improvements
 
 ### 1. Dual-Stream Configuration (Hardware ISP Downscaling)
-- **File**: `Modules/CamerasStub/controller/runtime.py:722-735`
+- **File**: `Modules/Cameras/controller/runtime.py:722-735`
 - **Change**: Modified camera configuration from `create_preview_configuration()` to `create_video_configuration()` with both `main` (YUV420) and `lores` (RGB888) streams
 - **Benefit**: Hardware ISP performs downscaling to 640x480 for preview (zero CPU cost)
 
@@ -29,8 +29,8 @@ config = camera.create_video_configuration(
 
 ### 2. Dual-Stream Capture
 - **Files**:
-  - `Modules/CamerasStub/model/image_pipeline.py:115-142`
-  - `Modules/CamerasStub/model/runtime_state.py:98-106`
+  - `Modules/Cameras/model/image_pipeline.py:115-142`
+  - `Modules/Cameras/model/runtime_state.py:98-106`
 - **Change**: Capture loop now extracts both main and lores frames from each request
 - **Benefit**: Both streams available from single camera capture, no duplication
 
@@ -41,7 +41,7 @@ preview_frame = request.make_array(slot.preview_stream)
 ```
 
 ### 3. Separate Frame Routing
-- **File**: `Modules/CamerasStub/model/image_pipeline.py:258-272`
+- **File**: `Modules/Cameras/model/image_pipeline.py:258-272`
 - **Change**: Router now uses `preview_frame` for preview, `main_frame` for storage
 - **Benefit**: Eliminates software cv2.resize() call for preview (5-15ms saved per frame)
 
@@ -54,7 +54,7 @@ storage_frame = main_array
 ```
 
 ### 4. Picamera2 H264Encoder Integration
-- **File**: `Modules/CamerasStub/storage/pipeline.py`
+- **File**: `Modules/Cameras/storage/pipeline.py`
 - **Changes**:
   - Added imports for `H264Encoder`, `MJPEGEncoder`, `FfmpegOutput`
   - Added `camera` parameter to pipeline initialization
@@ -70,12 +70,12 @@ self.camera.start_encoder(encoder, output, name="main")
 ```
 
 ### 5. Simplified Storage Consumer
-- **File**: `Modules/CamerasStub/controller/runtime.py:1094-1131`
+- **File**: `Modules/Cameras/controller/runtime.py:1094-1131`
 - **Change**: When using Picamera2 encoder, skip PIL conversions for video (only needed for stills)
 - **Benefit**: Reduces PIL conversions from 5-6 to 0-1 per frame
 
 ### 6. Removed Router Idle Sleep
-- **File**: `Modules/CamerasStub/model/image_pipeline.py:188-194`
+- **File**: `Modules/Cameras/model/image_pipeline.py:188-194`
 - **Change**: Deleted unnecessary `await asyncio.sleep(self.ROUTER_IDLE_SLEEP)` call
 - **Benefit**: Eliminates 1ms sleep after every frame (5-8% CPU reduction + lower latency)
 
@@ -143,12 +143,12 @@ To force OpenCV mode, set `camera=None` in `CameraStoragePipeline` initializatio
 
 ## Files Modified
 
-1. `Modules/CamerasStub/controller/runtime.py` - Camera config, storage pipeline init, storage consumer
-2. `Modules/CamerasStub/model/image_pipeline.py` - Dual-stream capture, frame routing, removed idle sleep
-3. `Modules/CamerasStub/model/runtime_state.py` - Added preview_frame field to CapturedFrame
-4. `Modules/CamerasStub/controller/runtime.py` - Main stream switched to `YUV420` during recording so Picamera2's H.264 encoder can run without extra conversions
-4. `Modules/CamerasStub/storage/pipeline.py` - Picamera2 encoder integration
-5. `Modules/CamerasStub/view/adapter.py` - No changes (preview still uses PIL/ImageTk)
+1. `Modules/Cameras/controller/runtime.py` - Camera config, storage pipeline init, storage consumer
+2. `Modules/Cameras/model/image_pipeline.py` - Dual-stream capture, frame routing, removed idle sleep
+3. `Modules/Cameras/model/runtime_state.py` - Added preview_frame field to CapturedFrame
+4. `Modules/Cameras/controller/runtime.py` - Main stream switched to `YUV420` during recording so Picamera2's H.264 encoder can run without extra conversions
+4. `Modules/Cameras/storage/pipeline.py` - Picamera2 encoder integration
+5. `Modules/Cameras/view/adapter.py` - No changes (preview still uses PIL/ImageTk)
 
 ## Hardware Notes
 

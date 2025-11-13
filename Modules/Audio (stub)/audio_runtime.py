@@ -8,7 +8,10 @@ from logger_core.commands import StatusMessage
 
 from vmc import ModuleRuntime, RuntimeContext
 
-from .audio_mvc import AudioController, AudioStubConfig
+try:  # Prefer absolute import when executed as a loose module
+    from audio_mvc import AudioController, AudioStubConfig
+except ImportError:  # Fallback when package context is available
+    from .audio_mvc import AudioController, AudioStubConfig
 
 
 class AudioStubRuntime(ModuleRuntime):

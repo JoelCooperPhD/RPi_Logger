@@ -1,4 +1,4 @@
-"""RGB/ARGB frame conversion helpers for the Cameras stub."""
+"""RGB/ARGB frame conversion helpers for the Cameras module."""
 
 from __future__ import annotations
 

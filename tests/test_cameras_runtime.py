@@ -35,12 +35,12 @@ if "async_tkinter_loop" not in sys.modules:
     async_tk_stub.async_handler = _passthrough
     sys.modules["async_tkinter_loop"] = async_tk_stub
 
-from Modules.CamerasStub.controller.runtime import CameraStubController
+from Modules.Cameras.controller.runtime import CameraController
 
 
 class SensorIntervalTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.runtime = CameraStubController.__new__(CameraStubController)
+        self.runtime = CameraController.__new__(CameraController)
         self.runtime._state = SimpleNamespace(
             save_frame_interval=0.0,
             preview_frame_interval=1.0 / 15.0,

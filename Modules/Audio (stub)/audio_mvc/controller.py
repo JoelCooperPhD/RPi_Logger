@@ -50,8 +50,6 @@ class AudioController:
             self.audio_model,
             callbacks=ViewCallbacks(
                 toggle_device=self.toggle_device,
-                start_recording=self.start_recording,
-                stop_recording=self.stop_recording,
             ),
             submit_async=self._submit_async,
             logger=self.logger,
@@ -142,9 +140,16 @@ class AudioController:
         if enabled:
             device = devices[device_id]
             meter = self.audio_model.ensure_meter(device_id)
-            success = await self.recorder_service.enable_device(device, meter)
-            if success:
+            already_selected = device_id in self.audio_model.selected_devices
+            if not already_selected:
                 self.audio_model.select_device(device)
+            success = await self.recorder_service.enable_device(device, meter)
+            if not success:
+                self.logger.warning(
+                    "Device %s (%d) failed to start streaming; meter will remain visible",
+                    device.name,
+                    device.device_id,
+                )
         else:
             self.audio_model.deselect_device(device_id)
             await self.recorder_service.disable_device(device_id)
@@ -279,4 +284,3 @@ class AudioController:
                 self._pending_trial_number = 1
         elif prop == "session_dir" and value:
             self.audio_model.set_session_dir(Path(value))
-

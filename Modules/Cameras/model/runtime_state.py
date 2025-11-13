@@ -1,4 +1,4 @@
-"""Model definitions and persistence helpers for the Cameras stub runtime."""
+"""Model definitions and persistence helpers for the Cameras runtime."""
 
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ class FrameGate:
         return True
 
 
-class CameraStubModel:
+class CameraModel:
     """Holds runtime configuration, persistence helpers, and shared state."""
 
     PREVIEW_SIZE = (640, 480)
@@ -488,7 +488,7 @@ class CameraStubModel:
         if output_root:
             base = Path(output_root)
         else:
-            base = Path.cwd() / "cameras-stub"
+            base = Path.cwd() / "cameras"
         return base / "captures"
 
     def prepare_session_directory_sync(self, base_dir: Path) -> Optional[Path]:
@@ -741,4 +741,4 @@ class CameraStubModel:
         return min(1.0, max(0.1, value))
 
 
-__all__ = ["CameraStubModel", "FramePayload", "FrameGate"]
+__all__ = ["CameraModel", "FramePayload", "FrameGate"]

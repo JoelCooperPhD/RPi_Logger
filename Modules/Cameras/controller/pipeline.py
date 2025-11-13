@@ -1,4 +1,4 @@
-"""Pipeline consumers shared by the Cameras stub controller."""
+"""Pipeline consumers shared by the Cameras controller."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ except AttributeError:  # pragma: no cover - compatibility shim
 
 from ..model import FramePayload, RollingFpsCounter
 from ..storage import StorageWriteResult
-from ..view import CameraStubViewAdapter
+from ..view import CameraViewAdapter
 from .slot import CameraSlot
 
 
@@ -42,7 +42,7 @@ class PreviewConsumer:
         self,
         *,
         stop_event: asyncio.Event,
-        view_adapter: Optional[CameraStubViewAdapter],
+        view_adapter: Optional[CameraViewAdapter],
         logger: logging.Logger,
     ) -> None:
         self._stop_event = stop_event
@@ -168,7 +168,12 @@ class StorageConsumer:
                 pixel_format = latest.pixel_format or slot.main_format or slot.preview_format
 
                 if uses_hw_encoder and not need_stills:
-                    pass
+                    storage_result = await pipeline.write_frame(
+                        None,
+                        latest,
+                        fps_hint=fps_hint,
+                        pil_image=None,
+                    )
                 else:
                     image = await asyncio.to_thread(
                         self._hooks.frame_to_image,
@@ -185,13 +190,12 @@ class StorageConsumer:
                         rgb_frame = np.asarray(image)
                     if need_stills:
                         still_image = image
-
-                storage_result = await pipeline.write_frame(
-                    rgb_frame,
-                    latest,
-                    fps_hint=fps_hint,
-                    pil_image=still_image,
-                )
+                    storage_result = await pipeline.write_frame(
+                        rgb_frame,
+                        latest,
+                        fps_hint=fps_hint,
+                        pil_image=still_image,
+                    )
 
                 should_continue = await self._hooks.on_frame_written(
                     slot,

@@ -1,4 +1,4 @@
-"""Camera runtime built on the stub (codex) VMC stack."""
+"""Cameras runtime built on the stub (codex) VMC stack."""
 
 from __future__ import annotations
 
@@ -9,13 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, List, Optional
 
-import cv2
-
-from PIL import Image
-try:  # Pillow 10+
-    DEFAULT_RESAMPLE = Image.Resampling.BILINEAR
-except AttributeError:  # pragma: no cover - older Pillow fallback
-    DEFAULT_RESAMPLE = Image.BILINEAR  # type: ignore[attr-defined]
 
 try:
     from picamera2 import Picamera2  # type: ignore
@@ -27,17 +20,17 @@ from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
 from ..constants import FRAME_LOG_COUNT
 
-from ..model import CameraStubModel, CapturedFrame, FrameGate, FramePayload
+from ..model import CameraModel, CapturedFrame, FrameGate, FramePayload
 from ..model.image_pipeline import ImagePipeline
-from ..view import CameraStubViewAdapter
-from ..frame_timing import StubFrameTimingTracker
+from ..view import CameraViewAdapter
+from ..frame_timing import FrameTimingTracker
 from ..storage import CameraStoragePipeline, StorageWriteResult
 from ..utils import frame_to_image as convert_frame_to_image
 from .pipeline import PreviewConsumer, StorageConsumer, StorageHooks
 from .slot import CameraSlot
 
 
-class CameraStubController(ModuleRuntime):
+class CameraController(ModuleRuntime):
     """Minimal dual-camera preview atop the stub supervisor."""
 
     PREVIEW_SIZE = (640, 480)
@@ -53,7 +46,7 @@ class CameraStubController(ModuleRuntime):
     PREVIEW_FRACTION_CHOICES = (1.0, 0.5, 1 / 3, 0.25)
 
     @property
-    def state(self) -> CameraStubModel:
+    def state(self) -> CameraModel:
         return self._state
 
     @property
@@ -166,20 +159,20 @@ class CameraStubController(ModuleRuntime):
         self.display_name = context.display_name
         self.module_dir = context.module_dir
 
-        self.task_manager = BackgroundTaskManager("CamerasStubTasks", self.logger)
+        self.task_manager = BackgroundTaskManager("CamerasTasks", self.logger)
         timeout = getattr(self.args, "shutdown_timeout", 15.0)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=timeout)
 
-        self._state = CameraStubModel(
+        self._state = CameraModel(
             args=self.args,
             module_dir=self.module_dir,
             display_name=self.display_name,
             logger=self.logger,
         )
 
-        self.view_adapter: Optional[CameraStubViewAdapter] = None
+        self.view_adapter: Optional[CameraViewAdapter] = None
         if self.view is not None:
-            self.view_adapter = CameraStubViewAdapter(
+            self.view_adapter = CameraViewAdapter(
                 self.view,
                 args=self.args,
                 preview_size=self._state.PREVIEW_SIZE,
@@ -392,13 +385,11 @@ class CameraStubController(ModuleRuntime):
         if slot is None or slot.preview_enabled == enabled:
             return
         slot.preview_enabled = enabled
-        slot.snapshot_pending = enabled
         if enabled:
             slot.preview_gate.configure(slot.preview_gate.period)
             if self.view_adapter:
                 self.view_adapter.show_camera_waiting(slot)
         else:
-            slot.drop_preview_cache()
             if self.view_adapter:
                 self.view_adapter.show_camera_hidden(slot)
         self._refresh_status()
@@ -585,7 +576,6 @@ class CameraStubController(ModuleRuntime):
         if new_size == slot.size:
             return
         slot.size = new_size
-        slot.snapshot_pending = True
 
     def _refresh_preview_fps_ui(self) -> None:
         if self.view_adapter:
@@ -1388,6 +1378,7 @@ class CameraStubController(ModuleRuntime):
             camera_dir,
             camera_alias=camera_alias,
             camera_slug=camera_slug,
+            main_size=slot.main_size,
             save_format=self.save_format,
             save_quality=self.save_quality,
             max_fps=self.MAX_SENSOR_FPS,
@@ -1397,6 +1388,8 @@ class CameraStubController(ModuleRuntime):
             logger=self.logger.getChild(f"StorageCam{slot.index}"),
         )
         await pipeline.start()
+        fps_hint = self._resolve_video_fps(slot)
+        await pipeline.start_video_recording(fps_hint)
         slot.storage_pipeline = pipeline
         self.logger.info(
             "Storage ready for %s -> dir=%s | queue=%d",
@@ -1666,21 +1659,21 @@ class CameraStubController(ModuleRuntime):
 
     @staticmethod
     def _safe_int(value: Any) -> Optional[int]:
-        return CameraStubModel._safe_int(value)
+        return CameraModel._safe_int(value)
 
     @staticmethod
     def _safe_float(value: Any) -> Optional[float]:
-        return CameraStubModel._safe_float(value)
+        return CameraModel._safe_float(value)
 
     @staticmethod
     def _clamp_preview_fraction(value: float) -> float:
-        choices = CameraStubController.PREVIEW_FRACTION_CHOICES
+        choices = CameraController.PREVIEW_FRACTION_CHOICES
         value = max(min(value, choices[0]), choices[-1])
         return min(choices, key=lambda choice: abs(choice - value))
 
     @staticmethod
     def _fraction_to_stride(fraction: float) -> int:
-        fraction = CameraStubController._clamp_preview_fraction(fraction)
+        fraction = CameraController._clamp_preview_fraction(fraction)
         mapping = {1.0: 1, 0.5: 2, 1 / 3: 3, 0.25: 4}
         return mapping.get(fraction, 1)
 
@@ -1712,11 +1705,11 @@ class CameraStubController(ModuleRuntime):
 
     @staticmethod
     def _ensure_even_dimensions(width: int, height: int) -> tuple[int, int]:
-        return CameraStubModel._ensure_even_dimensions(width, height)
+        return CameraModel._ensure_even_dimensions(width, height)
 
     @staticmethod
     def _normalize_size(value: Any) -> Optional[tuple[int, int]]:
-        return CameraStubModel.normalize_size(value)
+        return CameraModel.normalize_size(value)
 
     def _build_camera_configuration(
         self,
@@ -1731,11 +1724,21 @@ class CameraStubController(ModuleRuntime):
             "sensor": sensor_config,
             "encode": "main",
         }
+
+        lores_format = "XRGB8888"
         if lores_size:
-            kwargs["lores"] = {"size": lores_size, "format": "RGB888"}
+            kwargs["lores"] = {"size": lores_size, "format": lores_format}
             kwargs["display"] = "lores"
         else:
             kwargs["display"] = "main"
-        return camera.create_video_configuration(**kwargs)
 
-__all__ = ["CamerasStubRuntime"]
+        try:
+            return camera.create_video_configuration(**kwargs)
+        except Exception:
+            # Fallback for platforms that do not support RGB lores streams
+            if lores_size:
+                kwargs["lores"] = {"size": lores_size, "format": "YUV420"}
+            main_config["format"] = "RGB888"
+            return camera.create_video_configuration(**kwargs)
+
+__all__ = ["CameraController"]
