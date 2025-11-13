@@ -18,8 +18,8 @@ try:
 except Exception:  # pragma: no cover - allows dev environments without Picamera2
     MappedArray = None  # type: ignore[arg-type]
 
-from ..csv_logger import CameraCSVLogger
-from ..model import FramePayload
+from .csv_logger import CameraCSVLogger
+from ...domain.model import FramePayload
 
 
 @dataclass(slots=True)

@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from .constants import FRAME_LOG_COUNT
+from ...io.storage.constants import FRAME_LOG_COUNT
 
 
 @dataclass(slots=True)

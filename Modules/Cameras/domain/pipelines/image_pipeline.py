@@ -10,8 +10,8 @@ from typing import Any, Callable, Deque, Optional
 
 import numpy as np
 
-from .runtime_state import CapturedFrame, FramePayload
-from ..constants import FRAME_LOG_COUNT
+from ..model.runtime_state import CapturedFrame, FramePayload
+from ...io.storage.constants import FRAME_LOG_COUNT
 
 
 class RollingFpsCounter:

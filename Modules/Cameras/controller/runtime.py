@@ -18,14 +18,13 @@ except Exception:  # pragma: no cover - dependency optional on dev hosts
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
-from ..constants import FRAME_LOG_COUNT
+from ..io.storage.constants import FRAME_LOG_COUNT
 
-from ..model import CameraModel, CapturedFrame, FrameGate, FramePayload
-from ..model.image_pipeline import ImagePipeline
-from ..view import CameraViewAdapter
-from ..frame_timing import FrameTimingTracker
-from ..storage import CameraStoragePipeline, StorageWriteResult
-from ..utils import frame_to_image as convert_frame_to_image
+from ..domain.model import CameraModel, CapturedFrame, FrameGate, FramePayload
+from ..domain.pipelines import FrameTimingTracker, ImagePipeline
+from ..ui import CameraViewAdapter
+from ..io.storage import CameraStoragePipeline, StorageWriteResult
+from ..io.media import frame_to_image as convert_frame_to_image
 from .pipeline import PreviewConsumer, StorageConsumer, StorageHooks
 from .slot import CameraSlot
 

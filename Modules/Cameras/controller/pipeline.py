@@ -16,9 +16,9 @@ try:  # Pillow 10+
 except AttributeError:  # pragma: no cover - compatibility shim
     DEFAULT_RESAMPLE = Image.BILINEAR  # type: ignore[attr-defined]
 
-from ..model import FramePayload, RollingFpsCounter
-from ..storage import StorageWriteResult
-from ..view import CameraViewAdapter
+from ..domain.model import FramePayload, RollingFpsCounter
+from ..io.storage import StorageWriteResult
+from ..ui import CameraViewAdapter
 from .slot import CameraSlot
 
 

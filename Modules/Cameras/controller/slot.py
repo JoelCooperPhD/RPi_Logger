@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from ..frame_timing import FrameTimingTracker
-from ..model import CapturedFrame, FrameGate, FramePayload, ImagePipeline
-from ..storage import CameraStoragePipeline
+from ..domain.pipelines import FrameTimingTracker, ImagePipeline
+from ..domain.model import CapturedFrame, FrameGate, FramePayload
+from ..io.storage import CameraStoragePipeline
 
 
 @dataclass(slots=True)

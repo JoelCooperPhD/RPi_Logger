@@ -1,12 +1,12 @@
 """Model package for the Cameras runtime."""
 
-from .image_pipeline import ImagePipeline, PipelineMetrics, RollingFpsCounter
 from .runtime_state import (
     CameraModel,
     CapturedFrame,
     FrameGate,
     FramePayload,
 )
+from ..pipelines import ImagePipeline, PipelineMetrics, RollingFpsCounter
 
 __all__ = [
     "CameraModel",
