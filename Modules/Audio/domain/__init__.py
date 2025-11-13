@@ -9,13 +9,12 @@ from .constants import (
     DB_YELLOW,
     DEFAULT_SESSION_PREFIX,
 )
+from .entities import AudioDeviceInfo, AudioSnapshot
 from .level_meter import LevelMeter
-from .model import AudioDevice, AudioDeviceInfo, AudioModel, AudioSnapshot, AudioState
+from .state import AudioState
 
 __all__ = [
-    "AudioDevice",
     "AudioDeviceInfo",
-    "AudioModel",
     "AudioSnapshot",
     "AudioState",
     "LevelMeter",

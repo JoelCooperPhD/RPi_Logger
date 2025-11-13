@@ -142,9 +142,3 @@ class AudioState:
             "session_dir": str(self.session_dir) if self.session_dir else None,
             "status_message": self._status_text,
         }
-
-
-# Backwards compatibility ----------------------------------------------------
-
-AudioDevice = AudioDeviceInfo
-AudioModel = AudioState

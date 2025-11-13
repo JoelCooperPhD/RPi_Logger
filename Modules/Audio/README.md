@@ -11,8 +11,8 @@ command-line interaction otherwise.
 - `config/` contains the shared CLI + file parsing logic (`settings.py`).
 - `app/` hosts the high-level `AudioApp` orchestration (`application.py`) and
   the persistence helpers that restore device selections (`startup.py`).
-- `domain/` groups immutable constants, the observable state container, level
-  meter logic, and the legacy model shim.
+- `domain/` groups immutable constants, the observable state container, and the
+  level meter logic.
 - `services/` keeps the pure device/session/recorder helpers that interact with
   hardware and the filesystem.
 - `ui/` isolates the Tk view + callbacks used by the codex shell.
