@@ -343,6 +343,7 @@ class RecordingManager:
         self.logger = logger.getChild("RecordingManager")
         self._emit_status = status_callback
         self._active_session_dir: Path | None = None
+        self._start_lock = asyncio.Lock()
 
     async def ensure_session_dir(self, current: Optional[Path]) -> Path:
         session_dir = await self.session_service.ensure_session_dir(current)
@@ -357,36 +358,40 @@ class RecordingManager:
             trial_number,
             device_ids,
         )
-        if self.state.recording:
-            self.logger.debug("Recording already active")
+        if self.state.recording or self._start_lock.locked():
+            self.logger.debug("Recording already active or starting")
             return False
-        if not device_ids:
-            self.logger.warning("No devices selected for recording")
-            return False
+        async with self._start_lock:
+            if self.state.recording:
+                self.logger.debug("Recording already active inside lock")
+                return False
+            if not device_ids:
+                self.logger.warning("No devices selected for recording")
+                return False
 
-        session_dir = await self.ensure_session_dir(self.state.session_dir)
-        started = await self.recorder_service.begin_recording(device_ids, session_dir, trial_number)
-        if started == 0:
-            self.logger.error("No recorders ready; aborting start")
-            return False
+            session_dir = await self.ensure_session_dir(self.state.session_dir)
+            started = await self.recorder_service.begin_recording(device_ids, session_dir, trial_number)
+            if started == 0:
+                self.logger.error("No recorders ready; aborting start")
+                return False
 
-        self.state.set_recording(True, trial_number)
-        self.stub_bridge.set_recording(True, trial_number)
-        self._emit_status(
-            StatusType.RECORDING_STARTED,
-            {
-                "trial_number": trial_number,
-                "devices": started,
-                "session_dir": str(session_dir),
-            },
-        )
-        self.logger.info(
-            "Recording started for trial %d (%d device%s)",
-            trial_number,
-            started,
-            "s" if started != 1 else "",
-        )
-        return True
+            self.state.set_recording(True, trial_number)
+            self.stub_bridge.set_recording(True, trial_number)
+            self._emit_status(
+                StatusType.RECORDING_STARTED,
+                {
+                    "trial_number": trial_number,
+                    "devices": started,
+                    "session_dir": str(session_dir),
+                },
+            )
+            self.logger.info(
+                "Recording started for trial %d (%d device%s)",
+                trial_number,
+                started,
+                "s" if started != 1 else "",
+            )
+            return True
 
     async def stop(self) -> bool:
         self.logger.debug("Recording stop requested (active=%s)", self.state.recording)

@@ -1,18 +1,72 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import math
 import sys
 from pathlib import Path
+
+import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+if "vmc" not in sys.modules:
+    import types
+
+    class _StubRuntimeContext:
+        def __init__(self, *args, **kwargs) -> None:  # pragma: no cover - test shim
+            pass
+
+    class _StubModuleRuntime:
+        async def start(self):  # pragma: no cover - test shim
+            raise NotImplementedError
+
+    class _StubBackgroundTaskManager:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def create(self, coro, name=None):
+            return asyncio.create_task(coro)
+
+        def add(self, task):
+            return task
+
+        async def shutdown(self, **_):
+            return True
+
+    class _StubShutdownGuard:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def start(self):
+            return None
+
+        async def cancel(self):
+            return None
+
+    vmc_module = types.ModuleType("vmc")
+    vmc_runtime = types.ModuleType("vmc.runtime")
+    vmc_runtime.RuntimeContext = _StubRuntimeContext
+    vmc_helpers = types.ModuleType("vmc.runtime_helpers")
+    vmc_helpers.BackgroundTaskManager = _StubBackgroundTaskManager
+    vmc_helpers.ShutdownGuard = _StubShutdownGuard
+    vmc_module.ModuleRuntime = _StubModuleRuntime
+    vmc_module.RuntimeContext = _StubRuntimeContext
+    vmc_module.runtime = vmc_runtime
+    vmc_module.runtime_helpers = vmc_helpers
+    sys.modules["vmc"] = vmc_module
+    sys.modules["vmc.runtime"] = vmc_runtime
+    sys.modules["vmc.runtime_helpers"] = vmc_helpers
+
 from modules.audio_stub.config import AudioStubSettings
 from modules.audio_stub.level_meter import LevelMeter
+from modules.audio_stub.services.recorder import RecorderService
 from modules.audio_stub.startup import PersistedSelection
 from modules.audio_stub.state import AudioDeviceInfo, AudioState
+from modules.audio_stub.app import RecordingManager
 
 
 MODULE_DIR = PROJECT_ROOT / "Modules" / "Audio (stub)"
@@ -89,3 +143,71 @@ def test_persisted_selection_parses_delimited_string() -> None:
     selection = PersistedSelection.from_raw("4, Desk Mic")
     assert selection.device_ids == (4,)
     assert selection.device_names == ("Desk Mic",)
+
+
+def test_recorder_service_prefers_device_sample_rate() -> None:
+    service = RecorderService(logging.getLogger("test"), sample_rate=48000, start_timeout=1.0, stop_timeout=1.0)
+    device = AudioDeviceInfo(device_id=1, name="Mic", channels=1, sample_rate=44100.0)
+    assert service._resolve_sample_rate(device) == 44100
+
+
+def test_recorder_service_falls_back_to_default_rate() -> None:
+    service = RecorderService(logging.getLogger("test"), sample_rate=32000, start_timeout=1.0, stop_timeout=1.0)
+    device = AudioDeviceInfo(device_id=2, name="Line", channels=1, sample_rate=0)
+    assert service._resolve_sample_rate(device) == 32000
+
+
+class _DummyRecorderService:
+    def __init__(self) -> None:
+        self.calls: int = 0
+
+    async def begin_recording(self, device_ids, session_dir, trial_number):
+        self.calls += 1
+        await asyncio.sleep(0.01)
+        return len(device_ids)
+
+    async def finish_recording(self):
+        return []
+
+
+class _DummySessionService:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    async def ensure_session_dir(self, current):
+        return self.path
+
+
+class _DummyBridge:
+    def set_session_dir(self, path):
+        return None
+
+    def set_recording(self, active, trial):
+        return None
+
+
+def test_recording_manager_prevents_duplicate_start(tmp_path: Path) -> None:
+    async def _exercise() -> None:
+        state = AudioState()
+        recorder_service = _DummyRecorderService()
+        session_service = _DummySessionService(tmp_path)
+        bridge = _DummyBridge()
+        logger = logging.getLogger("test.recording_manager")
+
+        manager = RecordingManager(
+            state,
+            recorder_service,
+            session_service,
+            bridge,
+            logger,
+            lambda *_: None,
+        )
+
+        async def _start():
+            return await manager.start([1], trial_number=1)
+
+        results = await asyncio.gather(_start(), _start())
+        assert results.count(True) == 1
+        assert recorder_service.calls == 1
+
+    asyncio.run(_exercise())

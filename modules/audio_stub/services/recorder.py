@@ -39,7 +39,7 @@ class AudioDeviceRecorder:
         logger: logging.Logger,
     ) -> None:
         self.device = device
-        self.sample_rate = sample_rate
+        self.sample_rate = max(1, int(sample_rate))
         self.level_meter = level_meter
         self.logger = logger.getChild(f"Dev{device.device_id}")
         self.stream: Optional[sd.InputStream] = None
@@ -77,6 +77,18 @@ class AudioDeviceRecorder:
                 blocksize=0,
             )
             stream.start()
+            try:
+                actual_rate = int(stream.samplerate)
+            except Exception:
+                actual_rate = None
+            if actual_rate and actual_rate != self.sample_rate:
+                self.logger.info(
+                    "Device %d sample rate adjusted from %d to %d",
+                    self.device.device_id,
+                    self.sample_rate,
+                    actual_rate,
+                )
+                self.sample_rate = actual_rate
             self.stream = stream
             self.logger.info("Input stream started (%d Hz)", self.sample_rate)
         except Exception as exc:
@@ -217,15 +229,19 @@ class RecorderService:
         stop_timeout: float,
     ) -> None:
         self.logger = logger.getChild("RecorderService")
-        self.sample_rate = sample_rate
+        self._default_sample_rate = max(1, int(sample_rate))
         self.start_timeout = start_timeout
         self.stop_timeout = stop_timeout
         self.recorders: Dict[int, AudioDeviceRecorder] = {}
 
     async def enable_device(self, device: AudioDeviceInfo, meter: LevelMeter) -> bool:
+        effective_rate = self._resolve_sample_rate(device)
         recorder = self.recorders.get(device.device_id)
+        if recorder and recorder.sample_rate != effective_rate:
+            await self.disable_device(device.device_id)
+            recorder = None
         if recorder is None:
-            recorder = AudioDeviceRecorder(device, self.sample_rate, meter, self.logger)
+            recorder = AudioDeviceRecorder(device, effective_rate, meter, self.logger)
             self.recorders[device.device_id] = recorder
 
         self.logger.debug("Enabling recorder for device %d (%s)", device.device_id, device.name)
@@ -305,3 +321,17 @@ class RecorderService:
     @property
     def any_recording_active(self) -> bool:
         return any(recorder.recording for recorder in self.recorders.values())
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+
+    def _resolve_sample_rate(self, device: AudioDeviceInfo) -> int:
+        try:
+            candidate = device.sample_rate
+            if candidate:
+                rate = int(float(candidate))
+                if rate > 0:
+                    return rate
+        except (TypeError, ValueError):
+            pass
+        return self._default_sample_rate
