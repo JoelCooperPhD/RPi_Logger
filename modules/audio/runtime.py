@@ -1,4 +1,4 @@
-"""Runtime adapter that wires the stub supervisor to :class:`AudioApp`."""
+"""Runtime adapter that wires the supervisor to :class:`AudioApp`."""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ from logger_core.commands import StatusMessage
 from vmc import ModuleRuntime, RuntimeContext
 
 from .app import AudioApp
-from .config import AudioStubSettings
+from .config import AudioSettings
 
 
-class AudioStubRuntime(ModuleRuntime):
-    """Adapter used by the stub supervisor."""
+class AudioRuntime(ModuleRuntime):
+    """Adapter used by the supervisor."""
 
     def __init__(self, context: RuntimeContext) -> None:
         self.context = context
-        self.settings = AudioStubSettings.from_args(context.args)
+        self.settings = AudioSettings.from_args(context.args)
         self.app = AudioApp(context, self.settings, status_callback=StatusMessage.send)
 
     async def start(self) -> None:

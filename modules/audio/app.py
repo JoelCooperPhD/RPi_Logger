@@ -1,4 +1,4 @@
-"""Refactored audio stub application composed of small managers."""
+"""Refactored audio application composed of small managers."""
 
 from __future__ import annotations
 
@@ -12,33 +12,33 @@ from logger_core.commands import StatusMessage, StatusType
 from vmc.runtime import RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
-from .config import AudioStubSettings
+from .config import AudioSettings
 from .services import DeviceDiscoveryService, RecorderService, SessionService
 from .startup import AudioStartupManager
 from .state import AudioDeviceInfo, AudioState
-from .view import AudioStubView, ViewCallbacks
+from .view import AudioView, ViewCallbacks
 
 
 class AudioApp:
-    """High-level coordinator for the audio stub module."""
+    """High-level coordinator for the audio module."""
 
     def __init__(
         self,
         context: RuntimeContext,
-        settings: AudioStubSettings,
+        settings: AudioSettings,
         *,
         status_callback: Callable[[StatusType, Dict[str, Any]], None] | None = None,
     ) -> None:
         self.context = context
         self.settings = settings
-        base_logger = context.logger or logging.getLogger("AudioStub")
+        base_logger = context.logger or logging.getLogger("Audio")
         self.logger = base_logger.getChild("App")
         self.logger.setLevel(logging.DEBUG)
-        self.stub_model = context.model
+        self.module_model = context.model
         self.status_callback = status_callback or StatusMessage.send
 
         self.state = AudioState()
-        self.task_manager = BackgroundTaskManager("AudioStubTasks", self.logger)
+        self.task_manager = BackgroundTaskManager("AudioTasks", self.logger)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=settings.shutdown_timeout)
         self.device_service = DeviceDiscoveryService(self.logger, settings.sample_rate)
         self.recorder_service = RecorderService(
@@ -58,12 +58,12 @@ class AudioApp:
         self._stop_event = asyncio.Event()
         self._pending_trial = 1
 
-        self.stub_bridge = StubBridge(
-            self.stub_model,
+        self.module_bridge = ModuleBridge(
+            self.module_model,
             self.logger,
-            on_recording_change=self._handle_stub_recording_event,
-            on_trial_change=self._handle_stub_trial_event,
-            on_session_change=self._handle_stub_session_event,
+            on_recording_change=self._handle_bridge_recording_event,
+            on_trial_change=self._handle_bridge_trial_event,
+            on_session_change=self._handle_bridge_session_event,
         )
 
         self.device_manager = DeviceManager(
@@ -76,7 +76,7 @@ class AudioApp:
             self.state,
             self.recorder_service,
             self.session_service,
-            self.stub_bridge,
+            self.module_bridge,
             self.logger,
             self._emit_status,
         )
@@ -88,7 +88,7 @@ class AudioApp:
         )
         self.startup_manager.bind()
 
-        self.view = AudioStubView(
+        self.view = AudioView(
             context.view,
             self.state,
             callbacks=ViewCallbacks(toggle_device=self.toggle_device),
@@ -210,31 +210,31 @@ class AudioApp:
             await asyncio.sleep(interval)
             self.view.draw_level_meters()
 
-    def _handle_stub_recording_event(self, active: bool) -> None:
-        self.logger.debug("Stub bridge set recording=%s", active)
+    def _handle_bridge_recording_event(self, active: bool) -> None:
+        self.logger.debug("Bridge set recording=%s", active)
         if active:
-            self.task_manager.create(self.start_recording(), name="recording_from_stub")
+            self.task_manager.create(self.start_recording(), name="recording_from_bridge")
         else:
-            self.task_manager.create(self.stop_recording(), name="stop_from_stub")
+            self.task_manager.create(self.stop_recording(), name="stop_from_bridge")
 
-    def _handle_stub_trial_event(self, value: Any) -> None:
+    def _handle_bridge_trial_event(self, value: Any) -> None:
         try:
             self._pending_trial = max(1, int(value))
-            self.logger.debug("Stub bridge set trial number to %d", self._pending_trial)
+            self.logger.debug("Bridge set trial number to %d", self._pending_trial)
         except (TypeError, ValueError):
             self._pending_trial = 1
-            self.logger.debug("Stub trial value %r invalid; reset to 1", value)
+            self.logger.debug("Bridge trial value %r invalid; reset to 1", value)
 
-    def _handle_stub_session_event(self, value: Any) -> None:
+    def _handle_bridge_session_event(self, value: Any) -> None:
         if not value:
             return
         try:
             path = Path(value)
         except TypeError:
-            self.logger.debug("Stub session value %r invalid; ignoring", value)
+            self.logger.debug("Bridge session value %r invalid; ignoring", value)
             return
         self.state.set_session_dir(path)
-        self.logger.debug("Stub session directory updated to %s", path)
+        self.logger.debug("Bridge session directory updated to %s", path)
 
     def _emit_status(self, status_type: StatusType, payload: Dict[str, Any]) -> None:
         try:
@@ -332,14 +332,14 @@ class RecordingManager:
         state: AudioState,
         recorder_service: RecorderService,
         session_service: SessionService,
-        stub_bridge: "StubBridge",
+        module_bridge: "ModuleBridge",
         logger: logging.Logger,
         status_callback: Callable[[StatusType, Dict[str, Any]], None],
     ) -> None:
         self.state = state
         self.recorder_service = recorder_service
         self.session_service = session_service
-        self.stub_bridge = stub_bridge
+        self.module_bridge = module_bridge
         self.logger = logger.getChild("RecordingManager")
         self._emit_status = status_callback
         self._active_session_dir: Path | None = None
@@ -348,7 +348,7 @@ class RecordingManager:
     async def ensure_session_dir(self, current: Optional[Path]) -> Path:
         session_dir = await self.session_service.ensure_session_dir(current)
         self._active_session_dir = session_dir
-        self.stub_bridge.set_session_dir(session_dir)
+        self.module_bridge.set_session_dir(session_dir)
         self.state.set_session_dir(session_dir)
         return session_dir
 
@@ -376,7 +376,7 @@ class RecordingManager:
                 return False
 
             self.state.set_recording(True, trial_number)
-            self.stub_bridge.set_recording(True, trial_number)
+            self.module_bridge.set_recording(True, trial_number)
             self._emit_status(
                 StatusType.RECORDING_STARTED,
                 {
@@ -401,7 +401,7 @@ class RecordingManager:
         recordings = await self.recorder_service.finish_recording()
         trial = self.state.trial_number
         self.state.set_recording(False, trial)
-        self.stub_bridge.set_recording(False, trial)
+        self.module_bridge.set_recording(False, trial)
 
         session_dir = self._active_session_dir or self.state.session_dir
         payload = {
@@ -463,33 +463,33 @@ class CommandRouter:
         return False
 
 
-class StubBridge:
-    """Synchronize derived state with the stub codex shared model."""
+class ModuleBridge:
+    """Synchronize derived state with the codex shared model."""
 
     def __init__(
         self,
-        stub_model,
+        module_model,
         logger: logging.Logger,
         *,
         on_recording_change: Callable[[bool], None],
         on_trial_change: Callable[[Any], None],
         on_session_change: Callable[[Any], None],
     ) -> None:
-        self.stub_model = stub_model
-        self.logger = logger.getChild("StubBridge")
+        self.module_model = module_model
+        self.logger = logger.getChild("ModuleBridge")
         self._suppress_recording = False
         self._suppress_trial = False
         self._suppress_session = False
         self._on_recording_change = on_recording_change
         self._on_trial_change = on_trial_change
         self._on_session_change = on_session_change
-        if hasattr(self.stub_model, "subscribe"):
-            self.stub_model.subscribe(self._handle_stub_event)
+        if hasattr(self.module_model, "subscribe"):
+            self.module_model.subscribe(self._handle_bridge_event)
 
     def set_recording(self, active: bool, trial: Optional[int] = None) -> None:
         self._suppress_recording = True
         try:
-            self.stub_model.recording = active
+            self.module_model.recording = active
         finally:
             self._suppress_recording = False
         if trial is not None:
@@ -498,18 +498,18 @@ class StubBridge:
     def set_trial_number(self, trial: int) -> None:
         self._suppress_trial = True
         try:
-            self.stub_model.trial_number = trial
+            self.module_model.trial_number = trial
         finally:
             self._suppress_trial = False
 
     def set_session_dir(self, path: Path) -> None:
         self._suppress_session = True
         try:
-            self.stub_model.session_dir = path
+            self.module_model.session_dir = path
         finally:
             self._suppress_session = False
 
-    def _handle_stub_event(self, prop: str, value: Any) -> None:
+    def _handle_bridge_event(self, prop: str, value: Any) -> None:
         if prop == "recording":
             if self._suppress_recording:
                 return

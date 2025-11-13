@@ -1,4 +1,4 @@
-"""Audio level metering helpers for the stub view."""
+"""Audio level metering helpers for the module view."""
 
 from __future__ import annotations
 

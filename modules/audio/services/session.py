@@ -1,4 +1,4 @@
-"""Session directory helpers for the audio stub."""
+"""Session directory helpers for the audio module."""
 
 from __future__ import annotations
 

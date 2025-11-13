@@ -1,4 +1,4 @@
-"""Tk view for the Audio (Stub) module built on stub codex."""
+"""Tk view for the audio module built on the codex surface."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ class ViewCallbacks:
     toggle_device: Callable[[int, bool], Awaitable[None]]
 
 
-class AudioStubView:
-    """Adapter that renders audio controls inside the stub codex view."""
+class AudioView:
+    """Adapter that renders audio controls inside the codex view."""
 
     def __init__(
         self,
@@ -59,7 +59,8 @@ class AudioStubView:
         self._model.subscribe(self._on_snapshot)
         self._vmc_view.hide_io_stub()
         self._vmc_view.show_logger()
-        self.logger.info("Audio stub view attached")
+        self._rename_stub_label()
+        self.logger.info("Audio view attached")
 
     # ------------------------------------------------------------------
     # Snapshot handling
@@ -109,13 +110,22 @@ class AudioStubView:
 
         self._meter_container = ttk.Frame(container)
         self._meter_container.grid(row=0, column=0, sticky="nsew")
-        self._meter_container.columnconfigure(0, weight=1)
+        self._meter_container.columnconfigure(0, weight=0, minsize=170)
+        self._meter_container.columnconfigure(1, weight=1)
 
         if self.mode == "headless":
             parent.grid_remove()
-            self.logger.info("Headless mode active; stub frame hidden")
+            self.logger.info("Headless mode active; view frame hidden")
 
         self._ensure_device_menu()
+
+    def _rename_stub_label(self) -> None:
+        stub_frame = getattr(self._vmc_view, "stub_frame", None)
+        if stub_frame is not None and hasattr(stub_frame, "configure"):
+            try:
+                stub_frame.configure(text="Audio Control Panel")
+            except Exception:
+                self.logger.debug("Unable to rename stub frame", exc_info=True)
 
     def _ensure_device_menu(self) -> None:
         if not self.enabled or tk is None:
@@ -181,23 +191,20 @@ class AudioStubView:
 
         for row_index, device_id in enumerate(desired_order):
             container.rowconfigure(row_index, weight=0)
-            frame = ttk.Frame(container)
-            frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 3))
-            frame.columnconfigure(1, weight=1)
-
             device = snapshot.devices.get(device_id) or snapshot.selected_devices[device_id]
-            label = ttk.Label(frame, text=f"Dev{device_id}: {device.name}", width=14)
-            label.grid(row=0, column=0, sticky="w", padx=(0, 6))
+
+            label = ttk.Label(container, text=f"Dev{device_id}: {device.name}")
+            label.grid(row=row_index, column=0, sticky="w", padx=(0, 6), pady=(0, 3))
 
             canvas = tk.Canvas(
-                frame,
+                container,
                 width=260,
                 height=24,
                 bg="#1a1a1a",
                 highlightthickness=1,
                 highlightbackground="gray",
             )
-            canvas.grid(row=0, column=1, sticky="ew")
+            canvas.grid(row=row_index, column=1, sticky="ew", pady=(0, 3))
             self._meter_canvases[device_id] = canvas
 
         self.draw_level_meters(force=True)

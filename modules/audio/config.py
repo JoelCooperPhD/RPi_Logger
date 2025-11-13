@@ -1,4 +1,4 @@
-"""Configuration loading + normalization helpers for the audio stub."""
+"""Configuration loading + normalization helpers for the audio module."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from typing import Any, Mapping, Optional
 
 
 @dataclass(slots=True)
-class AudioStubSettings:
+class AudioSettings:
     """Normalized configuration derived from CLI args and config file."""
 
     mode: str = "gui"
-    output_dir: Path = Path("audio-stub")
-    session_prefix: str = "audio_stub"
+    output_dir: Path = Path("audio")
+    session_prefix: str = "audio"
     log_level: str = "debug"
     log_file: Path | None = None
     enable_commands: bool = False
@@ -32,7 +32,7 @@ class AudioStubSettings:
     shutdown_timeout: float = 15.0
 
     @classmethod
-    def from_args(cls, args: Any) -> "AudioStubSettings":
+    def from_args(cls, args: Any) -> "AudioSettings":
         """Create a settings instance from an argparse namespace."""
 
         def _to_bool(value: Any) -> bool:
@@ -127,8 +127,8 @@ def _config_value(config: Mapping[str, object], key: str, fallback: Any) -> Any:
 def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
     """Create the CLI parser with defaults sourced from the config file."""
 
-    defaults = AudioStubSettings()
-    parser = argparse.ArgumentParser(description="Audio (Stub) module")
+    defaults = AudioSettings()
+    parser = argparse.ArgumentParser(description="Audio module")
 
     parser.add_argument(
         "--mode",

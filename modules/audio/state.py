@@ -166,4 +166,4 @@ class AudioState:
 # Backwards compatibility ----------------------------------------------------
 
 AudioDevice = AudioDeviceInfo
-AudioStubModel = AudioState
+AudioModel = AudioState

@@ -1,4 +1,4 @@
-"""Service layer for the audio stub."""
+"""Service layer for the audio module."""
 
 from .discovery import DeviceDiscoveryService
 from .recorder import AudioDeviceRecorder, RecorderService

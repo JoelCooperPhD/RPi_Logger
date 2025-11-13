@@ -1,4 +1,4 @@
-"""Startup + persistence helpers for the audio stub module."""
+"""Startup + persistence helpers for the audio module."""
 
 from __future__ import annotations
 

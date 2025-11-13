@@ -1,4 +1,4 @@
-"""Audio (Stub) module entry point leveraging the stub (codex) stack."""
+"""Audio module entry point leveraging the codex stack."""
 
 from __future__ import annotations
 
@@ -24,22 +24,22 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor
 
 from logger_core.logging_config import configure_logging
-from modules.audio_stub.config import parse_cli_args
+from modules.audio.config import parse_cli_args
 
-from audio_runtime import AudioStubRuntime
+from audio_runtime import AudioRuntime
 
-DISPLAY_NAME = "Audio (Stub)"
-MODULE_ID = "audio_stub"
+DISPLAY_NAME = "Audio"
+MODULE_ID = "audio"
 CONFIG_PATH = MODULE_DIR / "config.txt"
 
-logger = logging.getLogger("AudioStub")
+logger = logging.getLogger("Audio")
 
 def parse_args(argv: Optional[list[str]] = None):
     return parse_cli_args(argv, config_path=CONFIG_PATH)
 
 
 def build_runtime(context):
-    return AudioStubRuntime(context)
+    return AudioRuntime(context)
 
 
 async def main(argv: Optional[list[str]] = None) -> None:
@@ -54,18 +54,18 @@ async def main(argv: Optional[list[str]] = None) -> None:
     )
     if requested_level and requested_level != effective_level:
         logger.warning(
-            "Ignoring requested log level '%s'; forcing %s for Audio (Stub)",
+            "Ignoring requested log level '%s'; forcing %s for Audio",
             requested_level,
             effective_level,
         )
     logger.debug(
-        "Audio (Stub) entry configured (console=%s, log_file=%s)",
+        "Audio entry configured (console=%s, log_file=%s)",
         getattr(args, "console_output", True),
         getattr(args, "log_file", None),
     )
 
     if not args.enable_commands:
-        logger.error("Audio (Stub) module must be launched by the logger controller.")
+        logger.error("Audio module must be launched by the logger controller.")
         return
 
     module_dir = MODULE_DIR
