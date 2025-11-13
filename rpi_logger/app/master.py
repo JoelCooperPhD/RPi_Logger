@@ -18,7 +18,7 @@ if _venv_path.exists() and str(_venv_path) not in sys.path:
 from logger_core import LoggerSystem, get_shutdown_coordinator
 from logger_core.ui import MainWindow
 from logger_core.cli import HeadlessController, InteractiveShell
-from logger_core.paths import CONFIG_PATH, MASTER_LOG_FILE, ensure_directories
+from logger_core.paths import CONFIG_PATH, MASTER_LOG_FILE, SESSION_STAGING_DIR, ensure_directories
 from logger_core.config_manager import get_config_manager
 from logger_core.logging_config import configure_logging
 
@@ -254,8 +254,10 @@ async def main(argv: Optional[list[str]] = None) -> None:
     logger.info("Session will be created when user starts recording")
     logger.info("=" * 60)
 
+    initial_session_dir = args.data_dir if args.mode in ('cli', 'interactive') else SESSION_STAGING_DIR
+
     logger_system = LoggerSystem(
-        session_dir=args.data_dir,
+        session_dir=initial_session_dir,
         session_prefix=args.session_prefix,
         log_level=args.log_level,
     )

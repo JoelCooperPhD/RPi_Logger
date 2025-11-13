@@ -303,8 +303,6 @@ class ModuleManager:
             self.logger.error("Module info not found: %s", module_name)
             return False
 
-        # Ensure session directory exists
-        self.session_dir.mkdir(parents=True, exist_ok=True)
         self.logger.info("Using session directory for %s: %s", module_name, self.session_dir)
 
         # Create and start process
@@ -329,6 +327,11 @@ class ModuleManager:
         except Exception as e:
             self.logger.error("Exception starting %s: %s", module_name, e, exc_info=True)
             return False
+
+    def set_session_dir(self, session_dir: Path) -> None:
+        """Update the base session directory used for new module launches."""
+        self.session_dir = Path(session_dir)
+        self.logger.info("ModuleManager session directory set to: %s", self.session_dir)
 
     async def send_command(self, module_name: str, command: str) -> bool:
         """Send a raw command string to a running module process."""

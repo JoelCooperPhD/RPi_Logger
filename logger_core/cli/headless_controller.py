@@ -90,7 +90,10 @@ class HeadlessController:
             return False
 
         if session_dir is None:
-            session_dir = self.logger_system.session_dir
+            session_dir = self.logger_system.idle_session_path
+        else:
+            session_dir = Path(session_dir)
+            self.logger_system.set_idle_session_dir(session_dir)
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         session_name = f"{self.logger_system.session_prefix}_{timestamp}"
@@ -131,6 +134,8 @@ class HeadlessController:
         await self.logger_system.stop_session_all()
 
         self.session_active = False
+
+        self.logger_system.reset_session_dir()
 
         self.logger.info("Session stopped")
 

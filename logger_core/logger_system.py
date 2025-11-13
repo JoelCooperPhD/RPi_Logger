@@ -17,7 +17,7 @@ from .module_process import ModuleState
 from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
 from .config_manager import get_config_manager
-from .paths import STATE_FILE
+from .paths import STATE_FILE, SESSION_STAGING_DIR
 from .module_manager import ModuleManager
 from .session_manager import SessionManager
 
@@ -43,14 +43,15 @@ class LoggerSystem:
         ui_callback: Optional[Callable] = None,
     ):
         self.logger = logging.getLogger("LoggerSystem")
-        self.session_dir = Path(session_dir)
+        self.idle_session_dir = Path(session_dir)
+        self._session_dir = Path(session_dir)
         self.session_prefix = session_prefix
         self.log_level = log_level
         self.ui_callback = ui_callback
 
         # Managers
         self.module_manager = ModuleManager(
-            session_dir=session_dir,
+            session_dir=self._session_dir,
             session_prefix=session_prefix,
             log_level=log_level,
             status_callback=self._module_status_callback,
@@ -64,6 +65,41 @@ class LoggerSystem:
         self.event_logger: Optional['EventLogger'] = None
         self._gracefully_quitting_modules: set[str] = set()
         self._shutdown_restart_candidates: List[str] = []
+
+    @property
+    def session_dir(self) -> Path:
+        return self._session_dir
+
+    @session_dir.setter
+    def session_dir(self, value: Path) -> None:
+        self.set_session_dir(value)
+
+    @property
+    def idle_session_path(self) -> Path:
+        return self.idle_session_dir
+
+    def set_session_dir(self, session_dir: Path) -> None:
+        """Update the active session directory for module coordination."""
+        new_path = Path(session_dir)
+        self._session_dir = new_path
+        self.module_manager.set_session_dir(new_path)
+        self.logger.info("Active session directory set to: %s", new_path)
+
+    def set_idle_session_dir(self, session_dir: Path) -> None:
+        """Update the idle (pre-session) directory."""
+        self.idle_session_dir = Path(session_dir)
+        self.logger.info("Idle session directory set to: %s", self.idle_session_dir)
+        if not self.session_manager.recording:
+            self.set_session_dir(self.idle_session_dir)
+
+    def reset_session_dir(self, *, use_staging: bool = False) -> None:
+        """Return to the idle directory (or staging) after a session finishes."""
+        if use_staging:
+            self.idle_session_dir = SESSION_STAGING_DIR
+            target = SESSION_STAGING_DIR
+        else:
+            target = self.idle_session_dir
+        self.set_session_dir(target)
 
     async def async_init(self) -> None:
         """Complete async initialization. Must be called after construction."""

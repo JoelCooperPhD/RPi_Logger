@@ -164,7 +164,7 @@ class MainController:
             full_session_dir = session_dir / session_name
             full_session_dir.mkdir(parents=True, exist_ok=True)
 
-            self.logger_system.session_dir = full_session_dir
+            self.logger_system.set_session_dir(full_session_dir)
 
             from logger_core.event_logger import EventLogger
             self.logger_system.event_logger = EventLogger(full_session_dir, timestamp)
@@ -215,6 +215,10 @@ class MainController:
             await self.timer_manager.stop_session_timer()
 
             self.logger.info("Session stopped")
+
+            # Return modules to the staging directory so they don't keep
+            # writing into the completed session folder.
+            self.logger_system.reset_session_dir(use_staging=True)
 
         except Exception as e:
             self.logger.error("Error stopping session: %s", e, exc_info=True)
