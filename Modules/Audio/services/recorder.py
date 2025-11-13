@@ -16,9 +16,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import sounddevice as sd
 
-from ..constants import AUDIO_BIT_DEPTH, AUDIO_CHANNELS_MONO
-from ..level_meter import LevelMeter
-from ..state import AudioDeviceInfo
+from ..domain import AUDIO_BIT_DEPTH, AUDIO_CHANNELS_MONO, AudioDeviceInfo, LevelMeter
 
 
 @dataclass(slots=True)

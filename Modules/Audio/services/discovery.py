@@ -7,7 +7,7 @@ from typing import Dict
 
 import sounddevice as sd
 
-from ..state import AudioDeviceInfo
+from ..domain import AudioDeviceInfo
 
 
 class DeviceDiscoveryService:

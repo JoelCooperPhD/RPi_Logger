@@ -8,17 +8,16 @@ headless operation otherwise.
 
 - `main_audio.py` handles CLI/config parsing and bootstraps the supervisor
   runtime.
-- `audio_runtime.py` is a thin shim that re-exports the packaged runtime living
-  under `modules/audio/runtime.py`.
-- `modules/audio/`
-  - `config.py` – shared config loader used by both the CLI parser and runtime.
-  - `app.py` – high-level `AudioApp` that wires managers, services, and view.
-  - `startup.py` – persists device selections and restores them on launch.
-  - `state.py` – observable audio state (devices, selections, session info).
-  - `services/` – pure services for device discovery, session coordination, and
-    streaming recorders that write directly to disk.
-- `view.py` – Tk widgets rendered inside the codex window, exposing device
-  toggles and level meters.
+- `config/` contains the shared CLI + file parsing logic (`settings.py`).
+- `app/` hosts the high-level `AudioApp` orchestration (`application.py`) and
+  the persistence helpers that restore device selections (`startup.py`).
+- `domain/` groups immutable constants, the observable state container, level
+  meter logic, and the legacy model shim.
+- `services/` keeps the pure device/session/recorder helpers that interact with
+  hardware and the filesystem.
+- `ui/` isolates the Tk view + callbacks used by the codex shell.
+- `runtime/` bundles the module runtime adapter consumed directly by the
+  supervisor.
 
 Only `sounddevice`, `numpy`, and the codex helpers are required.
 

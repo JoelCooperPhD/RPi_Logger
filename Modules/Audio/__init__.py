@@ -13,7 +13,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover
     if exc.name != "vmc":
         raise
     AudioRuntime = None  # type: ignore[assignment]
-from .state import AudioDeviceInfo, AudioSnapshot, AudioState
+from .domain import AudioDeviceInfo, AudioSnapshot, AudioState
 
 __all__ = [
     "AudioApp",

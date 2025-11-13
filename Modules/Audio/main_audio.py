@@ -25,8 +25,7 @@ from vmc import StubCodexSupervisor
 
 from logger_core.logging_config import configure_logging
 from Modules.Audio.config import parse_cli_args
-
-from audio_runtime import AudioRuntime
+from Modules.Audio.runtime import AudioRuntime
 
 DISPLAY_NAME = "Audio"
 MODULE_ID = "audio"
