@@ -18,6 +18,7 @@ except AttributeError:  # pragma: no cover - compatibility shim
 
 from ..domain.model import FramePayload, RollingFpsCounter
 from ..io.storage import StorageWriteResult
+from ..logging_utils import ensure_structured_logger
 from ..ui import CameraViewAdapter
 from .slot import CameraSlot
 
@@ -47,7 +48,11 @@ class PreviewConsumer:
     ) -> None:
         self._stop_event = stop_event
         self._view = view_adapter
-        self._logger = logger
+        self._logger = ensure_structured_logger(
+            logger,
+            component="PreviewConsumer",
+            fallback_name=f"{__name__}.PreviewConsumer",
+        )
         self._fps_counters: dict[int, RollingFpsCounter] = {}
 
     async def run(self, slot: CameraSlot) -> None:
@@ -117,7 +122,11 @@ class StorageConsumer:
     ) -> None:
         self._stop_event = stop_event
         self._hooks = hooks
-        self._logger = logger
+        self._logger = ensure_structured_logger(
+            logger,
+            component="StorageConsumer",
+            fallback_name=f"{__name__}.StorageConsumer",
+        )
 
     async def run(self, slot: CameraSlot) -> None:
         queue = slot.storage_queue

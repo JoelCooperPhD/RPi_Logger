@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover - defensive import
 from PIL import Image, ImageTk
 
 from ..io.media import frame_to_image as convert_frame_to_image
+from ..logging_utils import ensure_structured_logger
 
 try:  # Pillow 10+
     DEFAULT_RESAMPLE = Image.Resampling.BILINEAR
@@ -41,7 +42,11 @@ class CameraViewAdapter:
         self.args = args
         self.preview_size = preview_size
         self.task_manager = task_manager
-        self.logger = logger
+        self.logger = ensure_structured_logger(
+            logger,
+            component="CameraViewAdapter",
+            fallback_name=f"{__name__}.CameraViewAdapter",
+        )
         self._preview_row: Optional[ttk.Frame] = None
         self._preview_uniform_group = f"camera_preview_columns_{id(self)}"
         self._preview_padx = 6

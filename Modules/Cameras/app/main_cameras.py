@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 from pathlib import Path
 import sys
 from typing import Optional
@@ -28,13 +27,14 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 from vmc.constants import PLACEHOLDER_GEOMETRY
 
+from ..logging_utils import get_module_logger
 from .camera_runtime import CamerasRuntime
 
 DISPLAY_NAME = "Cameras"
 MODULE_ID = "cameras"
 DEFAULT_OUTPUT_SUBDIR = Path("cameras")
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):
@@ -61,8 +61,8 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--log-level",
         type=str,
-        default="info",
-        help="Logging verbosity",
+        default="debug",
+        help="Logging verbosity (default: debug)",
     )
     parser.add_argument(
         "--log-file",

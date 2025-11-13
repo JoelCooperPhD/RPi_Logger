@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from ...logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
+
 try:
     from Modules.Cameras.camera_core.constants import (  # type: ignore
         CSV_FLUSH_INTERVAL_FRAMES as _CSV_FLUSH_INTERVAL_FRAMES,
@@ -10,6 +14,7 @@ try:
         FRAME_LOG_COUNT as _FRAME_LOG_COUNT,
     )
 except ModuleNotFoundError:
+    logger.debug("camera_core constants unavailable; using local fallbacks")
     _CSV_FLUSH_INTERVAL_FRAMES = 60
     _CSV_LOGGER_STOP_TIMEOUT_SECONDS = 5.0
     _CSV_QUEUE_SIZE = 300

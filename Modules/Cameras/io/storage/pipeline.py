@@ -20,6 +20,7 @@ except Exception:  # pragma: no cover - allows dev environments without Picamera
 
 from .csv_logger import CameraCSVLogger
 from ...domain.model import FramePayload
+from ...logging_utils import ensure_structured_logger
 
 
 @dataclass(slots=True)
@@ -62,7 +63,12 @@ class CameraStoragePipeline:
         self.max_fps = max_fps
         self.overlay_config = overlay_config or {}
         self.save_stills = save_stills
-        self._logger = logger or logging.getLogger(f"CameraStoragePipeline[{camera_index}]")
+        component = f"StoragePipeline.cam{camera_index}"
+        self._logger = ensure_structured_logger(
+            logger,
+            component=component,
+            fallback_name=f"{__name__}.{component}",
+        )
         self.uses_hardware_encoder = camera is not None
 
         self._csv_logger: Optional[CameraCSVLogger] = None

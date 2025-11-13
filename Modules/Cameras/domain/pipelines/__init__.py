@@ -1,5 +1,10 @@
 """Pipelines encapsulating frame capture and processing for Cameras."""
 
+from ...logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
+logger.debug("Domain.pipelines package initialized")
+
 from .image_pipeline import ImagePipeline, PipelineMetrics, RollingFpsCounter
 from .frame_timing import FrameTimingResult, FrameTimingTracker, FrameTimingCalculator, TimingUpdate
 

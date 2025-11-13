@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 from ...io.storage.constants import FRAME_LOG_COUNT
+from ...logging_utils import ensure_structured_logger, get_module_logger
+
+module_logger = get_module_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -54,6 +57,11 @@ class FrameTimingCalculator:
         logger,
         log_first_n: int = FRAME_LOG_COUNT,
     ) -> TimingUpdate:
+        structured_logger = ensure_structured_logger(
+            logger,
+            component="FrameTimingCalculator",
+            fallback_name=f"{__name__}.FrameTiming",
+        )
         sensor_ts_ns = self._normalize_sensor_timestamp(metadata)
         expected_interval_ns = self._derive_expected_interval(metadata)
         dropped = 0
@@ -89,7 +97,7 @@ class FrameTimingCalculator:
         self._last_sensor_timestamp_ns = sensor_ts_ns
 
         if log_first_n and captured_frames < log_first_n:
-            logger.info(
+            structured_logger.info(
                 "Frame %d timing -> sensor_ts=%s expected_interval=%s dropped=%s",
                 captured_frames,
                 sensor_ts_ns,

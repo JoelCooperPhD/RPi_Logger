@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Optional
 
 import numpy as np
 from PIL import Image
 
-logger = logging.getLogger(__name__)
+from ...logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
 
 _LOGGED_FORMATS: set[str] = set()
 

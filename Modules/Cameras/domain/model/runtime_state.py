@@ -11,11 +11,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from ...logging_utils import get_module_logger
+
+module_logger = get_module_logger(__name__)
+
 try:
     from Modules.Cameras.camera_core.config.config_loader import (
         DEFAULT_OVERLAY_CONFIG as CAMERA_OVERLAY_DEFAULTS,
     )
 except ModuleNotFoundError:
+    module_logger.debug("camera_core overlay defaults unavailable; using fallback values")
     CAMERA_OVERLAY_DEFAULTS = {
         'resolution_preset': 0,
         'resolution_width': 1920,

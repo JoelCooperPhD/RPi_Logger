@@ -20,6 +20,10 @@ from .color_convert import (
     log_frame_format,
     normalize_pixel_format,
 )
+from ...logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
+logger.debug("frame_convert helpers ready")
 
 YUV_PLANAR_FORMATS = {
     "YUV420",
@@ -88,6 +92,7 @@ def _is_planar_yuv_candidate(frame: Any, pixel_format: str) -> bool:
 
 def _convert_yuv420_to_rgb(frame: np.ndarray, size_hint: Optional[Tuple[int, int]]) -> np.ndarray:
     if frame.dtype != np.uint8:
+        logger.debug("Converting planar frame dtype to uint8 | dtype=%s", frame.dtype)
         frame = frame.astype(np.uint8, copy=False)
 
     rows, stride = frame.shape
@@ -104,6 +109,11 @@ def _convert_yuv420_to_rgb(frame: np.ndarray, size_hint: Optional[Tuple[int, int
 
     expected_rows = height * 3 // 2
     if expected_rows > rows:
+        logger.debug(
+            "Planar frame shorter than expected rows; clamping | expected=%s rows=%s",
+            expected_rows,
+            rows,
+        )
         expected_rows = rows - (rows % 2)
         height = max(2, (expected_rows * 2) // 3)
         if height % 2:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
 from dataclasses import dataclass
@@ -16,8 +15,9 @@ from .constants import (
     CSV_QUEUE_SIZE,
     FRAME_LOG_COUNT,
 )
+from ...logging_utils import get_module_logger
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 @dataclass(slots=True)

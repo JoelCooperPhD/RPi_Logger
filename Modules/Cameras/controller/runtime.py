@@ -25,8 +25,12 @@ from ..domain.pipelines import FrameTimingTracker, ImagePipeline
 from ..ui import CameraViewAdapter
 from ..io.storage import CameraStoragePipeline, StorageWriteResult
 from ..io.media import frame_to_image as convert_frame_to_image
+from ..logging_utils import ensure_structured_logger
+from .camera_setup import CameraSetupManager
 from .pipeline import PreviewConsumer, StorageConsumer, StorageHooks
 from .slot import CameraSlot
+from .storage_manager import CameraStorageManager
+from .view_manager import CameraViewManager
 
 
 class CameraController(ModuleRuntime):
@@ -153,10 +157,16 @@ class CameraController(ModuleRuntime):
         self.supervisor = context.supervisor
         self.supervisor_model = context.model
         self.view = context.view
-        base_logger = context.logger
-        self.logger = base_logger.getChild("CamerasRuntime") if base_logger else logging.getLogger("CamerasRuntime")
+        base_logger = ensure_structured_logger(
+            context.logger,
+            component="CameraController",
+            fallback_name=f"{__name__}.CameraController",
+        )
+        self.logger = base_logger.getChild("runtime")
+        self.logger.debug("CameraController initializing")
         self.display_name = context.display_name
         self.module_dir = context.module_dir
+        self.picamera_cls = Picamera2
 
         self.task_manager = BackgroundTaskManager("CamerasTasks", self.logger)
         timeout = getattr(self.args, "shutdown_timeout", 15.0)
@@ -178,6 +188,10 @@ class CameraController(ModuleRuntime):
                 task_manager=self.task_manager,
                 logger=self.logger,
             )
+
+        self.view_manager = CameraViewManager(self)
+        self.storage_manager = CameraStorageManager(self)
+        self.setup_manager = CameraSetupManager(self)
 
         self._stop_event = asyncio.Event()
         self._previews: List[CameraSlot] = []
@@ -230,12 +244,12 @@ class CameraController(ModuleRuntime):
         self.view_adapter.build_camera_grid(max_cams)
         self.view_adapter.install_io_metrics_panel()
         self.view_adapter.configure_capture_menu()
-        self._install_view_hooks()
+        self.view_manager.install_view_hooks()
         self._sync_record_toggle()
 
         if self.view_adapter and self._metrics_task is None:
             self._metrics_task = self.task_manager.create(
-                self._run_metrics_loop(),
+                self.view_manager.run_metrics_loop(),
                 name="CameraPipelineMetrics",
             )
 
@@ -243,7 +257,7 @@ class CameraController(ModuleRuntime):
             self.logger.error("Cannot initialize cameras: picamera2 missing")
             return
 
-        await self._initialize_cameras()
+        await self.setup_manager.initialize_cameras()
         await self._flush_sensor_sync()
         await self._await_first_frames(timeout=6.0)
 
@@ -581,73 +595,13 @@ class CameraController(ModuleRuntime):
             self.view_adapter.refresh_preview_fps_ui()
 
     def _record_sensor_modes(self, camera: Any) -> None:
-        if not camera:
-            return
-        try:
-            modes = getattr(camera, "sensor_modes", None)
-        except Exception:  # pragma: no cover - defensive
-            modes = None
-        if not modes:
-            return
-
-        entries: dict[tuple[int, int], int] = {}
-        for mode in modes:
-            if not isinstance(mode, dict):
-                continue
-            size = mode.get("size")
-            if not size:
-                continue
-            bit_depth = mode.get("bit_depth")
-            if isinstance(size, tuple) and len(size) == 2:
-                entries[(int(size[0]), int(size[1]))] = int(bit_depth) if isinstance(bit_depth, (int, float)) else 0
-
-        if not entries:
-            return
-
-        sizes = set(entries.keys())
-        if not self._sensor_mode_sizes:
-            self._sensor_mode_sizes = sizes
-            self._sensor_mode_bit_depths = entries
-        else:
-            self._sensor_mode_sizes &= sizes
-            self._sensor_mode_bit_depths = {
-                size: entries.get(size, self._sensor_mode_bit_depths.get(size, 0))
-                for size in self._sensor_mode_sizes
-            }
-
-        if not self._sensor_mode_sizes:
-            return
-
-        sorted_sizes = sorted(f"{w}x{h}" for w, h in self._sensor_mode_sizes)
-        self.logger.info(
-            "Intersected sensor modes (%d): %s",
-            len(self._sensor_mode_sizes),
-            ", ".join(sorted_sizes),
-        )
+        self.setup_manager.record_sensor_modes(camera)
 
     def _is_supported_sensor_size(self, size: Optional[tuple[int, int]]) -> bool:
-        if size is None:
-            return True
-        if not self._sensor_mode_sizes:
-            return True
-        return tuple(size) in self._sensor_mode_sizes
+        return self.setup_manager.is_supported_sensor_size(size)
 
     def _get_requested_resolution(self) -> Optional[tuple[int, int]]:
-        width = self._safe_int(getattr(self.args, "save_width", None))
-        height = self._safe_int(getattr(self.args, "save_height", None))
-
-        if width is None and height is None:
-            return None
-        if width is None and height is not None:
-            width = int(round(height / self.NATIVE_ASPECT))
-        if height is None and width is not None:
-            height = int(round(width * self.NATIVE_ASPECT))
-        if width is None or height is None:
-            return None
-        width = max(64, int(width))
-        height = max(64, int(height))
-        width, height = self._ensure_even_dimensions(width, height)
-        return width, height
+        return self.setup_manager.get_requested_resolution()
 
     def _apply_preview_fraction(self) -> None:
         base_interval = self.save_frame_interval if self.save_frame_interval > 0 else (1.0 / self.MAX_SENSOR_FPS)
@@ -1331,7 +1285,7 @@ class CameraController(ModuleRuntime):
         setattr(self.args, "save_height", int(height))
 
     def _update_slot_targets(self, slot: CameraSlot) -> None:
-        slot.save_size = self._coerce_save_size(slot.main_size) or slot.main_size or self.MAX_NATIVE_SIZE
+        self.setup_manager.update_slot_targets(slot)
 
     def _derive_interval(self, *, fps: Any = None, interval: Any = None) -> float:
         if fps is not None:
@@ -1570,82 +1524,16 @@ class CameraController(ModuleRuntime):
                 await self._start_storage_resources(slot)
 
     def _unwrap_config_block(self, config: Any, key: str) -> dict[str, Any]:
-        try:
-            if isinstance(config, dict):
-                raw = config.get(key, {}) or {}
-            else:
-                raw = getattr(config, key, None)
-        except Exception:  # pragma: no cover - defensive
-            return {}
-
-        if isinstance(raw, dict):
-            return raw
-
-        block: dict[str, Any] = {}
-        if raw is None:
-            return block
-
-        for attr in ("format", "size", "stride", "framesize"):
-            value = getattr(raw, attr, None)
-            if value is not None:
-                block[attr] = value
-        return block
+        return self.setup_manager.unwrap_config_block(config, key)
 
     def _resolve_sensor_resolution(self, camera: Any) -> Optional[tuple[int, int]]:
-        size = self._normalize_size(getattr(camera, "sensor_resolution", None))
-        if size:
-            return self._clamp_resolution(size[0], size[1], self.MAX_NATIVE_SIZE)
-
-        properties = getattr(camera, "camera_properties", None)
-        if isinstance(properties, dict):
-            size = self._normalize_size(properties.get("PixelArraySize"))
-            if size:
-                return self._clamp_resolution(size[0], size[1], self.MAX_NATIVE_SIZE)
-        return self.MAX_NATIVE_SIZE
+        return self.setup_manager.resolve_sensor_resolution(camera)
 
     def _coerce_capture_size(self, native_size: Optional[tuple[int, int]]) -> Optional[tuple[int, int]]:
-        width_value = getattr(self.args, "capture_width", None)
-        height_value = getattr(self.args, "capture_height", None)
-
-        width = self._safe_int(width_value)
-        height = self._safe_int(height_value)
-
-        target = self._get_requested_resolution()
-        if target is None:
-            return native_size
-
-        width, height = target
-        if width <= 0 or height <= 0:
-            return native_size
-        return self._ensure_even_dimensions(width, height)
+        return self.setup_manager.coerce_capture_size(native_size)
 
     def _coerce_save_size(self, capture_size: Optional[tuple[int, int]]) -> Optional[tuple[int, int]]:
-        width_value = getattr(self.args, "save_width", None)
-        height_value = getattr(self.args, "save_height", None)
-
-        width = self._safe_int(width_value)
-        height = self._safe_int(height_value)
-
-        if width is None and height is None:
-            return capture_size
-
-        capture = self._normalize_size(capture_size) or self.MAX_NATIVE_SIZE
-
-        if width is not None and height is not None:
-            width, height = self._enforce_native_aspect(width, height)
-            return self._clamp_resolution(width, height, capture)
-
-        if width is not None and capture:
-            height = int(round(width * self.NATIVE_ASPECT))
-            width, height = self._enforce_native_aspect(width, height)
-            return self._clamp_resolution(width, height, capture)
-
-        if height is not None and capture:
-            width = int(round(height / self.NATIVE_ASPECT))
-            width, height = self._enforce_native_aspect(width, height)
-            return self._clamp_resolution(width, height, capture)
-
-        return capture
+        return self.setup_manager.coerce_save_size(capture_size)
 
     def _resolve_save_dir(self) -> Path:
         return self.state.resolve_save_dir()
@@ -1677,38 +1565,13 @@ class CameraController(ModuleRuntime):
         return mapping.get(fraction, 1)
 
     def _compute_lores_size(self, main_size: tuple[int, int]) -> Optional[tuple[int, int]]:
-        """Compute lores stream size that is <= main size and suitable for preview."""
-        if not main_size:
-            return None
-
-        main_width, main_height = main_size
-        preview_width, preview_height = self.PREVIEW_SIZE
-
-        if preview_width >= main_width or preview_height >= main_height:
-            return None
-
-        target_width = min(preview_width, main_width)
-        target_height = min(preview_height, main_height)
-
-        if target_width < 160 or target_height < 120:
-            return None
-
-        target_width, target_height = self._ensure_even_dimensions(target_width, target_height)
-        return (target_width, target_height)
+        return self.setup_manager.compute_lores_size(main_size)
 
     def _clamp_resolution(self, width: int, height: int, native: Optional[tuple[int, int]]) -> tuple[int, int]:
-        return self.state.clamp_resolution(width, height, native)
+        return self.setup_manager.clamp_resolution(width, height, native)
 
     def _enforce_native_aspect(self, width: int, height: int) -> tuple[int, int]:
-        return self.state.enforce_native_aspect(width, height)
-
-    @staticmethod
-    def _ensure_even_dimensions(width: int, height: int) -> tuple[int, int]:
-        return CameraModel._ensure_even_dimensions(width, height)
-
-    @staticmethod
-    def _normalize_size(value: Any) -> Optional[tuple[int, int]]:
-        return CameraModel.normalize_size(value)
+        return self.setup_manager.enforce_native_aspect(width, height)
 
     def _build_camera_configuration(
         self,
@@ -1717,27 +1580,6 @@ class CameraController(ModuleRuntime):
         lores_size: Optional[tuple[int, int]],
         sensor_config: Optional[dict],
     ):
-        main_config = {"size": capture_size, "format": "YUV420"}
-        kwargs: dict[str, Any] = {
-            "main": main_config,
-            "sensor": sensor_config,
-            "encode": "main",
-        }
-
-        lores_format = "XRGB8888"
-        if lores_size:
-            kwargs["lores"] = {"size": lores_size, "format": lores_format}
-            kwargs["display"] = "lores"
-        else:
-            kwargs["display"] = "main"
-
-        try:
-            return camera.create_video_configuration(**kwargs)
-        except Exception:
-            # Fallback for platforms that do not support RGB lores streams
-            if lores_size:
-                kwargs["lores"] = {"size": lores_size, "format": "YUV420"}
-            main_config["format"] = "RGB888"
-            return camera.create_video_configuration(**kwargs)
+        return self.setup_manager.build_camera_configuration(camera, capture_size, lores_size, sensor_config)
 
 __all__ = ["CameraController"]

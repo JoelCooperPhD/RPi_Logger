@@ -3,9 +3,39 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+import sys
+from typing import Optional
+
+MODULE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = MODULE_DIR.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+STUB_ROOT = MODULE_DIR.parent / "stub (codex)"
+if STUB_ROOT.exists() and str(STUB_ROOT) not in sys.path:
+    sys.path.insert(0, str(STUB_ROOT))
+
+_venv_site = PROJECT_ROOT / ".venv" / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+if _venv_site.exists() and str(_venv_site) not in sys.path:
+    sys.path.insert(0, str(_venv_site))
+
+if __package__ in {None, ""}:
+    __package__ = "Modules.Cameras"
 
 from .app.main_cameras import *  # noqa: F401,F403
 from .app.main_cameras import main as _app_main
+from .logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
+logger.debug("main_cameras shim imported")
+
+
+async def main(argv: Optional[list[str]] = None) -> None:
+    """Entry point invoked by the module manager discovery logic."""
+    logger.debug("Delegating Cameras entry point to app layer")
+    await _app_main(argv)
 
 if __name__ == "__main__":
-    asyncio.run(_app_main())
+    logger.debug("main_cameras shim executing entrypoint")
+    asyncio.run(main())

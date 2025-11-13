@@ -10,6 +10,9 @@ from typing import Any, Optional
 from ..domain.pipelines import FrameTimingTracker, ImagePipeline
 from ..domain.model import CapturedFrame, FrameGate, FramePayload
 from ..io.storage import CameraStoragePipeline
+from ..logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -77,6 +80,13 @@ class CameraSlot:
         self.capture_queue = capture_queue
         self.preview_queue = preview_queue
         self.storage_queue = storage_queue
+        logger.debug(
+            "CameraSlot queues attached | index=%s capture=%s preview=%s storage=%s",
+            self.index,
+            bool(capture_queue),
+            bool(preview_queue),
+            bool(storage_queue),
+        )
 
     def reset_pipeline(self) -> None:
         self.capture_task = None
@@ -84,5 +94,6 @@ class CameraSlot:
         self.preview_task = None
         self.storage_task = None
         self.image_pipeline = None
+        logger.debug("CameraSlot pipeline reset | index=%s", self.index)
 
 __all__ = ["CameraSlot"]

@@ -12,6 +12,7 @@ import numpy as np
 
 from ..model.runtime_state import CapturedFrame, FramePayload
 from ...io.storage.constants import FRAME_LOG_COUNT
+from ...logging_utils import ensure_structured_logger
 
 
 class RollingFpsCounter:
@@ -61,7 +62,12 @@ class ImagePipeline:
         fps_window_seconds: float = 2.0,
     ) -> None:
         self.camera_index = camera_index
-        self.logger = logger
+        component = f"ImagePipeline.cam{camera_index}"
+        self.logger = ensure_structured_logger(
+            logger,
+            component=component,
+            fallback_name=f"{__name__}.{component}",
+        )
         self._view_resize_checker = view_resize_checker or (lambda: False)
         self._status_refresh = status_refresh or (lambda: None)
         self.metrics = PipelineMetrics()
