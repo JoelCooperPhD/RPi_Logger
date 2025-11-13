@@ -3,7 +3,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from .base_mode import BaseMode
-from logger_core.commands import BaseSlaveMode, BaseCommandHandler, StatusMessage
+from rpi_logger.core.commands import BaseSlaveMode, BaseCommandHandler, StatusMessage
 from ..commands import CommandHandler
 
 if TYPE_CHECKING:

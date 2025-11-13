@@ -288,12 +288,12 @@ class TkinterGUIBase:
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
 
-        from Modules.base import gui_utils
+        from rpi_logger.modules.base import gui_utils
         gui_utils.send_geometry_to_parent(self.root)
 
     def send_quitting_status(self):
         try:
-            from logger_core.commands import StatusMessage
+            from rpi_logger.core.commands import StatusMessage
             StatusMessage.send("quitting", {"reason": "user_closed_window"})
             logger.debug("Sent quitting status to parent")
         except Exception as e:

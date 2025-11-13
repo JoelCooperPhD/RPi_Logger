@@ -76,7 +76,9 @@ class CameraStorageManager:
             logger=self.logger.getChild(f"cam{slot.index}"),
         )
         await pipeline.start()
-        fps_hint = controller._resolve_video_fps(slot)
+        fps_hint = await controller._await_slot_fps(slot)
+        if fps_hint <= 0:
+            fps_hint = controller._resolve_video_fps(slot)
         await pipeline.start_video_recording(fps_hint)
         slot.storage_pipeline = pipeline
         self.logger.info(

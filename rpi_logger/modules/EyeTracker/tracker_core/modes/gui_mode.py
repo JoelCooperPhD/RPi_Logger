@@ -3,7 +3,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from Modules.base.modes import BaseGUIMode
+from rpi_logger.modules.base.modes import BaseGUIMode
 from ..interfaces.gui import TkinterGUI
 from ..commands import CommandHandler
 

@@ -10,7 +10,7 @@ class GPSInitializationError(Exception):
 
 def load_config_file(config_path=None):
     from pathlib import Path
-    from logger_core.config_manager import get_config_manager
+    from rpi_logger.core.config_manager import get_config_manager
 
     if config_path is None:
         config_path = Path(__file__).parent.parent / "config.txt"

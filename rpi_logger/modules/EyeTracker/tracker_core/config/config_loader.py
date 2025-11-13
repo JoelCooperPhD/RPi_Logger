@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
-from Modules.base import ConfigLoader as BaseConfigLoader
+from rpi_logger.modules.base import ConfigLoader as BaseConfigLoader
 
 logger = logging.getLogger(__name__)
 

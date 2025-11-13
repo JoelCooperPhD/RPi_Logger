@@ -9,8 +9,17 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-MODULE_DIR = Path(__file__).parent
-PROJECT_ROOT = MODULE_DIR.parent.parent
+MODULE_DIR = Path(__file__).resolve().parent
+
+
+def _find_project_root(start: Path) -> Path:
+    for parent in start.parents:
+        if parent.name == "rpi_logger":
+            return parent.parent
+    return start.parents[-1]
+
+
+PROJECT_ROOT = _find_project_root(MODULE_DIR)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -35,10 +44,10 @@ from rpi_logger.cli.common import (
     get_config_bool,
     get_config_str,
 )
-from Modules.base import load_window_geometry_from_config
+from rpi_logger.modules.base import load_window_geometry_from_config
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 
-from Modules.EyeTracker.tracker_core.config import load_config_file
+from rpi_logger.modules.EyeTracker.tracker_core.config import load_config_file
 
 from eye_t_runtime import EyeTStubRuntime
 

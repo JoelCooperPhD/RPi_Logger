@@ -1,6 +1,6 @@
 
 from typing import TYPE_CHECKING
-from Modules.base.modes import BaseMode as CoreBaseMode
+from rpi_logger.modules.base.modes import BaseMode as CoreBaseMode
 
 if TYPE_CHECKING:
     from ..tracker_system import TrackerSystem

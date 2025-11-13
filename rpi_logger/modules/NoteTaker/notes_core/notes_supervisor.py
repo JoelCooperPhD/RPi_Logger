@@ -2,7 +2,7 @@
 import logging
 from typing import Type
 
-from Modules.base import BaseSupervisor
+from rpi_logger.modules.base import BaseSupervisor
 from . import NotesInitializationError
 from .notes_system import NotesSystem
 

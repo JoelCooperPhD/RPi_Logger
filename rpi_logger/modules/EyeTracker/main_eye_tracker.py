@@ -269,7 +269,7 @@ def parse_args(argv: Optional[list[str]] = None):
     args.gaze_color_not_worn_g = default_gaze_color_not_worn_g
     args.gaze_color_not_worn_r = default_gaze_color_not_worn_r
 
-    from Modules.base import load_window_geometry_from_config
+    from rpi_logger.modules.base import load_window_geometry_from_config
     args.window_geometry = load_window_geometry_from_config(config, args.window_geometry)
 
     args.config = config

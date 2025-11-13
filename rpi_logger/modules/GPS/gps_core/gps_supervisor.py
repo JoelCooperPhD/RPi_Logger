@@ -1,6 +1,6 @@
 from typing import Type
 
-from Modules.base import BaseSupervisor
+from rpi_logger.modules.base import BaseSupervisor
 from .gps_system import GPSSystem, GPSInitializationError
 
 

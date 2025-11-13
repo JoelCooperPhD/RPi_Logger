@@ -9,8 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional, Sequence, Tuple
 
-from logger_core.logging_config import configure_logging
-from logger_core.paths import USER_MODULE_LOGS_DIR
+from rpi_logger.core.logging_config import configure_logging
+from rpi_logger.core.paths import USER_MODULE_LOGS_DIR
 
 
 LOG_LEVELS: dict[str, int] = {
@@ -239,7 +239,7 @@ def _try_prepare_log_destination(directory: Path, filename: str) -> tuple[Path |
 def _prepare_log_file(module_dir: Path, module_name: str) -> tuple[Path, bool, str | None]:
     """Select a writable log destination, falling back to the user state dir."""
 
-    from Modules.base import sanitize_path_component
+    from rpi_logger.modules.base import sanitize_path_component
 
     preferred_dir = module_dir / "logs"
     filename = f"{module_name}.log"
@@ -265,7 +265,7 @@ def setup_module_logging(
     module_dir: Path,
     default_prefix: str = 'session'
 ) -> Tuple[str, Path, bool]:
-    from Modules.base import setup_session_from_args, redirect_stderr_stdout
+    from rpi_logger.modules.base import setup_session_from_args, redirect_stderr_stdout
 
     session_dir, session_name, is_command_mode = setup_session_from_args(
         args,
@@ -277,7 +277,7 @@ def setup_module_logging(
     original_stdout = redirect_stderr_stdout(log_file)
 
     if is_command_mode:
-        from logger_core.commands import StatusMessage
+        from rpi_logger.core.commands import StatusMessage
         StatusMessage.configure(original_stdout)
 
     configure_logging(

@@ -12,8 +12,8 @@ if TYPE_CHECKING:
     import tkinter as tk
 
 from .base_mode import BaseMode
-from logger_core.commands import BaseCommandHandler, CommandMessage, StatusMessage
-from logger_core.async_bridge import AsyncBridge
+from rpi_logger.core.commands import BaseCommandHandler, CommandMessage, StatusMessage
+from rpi_logger.core.async_bridge import AsyncBridge
 
 
 class BaseGUIMode(BaseMode, ABC):
@@ -151,7 +151,7 @@ class BaseGUIMode(BaseMode, ABC):
                     self.logger.info("Device(s) detected after %d attempts!", retry_attempt)
 
                 if hasattr(self.system, 'enable_gui_commands') and self.system.enable_gui_commands:
-                    from logger_core.commands import StatusMessage
+                    from rpi_logger.core.commands import StatusMessage
                     init_duration = self.system.lifecycle_timer.get_duration("process_start", "initialized")
                     StatusMessage.send_with_timing("initialized", init_duration, {
                         "status": "connected",

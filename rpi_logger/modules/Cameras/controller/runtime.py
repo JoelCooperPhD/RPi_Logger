@@ -1341,7 +1341,9 @@ class CameraController(ModuleRuntime):
             logger=self.logger.getChild(f"StorageCam{slot.index}"),
         )
         await pipeline.start()
-        fps_hint = self._resolve_video_fps(slot)
+        fps_hint = await self._await_slot_fps(slot)
+        if fps_hint <= 0:
+            fps_hint = self._resolve_video_fps(slot)
         await pipeline.start_video_recording(fps_hint)
         slot.storage_pipeline = pipeline
         self.logger.info(
@@ -1405,13 +1407,36 @@ class CameraController(ModuleRuntime):
             slot.storage_queue = None
             slot.storage_task = None
 
-    def _resolve_video_fps(self, slot: CameraSlot) -> float:
-        if slot.last_hardware_fps and slot.last_hardware_fps > 0:
-            return min(float(slot.last_hardware_fps), self.MAX_SENSOR_FPS)
-        if slot.last_expected_interval_ns and slot.last_expected_interval_ns > 0:
-            fps = 1_000_000_000.0 / float(slot.last_expected_interval_ns)
+    def _probe_slot_fps(self, slot: CameraSlot) -> float:
+        for candidate in (
+            getattr(slot, "last_observed_fps", 0.0),
+            getattr(slot, "last_hardware_fps", 0.0),
+        ):
+            if candidate and candidate > 0:
+                return min(float(candidate), self.MAX_SENSOR_FPS)
+        interval_ns = getattr(slot, "last_expected_interval_ns", None)
+        if interval_ns and interval_ns > 0:
+            fps = 1_000_000_000.0 / float(interval_ns)
             if fps > 0:
                 return min(fps, self.MAX_SENSOR_FPS)
+        return 0.0
+
+    async def _await_slot_fps(self, slot: CameraSlot, timeout: float = 1.0) -> float:
+        fps = self._probe_slot_fps(slot)
+        if fps > 0:
+            return fps
+        deadline = time.monotonic() + max(0.05, timeout)
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+            fps = self._probe_slot_fps(slot)
+            if fps > 0:
+                return fps
+        return 0.0
+
+    def _resolve_video_fps(self, slot: CameraSlot) -> float:
+        fps = self._probe_slot_fps(slot)
+        if fps > 0:
+            return fps
         if self.save_frame_interval > 0:
             fps = 1.0 / self.save_frame_interval
             return min(max(fps, 1.0), self.MAX_SENSOR_FPS)

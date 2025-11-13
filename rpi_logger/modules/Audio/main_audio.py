@@ -8,8 +8,17 @@ from pathlib import Path
 import sys
 from typing import Optional
 
-MODULE_DIR = Path(__file__).parent
-PROJECT_ROOT = MODULE_DIR.parent.parent
+MODULE_DIR = Path(__file__).resolve().parent
+
+
+def _find_project_root(start: Path) -> Path:
+    for parent in start.parents:
+        if parent.name == "rpi_logger":
+            return parent.parent
+    return start.parents[-1]
+
+
+PROJECT_ROOT = _find_project_root(MODULE_DIR)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -23,9 +32,9 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 
 from vmc import StubCodexSupervisor
 
-from logger_core.logging_config import configure_logging
-from Modules.Audio.config import parse_cli_args
-from Modules.Audio.runtime import AudioRuntime
+from rpi_logger.core.logging_config import configure_logging
+from rpi_logger.modules.Audio.config import parse_cli_args
+from rpi_logger.modules.Audio.runtime import AudioRuntime
 
 DISPLAY_NAME = "Audio"
 MODULE_ID = "audio"

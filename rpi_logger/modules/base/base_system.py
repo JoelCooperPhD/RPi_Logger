@@ -198,13 +198,13 @@ class BaseSystem(ABC):
         self.lifecycle_timer.log_summary()
 
         if self._should_send_status():
-            from logger_core.commands import StatusMessage
+            from rpi_logger.core.commands import StatusMessage
             cleanup_duration = self.lifecycle_timer.get_duration("cleanup_start", "cleanup_complete")
             StatusMessage.send_with_timing("cleanup_complete", cleanup_duration)
 
     def _send_slave_error(self, message: str) -> None:
         try:
-            from logger_core.commands import StatusMessage
+            from rpi_logger.core.commands import StatusMessage
             StatusMessage.send("error", {"message": message})
         except ImportError:
             self.logger.warning("Cannot send slave error - StatusMessage not available")
@@ -212,7 +212,7 @@ class BaseSystem(ABC):
     def _send_slave_status(self, status: str, data: Optional[dict] = None) -> None:
         if self.slave_mode:
             try:
-                from logger_core.commands import StatusMessage
+                from rpi_logger.core.commands import StatusMessage
                 StatusMessage.send(status, data or {})
             except ImportError:
                 self.logger.warning("Cannot send slave status - StatusMessage not available")

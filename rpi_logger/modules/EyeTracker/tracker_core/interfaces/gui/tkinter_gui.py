@@ -7,7 +7,7 @@ from tkinter import ttk, scrolledtext
 from typing import Optional, TYPE_CHECKING
 import datetime
 
-from Modules.base import TkinterGUIBase, TkinterMenuBase
+from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase
 
 if TYPE_CHECKING:
     from ...tracker_system import TrackerSystem
@@ -129,7 +129,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
     def save_window_geometry_to_config(self):
         from pathlib import Path
-        from Modules.base import gui_utils
+        from rpi_logger.modules.base import gui_utils
         config_path = gui_utils.get_module_config_path(Path(__file__))
         gui_utils.save_window_geometry(self.root, config_path)
 

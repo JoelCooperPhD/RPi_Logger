@@ -124,7 +124,7 @@ class ConfigLoader:
         This helper allows modules to load their config.txt without hardcoding paths.
         The calling file should be __file__ from the caller's context.
 
-        Example usage from Modules/Camera/camera_core/config/config_loader.py:
+        Example usage from rpi_logger.modules/Camera/camera_core/config/config_loader.py:
             config = ConfigLoader.load_module_config(__file__)
 
         Args:
@@ -137,8 +137,8 @@ class ConfigLoader:
             Dict containing config values
         """
         # Navigate up from calling_file to find module root (where config.txt lives)
-        # Typical structure: Modules/ModuleName/module_core/config/config_loader.py
-        # We need to go up 3 levels to Modules/ModuleName/
+        # Typical structure: rpi_logger/modules/ModuleName/module_core/config/config_loader.py
+        # We need to go up 3 levels to rpi_logger/modules/ModuleName/
         calling_path = Path(calling_file)
 
         # Go up until we find a directory containing config_filename

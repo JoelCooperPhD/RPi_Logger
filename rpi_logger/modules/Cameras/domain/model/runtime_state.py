@@ -16,7 +16,7 @@ from ...logging_utils import get_module_logger
 module_logger = get_module_logger(__name__)
 
 try:
-    from Modules.Cameras.camera_core.config.config_loader import (
+    from rpi_logger.modules.Cameras.camera_core.config.config_loader import (
         DEFAULT_OVERLAY_CONFIG as CAMERA_OVERLAY_DEFAULTS,
     )
 except ModuleNotFoundError:
@@ -81,7 +81,7 @@ except ModuleNotFoundError:
         'disable_mp4_conversion': True,
     }
 
-from logger_core.config_manager import get_config_manager
+from rpi_logger.core.config_manager import get_config_manager
 from vmc.constants import PLACEHOLDER_GEOMETRY
 
 

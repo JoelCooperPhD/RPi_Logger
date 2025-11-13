@@ -166,7 +166,7 @@ class MainController:
 
             self.logger_system.set_session_dir(full_session_dir)
 
-            from logger_core.event_logger import EventLogger
+            from rpi_logger.core.event_logger import EventLogger
             self.logger_system.event_logger = EventLogger(full_session_dir, timestamp)
             await self.logger_system.event_logger.initialize()
 

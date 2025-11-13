@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional
 
-from Modules.base import BaseSystem, RecordingStateMixin
+from rpi_logger.modules.base import BaseSystem, RecordingStateMixin
 from . import NotesInitializationError
 from .notes_handler import NotesHandler
 
@@ -34,7 +34,7 @@ class NotesSystem(BaseSystem, RecordingStateMixin):
             logger.info("NoteTaker module initialized successfully")
 
             if self._should_send_status():
-                from logger_core.commands import StatusMessage
+                from rpi_logger.core.commands import StatusMessage
                 init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
                 StatusMessage.send_with_timing("initialized", init_duration, {
                     "device_type": "notes_handler",

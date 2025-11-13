@@ -20,7 +20,7 @@ from rpi_logger.cli.common import (
     log_module_startup,
     log_module_shutdown,
 )
-from Modules.base import load_window_geometry_from_config
+from rpi_logger.modules.base import load_window_geometry_from_config
 from notes_core import MODULE_NAME, MODULE_DESCRIPTION
 from notes_core.config import load_config_file
 from notes_core.notes_supervisor import NotesSupervisor

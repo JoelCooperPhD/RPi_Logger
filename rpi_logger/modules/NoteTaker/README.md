@@ -38,7 +38,7 @@ The NoteTaker module is typically used via the master logger (`python -m rpi_log
 - Coordinates window positioning with other modules
 
 To enable auto-start:
-1. Edit `Modules/NoteTaker/config.txt`: Set `enabled = true`
+1. Edit `rpi_logger/modules/NoteTaker/config.txt`: Set `enabled = true`
 2. Launch master logger: `python -m rpi_logger`
 3. NoteTaker will automatically launch with the other enabled modules
 

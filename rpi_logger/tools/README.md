@@ -95,7 +95,7 @@ The sync_and_mux utility achieves ~30ms A/V synchronization accuracy through:
 
 ### Configuration
 
-Edit `Modules/base/constants.py` to configure:
+Edit `rpi_logger/modules/base/constants.py` to configure:
 
 ```python
 AV_MUXING_ENABLED = True          # Enable/disable muxing
@@ -222,7 +222,7 @@ print(f"Total dropped frames: {camera_timing['total_hardware_drops'].iloc[-1]}")
 #### Manual Muxing with Custom Offset
 
 ```python
-from Modules.base.av_muxer import AVMuxer
+from rpi_logger.modules.base.av_muxer import AVMuxer
 from pathlib import Path
 
 muxer = AVMuxer(timeout_seconds=60)
@@ -237,7 +237,7 @@ await muxer.mux_audio_video(
 #### Reading Sync Metadata
 
 ```python
-from Modules.base.sync_metadata import SyncMetadataWriter
+from rpi_logger.modules.base.sync_metadata import SyncMetadataWriter
 from pathlib import Path
 
 sync_data = await SyncMetadataWriter.read_sync_file(

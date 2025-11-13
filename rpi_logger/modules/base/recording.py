@@ -93,7 +93,7 @@ class RecordingManagerBase(ABC):
 
         Note:
             While base metadata classes (FrameMetadata, GazeMetadata, CameraMetadata)
-            are provided in Modules.base.metadata, modules may use their own
+            are provided in rpi_logger.modules.base.metadata, modules may use their own
             metadata structures for internal implementation.
         """
         pass

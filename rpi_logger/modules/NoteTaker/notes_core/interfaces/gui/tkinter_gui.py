@@ -6,7 +6,7 @@ from pathlib import Path
 from tkinter import ttk, scrolledtext
 from typing import TYPE_CHECKING, Optional
 
-from Modules.base import TkinterGUIBase, TkinterMenuBase, gui_utils
+from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase, gui_utils
 
 if TYPE_CHECKING:
     from ...notes_system import NotesSystem

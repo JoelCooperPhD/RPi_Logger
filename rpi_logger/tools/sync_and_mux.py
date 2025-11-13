@@ -24,10 +24,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from Modules.base.sync_metadata import SyncMetadataWriter
-from Modules.base.av_muxer import AVMuxer
-from Modules.base.constants import AV_MUXING_TIMEOUT_SECONDS, AV_DELETE_SOURCE_FILES
-from logger_core.logging_config import configure_logging
+from rpi_logger.modules.base.sync_metadata import SyncMetadataWriter
+from rpi_logger.modules.base.av_muxer import AVMuxer
+from rpi_logger.modules.base.constants import AV_MUXING_TIMEOUT_SECONDS, AV_DELETE_SOURCE_FILES
+from rpi_logger.core.logging_config import configure_logging
 
 configure_logging()
 logger = logging.getLogger(__name__)

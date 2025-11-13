@@ -32,7 +32,7 @@ def save_window_geometry(root_widget, config_path: Path) -> bool:
     logger.debug("Saving window geometry to config")
 
     try:
-        from Modules.base import ConfigLoader
+        from rpi_logger.modules.base import ConfigLoader
 
         geometry_str = root_widget.geometry()
         logger.debug("Current geometry string: '%s'", geometry_str)
@@ -78,7 +78,7 @@ def save_window_geometry(root_widget, config_path: Path) -> bool:
 def send_geometry_to_parent(root_widget) -> bool:
     try:
         logger.debug("Sending geometry to parent process")
-        from logger_core.commands import StatusMessage
+        from rpi_logger.core.commands import StatusMessage
 
         geometry_str = root_widget.geometry()
         logger.debug("Current geometry string: %s", geometry_str)

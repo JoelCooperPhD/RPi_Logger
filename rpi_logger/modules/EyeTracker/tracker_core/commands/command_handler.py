@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict
 
-from logger_core.commands import BaseCommandHandler, StatusMessage
+from rpi_logger.core.commands import BaseCommandHandler, StatusMessage
 
 if TYPE_CHECKING:
     from ..tracker_system import TrackerSystem

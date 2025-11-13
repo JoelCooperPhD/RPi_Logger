@@ -4,8 +4,8 @@ import sys
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
-from Modules.base.modes.base_mode import BaseMode
-from logger_core.commands import CommandMessage, StatusMessage
+from rpi_logger.modules.base.modes.base_mode import BaseMode
+from rpi_logger.core.commands import CommandMessage, StatusMessage
 
 from ..commands import CommandHandler
 

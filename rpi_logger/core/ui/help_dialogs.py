@@ -47,7 +47,7 @@ class AboutDialog:
         title_label.pack()
 
         try:
-            from logger_core import __version__
+            from rpi_logger.core import __version__
             version_text = f"Version {__version__}"
         except ImportError:
             version_text = "Version Unknown"
@@ -146,7 +146,7 @@ class SystemInfoDialog:
         info_lines.append("=" * 60)
 
         try:
-            from logger_core import __version__
+            from rpi_logger.core import __version__
             info_lines.append(f"Version: {__version__}")
         except ImportError:
             info_lines.append("Version: Unknown")

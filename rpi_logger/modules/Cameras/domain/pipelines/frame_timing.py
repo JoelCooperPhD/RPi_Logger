@@ -19,7 +19,9 @@ class TimingUpdate:
     hardware_frame_number: Optional[int]
     sensor_timestamp_ns: Optional[int]
     expected_interval_ns: Optional[int]
+    observed_interval_ns: Optional[int]
     hardware_fps: float
+    observed_fps: float
     dropped_since_last: int
 
 
@@ -42,12 +44,16 @@ class FrameTimingCalculator:
         self._last_sensor_timestamp_ns: Optional[int] = None
         self._expected_interval_ns: Optional[int] = None
         self._hardware_fps: float = 0.0
+        self._observed_interval_ns: Optional[float] = None
+        self._observed_fps: float = 0.0
 
     def reset(self) -> None:
         self._hardware_frame_number = -1
         self._last_sensor_timestamp_ns = None
         self._expected_interval_ns = None
         self._hardware_fps = 0.0
+        self._observed_interval_ns = None
+        self._observed_fps = 0.0
 
     def update(
         self,
@@ -72,6 +78,7 @@ class FrameTimingCalculator:
                 self._hardware_fps = 1_000_000_000 / expected_interval_ns
 
         increment = 1
+        observed_interval_ns: Optional[float] = None
         if (
             sensor_ts_ns is not None
             and self._last_sensor_timestamp_ns is not None
@@ -83,6 +90,13 @@ class FrameTimingCalculator:
                 expected_frames = max(1, round(delta / self._expected_interval_ns))
                 increment = expected_frames
                 dropped = max(0, expected_frames - 1)
+                observed_interval_ns = delta / max(expected_frames, 1)
+                self._update_observed_rate(observed_interval_ns)
+        elif sensor_ts_ns is not None and self._last_sensor_timestamp_ns is not None:
+            delta = sensor_ts_ns - self._last_sensor_timestamp_ns
+            if delta > 0:
+                observed_interval_ns = float(delta)
+                self._update_observed_rate(observed_interval_ns)
 
         if self._hardware_frame_number < 0:
             self._hardware_frame_number = max(0, captured_frames)
@@ -109,9 +123,24 @@ class FrameTimingCalculator:
             hardware_frame_number=hardware_frame_number,
             sensor_timestamp_ns=sensor_ts_ns,
             expected_interval_ns=self._expected_interval_ns,
+             observed_interval_ns=int(observed_interval_ns) if observed_interval_ns is not None else None,
             hardware_fps=self._hardware_fps,
+             observed_fps=self._observed_fps,
             dropped_since_last=dropped,
         )
+
+    def _update_observed_rate(self, interval_ns: Optional[float]) -> None:
+        if interval_ns is None or interval_ns <= 0:
+            return
+        alpha = 0.3
+        if self._observed_interval_ns is None:
+            self._observed_interval_ns = float(interval_ns)
+        else:
+            self._observed_interval_ns = (
+                (1.0 - alpha) * self._observed_interval_ns + alpha * float(interval_ns)
+            )
+        if self._observed_interval_ns > 0:
+            self._observed_fps = 1_000_000_000.0 / self._observed_interval_ns
 
     def _normalize_sensor_timestamp(self, metadata: dict) -> Optional[int]:
         sensor_ts = metadata.get('SensorTimestamp')

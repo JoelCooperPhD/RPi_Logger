@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from Modules.base import BaseSystem, ModuleInitializationError, RecordingStateMixin
+from rpi_logger.modules.base import BaseSystem, ModuleInitializationError, RecordingStateMixin
 from .config.tracker_config import TrackerConfig
 from .device_manager import DeviceManager
 from .stream_handler import StreamHandler
@@ -103,7 +103,7 @@ class TrackerSystem(BaseSystem, RecordingStateMixin):
         self.lifecycle_timer.mark_phase("device_discovery_start")
 
         if self._should_send_status():
-            from logger_core.commands import StatusMessage
+            from rpi_logger.core.commands import StatusMessage
 
             StatusMessage.send(
                 "discovering", {"device_type": "eye_tracker", "timeout": self.device_timeout}
@@ -119,7 +119,7 @@ class TrackerSystem(BaseSystem, RecordingStateMixin):
         self.logger.info("Tracker system initialized")
 
         if self._should_send_status():
-            from logger_core.commands import StatusMessage
+            from rpi_logger.core.commands import StatusMessage
 
             init_duration = self.lifecycle_timer.get_duration(
                 "device_discovery_start", "initialized"

@@ -4,7 +4,7 @@ import time
 from typing import Any, Optional
 from pathlib import Path
 
-from Modules.base import BaseSystem, RecordingStateMixin
+from rpi_logger.modules.base import BaseSystem, RecordingStateMixin
 from .gps_handler import GPSHandler
 from .recording import GPSRecordingManager
 from .constants import SERIAL_PORT, BAUD_RATE
@@ -41,7 +41,7 @@ class GPSSystem(BaseSystem, RecordingStateMixin):
             discovery_attempts += 1
             try:
                 if self._should_send_status() and discovery_attempts == 1:
-                    from logger_core.commands import StatusMessage
+                    from rpi_logger.core.commands import StatusMessage
                     StatusMessage.send("discovering", {"device_type": "gps_receiver", "timeout": self.device_timeout})
 
                 self.gps_handler = GPSHandler(SERIAL_PORT, BAUD_RATE)
@@ -49,7 +49,7 @@ class GPSSystem(BaseSystem, RecordingStateMixin):
 
                 if await self.gps_handler.wait_for_fix(timeout=2.0):
                     if self._should_send_status():
-                        from logger_core.commands import StatusMessage
+                        from rpi_logger.core.commands import StatusMessage
                         StatusMessage.send("device_detected", {"device_type": "gps_receiver", "port": SERIAL_PORT})
                     break
             except Exception as e:
@@ -77,7 +77,7 @@ class GPSSystem(BaseSystem, RecordingStateMixin):
         logger.info("GPS receiver initialized successfully")
 
         if self._should_send_status():
-            from logger_core.commands import StatusMessage
+            from rpi_logger.core.commands import StatusMessage
             init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
             StatusMessage.send_with_timing("initialized", init_duration, {
                 "device_type": "gps_receiver",

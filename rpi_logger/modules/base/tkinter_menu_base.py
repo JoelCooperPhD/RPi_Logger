@@ -217,7 +217,7 @@ class TkinterMenuBase:
                     setattr(config, config_key, visible)
 
                 if hasattr(self.system, 'config_file_path'):
-                    from Modules.base import ConfigLoader
+                    from rpi_logger.modules.base import ConfigLoader
                     ConfigLoader.update_config_values(
                         self.system.config_file_path,
                         {config_key: visible}
@@ -306,14 +306,14 @@ class TkinterMenuBase:
 
     def _show_about(self):
         try:
-            from logger_core.ui.help_dialogs import AboutDialog
+            from rpi_logger.core.ui.help_dialogs import AboutDialog
             AboutDialog(self.root)
         except Exception as e:
             logger.error("Failed to show About dialog: %s", e)
 
     def _show_system_info(self):
         try:
-            from logger_core.ui.help_dialogs import SystemInfoDialog
+            from rpi_logger.core.ui.help_dialogs import SystemInfoDialog
             logger_system = getattr(self, 'system', None)
             SystemInfoDialog(self.root, logger_system)
         except Exception as e:
@@ -321,7 +321,7 @@ class TkinterMenuBase:
 
     def _show_help(self):
         try:
-            from logger_core.ui.help_dialogs import QuickStartDialog
+            from rpi_logger.core.ui.help_dialogs import QuickStartDialog
             QuickStartDialog(self.root)
         except Exception as e:
             logger.error("Failed to show Help dialog: %s", e)
@@ -374,7 +374,7 @@ class TkinterMenuBase:
             else:
                 config_path = Path(__file__).parent.parent / "config.txt"
 
-            from logger_core.ui.help_dialogs import ResetSettingsDialog
+            from rpi_logger.core.ui.help_dialogs import ResetSettingsDialog
             ResetSettingsDialog(self.root, config_path)
         except Exception as e:
             logger.error("Failed to reset settings: %s", e)

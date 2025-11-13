@@ -67,6 +67,7 @@ class CameraSlot:
     last_video_frame_count: int = 0
     video_stall_frames: int = 0
     last_video_fps: float = 0.0
+    last_observed_fps: float = 0.0
     session_camera_dir: Optional[Path] = field(default=None, repr=False)
     slow_capture_warnings: int = 0
 

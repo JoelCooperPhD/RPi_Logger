@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, Union
 
-MODULE_LOGGER_NAMESPACE = "Modules.Cameras"
+MODULE_LOGGER_NAMESPACE = "rpi_logger.modules.Cameras"
 DEFAULT_COMPONENT = "Cameras"
 DEFAULT_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s | %(message)s"
 

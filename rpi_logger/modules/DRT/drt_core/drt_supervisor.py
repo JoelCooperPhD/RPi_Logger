@@ -1,7 +1,7 @@
 import logging
 from typing import Type
 
-from Modules.base import BaseSupervisor
+from rpi_logger.modules.base import BaseSupervisor
 from . import DRTInitializationError
 from .drt_system import DRTSystem
 

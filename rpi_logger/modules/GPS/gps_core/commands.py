@@ -1,5 +1,5 @@
 from typing import Dict, Any
-from logger_core.commands import BaseCommandHandler, StatusMessage
+from rpi_logger.core.commands import BaseCommandHandler, StatusMessage
 
 
 class CommandHandler(BaseCommandHandler):

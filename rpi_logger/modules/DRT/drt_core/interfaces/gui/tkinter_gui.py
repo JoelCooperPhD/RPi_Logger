@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Optional, Dict, Any
 from collections import deque
 from pathlib import Path
 
-from Modules.base import TkinterGUIBase, TkinterMenuBase
+from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase
 from .drt_plotter import DRTPlotter
 from .sdrt_config_window import SDRTConfigWindow
 from .quick_status_panel import QuickStatusPanel
@@ -344,7 +344,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 self.quick_panel.set_module_state("Idle")
 
     def save_window_geometry_to_config(self):
-        from Modules.base import gui_utils
+        from rpi_logger.modules.base import gui_utils
 
         config_path = gui_utils.get_module_config_path(Path(__file__))
         gui_utils.save_window_geometry(self.root, config_path)

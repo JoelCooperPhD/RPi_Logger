@@ -43,7 +43,7 @@ examples_output/
 /data/
 
 # GPS map tiles
-Modules/GPS/offline_tiles.db
+rpi_logger/modules/GPS/offline_tiles.db
 
 # Development notes
 AGENTS.md

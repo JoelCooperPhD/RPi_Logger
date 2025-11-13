@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
-from logger_core.commands import StatusMessage, StatusType
+from rpi_logger.core.commands import StatusMessage, StatusType
 
 from vmc.runtime import RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard

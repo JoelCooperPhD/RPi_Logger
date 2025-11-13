@@ -8,7 +8,7 @@ The DRT module provides comprehensive support for sDRT devices connected via USB
 
 ## Architecture
 
-### Reusable USB Serial Framework (`Modules/base/usb_serial_manager.py`)
+### Reusable USB Serial Framework (`rpi_logger/modules/base/usb_serial_manager.py`)
 - **USBDeviceConfig**: Device configuration (VID/PID, baudrate, timeouts)
 - **USBSerialDevice**: Individual device connection and async I/O
 - **USBDeviceMonitor**: Hot-plug detection with automatic connect/disconnect
@@ -102,7 +102,7 @@ Timestamp,Port,TrialNumber,ReactionTime_ms
 
 ### Standalone Mode
 ```bash
-cd Modules/DRT
+cd rpi_logger/modules/DRT
 python3 main_drt.py --mode gui
 ```
 
@@ -115,7 +115,7 @@ The DRT module is typically used via the master logger (`python -m rpi_logger`),
 - Manages trial-based recording
 
 To enable auto-start:
-1. Edit `Modules/DRT/config.txt`: Set `enabled = true`
+1. Edit `rpi_logger/modules/DRT/config.txt`: Set `enabled = true`
 2. Launch master logger: `python -m rpi_logger`
 3. DRT will automatically launch with the other enabled modules
 

@@ -512,7 +512,7 @@ class MainWindow:
             return
 
         try:
-            from Modules.base import gui_utils
+            from rpi_logger.modules.base import gui_utils
 
             geometry_str = self.root.geometry()
             parsed = gui_utils.parse_geometry_string(geometry_str)

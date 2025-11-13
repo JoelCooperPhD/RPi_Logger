@@ -16,7 +16,7 @@ from typing import Optional, Any, TextIO, TYPE_CHECKING
 
 import numpy as np
 
-from Modules.base.recording import RecordingManagerBase
+from rpi_logger.modules.base.recording import RecordingManagerBase
 from ..config.tracker_config import TrackerConfig as Config
 from .async_csv_writer import AsyncCSVWriter
 from .video_encoder import VideoEncoder

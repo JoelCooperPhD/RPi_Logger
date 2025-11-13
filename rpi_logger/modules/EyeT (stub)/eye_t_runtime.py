@@ -11,18 +11,18 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from logger_core.commands import StatusMessage, StatusType
+from rpi_logger.core.commands import StatusMessage, StatusType
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
 try:  # tracker_core dependencies (optional on dev hosts)
-    from Modules.EyeTracker.tracker_core.config.tracker_config import TrackerConfig
-    from Modules.EyeTracker.tracker_core.device_manager import DeviceManager
-    from Modules.EyeTracker.tracker_core.stream_handler import StreamHandler
-    from Modules.EyeTracker.tracker_core.frame_processor import FrameProcessor
-    from Modules.EyeTracker.tracker_core.recording import RecordingManager
-    from Modules.EyeTracker.tracker_core.tracker_handler import TrackerHandler
-    from Modules.EyeTracker.tracker_core.tracker_system import TrackerInitializationError
+    from rpi_logger.modules.EyeTracker.tracker_core.config.tracker_config import TrackerConfig
+    from rpi_logger.modules.EyeTracker.tracker_core.device_manager import DeviceManager
+    from rpi_logger.modules.EyeTracker.tracker_core.stream_handler import StreamHandler
+    from rpi_logger.modules.EyeTracker.tracker_core.frame_processor import FrameProcessor
+    from rpi_logger.modules.EyeTracker.tracker_core.recording import RecordingManager
+    from rpi_logger.modules.EyeTracker.tracker_core.tracker_handler import TrackerHandler
+    from rpi_logger.modules.EyeTracker.tracker_core.tracker_system import TrackerInitializationError
 except Exception as exc:  # pragma: no cover - defensive import guard
     TrackerConfig = None  # type: ignore[assignment]
     DeviceManager = None  # type: ignore[assignment]

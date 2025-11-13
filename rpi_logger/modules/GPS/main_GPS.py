@@ -18,7 +18,7 @@ from rpi_logger.cli.common import (
     log_module_startup,
     log_module_shutdown,
 )
-from Modules.base import load_window_geometry_from_config
+from rpi_logger.modules.base import load_window_geometry_from_config
 from gps_core import MODULE_NAME, MODULE_DESCRIPTION, GPSSupervisor, load_config_file
 
 logger = logging.getLogger(__name__)

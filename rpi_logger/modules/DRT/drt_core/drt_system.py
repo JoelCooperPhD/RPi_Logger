@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import Any, Optional, Dict, List, Tuple
 
-from Modules.base import BaseSystem, RecordingStateMixin, USBDeviceConfig, USBDeviceMonitor, USBSerialDevice
+from rpi_logger.modules.base import BaseSystem, RecordingStateMixin, USBDeviceConfig, USBDeviceMonitor, USBSerialDevice
 from . import DRTInitializationError
 from .drt_handler import DRTHandler
 
@@ -28,7 +28,7 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             self.lifecycle_timer.mark_phase("device_discovery_start")
 
             if self._should_send_status():
-                from logger_core.commands import StatusMessage
+                from rpi_logger.core.commands import StatusMessage
                 StatusMessage.send("discovering", {"device_type": "usb_drt", "timeout": self.device_timeout})
 
             self.session_dir.mkdir(parents=True, exist_ok=True)
@@ -59,7 +59,7 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             logger.info("DRT module initialized successfully, discovering devices...")
 
             if self._should_send_status():
-                from logger_core.commands import StatusMessage
+                from rpi_logger.core.commands import StatusMessage
                 init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
                 StatusMessage.send_with_timing("initialized", init_duration, {
                     "device_type": "usb_drt",

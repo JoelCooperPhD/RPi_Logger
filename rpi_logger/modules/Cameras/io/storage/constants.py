@@ -7,7 +7,7 @@ from ...logging_utils import get_module_logger
 logger = get_module_logger(__name__)
 
 try:
-    from Modules.Cameras.camera_core.constants import (  # type: ignore
+    from rpi_logger.modules.Cameras.camera_core.constants import (  # type: ignore
         CSV_FLUSH_INTERVAL_FRAMES as _CSV_FLUSH_INTERVAL_FRAMES,
         CSV_LOGGER_STOP_TIMEOUT_SECONDS as _CSV_LOGGER_STOP_TIMEOUT_SECONDS,
         CSV_QUEUE_SIZE as _CSV_QUEUE_SIZE,

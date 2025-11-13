@@ -19,7 +19,7 @@ from rpi_logger.cli.common import (
     log_module_startup,
     log_module_shutdown,
 )
-from Modules.base import load_window_geometry_from_config
+from rpi_logger.modules.base import load_window_geometry_from_config
 from drt_core import MODULE_NAME, MODULE_DESCRIPTION
 from drt_core.config import load_config_file
 from drt_core.drt_supervisor import DRTSupervisor

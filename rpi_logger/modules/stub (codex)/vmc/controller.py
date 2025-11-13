@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from logger_core.commands import CommandMessage, StatusMessage, StatusType
+from rpi_logger.core.commands import CommandMessage, StatusMessage, StatusType
 
 from .constants import DISPLAY_NAME
 from .model import StubCodexModel

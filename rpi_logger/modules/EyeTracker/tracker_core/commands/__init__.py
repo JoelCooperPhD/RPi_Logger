@@ -1,5 +1,5 @@
 
-from logger_core.commands import CommandMessage, StatusMessage
+from rpi_logger.core.commands import CommandMessage, StatusMessage
 
 from .command_handler import CommandHandler
 

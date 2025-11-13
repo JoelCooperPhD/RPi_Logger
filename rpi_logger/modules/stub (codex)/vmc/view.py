@@ -411,7 +411,7 @@ class StubCodexView:
 
     def _show_help(self) -> None:
         try:
-            from logger_core.ui.help_dialogs import QuickStartDialog
+            from rpi_logger.core.ui.help_dialogs import QuickStartDialog
             QuickStartDialog(self.root)
         except Exception as exc:
             self.logger.error("Failed to open help dialog: %s", exc)

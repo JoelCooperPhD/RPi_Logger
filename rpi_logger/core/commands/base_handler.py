@@ -170,7 +170,7 @@ class BaseCommandHandler(ABC):
             return
 
         try:
-            from Modules.base import gui_utils
+            from rpi_logger.modules.base import gui_utils
 
             geometry_str = window.geometry()
             parsed = gui_utils.parse_geometry_string(geometry_str)
@@ -190,7 +190,7 @@ class BaseCommandHandler(ABC):
 
         except Exception as e:
             try:
-                from Modules.base import sanitize_error_message
+                from rpi_logger.modules.base import sanitize_error_message
                 error_msg = sanitize_error_message(str(e))
             except ImportError:
                 error_msg = str(e)

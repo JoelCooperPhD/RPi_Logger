@@ -15,12 +15,12 @@ _venv_path = _PROJECT_ROOT / ".venv" / "lib" / "python3.13" / "site-packages"
 if _venv_path.exists() and str(_venv_path) not in sys.path:
     sys.path.insert(0, str(_venv_path))
 
-from logger_core import LoggerSystem, get_shutdown_coordinator
-from logger_core.ui import MainWindow
-from logger_core.cli import HeadlessController, InteractiveShell
-from logger_core.paths import CONFIG_PATH, MASTER_LOG_FILE, SESSION_STAGING_DIR, ensure_directories
-from logger_core.config_manager import get_config_manager
-from logger_core.logging_config import configure_logging
+from rpi_logger.core import LoggerSystem, get_shutdown_coordinator
+from rpi_logger.core.ui import MainWindow
+from rpi_logger.core.cli import HeadlessController, InteractiveShell
+from rpi_logger.core.paths import CONFIG_PATH, MASTER_LOG_FILE, SESSION_STAGING_DIR, ensure_directories
+from rpi_logger.core.config_manager import get_config_manager
+from rpi_logger.core.logging_config import configure_logging
 
 
 logger = logging.getLogger(__name__)

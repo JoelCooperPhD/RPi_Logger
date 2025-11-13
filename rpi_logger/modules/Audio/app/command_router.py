@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, TYPE_CHECKING
 
-from logger_core.commands import StatusType
+from rpi_logger.core.commands import StatusType
 
 if TYPE_CHECKING:  # pragma: no cover - avoids circular import at runtime
     from .application import AudioApp

@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from logger_core.commands import StatusType
+from rpi_logger.core.commands import StatusType
 
 from ..domain import AudioState
 from ..services import RecorderService, SessionService

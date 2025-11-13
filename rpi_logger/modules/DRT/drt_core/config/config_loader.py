@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
-from Modules.base import ConfigLoader
+from rpi_logger.modules.base import ConfigLoader
 
 logger = logging.getLogger(__name__)
 

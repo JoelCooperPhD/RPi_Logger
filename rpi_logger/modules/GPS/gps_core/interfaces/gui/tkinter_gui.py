@@ -6,7 +6,7 @@ from typing import Optional
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 
-from Modules.base import TkinterGUIBase, TkinterMenuBase
+from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase
 from rpi_logger.cli.common import get_config_float, get_config_int
 
 logger = logging.getLogger("GPS_GUI")
@@ -678,7 +678,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 logger.error("Failed to save map state: %s", exc, exc_info=True)
 
     def save_window_geometry_to_config(self):
-        from Modules.base import gui_utils
+        from rpi_logger.modules.base import gui_utils
         config_path = gui_utils.get_module_config_path(Path(__file__))
         gui_utils.save_window_geometry(self.root, config_path)
 
@@ -686,7 +686,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         if not self.map_widget:
             return
 
-        from Modules.base import ConfigLoader, gui_utils
+        from rpi_logger.modules.base import ConfigLoader, gui_utils
 
         current_zoom = int(self.map_widget.zoom)
         lat, lon = self.map_widget.get_position()

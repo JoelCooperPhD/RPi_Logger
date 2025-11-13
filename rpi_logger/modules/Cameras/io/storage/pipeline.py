@@ -86,6 +86,9 @@ class CameraStoragePipeline:
         self._writer_fps: float = 30.0
         self._video_start_monotonic: Optional[float] = None
         self._video_fps_hint: Optional[float] = None
+        self._pending_video_frames: list[tuple[int, np.ndarray]] = []
+        self._pending_frame_limit = 120
+        self._pending_fps_warning_logged = False
 
         self._codec_candidates = ("mp4v", "avc1", "H264", "XVID")
         self._fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -160,11 +163,15 @@ class CameraStoragePipeline:
         if rgb_frame is None:
             raise RuntimeError("RGB frame required for software encoding path")
 
-        if self._video_writer is None:
-            await self._ensure_video_writer((rgb_frame.shape[1], rgb_frame.shape[0]), fps_hint)
-
         video_written = False
-        if self._video_writer is not None:
+        writer_ready = self._video_writer is not None
+        frame_size = (rgb_frame.shape[1], rgb_frame.shape[0])
+        if not writer_ready:
+            writer_ready = await self._try_prepare_video_writer(frame_size, fps_hint)
+            if not writer_ready:
+                self._queue_pending_frame(rgb_frame, payload.capture_index)
+
+        if writer_ready and self._video_writer is not None:
             video_written = await self._write_video_frame(rgb_frame, payload.capture_index)
 
         image_path: Optional[Path] = None
@@ -319,6 +326,44 @@ class CameraStoragePipeline:
             f"Failed to open video writer for {video_path} (attempted codecs: {', '.join(self._codec_candidates)})"
         )
 
+    async def _try_prepare_video_writer(self, frame_size: tuple[int, int], fps_hint: float) -> bool:
+        if self._video_writer is not None or self.uses_hardware_encoder:
+            return True
+        fps = fps_hint if fps_hint > 0 else (self._video_fps_hint or 0.0)
+        if fps <= 0:
+            return False
+        await self._ensure_video_writer(frame_size, fps)
+        await self._flush_pending_frames()
+        return self._video_writer is not None
+
+    def _queue_pending_frame(
+        self,
+        rgb_frame: np.ndarray,
+        frame_number: int,
+    ) -> None:
+        if rgb_frame is None:
+            return
+        frame_copy = np.array(rgb_frame, copy=True)
+        self._pending_video_frames.append((frame_number, frame_copy))
+        if (
+            len(self._pending_video_frames) >= self._pending_frame_limit
+            and not self._pending_fps_warning_logged
+        ):
+            self._logger.warning(
+                "Video writer waiting for FPS hint; buffering %d frames",
+                len(self._pending_video_frames),
+            )
+            self._pending_fps_warning_logged = True
+
+    async def _flush_pending_frames(self) -> None:
+        if not self._pending_video_frames or self._video_writer is None:
+            return
+        pending = list(self._pending_video_frames)
+        self._pending_video_frames.clear()
+        self._pending_fps_warning_logged = False
+        for frame_number, frame in pending:
+            await self._write_video_frame(frame, frame_number)
+
     async def _write_video_frame(self, rgb_frame: np.ndarray, frame_number: int) -> bool:
         if self._video_writer is None:
             return False
@@ -389,6 +434,8 @@ class CameraStoragePipeline:
         self._video_frame_count = 0
         self._writer_codec = None
         self._video_start_monotonic = None
+        self._pending_video_frames.clear()
+        self._pending_fps_warning_logged = False
 
         if video_path is not None:
             self._logger.info(

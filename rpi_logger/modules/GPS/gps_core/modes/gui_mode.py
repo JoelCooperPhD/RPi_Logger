@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from Modules.base.modes import BaseGUIMode
+from rpi_logger.modules.base.modes import BaseGUIMode
 from ..interfaces.gui import TkinterGUI
 
 if TYPE_CHECKING:

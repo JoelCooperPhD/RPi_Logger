@@ -2,7 +2,7 @@
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from logger_core.commands import BaseCommandHandler, StatusMessage
+from rpi_logger.core.commands import BaseCommandHandler, StatusMessage
 
 if TYPE_CHECKING:
     from ..notes_system import NotesSystem

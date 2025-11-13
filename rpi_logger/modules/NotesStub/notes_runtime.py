@@ -20,7 +20,7 @@ except Exception:  # pragma: no cover - defensive import for headless environmen
     scrolledtext = None  # type: ignore
     messagebox = None  # type: ignore
 
-from logger_core.commands import StatusMessage, StatusType
+from rpi_logger.core.commands import StatusMessage, StatusType
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 

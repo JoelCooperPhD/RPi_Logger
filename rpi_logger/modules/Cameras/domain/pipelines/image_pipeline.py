@@ -234,6 +234,8 @@ class ImagePipeline:
             slot.last_hardware_fps = timing_update.hardware_fps
         if timing_update.expected_interval_ns is not None:
             slot.last_expected_interval_ns = timing_update.expected_interval_ns
+        if timing_update.observed_fps and timing_update.observed_fps > 0:
+            slot.last_observed_fps = timing_update.observed_fps
 
         if capture_index < FRAME_LOG_COUNT:
             self.logger.info(

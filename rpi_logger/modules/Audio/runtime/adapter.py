@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from logger_core.commands import StatusMessage
+from rpi_logger.core.commands import StatusMessage
 
 from vmc import ModuleRuntime, RuntimeContext
 

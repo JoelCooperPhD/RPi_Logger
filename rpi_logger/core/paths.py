@@ -6,8 +6,9 @@ import os
 from pathlib import Path
 
 
-# Project root directory
-PROJECT_ROOT = Path(__file__).parent.parent
+# Project/package roots
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PACKAGE_ROOT = PROJECT_ROOT / "rpi_logger"
 
 # Configuration
 CONFIG_PATH = PROJECT_ROOT / "config.txt"
@@ -20,7 +21,7 @@ MASTER_LOG_FILE = LOGS_DIR / "master.log"
 STATE_FILE = PROJECT_ROOT / "running_modules.json"
 
 # Module directories
-MODULES_DIR = PROJECT_ROOT / "Modules"
+MODULES_DIR = PACKAGE_ROOT / "modules"
 
 # User-specific state (allows running from read-only project directories)
 _USER_STATE_ENV = os.environ.get("RPI_LOGGER_STATE_DIR")
@@ -46,6 +47,7 @@ def ensure_directories() -> None:
 
 __all__ = [
     'PROJECT_ROOT',
+    'PACKAGE_ROOT',
     'CONFIG_PATH',
     'LOGS_DIR',
     'MASTER_LOG_FILE',

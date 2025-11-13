@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Any, TYPE_CHECKING, Dict
 
-from Modules.base.modes import BaseGUIMode
+from rpi_logger.modules.base.modes import BaseGUIMode
 from ..commands import CommandHandler
 
 if TYPE_CHECKING:

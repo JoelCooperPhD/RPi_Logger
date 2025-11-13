@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime
 
-from Modules.base import USBSerialDevice
-from logger_core.commands import StatusMessage
+from rpi_logger.modules.base import USBSerialDevice
+from rpi_logger.core.commands import StatusMessage
 from .constants import DRT_COMMANDS, DRT_RESPONSE_TYPES, ISO_PRESET_CONFIG
 
 logger = logging.getLogger(__name__)

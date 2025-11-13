@@ -1,5 +1,5 @@
 # Import shared constants from base module
-from Modules.base.constants import (
+from rpi_logger.modules.base.constants import (
     CLEANUP_TIMEOUT_SECONDS,
     MAX_ERROR_MESSAGE_LENGTH,
 )

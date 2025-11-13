@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from logger_core.logging_config import configure_logging
+from rpi_logger.core.logging_config import configure_logging
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -196,14 +196,15 @@ class ModuleLifecycleTest:
 
 async def test_all_modules():
     project_root = PROJECT_ROOT
+    modules_root = project_root / "rpi_logger" / "modules"
 
     modules_to_test = [
-        ("AudioRecorder", project_root / "Modules" / "AudioRecorder" / "main_audio.py"),
-        ("Cameras", project_root / "Modules" / "Cameras" / "main_camera.py"),
-        ("DRT", project_root / "Modules" / "DRT" / "main_DRT.py"),
-        ("EyeTracker", project_root / "Modules" / "EyeTracker" / "main_eye_tracker.py"),
-        ("GPS", project_root / "Modules" / "GPS" / "main_GPS.py"),
-        ("NoteTaker", project_root / "Modules" / "NoteTaker" / "main_notes.py"),
+        ("Audio", modules_root / "Audio" / "main_audio.py"),
+        ("Cameras", modules_root / "Cameras" / "main_cameras.py"),
+        ("DRT", modules_root / "DRT" / "main_DRT.py"),
+        ("EyeTracker", modules_root / "EyeTracker" / "main_eye_tracker.py"),
+        ("GPS", modules_root / "GPS" / "main_GPS.py"),
+        ("NoteTaker", modules_root / "NoteTaker" / "main_notes.py"),
     ]
 
     all_results = []

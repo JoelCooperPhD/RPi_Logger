@@ -87,7 +87,7 @@ Multi-camera video recording with hardware-accelerated H.264 encoding, real-time
 
 **Standalone Usage:**
 ```bash
-python3 Modules/Cameras/main_camera.py --resolution 2 --target-fps 30
+python3 rpi_logger/modules/Cameras/main_cameras.py --resolution 2 --target-fps 30
 ```
 
 ### AudioRecorder
@@ -102,7 +102,7 @@ Multi-microphone recording with USB hot-plug support and configurable sample rat
 
 **Standalone Usage:**
 ```bash
-python3 Modules/AudioRecorder/main_audio.py --sample-rate 48000
+python3 rpi_logger/modules/Audio/main_audio.py --sample-rate 48000
 ```
 
 ### EyeTracker
@@ -117,7 +117,7 @@ Pupil Labs eye tracking integration with gaze overlay and scene video recording.
 
 **Standalone Usage:**
 ```bash
-python3 Modules/EyeTracker/main_eye_tracker.py --target-fps 30
+python3 rpi_logger/modules/EyeTracker/main_eye_tracker.py --target-fps 30
 ```
 
 ### NoteTaker
@@ -132,7 +132,7 @@ Timestamped note-taking interface for annotating sessions in real-time.
 
 **Standalone Usage:**
 ```bash
-python3 Modules/NoteTaker/main_notes.py --mode gui
+python3 rpi_logger/modules/NoteTaker/main_notes.py --mode gui
 ```
 
 ### DRT (Detection Response Task)
@@ -147,7 +147,7 @@ Multi-device sDRT (Simple Detection Response Task) support with USB serial commu
 
 **Standalone Usage:**
 ```bash
-python3 Modules/DRT/main_drt.py --mode gui
+python3 rpi_logger/modules/DRT/main_drt.py --mode gui
 ```
 
 ## Architecture
@@ -175,27 +175,27 @@ python3 Modules/DRT/main_drt.py --mode gui
 
 ### Core Components
 
-**LoggerSystem** (`logger_core/logger_system.py`)
+**LoggerSystem** (`rpi_logger/core/logger_system.py`)
 - Facade pattern coordinator
 - Unified API for UI
 - Delegates to specialized managers
 
-**ModuleManager** (`logger_core/module_manager.py`)
+**ModuleManager** (`rpi_logger/core/module_manager.py`)
 - Module discovery and lifecycle
 - Process management for slave mode modules
 - JSON command protocol communication
 
-**SessionManager** (`logger_core/session_manager.py`)
+**SessionManager** (`rpi_logger/core/session_manager.py`)
 - Session and trial coordination
 - Cross-module recording synchronization
 - State tracking
 
-**ShutdownCoordinator** (`logger_core/shutdown_coordinator.py`)
+**ShutdownCoordinator** (`rpi_logger/core/shutdown_coordinator.py`)
 - Race-condition-free shutdown
 - Ordered cleanup callbacks
 - State machine protection
 
-**WindowManager** (`logger_core/window_manager.py`)
+**WindowManager** (`rpi_logger/core/window_manager.py`)
 - Automatic window tiling
 - Geometry persistence
 
@@ -226,7 +226,7 @@ Module/
 
 ### Shared Base Classes
 
-All modules inherit from common base classes in `Modules/base/`:
+All modules inherit from common base classes in `rpi_logger/modules/base/`:
 
 - `BaseSystem`: Core system interface
 - `BaseSupervisor`: Lifecycle and retry logic
@@ -330,7 +330,7 @@ Each module has its own `config.txt` with:
 - Window geometry (auto-saved)
 - Logging configuration
 
-### AV Muxing Configuration (`Modules/base/constants.py`)
+### AV Muxing Configuration (`rpi_logger/modules/base/constants.py`)
 
 ```python
 AV_MUXING_ENABLED = True          # Enable automatic muxing
@@ -396,46 +396,38 @@ The master logger communicates with modules via **JSON protocol over stdin/stdou
 
 ```
 RPi_Logger/
-├── rpi_logger/             # Application package (entrypoints + tooling)
+├── rpi_logger/             # Main application package
+│   ├── __init__.py
 │   ├── __main__.py         # Enables ``python -m rpi_logger``
-│   ├── app/master.py       # Master logger orchestration
-│   ├── cli/common.py       # Shared CLI helpers for modules
-│   └── tools/              # Post-processing and diagnostics utilities
-├── main_logger.py          # Thin script that forwards to the packaged entrypoint
+│   ├── app/                # GUI/CLI entrypoints
+│   ├── cli/                # Shared CLI helpers for modules
+│   ├── core/               # Master logger core runtime
+│   │   ├── logger_system.py
+│   │   ├── module_manager.py
+│   │   ├── session_manager.py
+│   │   ├── shutdown_coordinator.py
+│   │   ├── window_manager.py
+│   │   ├── config_manager.py
+│   │   ├── paths.py
+│   │   ├── event_logger.py
+│   │   └── ui/
+│   │       ├── main_window.py
+│   │       ├── main_controller.py
+│   │       ├── timer_manager.py
+│   │       └── help_dialogs.py
+│   ├── modules/            # Recording modules
+│   │   ├── base/           # Shared base classes
+│   │   ├── Audio/          # Audio module
+│   │   ├── Cameras/        # Camera module
+│   │   ├── EyeTracker/     # Eye tracking module
+│   │   ├── NoteTaker/      # Note taking module
+│   │   └── DRT/            # Detection response task
+│   └── tools/              # Post-processing + diagnostics
 ├── config.txt              # Main configuration
-├── CLAUDE.md               # Architecture documentation
-├── README.md               # This file
-├── logger_core/            # Master logger core
-│   ├── logger_system.py    # System facade
-│   ├── module_manager.py   # Module lifecycle
-│   ├── session_manager.py  # Session/trial control
-│   ├── shutdown_coordinator.py # Graceful shutdown
-│   ├── window_manager.py   # Window layout
-│   ├── config_manager.py   # Config handling
-│   ├── paths.py            # Path constants
-│   ├── event_logger.py     # Event logging
-│   └── ui/                 # User interface
-│       ├── main_window.py  # Main GUI window
-│       ├── main_controller.py # UI event handler
-│       ├── timer_manager.py # Recording timers
-│       └── help_dialogs.py # Help windows
-├── Modules/                # Recording modules
-│   ├── base/               # Shared base classes
-│   │   ├── base_system.py
-│   │   ├── base_supervisor.py
-│   │   ├── tkinter_gui_base.py
-│   │   ├── recording.py
-│   │   ├── io_utils.py
-│   │   ├── constants.py
-│   │   ├── sync_metadata.py # Sync metadata writer
-│   │   ├── av_muxer.py     # FFmpeg A/V muxer
-│   │   └── usb_serial_manager.py # USB device framework
-│   ├── Cameras/            # Camera module
-│   ├── AudioRecorder/      # Audio module
-│   ├── EyeTracker/         # Eye tracking module
-│   ├── NoteTaker/          # Note taking module
-│   └── DRT/                # DRT task module
-└── data/                   # Session recordings (auto-created)
+├── logs/                   # Master log output
+├── main_logger.py          # Thin script forwarding to the package entrypoint
+├── pyproject.toml
+└── README.md
 ```
 
 ### Testing
@@ -443,11 +435,11 @@ RPi_Logger/
 ```bash
 # Syntax check core files
 python -m py_compile rpi_logger/app/master.py
-python -m py_compile logger_core/*.py
+python -m py_compile rpi_logger/core/*.py
 
 # Test module in standalone mode
-python3 Modules/Cameras/main_camera.py
-python3 Modules/AudioRecorder/main_audio.py
+python3 rpi_logger/modules/Cameras/main_cameras.py
+python3 rpi_logger/modules/Audio/main_audio.py
 
 # Test with master logger
 python -m rpi_logger
@@ -475,7 +467,7 @@ To create a new module:
 **Solutions**:
 - Check module log in `data/session_*/ModuleName/session.log`
 - Verify hardware is connected (cameras, microphones, eye tracker)
-- Ensure no other processes are using devices: `pkill -f main_camera`
+- Ensure no other processes are using devices: `pkill -f main_cameras`
 - Check permissions for audio/video devices
 
 ### Recording Fails
@@ -620,7 +612,7 @@ For issues, feature requests, or contributions, please refer to the main project
 ## Support
 
 - **Documentation**: See `CLAUDE.md` for architecture details
-- **Module Docs**: See individual `Modules/*/README.md` files
+- **Module Docs**: See individual `rpi_logger/modules/*/README.md` files
 - **Utilities**: See `rpi_logger/tools/README.md` for post-processing tools
 
 ---

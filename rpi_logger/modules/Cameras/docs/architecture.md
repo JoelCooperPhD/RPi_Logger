@@ -42,7 +42,7 @@ CLI entry] --> B[CamerasRuntime]
 
 ## Folder Layout
 ```
-Modules/
+rpi_logger/modules/
   Cameras/
     app/                # CLI entrypoints & runtime adapters (main, runtime)
     controller/         # CameraController, CameraSlot, UI/input handlers

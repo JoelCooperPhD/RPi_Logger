@@ -16,7 +16,7 @@ Simple GPS map viewer with offline tile support.
 For offline operation, download map tiles:
 
 ```bash
-cd Modules/GPS
+cd rpi_logger/modules/GPS
 uv run python download_offline_tiles.py
 ```
 
@@ -37,12 +37,12 @@ zoom_max = 16  # Higher = more detail but larger file
 ### Standalone Mode
 
 ```bash
-uv run python Modules/GPS/main_GPS.py
+uv run python rpi_logger/modules/GPS/main_GPS.py
 ```
 
 ### With Main Logger
 
-Enable in `Modules/GPS/config.txt`:
+Enable in `rpi_logger/modules/GPS/config.txt`:
 ```ini
 enabled = true
 ```
@@ -75,4 +75,4 @@ async def _async_operation(self):
 
 ## Log Files
 
-Logs are in `Modules/GPS/logs/gps.log`
+Logs are in `rpi_logger/modules/GPS/logs/gps.log`

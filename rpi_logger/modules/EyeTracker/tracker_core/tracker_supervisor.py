@@ -1,7 +1,7 @@
 
 from typing import Type
 
-from Modules.base import BaseSupervisor
+from rpi_logger.modules.base import BaseSupervisor
 from .tracker_system import TrackerSystem, TrackerInitializationError
 from .constants import DEVICE_DISCOVERY_RETRY_SECONDS
 
