@@ -14,6 +14,7 @@ from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
 from .config import AudioStubSettings
 from .services import DeviceDiscoveryService, RecorderService, SessionService
+from .startup import AudioStartupManager
 from .state import AudioDeviceInfo, AudioState
 from .view import AudioStubView, ViewCallbacks
 
@@ -79,6 +80,13 @@ class AudioApp:
             self.logger,
             self._emit_status,
         )
+        self.startup_manager = AudioStartupManager(
+            context,
+            self.state,
+            task_submitter=self._submit_async,
+            logger=self.logger,
+        )
+        self.startup_manager.bind()
 
         self.view = AudioStubView(
             context.view,
@@ -102,6 +110,7 @@ class AudioApp:
         )
         await self.recording_manager.ensure_session_dir(self.state.session_dir)
         devices, new_ids = await self.device_manager.discover_devices()
+        await self.startup_manager.restore_previous_selection(self.device_manager)
         if devices:
             self.logger.info(
                 "Discovered %d audio device(s) (%d new)",
@@ -133,6 +142,7 @@ class AudioApp:
         self.logger.debug("Shutdown requested")
         await self.shutdown_guard.start()
         await self.stop_recording()
+        await self.startup_manager.flush()
         self._stop_event.set()
         await self.task_manager.shutdown()
         await self.recorder_service.stop_all()
@@ -181,8 +191,8 @@ class AudioApp:
     # ------------------------------------------------------------------
     # Internal helpers
 
-    def _submit_async(self, coro: Awaitable[None], name: str) -> None:
-        self.task_manager.create(coro, name=name)
+    def _submit_async(self, coro: Awaitable[None], name: str) -> asyncio.Task:
+        return self.task_manager.create(coro, name=name)
 
     async def _device_poll_loop(self) -> None:
         interval = max(1.0, float(self.settings.discovery_retry or self.settings.device_scan_interval))
