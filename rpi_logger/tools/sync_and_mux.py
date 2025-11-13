@@ -7,9 +7,9 @@ This script processes recorded sessions to:
 2. Automatically mux audio and video files with proper synchronization
 
 Usage:
-    python sync_and_mux.py <session_directory>
-    python sync_and_mux.py <session_directory> --trial 1
-    python sync_and_mux.py <session_directory> --all-trials
+    python -m rpi_logger.tools.sync_and_mux <session_directory>
+    python -m rpi_logger.tools.sync_and_mux <session_directory> --trial 1
+    python -m rpi_logger.tools.sync_and_mux <session_directory> --all-trials
 """
 
 import asyncio
@@ -20,7 +20,9 @@ import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from Modules.base.sync_metadata import SyncMetadataWriter
 from Modules.base.av_muxer import AVMuxer
@@ -450,6 +452,9 @@ async def main():
     return 0 if success else 1
 
 
+def cli() -> int:
+    return asyncio.run(main())
+
+
 if __name__ == '__main__':
-    exit_code = asyncio.run(main())
-    sys.exit(exit_code)
+    raise SystemExit(cli())

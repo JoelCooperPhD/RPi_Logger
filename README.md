@@ -53,22 +53,25 @@ uv sync
 
 ```bash
 # Start the master logger
-python3 main_logger.py
+python -m rpi_logger
 
 # Or with custom settings
-python3 main_logger.py --data-dir ~/research_data --session-prefix experiment
+python -m rpi_logger --data-dir ~/research_data --session-prefix experiment
+
+# If older tooling expects a script, this still works:
+python main_logger.py --mode gui
 ```
 
 ### Basic Workflow
 
-1. **Launch Application**: Run `python3 main_logger.py`
+1. **Launch Application**: Run `python -m rpi_logger`
 2. **Select Modules**: Check boxes for desired modules (auto-launches)
 3. **Start Session**: Click "Start Session" to prepare modules
 4. **Record Trial**: Click "Record" to begin trial recording
 5. **Stop Trial**: Click "Stop" to end trial (data saved automatically)
 6. **End Session**: Click "End Session" to finalize
-7. **Process Data**: Run `python muxing_tool.py` and select the session folder
-   (CLI alternative: `python utils/sync_and_mux.py <session_dir> --all-trials`)
+7. **Process Data**: Run `python -m rpi_logger.tools.muxing_tool` and select the session folder
+   (CLI alternative: `python -m rpi_logger.tools.sync_and_mux <session_dir> --all-trials`)
 
 ## Available Modules
 
@@ -153,8 +156,8 @@ python3 Modules/DRT/main_drt.py --mode gui
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   main_logger.py                    │
-│              (Entry Point & Coordination)           │
+│            rpi_logger/app/master.py                 │
+│      (Package Entry Point & Coordination)          │
 └──────────────────────┬──────────────────────────────┘
                        │
            ┌───────────┴───────────┐
@@ -267,7 +270,7 @@ The system implements **frame-level synchronization** (~30ms accuracy) through:
 1. **Timestamp Capture**: Each module captures `time.time()` at recording start
 2. **CSV Timing Logs**: Per-event timestamps for all data (frames, chunks, samples)
 3. **Sync Metadata**: Unified JSON file with timing for all modules
-4. **Automatic Muxing**: `muxing_tool.py` (FFmpeg) combines streams with calculated offsets
+4. **Automatic Muxing**: `python -m rpi_logger.tools.muxing_tool` (FFmpeg) combines streams with calculated offsets
 
 ### File Naming Convention
 
@@ -284,16 +287,16 @@ All files use consistent trial-based naming:
 
 ```bash
 # Interactive helper (select folder if --session omitted)
-python muxing_tool.py --session data/session_20251024_120000
+python -m rpi_logger.tools.muxing_tool --session data/session_20251024_120000
 
 # Process all trials via CLI
-python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --all-trials
 
 # Process specific trial
-python utils/sync_and_mux.py data/session_20251024_120000 --trial 2
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --trial 2
 
 # Generate sync metadata only (skip muxing)
-python utils/sync_and_mux.py data/session_20251024_120000 --no-mux
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --no-mux
 ```
 
 ## Configuration
@@ -393,7 +396,12 @@ The master logger communicates with modules via **JSON protocol over stdin/stdou
 
 ```
 RPi_Logger/
-├── main_logger.py          # Master logger entry point
+├── rpi_logger/             # Application package (entrypoints + tooling)
+│   ├── __main__.py         # Enables ``python -m rpi_logger``
+│   ├── app/master.py       # Master logger orchestration
+│   ├── cli/common.py       # Shared CLI helpers for modules
+│   └── tools/              # Post-processing and diagnostics utilities
+├── main_logger.py          # Thin script that forwards to the packaged entrypoint
 ├── config.txt              # Main configuration
 ├── CLAUDE.md               # Architecture documentation
 ├── README.md               # This file
@@ -427,17 +435,14 @@ RPi_Logger/
 │   ├── EyeTracker/         # Eye tracking module
 │   ├── NoteTaker/          # Note taking module
 │   └── DRT/                # DRT task module
-├── utils/                  # Utilities
-│   ├── sync_and_mux.py     # A/V sync post-processing
-│   └── README.md           # Utility documentation
 └── data/                   # Session recordings (auto-created)
 ```
 
 ### Testing
 
 ```bash
-# Syntax check all files
-python -m py_compile main_logger.py
+# Syntax check core files
+python -m py_compile rpi_logger/app/master.py
 python -m py_compile logger_core/*.py
 
 # Test module in standalone mode
@@ -445,7 +450,7 @@ python3 Modules/Cameras/main_camera.py
 python3 Modules/AudioRecorder/main_audio.py
 
 # Test with master logger
-python3 main_logger.py
+python -m rpi_logger
 ```
 
 ### Adding New Modules
@@ -499,7 +504,7 @@ To create a new module:
 
 **Solutions**:
 - Check master log: `data/session_*/master.log`
-- Kill processes: `pkill -f main_logger`
+- Kill processes: `pkill -f rpi_logger.app.master` (or `pkill -f main_logger.py` if launched via the script)
 - Restart system
 - Check for blocking operations in logs
 
@@ -570,7 +575,7 @@ uv sync
 2. **Storage Space**: Verify adequate disk space before long sessions
 3. **Battery/Power**: Ensure stable power supply (UPS recommended)
 4. **Device Warmup**: Let cameras/sensors warm up for 30 seconds
-5. **Post-Session**: Process recordings with `muxing_tool.py` (or `utils/sync_and_mux.py`) immediately
+5. **Post-Session**: Process recordings with `python -m rpi_logger.tools.muxing_tool` (or `python -m rpi_logger.tools.sync_and_mux`) immediately
 
 ### Configuration Management
 
@@ -616,7 +621,7 @@ For issues, feature requests, or contributions, please refer to the main project
 
 - **Documentation**: See `CLAUDE.md` for architecture details
 - **Module Docs**: See individual `Modules/*/README.md` files
-- **Utilities**: See `utils/README.md` for post-processing tools
+- **Utilities**: See `rpi_logger/tools/README.md` for post-processing tools
 
 ---
 

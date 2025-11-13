@@ -25,7 +25,7 @@ _venv_site = PROJECT_ROOT / ".venv" / "lib" / f"python{sys.version_info.major}.{
 if _venv_site.exists() and str(_venv_site) not in sys.path:
     sys.path.insert(0, str(_venv_site))
 
-from cli_utils import (
+from rpi_logger.cli.common import (
     add_common_cli_arguments,
     parse_resolution,
     positive_float,
@@ -104,7 +104,7 @@ def parse_args(argv: Optional[list[str]] = None):
         "--resolution",
         type=parse_resolution,
         default=default_resolution,
-        help="Scene video resolution preset (see cli_utils.RESOLUTION_PRESETS)",
+        help="Scene video resolution preset (see rpi_logger.cli.common.RESOLUTION_PRESETS)",
     )
     parser.add_argument(
         "--preview-width",

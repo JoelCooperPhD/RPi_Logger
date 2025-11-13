@@ -31,7 +31,7 @@ python main_notes.py --mode gui --console
 
 ### Master Logger Integration (Recommended)
 
-The NoteTaker module is typically used via the master logger (`main_logger.py`), which:
+The NoteTaker module is typically used via the master logger (`python -m rpi_logger`), which:
 - Automatically launches the module when checked in the module selection
 - Sends JSON commands for session/recording control
 - Provides access to `running_modules.json` for context capture
@@ -39,7 +39,7 @@ The NoteTaker module is typically used via the master logger (`main_logger.py`),
 
 To enable auto-start:
 1. Edit `Modules/NoteTaker/config.txt`: Set `enabled = true`
-2. Launch master logger: `python3 main_logger.py`
+2. Launch master logger: `python -m rpi_logger`
 3. NoteTaker will automatically launch with the other enabled modules
 
 ## GUI Controls

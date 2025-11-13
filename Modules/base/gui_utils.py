@@ -4,6 +4,8 @@ import re
 from pathlib import Path
 from typing import Optional, Tuple
 
+from rpi_logger.cli.common import get_config_int
+
 logger = logging.getLogger(__name__)
 
 
@@ -126,8 +128,6 @@ def load_window_geometry_from_config(config: dict, current_geometry: Optional[st
             if geometry_str and isinstance(geometry_str, str):
                 logger.debug("Loaded window geometry from config (new format): %s", geometry_str)
                 return geometry_str
-
-        from cli_utils import get_config_int
 
         window_x = get_config_int(config, 'window_x', None)
         window_y = get_config_int(config, 'window_y', None)

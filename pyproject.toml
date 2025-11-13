@@ -35,5 +35,10 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = []
 
+[project.scripts]
+rpi-logger = "rpi_logger.app.master:run"
+rpi-logger-mux = "rpi_logger.tools.muxing_tool:main"
+rpi-logger-sync = "rpi_logger.tools.sync_and_mux:cli"
+
 [tool.hatch.build.targets.wheel]
-packages = ["Modules", "logger_core"]
+packages = ["Modules", "logger_core", "rpi_logger"]

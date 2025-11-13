@@ -331,11 +331,11 @@ tasks, and annotations. All modules are controlled from a single interface.
 
    After recording, synchronize audio and video:
 
-   $ python muxing_tool.py
+   $ python -m rpi_logger.tools.muxing_tool
      (select the session folder when prompted)
 
    Advanced CLI:
-     python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+     python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --all-trials
 
    These commands create synchronized MP4 files with frame-level accuracy (~30ms).
 
@@ -387,7 +387,7 @@ data/session_20251024_120000/
 ✓ Verify adequate disk space before long sessions (check System Info)
 ✓ Let cameras/sensors warm up for 30 seconds after starting
 ✓ Use NoteTaker to annotate events during recording
-✓ Process recordings with muxing_tool.py (or utils/sync_and_mux.py) immediately after session
+✓ Process recordings with `python -m rpi_logger.tools.muxing_tool` (or `python -m rpi_logger.tools.sync_and_mux`) immediately after session
 ✓ Check logs if modules fail: Help > Open Logs Directory
 ✓ Module windows auto-tile on launch for efficient workspace
 
@@ -410,7 +410,7 @@ Recording fails immediately:
 
 Audio/video out of sync:
   • Verify CSV timing files exist in session directory
-  • Re-run muxing_tool.py for the session (or sync_and_mux.py --all-trials)
+  • Re-run `python -m rpi_logger.tools.muxing_tool` for the session (or `python -m rpi_logger.tools.sync_and_mux --all-trials`)
   • Check SYNC.json for reasonable offset values
 
 USB devices not detected:

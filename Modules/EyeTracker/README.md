@@ -53,13 +53,13 @@ tail -f recordings/tracking_*/session.log
 ### Slave Mode (Master Logger Control)
 
 ```bash
-# Typically launched automatically by main logger, but can be tested manually:
+# Typically launched automatically by ``python -m rpi_logger``, but can be tested manually:
 uv run main_tracker.py --mode headless --output-dir data/session_test/EyeTracker
 ```
 
 ### Integration with Main Logger
 
-The eye tracker module is typically used via the master logger (`main_logger.py`), which:
+The eye tracker module is typically used via the master logger (`python -m rpi_logger`), which:
 - Automatically launches the module in headless/slave mode
 - Sends JSON commands for session/recording control
 - Receives status updates and handles module lifecycle
@@ -293,7 +293,7 @@ GazeTracker → orchestrates processing pipeline
 - **pupil-labs-realtime-api**: Pupil Labs device communication
 - **opencv-python**: Video processing and display
 - **numpy**: Array operations
-- **cli_utils**: Shared CLI utilities (from parent project)
+- **rpi_logger/cli/common.py**: Shared CLI utilities used by standalone modules
 
 All dependencies are managed via `uv` package manager.
 
@@ -391,7 +391,7 @@ proc.wait(timeout=5)
 
 - `../Cameras/` - Camera recording module with parallel architecture
 - `../AudioRecorder/` - Audio recording module
-- `../../cli_utils.py` - Shared CLI argument parsing and utilities
+- `../../rpi_logger/cli/common.py` - Shared CLI argument parsing and utilities
 
 ## Support
 

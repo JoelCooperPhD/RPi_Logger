@@ -20,22 +20,22 @@ This utility processes RPi Logger session recordings to:
 
 #### Process a single trial (default: trial 1)
 ```bash
-python utils/sync_and_mux.py data/session_20251024_120000
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000
 ```
 
 #### Process a specific trial
 ```bash
-python utils/sync_and_mux.py data/session_20251024_120000 --trial 3
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --trial 3
 ```
 
 #### Process all trials in a session
 ```bash
-python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --all-trials
 ```
 
 #### Generate sync files only (skip muxing)
 ```bash
-python utils/sync_and_mux.py data/session_20251024_120000 --no-mux
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --no-mux
 ```
 
 ### Input Files Required
@@ -130,7 +130,7 @@ AV_DELETE_SOURCE_FILES = False    # Keep/delete originals after mux
 #### 1. Record Session
 ```bash
 # Launch main logger
-python3 main_logger.py
+python -m rpi_logger
 
 # In the GUI:
 # 1. Check "Cameras" and "AudioRecorder" modules
@@ -148,10 +148,10 @@ python3 main_logger.py
 cd ~/Development/RPi_Logger
 
 # Process all trials in the session
-python utils/sync_and_mux.py data/session_20251024_120000 --all-trials
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --all-trials
 
 # Or process specific trial
-python utils/sync_and_mux.py data/session_20251024_120000 --trial 1
+python -m rpi_logger.tools.sync_and_mux data/session_20251024_120000 --trial 1
 ```
 
 #### 3. Review Outputs

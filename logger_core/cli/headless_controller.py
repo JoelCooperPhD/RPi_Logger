@@ -185,7 +185,7 @@ class HeadlessController:
             await self.logger_system.event_logger.log_trial_stop(self.trial_counter)
 
         self.logger.info(
-            "Trial %d stopped (run muxing_tool.py later to mux recordings)",
+            "Trial %d stopped (run python -m rpi_logger.tools.muxing_tool later to mux recordings)",
             self.trial_counter,
         )
 

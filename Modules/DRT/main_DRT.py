@@ -7,7 +7,7 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from cli_utils import (
+from rpi_logger.cli.common import (
     add_common_cli_arguments,
     ensure_directory,
     get_config_str,

@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from utils.sync_and_mux import discover_trial_numbers, process_session
+from .sync_and_mux import discover_trial_numbers, process_session
 
 logger = logging.getLogger("muxing_tool")
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 try:
-    from cli_utils import (
+    from rpi_logger.cli.common import (
         add_common_cli_arguments,
         ensure_directory,
         parse_resolution,

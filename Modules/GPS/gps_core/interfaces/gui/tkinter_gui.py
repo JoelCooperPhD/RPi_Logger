@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 
 from Modules.base import TkinterGUIBase, TkinterMenuBase
+from rpi_logger.cli.common import get_config_float, get_config_int
 
 logger = logging.getLogger("GPS_GUI")
 
@@ -628,12 +629,10 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         return radius * c
 
     def _get_config_int(self, key: str, default: int) -> int:
-        from cli_utils import get_config_int
         config = getattr(self.system, 'config', {}) or {}
         return get_config_int(config, key, default)
 
     def _get_config_float(self, key: str, default: float) -> float:
-        from cli_utils import get_config_float
         config = getattr(self.system, 'config', {}) or {}
         return get_config_float(config, key, default)
 

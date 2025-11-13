@@ -11,7 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from cli_utils import ensure_directory, log_module_shutdown, log_module_startup, setup_module_logging
+from rpi_logger.cli.common import ensure_directory, log_module_shutdown, log_module_startup, setup_module_logging
 from logger_core.config_manager import get_config_manager
 from logger_core.commands import StatusMessage, StatusType
 from .constants import DISPLAY_NAME, MODULE_ID, PLACEHOLDER_GEOMETRY

@@ -277,7 +277,7 @@ class MainController:
             self.logger.info("Trial stopped (trial #%d)", self.trial_counter)
 
             self.logger.info(
-                "Trial %d ready for post-processing (run muxing_tool.py when convenient)",
+                "Trial %d ready for post-processing (run python -m rpi_logger.tools.muxing_tool when convenient)",
                 self.trial_counter,
             )
 

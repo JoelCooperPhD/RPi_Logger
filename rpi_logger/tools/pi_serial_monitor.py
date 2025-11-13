@@ -6,9 +6,9 @@ received. Optionally sends a test string on startup so you can confirm the TX
 line is active (requires the RX pin to be looped back or a device connected).
 
 Usage examples:
-  python3 utils/pi_serial_monitor.py            # monitor /dev/serial0 @ 9600
-  python3 utils/pi_serial_monitor.py --baud 4800
-  python3 utils/pi_serial_monitor.py --port /dev/ttyUSB0 --write "test" --hex
+  python -m rpi_logger.tools.pi_serial_monitor            # monitor /dev/serial0 @ 9600
+  python -m rpi_logger.tools.pi_serial_monitor --baud 4800
+  python -m rpi_logger.tools.pi_serial_monitor --port /dev/ttyUSB0 --write "test" --hex
 """
 
 from __future__ import annotations

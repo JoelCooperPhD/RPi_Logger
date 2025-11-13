@@ -10,6 +10,8 @@ from typing import Dict, List, Optional
 
 from logger_core.logging_config import configure_logging
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 configure_logging()
 logger = logging.getLogger("LifecycleTest")
 
@@ -53,7 +55,7 @@ class ModuleLifecycleTest:
         logger.info(f"\nTest 1: Startup and Initialization")
 
         try:
-            project_root = Path(__file__).parent.parent
+            project_root = PROJECT_ROOT
             session_dir = project_root / "data" / f"test_session_{int(time.time())}"
             session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -193,7 +195,7 @@ class ModuleLifecycleTest:
 
 
 async def test_all_modules():
-    project_root = Path(__file__).parent.parent
+    project_root = PROJECT_ROOT
 
     modules_to_test = [
         ("AudioRecorder", project_root / "Modules" / "AudioRecorder" / "main_audio.py"),
@@ -237,7 +239,7 @@ async def test_all_modules():
     return total_failed == 0
 
 
-async def main():
+async def main() -> int:
     logger.info("RPi Logger - Module Lifecycle Test Suite")
     logger.info("Testing standardized startup, state transitions, and shutdown\n")
 
@@ -245,11 +247,15 @@ async def main():
 
     if success:
         logger.info("\n✓ All tests passed!")
-        sys.exit(0)
+        return 0
     else:
         logger.error("\n✗ Some tests failed")
-        sys.exit(1)
+        return 1
+
+
+def cli() -> int:
+    return asyncio.run(main())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(cli())

@@ -108,7 +108,7 @@ python3 main_drt.py --mode gui
 
 ### Master Logger Integration (Recommended)
 
-The DRT module is typically used via the master logger (`main_logger.py`), which:
+The DRT module is typically used via the master logger (`python -m rpi_logger`), which:
 - Automatically launches the module when checked in the module selection
 - Sends JSON commands for session/recording control
 - Coordinates window positioning with other modules
@@ -116,7 +116,7 @@ The DRT module is typically used via the master logger (`main_logger.py`), which
 
 To enable auto-start:
 1. Edit `Modules/DRT/config.txt`: Set `enabled = true`
-2. Launch master logger: `python3 main_logger.py`
+2. Launch master logger: `python -m rpi_logger`
 3. DRT will automatically launch with the other enabled modules
 
 ### Multi-Device Support
