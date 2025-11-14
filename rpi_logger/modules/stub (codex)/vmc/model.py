@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import shutil
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -14,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from rpi_logger.cli.common import ensure_directory, log_module_shutdown, log_module_startup, setup_module_logging
 from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.core.commands import StatusMessage, StatusType
+from rpi_logger.core.paths import USER_MODULE_CONFIG_DIR
 from .constants import DISPLAY_NAME, MODULE_ID, PLACEHOLDER_GEOMETRY
 
 
@@ -62,7 +65,9 @@ class StubCodexModel:
         self.session_name: Optional[str] = None
         self.log_file: Optional[Path] = None
         self.logs_dir = module_dir / "logs"
-        self.config_path = module_dir / "config.txt"
+        self._template_config_path = module_dir / "config.txt"
+        self._using_fallback_config = False
+        self.config_path = self._prepare_config_path()
         self.config_data: Dict[str, Any] = {}
         self.saved_window_geometry: Optional[str] = None
         self.saved_preview_resolution: Optional[str] = None
@@ -184,6 +189,12 @@ class StubCodexModel:
             self.args,
             module_name=self.display_name,
         )
+        if self._using_fallback_config:
+            logger.info(
+                "Using writable config store %s (template %s unavailable for writes)",
+                self.config_path,
+                self._template_config_path,
+            )
 
     def mark_ready(self) -> float:
         ready_elapsed_ms = (time.perf_counter() - self._startup_timestamp) * 1000.0
@@ -317,6 +328,34 @@ class StubCodexModel:
             "session_dir": str(self.session_dir) if self.session_dir else None,
             "error": self.error_message,
         }
+
+    # Internal helpers -------------------------------------------------------
+
+    def _prepare_config_path(self) -> Path:
+        template = self._template_config_path
+        if self._path_is_writable(template):
+            return template
+
+        fallback_dir = USER_MODULE_CONFIG_DIR / self.module_id
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        fallback_path = fallback_dir / "config.txt"
+        if not fallback_path.exists():
+            try:
+                if template.exists():
+                    shutil.copy2(template, fallback_path)
+                else:
+                    fallback_path.touch()
+            except Exception as exc:
+                logger.warning("Failed to seed fallback config %s: %s", fallback_path, exc)
+        self._using_fallback_config = True
+        return fallback_path
+
+    @staticmethod
+    def _path_is_writable(path: Path) -> bool:
+        if path.exists():
+            return os.access(path, os.W_OK)
+        parent = path.parent
+        return parent.exists() and os.access(parent, os.W_OK)
 
     # Window geometry helpers -------------------------------------------------
 

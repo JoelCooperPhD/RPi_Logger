@@ -167,11 +167,13 @@ class CameraController(ModuleRuntime):
         timeout = getattr(self.args, "shutdown_timeout", 15.0)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=timeout)
 
+        config_path = getattr(context.model, "config_path", None)
         self._state = CameraModel(
             args=self.args,
             module_dir=self.module_dir,
             display_name=self.display_name,
             logger=self.logger,
+            config_path=config_path,
         )
 
         self.view_adapter: Optional[CameraViewAdapter] = None

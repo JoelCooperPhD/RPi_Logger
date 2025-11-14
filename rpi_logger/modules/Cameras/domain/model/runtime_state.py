@@ -160,12 +160,13 @@ class CameraModel:
         module_dir: Path,
         display_name: str,
         logger: logging.Logger,
+        config_path: Optional[Path] = None,
     ) -> None:
         self.args = args
         self.module_dir = module_dir
         self.display_name = display_name
         self.logger = logger
-        self.config_path = module_dir / "config.txt"
+        self.config_path = config_path or (module_dir / "config.txt")
         self.overlay_config = dict(CAMERA_OVERLAY_DEFAULTS)
         self.camera_aliases: dict[int, str] = {}
         self._camera_alias_slugs: dict[int, str] = {}
@@ -319,7 +320,6 @@ class CameraModel:
 
         if updates:
             self._write_module_preferences_sync(updates)
-        self._strip_legacy_keys(self.config_path, {"preview_resolution", "preview_width", "preview_height"})
 
     def _read_module_config(self) -> dict[str, Any]:
         path = self.config_path
@@ -373,13 +373,7 @@ class CameraModel:
             self.logger.warning("Failed to persist module prefs: %s", exc)
             return
 
-        if success:
-            await asyncio.to_thread(
-                self._strip_legacy_keys,
-                path,
-                {"preview_resolution", "preview_width", "preview_height"},
-            )
-        else:
+        if not success:
             self.logger.warning("Unable to write module prefs to %s", path)
 
     def _write_module_preferences_sync(self, updates: dict[str, Any]) -> None:
@@ -390,31 +384,6 @@ class CameraModel:
             get_config_manager().write_config(path, updates)
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.debug("Failed to sync-write module prefs: %s", exc)
-
-    @staticmethod
-    def _strip_legacy_keys(path: Path, keys: set[str]) -> None:
-        try:
-            if not path.exists():
-                return
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except Exception:  # pragma: no cover - defensive
-            return
-
-        filtered: list[str] = []
-        for line in lines:
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
-                filtered.append(line)
-                continue
-            key = stripped.split("=", 1)[0].strip()
-            if key in keys:
-                continue
-            filtered.append(line)
-
-        try:
-            path.write_text("\n".join(filtered) + "\n", encoding="utf-8")
-        except Exception:  # pragma: no cover - defensive
-            pass
 
     # ------------------------------------------------------------------
     # Camera alias helpers

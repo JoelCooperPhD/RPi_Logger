@@ -27,6 +27,7 @@ MODULES_DIR = PACKAGE_ROOT / "modules"
 _USER_STATE_ENV = os.environ.get("RPI_LOGGER_STATE_DIR")
 USER_STATE_DIR = Path(_USER_STATE_ENV).expanduser() if _USER_STATE_ENV else (Path.home() / ".rpi_logger")
 USER_CONFIG_OVERRIDES_DIR = USER_STATE_DIR / "config_overrides"
+USER_MODULE_CONFIG_DIR = USER_STATE_DIR / "module_configs"
 USER_MODULE_LOGS_DIR = USER_STATE_DIR / "module_logs"
 SESSION_STAGING_DIR = USER_STATE_DIR / "staging"
 
@@ -41,6 +42,7 @@ def ensure_directories() -> None:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     USER_STATE_DIR.mkdir(parents=True, exist_ok=True)
     USER_CONFIG_OVERRIDES_DIR.mkdir(parents=True, exist_ok=True)
+    USER_MODULE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     USER_MODULE_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     SESSION_STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +57,7 @@ __all__ = [
     'MODULES_DIR',
     'USER_STATE_DIR',
     'USER_CONFIG_OVERRIDES_DIR',
+    'USER_MODULE_CONFIG_DIR',
     'USER_MODULE_LOGS_DIR',
     'SESSION_STAGING_DIR',
     'UI_DIR',
