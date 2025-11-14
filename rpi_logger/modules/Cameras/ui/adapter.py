@@ -57,8 +57,8 @@ class CameraViewAdapter:
         self._preview_fraction_handler: Optional[Callable[[Optional[float]], Awaitable[None]]] = None
         self._last_metrics_text: Optional[str] = None
         self._frame_logged: set[int] = set()
-        self._camera_menu: Optional[tk.Menu] = None
         self._camera_toggle_vars: dict[int, tk.BooleanVar] = {}
+        self._camera_toggle_labels: dict[int, str] = {}
         self._camera_toggle_handlers: dict[int, Callable[[int, bool], Awaitable[None] | None]] = {}
         self._settings_menu: Optional[tk.Menu] = None
         self._capture_controls_ready = False
@@ -68,7 +68,6 @@ class CameraViewAdapter:
         self._capture_rate_menu: Optional[tk.Menu] = None
         self._resolution_menu_index: Optional[int] = None
         self._rate_menu_index: Optional[int] = None
-        self._preview_menu: Optional[tk.Menu] = None
         self._io_metrics_var: Optional[tk.StringVar] = None
         self._native_stub_size = (1440, 1080)
 
@@ -170,26 +169,20 @@ class CameraViewAdapter:
     ) -> None:
         if tk is None or self.view is None:
             return
-        menu = self._ensure_camera_menu()
-        if menu is None:
-            return
+        self._ensure_settings_menu()
         var = self._camera_toggle_vars.get(index)
         if var is None:
             master = self.view.root if hasattr(self.view, "root") else None
             var = tk.BooleanVar(master=master, value=enabled)
             self._camera_toggle_vars[index] = var
-            self._camera_toggle_handlers[index] = handler
-            menu.add_checkbutton(
-                label=title,
-                variable=var,
-                command=lambda idx=index: self._handle_camera_toggle(idx),
-            )
         else:
             try:
                 var.set(enabled)
             except tk.TclError:
                 pass
-            self._camera_toggle_handlers[index] = handler
+        self._camera_toggle_labels[index] = title
+        self._camera_toggle_handlers[index] = handler
+        self._rebuild_settings_menu()
 
     def update_camera_toggle_state(self, index: int, enabled: bool) -> None:
         var = self._camera_toggle_vars.get(index)
@@ -244,27 +237,9 @@ class CameraViewAdapter:
 
         if not self.view or tk is None:
             return
-        settings_menu = self._ensure_settings_menu()
-        if settings_menu is None:
-            return
-
-        if not self._menu_exists(self._preview_menu):
-            self._preview_menu = tk.Menu(settings_menu, tearoff=0)
-            settings_menu.add_cascade(label="Preview FPS", menu=self._preview_menu)
-        else:
-            try:
-                self._preview_menu.delete(0, "end")
-            except Exception:
-                pass
-
-        var = self._ensure_preview_fps_var()
-        for key, label, fraction in self._preview_fraction_options():
-            self._preview_menu.add_radiobutton(
-                label=label,
-                value=key,
-                variable=var,
-                command=lambda value=fraction: self._handle_preview_fraction_selection(value),
-            )
+        self._ensure_settings_menu()
+        self._ensure_preview_fps_var()
+        self._rebuild_settings_menu()
 
     def refresh_preview_fps_ui(self) -> None:
         if not self._preview_fps_var or not self._preview_fraction_getter:
@@ -312,6 +287,66 @@ class CameraViewAdapter:
         except Exception:
             return False
 
+    def _rebuild_settings_menu(self) -> None:
+        if tk is None:
+            return
+        settings_menu = self._ensure_settings_menu()
+        if settings_menu is None:
+            return
+        try:
+            settings_menu.delete(0, "end")
+        except tk.TclError:
+            pass
+
+        self._resolution_menu_index = None
+        self._rate_menu_index = None
+        has_entries = False
+
+        if self._preview_fraction_getter and self._preview_fraction_handler:
+            var = self._ensure_preview_fps_var()
+            settings_menu.add_command(label="Preview Refresh Rate", state=tk.DISABLED)
+            for key, label, fraction in self._preview_fraction_options():
+                settings_menu.add_radiobutton(
+                    label=label,
+                    value=key,
+                    variable=var,
+                    command=lambda value=fraction: self._handle_preview_fraction_selection(value),
+                )
+            has_entries = True
+
+        if self._camera_toggle_vars:
+            if has_entries:
+                settings_menu.add_separator()
+            settings_menu.add_command(label="Camera Feeds", state=tk.DISABLED)
+            for camera_index in sorted(self._camera_toggle_vars):
+                var = self._camera_toggle_vars[camera_index]
+                label = self._camera_toggle_labels.get(camera_index, f"Camera {camera_index + 1}")
+                settings_menu.add_checkbutton(
+                    label=label,
+                    variable=var,
+                    command=lambda idx=camera_index: self._handle_camera_toggle(idx),
+                )
+            has_entries = True
+
+        capture_sections = [
+            ("Resolution", self._capture_resolution_menu, "resolution"),
+            ("Frame Rate", self._capture_rate_menu, "rate"),
+        ]
+        if any(menu is not None for _, menu, _ in capture_sections):
+            if has_entries:
+                settings_menu.add_separator()
+            for label, submenu, token in capture_sections:
+                if submenu is None:
+                    continue
+                settings_menu.add_cascade(label=label, menu=submenu)
+                try:
+                    index = settings_menu.index("end")
+                except tk.TclError:
+                    index = None
+                if token == "resolution":
+                    self._resolution_menu_index = index
+                elif token == "rate":
+                    self._rate_menu_index = index
 
     def _preview_fraction_options(self) -> list[tuple[str, str, float]]:
         return [
@@ -364,9 +399,7 @@ class CameraViewAdapter:
                 variable=self._record_resolution_var,
                 command=lambda option=key: self._on_record_resolution(option),
             )
-        settings_menu.add_cascade(label="Resolution", menu=resolution_menu)
         self._capture_resolution_menu = resolution_menu
-        self._resolution_menu_index = settings_menu.index("end")
 
         rate_menu = tk.Menu(settings_menu, tearoff=0)
         self._record_fps_var = tk.StringVar(master=master, value=self._initial_record_fps_key())
@@ -377,11 +410,10 @@ class CameraViewAdapter:
                 variable=self._record_fps_var,
                 command=lambda option=key: self._on_record_fps(option),
             )
-        settings_menu.add_cascade(label="Frame Rate", menu=rate_menu)
         self._capture_rate_menu = rate_menu
-        self._rate_menu_index = settings_menu.index("end")
 
         self._capture_controls_ready = True
+        self._rebuild_settings_menu()
         self.set_capture_controls_enabled(True)
 
     def sync_record_toggle(self, enabled: bool, *, capture_disabled: bool) -> None:
@@ -615,7 +647,7 @@ class CameraViewAdapter:
 
     def show_camera_hidden(self, slot) -> None:
         title = getattr(slot, "title", "Camera")
-        self.show_camera_placeholder(slot, f"{title} disabled (View ▸ Cameras)")
+        self.show_camera_placeholder(slot, f"{title} disabled (Settings ▸ Camera Feeds)")
 
     def show_camera_waiting(self, slot) -> None:
         title = getattr(slot, "title", "")
@@ -788,19 +820,6 @@ class CameraViewAdapter:
                 source_size,
             )
         self._frame_logged.add(index)
-
-    def _ensure_camera_menu(self) -> Optional[tk.Menu]:
-        if self._camera_menu is not None:
-            return self._camera_menu
-        menu: Optional[tk.Menu] = None
-        if self.view is not None:
-            add_view_submenu = getattr(self.view, "add_view_submenu", None)
-            if callable(add_view_submenu):
-                menu = add_view_submenu("Cameras")
-            if menu is None and hasattr(self.view, "add_menu"):
-                menu = self.view.add_menu("Cameras")
-        self._camera_menu = menu
-        return menu
 
     def _handle_camera_toggle(self, index: int) -> None:
         handler = self._camera_toggle_handlers.get(index)
