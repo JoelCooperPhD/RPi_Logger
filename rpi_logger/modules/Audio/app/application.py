@@ -37,7 +37,9 @@ class AudioApp:
         self.settings = settings
         base_logger = context.logger or logging.getLogger("Audio")
         self.logger = base_logger.getChild("App")
-        self.logger.setLevel(logging.DEBUG)
+        level_name = getattr(self.settings, "log_level", "debug")
+        desired_level = getattr(logging, str(level_name).upper(), logging.DEBUG)
+        self.logger.setLevel(desired_level)
         self.module_model = context.model
         self.status_callback = status_callback or StatusMessage.send
 
@@ -112,7 +114,6 @@ class AudioApp:
             self.settings.auto_select_new,
             self.settings.auto_start_recording,
         )
-        await self.recording_manager.ensure_session_dir(self.state.session_dir)
         devices, new_ids = await self.device_manager.discover_devices()
         await self.startup_manager.restore_previous_selection(self.device_manager)
         if devices:

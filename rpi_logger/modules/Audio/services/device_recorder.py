@@ -18,6 +18,8 @@ import sounddevice as sd
 
 from ..domain import AUDIO_BIT_DEPTH, AUDIO_CHANNELS_MONO, AudioDeviceInfo, LevelMeter
 
+_CSV_FLUSH_INTERVAL = 200
+
 
 @dataclass(slots=True)
 class RecordingHandle:
@@ -190,7 +192,7 @@ class AudioDeviceRecorder:
         now_unix = time.time()
         now_monotonic = time.perf_counter()
         try:
-            self.level_meter.add_samples(mono.tolist(), now_unix)
+            self.level_meter.add_samples(mono, now_unix)
         except Exception:
             pass
 
@@ -239,9 +241,10 @@ class AudioDeviceRecorder:
             csv_file = open(handle.timing_csv_path, 'w', newline='', encoding='utf-8')
             writer = csv.writer(csv_file)
             writer.writerow([
+                'Module',
                 'trial',
-                'chunk_index',
                 'write_time_unix',
+                'chunk_index',
                 'write_time_monotonic',
                 'adc_timestamp',
                 'frames',
@@ -256,16 +259,17 @@ class AudioDeviceRecorder:
                 try:
                     wave_handle.writeframes(chunk.data)
                     writer.writerow([
+                        'Audio',
                         handle.trial_number,
-                        chunk.chunk_index,
                         f"{chunk.unix_time:.6f}",
+                        chunk.chunk_index,
                         f"{chunk.monotonic_time:.9f}",
                         f"{chunk.adc_timestamp:.9f}" if chunk.adc_timestamp is not None else '',
                         chunk.frames,
                         chunk.total_frames,
                     ])
                     written_rows += 1
-                    if written_rows % 20 == 0:
+                    if written_rows % _CSV_FLUSH_INTERVAL == 0:
                         csv_file.flush()
                 except Exception as exc:
                     self.logger.error("Failed to persist audio chunk: %s", exc)

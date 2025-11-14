@@ -33,7 +33,7 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor
 
 from rpi_logger.core.logging_config import configure_logging
-from rpi_logger.modules.Audio.config import parse_cli_args
+from rpi_logger.modules.Audio.config import AudioSettings, parse_cli_args
 from rpi_logger.modules.base.config_paths import resolve_writable_module_config
 from rpi_logger.modules.Audio.runtime import AudioRuntime
 
@@ -42,6 +42,26 @@ MODULE_ID = "audio"
 CONFIG_PATH = resolve_writable_module_config(MODULE_DIR, MODULE_ID)
 
 logger = logging.getLogger("Audio")
+
+_DEFAULT_LOG_LEVEL = AudioSettings().log_level.lower()
+_LEVEL_ALIASES = {
+    "warn": "warning",
+    "fatal": "critical",
+    "err": "error",
+}
+_VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
+
+
+def _resolve_log_level(value: str | None) -> tuple[str, bool]:
+    """Normalize user-supplied log levels before configuring logging."""
+
+    normalized = (value or "").strip().lower()
+    if not normalized:
+        return _DEFAULT_LOG_LEVEL, False
+    normalized = _LEVEL_ALIASES.get(normalized, normalized)
+    if normalized in _VALID_LOG_LEVELS:
+        return normalized, False
+    return _DEFAULT_LOG_LEVEL, True
 
 def parse_args(argv: Optional[list[str]] = None):
     return parse_cli_args(argv, config_path=CONFIG_PATH)
@@ -54,16 +74,16 @@ def build_runtime(context):
 async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
 
-    requested_level = str(getattr(args, "log_level", "") or "").lower()
-    effective_level = "debug"
+    requested_level = str(getattr(args, "log_level", "") or "")
+    effective_level, invalid_level = _resolve_log_level(requested_level)
     configure_logging(
         level=effective_level,
         console=getattr(args, "console_output", True),
         log_file=getattr(args, "log_file", None),
     )
-    if requested_level and requested_level != effective_level:
+    if requested_level and invalid_level:
         logger.warning(
-            "Ignoring requested log level '%s'; forcing %s for Audio",
+            "Unknown log level '%s'; defaulting to %s",
             requested_level,
             effective_level,
         )
