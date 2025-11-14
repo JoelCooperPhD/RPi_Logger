@@ -45,7 +45,7 @@ class CameraStorageManager:
 
         try:
             camera_dir = await asyncio.to_thread(
-                controller._ensure_camera_dir_sync,  # noqa: SLF001 - internal helper reuse
+                controller.state.ensure_camera_dir_sync,
                 slot.index,
                 session_dir,
             )
@@ -80,9 +80,9 @@ class CameraStorageManager:
             controller.current_trial_label,
         )
         await pipeline.start()
-        fps_hint = await controller._await_slot_fps(slot)
+        fps_hint = await controller.telemetry.await_slot_fps(slot)
         if fps_hint <= 0:
-            fps_hint = controller._resolve_video_fps(slot)
+            fps_hint = controller.telemetry.resolve_video_fps(slot)
         await pipeline.start_video_recording(fps_hint)
         slot.storage_pipeline = pipeline
         self.logger.info(
@@ -174,13 +174,13 @@ class CameraStorageManager:
                 return False
             external_session = True
         else:
-            target_dir = controller.save_dir or controller._resolve_save_dir()
+            target_dir = controller.save_dir or controller.state.resolve_save_dir()
             try:
                 base_dir = Path(target_dir)
             except Exception:
                 self.logger.error("Invalid save directory: %s", target_dir)
                 return False
-            session_dir = await asyncio.to_thread(controller._prepare_session_directory_sync, base_dir)
+            session_dir = await asyncio.to_thread(controller.state.prepare_session_directory_sync, base_dir)
             if session_dir is None:
                 return False
 
@@ -196,8 +196,8 @@ class CameraStorageManager:
         controller._storage_failure_reported = False
         controller._saved_count = 0
         await self.activate_storage_for_all_slots()
-        controller._request_sensor_sync()
-        controller._sync_record_toggle()
+        controller.telemetry.request_sensor_sync()
+        controller.view_manager.sync_record_toggle()
         controller.view_manager.refresh_status()
         rate_desc = (
             "uncapped"
@@ -226,8 +226,8 @@ class CameraStorageManager:
         controller.capture_preferences_enabled = False
         controller.session_dir = None
         controller._storage_failure_reported = False
-        controller._request_sensor_sync()
-        controller._sync_record_toggle()
+        controller.telemetry.request_sensor_sync()
+        controller.view_manager.sync_record_toggle()
         controller.view_manager.refresh_status()
         self.logger.info(
             "Recording disabled (saved %d frames, drops=%d)",
@@ -256,7 +256,7 @@ class CameraStorageManager:
         self.logger.info("Save directory set to %s", path)
 
         if controller.save_enabled:
-            session_dir = await asyncio.to_thread(controller._prepare_session_directory_sync, path)
+            session_dir = await asyncio.to_thread(controller.state.prepare_session_directory_sync, path)
             if session_dir is None:
                 self.logger.error(
                     "Unable to refresh session directory after path change; leaving previous session active",

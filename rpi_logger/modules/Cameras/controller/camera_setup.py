@@ -138,15 +138,23 @@ class CameraSetupManager:
                 if controller.view_adapter:
                     controller.view_adapter.bind_preview_resize(
                         slot.frame,
-                        lambda width, height, target=slot: controller._handle_preview_resize(target, width, height),
+                        lambda width, height, target=slot: controller.view_manager.handle_preview_resize(
+                            target,
+                            width,
+                            height,
+                        ),
                     )
                     controller.view_adapter.prime_preview_dimensions(
                         slot.frame,
-                        lambda width, height, target=slot: controller._handle_preview_resize(target, width, height),
+                        lambda width, height, target=slot: controller.view_manager.handle_preview_resize(
+                            target,
+                            width,
+                            height,
+                        ),
                     )
 
                 slot.saving_active = saving_active
-                await controller._apply_frame_rate(slot)
+                await controller.telemetry.apply_frame_rate(slot)
 
                 pipeline_logger = controller.logger.getChild(f"PipelineCam{index}")
                 view_resize_checker = controller.view_adapter.view_is_resizing if controller.view_adapter else None
@@ -161,7 +169,6 @@ class CameraSetupManager:
                 if saving_active:
                     slot.storage_queue = asyncio.Queue(maxsize=controller.storage_queue_size)
                     slot.storage_queue_size = controller.storage_queue_size
-                    await controller.storage_manager.start_storage_resources(slot)
                 else:
                     slot.storage_queue = None
                     await controller.storage_manager.stop_storage_resources(slot)
@@ -176,8 +183,8 @@ class CameraSetupManager:
                             camera=camera,
                             stop_event=controller._stop_event,
                             shutdown_queue=controller._shutdown_queue,
-                            record_latency=controller._record_capture_latency,
-                            log_failure=controller._log_capture_failure,
+                            record_latency=controller.telemetry.record_capture_latency,
+                            log_failure=controller.telemetry.log_capture_failure,
                         ),
                         name=f"CameraCapture{index}",
                     )
@@ -205,6 +212,9 @@ class CameraSetupManager:
 
                 if slot.storage_queue:
                     controller.storage_manager.start_storage_consumer(slot)
+
+                if saving_active and slot.storage_queue:
+                    await controller.storage_manager.start_storage_resources(slot)
             except Exception as exc:  # pragma: no cover - defensive
                 controller.logger.exception("Failed to initialize camera %s: %s", index, exc)
                 if camera is not None:

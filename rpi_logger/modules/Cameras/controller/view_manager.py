@@ -36,7 +36,18 @@ class CameraViewManager:
             return
         adapter.install_preview_fps_menu(
             getter=lambda: self._controller.preview_fraction,
-            handler=self._controller._handle_preview_fraction_selection,
+            handler=self._controller.capture_settings.handle_preview_fraction_selection,
+        )
+
+    def sync_record_toggle(self) -> None:
+        adapter = self.adapter
+        controller = self._controller
+        if not adapter:
+            return
+        desired = bool(controller.save_enabled or controller.capture_preferences_enabled)
+        adapter.sync_record_toggle(
+            desired,
+            capture_disabled=controller.save_enabled,
         )
 
     def register_camera_toggle(self, slot: "CameraSlot") -> None:
@@ -111,7 +122,7 @@ class CameraViewManager:
         if stage_summary:
             message += f" | {stage_summary}"
 
-        logical = controller._get_requested_resolution()
+        logical = controller.setup_manager.get_requested_resolution()
         if logical:
             message += f" | logical res={logical[0]}x{logical[1]} (software)"
 
@@ -129,6 +140,11 @@ class CameraViewManager:
         self.set_status(message)
         logger.debug("View status composed | message=%s", message)
         self.publish_pipeline_metrics()
+
+    def refresh_preview_fps_ui(self) -> None:
+        adapter = self.adapter
+        if adapter:
+            adapter.refresh_preview_fps_ui()
 
     def compute_stage_fps(self) -> dict[str, float]:
         controller = self._controller
@@ -190,3 +206,9 @@ class CameraViewManager:
             if slot.index == index:
                 return slot
         return None
+
+    def handle_preview_resize(self, slot: "CameraSlot", width: int, height: int) -> None:
+        new_size = (width, height)
+        if new_size == slot.size:
+            return
+        slot.size = new_size
