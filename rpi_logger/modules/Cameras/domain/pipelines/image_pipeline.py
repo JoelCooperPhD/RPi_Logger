@@ -74,6 +74,7 @@ class ImagePipeline:
         self._capture_counter = RollingFpsCounter(fps_window_seconds)
         self._process_counter = RollingFpsCounter(fps_window_seconds)
         self._storage_counter = RollingFpsCounter(fps_window_seconds)
+        self._skip_counters: dict[str, int] = {}
 
     def update_view_resize_checker(self, checker: Optional[Callable[[], bool]]) -> None:
         self._view_resize_checker = checker or (lambda: False)
@@ -224,6 +225,12 @@ class ImagePipeline:
         )
         capture_index = timing_result.capture_index
         slot.capture_index += 1
+        self._register_overlay_frame(
+            slot,
+            capture_index=capture_index,
+            timestamp=timestamp,
+            sensor_timestamp=timing_result.sensor_timestamp_ns,
+        )
 
         first_frame_event = getattr(slot, "first_frame_event", None)
         if first_frame_event is not None and not first_frame_event.is_set():
@@ -253,6 +260,7 @@ class ImagePipeline:
 
         if view_is_resizing:
             slot.was_resizing = True
+            self._log_frame_skip(slot, capture_index, "preview_resizing_pause")
         elif slot.was_resizing:
             slot.was_resizing = False
             slot.preview_gate.configure(slot.preview_gate.period)
@@ -261,6 +269,7 @@ class ImagePipeline:
         preview_ready = bool(preview_queue and not view_is_resizing and slot.preview_enabled)
 
         if not storage_needed and not preview_ready:
+            self._log_frame_skip(slot, capture_index, "no_consumers")
             return
 
         main_array = captured.frame
@@ -269,6 +278,7 @@ class ImagePipeline:
 
         limiter = getattr(slot, "frame_rate_gate", None)
         if limiter is not None and not limiter.should_emit(monotonic):
+            self._log_frame_skip(slot, capture_index, "storage_frame_gate")
             return
 
         preview_frame = captured.preview_frame if captured.preview_frame is not None else main_array
@@ -295,7 +305,7 @@ class ImagePipeline:
             self._offer_queue(
                 storage_queue,
                 payload,
-                drop_hook=lambda: self._record_storage_drop(slot),
+                drop_hook=lambda idx=payload.capture_index: self._record_storage_drop(slot, idx),
             )
             slot.storage_fps = self._storage_counter.tick()
             storage_enqueued = True
@@ -321,7 +331,15 @@ class ImagePipeline:
                 dropped_since_last=timing_result.dropped_since_last,
                 sensor_timestamp_ns=timing_result.sensor_timestamp_ns,
             )
-            self._offer_queue(preview_queue, payload)
+            self._offer_queue(
+                preview_queue,
+                payload,
+                drop_hook=lambda idx=payload.capture_index: self._log_frame_skip(
+                    slot,
+                    idx,
+                    "preview_queue_drop",
+                ),
+            )
 
         # Preview frames are emitted after storage so the stretch/skip logic never starves disk writes.
 
@@ -372,7 +390,7 @@ class ImagePipeline:
             except asyncio.QueueFull:  # pragma: no cover - defensive
                 pass
 
-    def _record_storage_drop(self, slot: Any) -> None:
+    def _record_storage_drop(self, slot: Any, frame_number: int) -> None:
         slot.storage_drop_since_last += 1
         slot.storage_drop_total += 1
         if slot.storage_drop_total <= 5 or slot.storage_drop_total % 25 == 0:
@@ -382,7 +400,47 @@ class ImagePipeline:
                 slot.storage_drop_total,
                 slot.storage_queue_size,
             )
+        self._log_frame_skip(slot, frame_number, "storage_queue_drop")
         self._status_refresh()
+
+    def _log_frame_skip(self, slot: Any, frame_number: int, reason: str) -> None:
+        counter = self._skip_counters.get(reason, 0) + 1
+        self._skip_counters[reason] = counter
+        if counter <= 5 or counter % 50 == 0:
+            self.logger.debug(
+                "Camera %s skipped frame %d -> %s (%d events)",
+                slot.index,
+                frame_number,
+                reason,
+                counter,
+            )
+
+    def _register_overlay_frame(
+        self,
+        slot: Any,
+        *,
+        capture_index: int,
+        timestamp: float,
+        sensor_timestamp: Optional[int],
+    ) -> None:
+        pipeline = getattr(slot, "storage_pipeline", None)
+        if not pipeline or not getattr(pipeline, "uses_hardware_encoder", False):
+            return
+        record = getattr(pipeline, "record_overlay_metadata", None)
+        if not callable(record):
+            return
+        try:
+            record(
+                frame_number=capture_index,
+                timestamp_unix=timestamp,
+                sensor_timestamp_ns=sensor_timestamp,
+            )
+        except Exception:  # pragma: no cover - defensive
+            self.logger.debug(
+                "Unable to register overlay metadata for cam %s frame %d",
+                slot.index,
+                capture_index,
+            )
 
 
 __all__ = ["ImagePipeline", "PipelineMetrics", "RollingFpsCounter"]

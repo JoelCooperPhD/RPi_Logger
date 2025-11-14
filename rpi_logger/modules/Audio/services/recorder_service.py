@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from ..domain import AudioDeviceInfo, LevelMeter
-from .device_recorder import AudioDeviceRecorder
+from .device_recorder import AudioDeviceRecorder, RecordingHandle
 
 
 class RecorderService:
@@ -87,14 +87,14 @@ class RecorderService:
                 self.logger.error("Failed to prepare recorder %d: %s", device_id, exc)
         return started
 
-    async def finish_recording(self) -> List[Path]:
+    async def finish_recording(self) -> List[RecordingHandle]:
         tasks = []
         for recorder in self.recorders.values():
             tasks.append(asyncio.to_thread(recorder.finish_recording))
         if not tasks:
             return []
         finished = await asyncio.gather(*tasks, return_exceptions=True)
-        results: List[Path] = []
+        results: List[RecordingHandle] = []
         for maybe_path in finished:
             if isinstance(maybe_path, Exception) or maybe_path is None:
                 continue

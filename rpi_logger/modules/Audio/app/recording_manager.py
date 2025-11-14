@@ -33,6 +33,7 @@ class RecordingManager:
         self.logger = logger.getChild("RecordingManager")
         self._emit_status = status_callback
         self._active_session_dir: Path | None = None
+        self._module_subdir = "Audio"
         self._start_lock = asyncio.Lock()
 
     async def ensure_session_dir(self, current: Optional[Path]) -> Path:
@@ -60,7 +61,9 @@ class RecordingManager:
                 return False
 
             session_dir = await self.ensure_session_dir(self.state.session_dir)
-            started = await self.recorder_service.begin_recording(device_ids, session_dir, trial_number)
+            module_dir = session_dir / self._module_subdir
+            await asyncio.to_thread(module_dir.mkdir, parents=True, exist_ok=True)
+            started = await self.recorder_service.begin_recording(device_ids, module_dir, trial_number)
             if started == 0:
                 self.logger.error("No recorders ready; aborting start")
                 return False
@@ -94,16 +97,26 @@ class RecordingManager:
         self.module_bridge.set_recording(False, trial)
 
         session_dir = self._active_session_dir or self.state.session_dir
+        artifact_payload = []
+        for handle in recordings:
+            artifact_payload.append({
+                "audio_file": str(handle.file_path),
+                "timing_csv": str(handle.timing_csv_path),
+                "device_id": handle.device_id,
+                "device_name": handle.device_name,
+                "start_time_unix": handle.start_time_unix,
+                "start_time_monotonic": handle.start_time_monotonic,
+            })
         payload = {
             "trial_number": trial,
-            "recordings": [str(path) for path in recordings],
+            "recordings": artifact_payload,
             "session_dir": str(session_dir) if session_dir else None,
         }
         self._emit_status(StatusType.RECORDING_STOPPED, payload)
         self.logger.info(
             "Recording stopped (%d file%s)",
-            len(recordings),
-            "s" if len(recordings) != 1 else "",
+            len(artifact_payload),
+            "s" if len(artifact_payload) != 1 else "",
         )
         return True
 

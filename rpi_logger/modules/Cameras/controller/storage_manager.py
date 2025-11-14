@@ -75,6 +75,10 @@ class CameraStorageManager:
             camera=slot.camera,
             logger=self.logger.getChild(f"cam{slot.index}"),
         )
+        pipeline.set_trial_context(
+            controller.current_trial_number,
+            controller.current_trial_label,
+        )
         await pipeline.start()
         fps_hint = await controller._await_slot_fps(slot)
         if fps_hint <= 0:
@@ -82,10 +86,11 @@ class CameraStorageManager:
         await pipeline.start_video_recording(fps_hint)
         slot.storage_pipeline = pipeline
         self.logger.info(
-            "Storage ready for %s -> dir=%s | queue=%d",
+            "Storage ready for %s -> dir=%s | queue=%d | trial=%s",
             camera_alias,
             camera_dir,
             slot.storage_queue_size,
+            controller.current_trial_number,
         )
 
     def start_storage_consumer(self, slot: "CameraSlot") -> None:

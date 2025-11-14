@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import csv
 import logging
 import queue
 import threading
@@ -21,8 +22,24 @@ from ..domain import AUDIO_BIT_DEPTH, AUDIO_CHANNELS_MONO, AudioDeviceInfo, Leve
 @dataclass(slots=True)
 class RecordingHandle:
     file_path: Path
+    timing_csv_path: Path
     session_dir: Path
     trial_number: int
+    device_id: int
+    device_name: str
+    start_time_unix: Optional[float] = None
+    start_time_monotonic: Optional[float] = None
+
+
+@dataclass(slots=True)
+class AudioChunk:
+    data: bytes
+    frames: int
+    chunk_index: int
+    unix_time: float
+    monotonic_time: float
+    adc_timestamp: Optional[float]
+    total_frames: int
 
 
 class AudioDeviceRecorder:
@@ -44,9 +61,11 @@ class AudioDeviceRecorder:
         self._last_status: Optional[str] = None
         self._writer_thread: Optional[threading.Thread] = None
         self._writer_stop = threading.Event()
-        self._write_queue: queue.Queue[bytes] = queue.Queue(maxsize=64)
+        self._write_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=64)
         self._active_handle: Optional[RecordingHandle] = None
         self._dropped_blocks = 0
+        self._chunk_counter = 0
+        self._total_frames = 0
 
     # ------------------------------------------------------------------
     # Stream lifecycle
@@ -56,7 +75,7 @@ class AudioDeviceRecorder:
             return
 
         def _callback(indata, frames, time_info, status):
-            self._handle_callback(indata, status)
+            self._handle_callback(indata, frames, time_info, status)
 
         channels = max(1, min(self.device.channels or 1, AUDIO_CHANNELS_MONO))
         self.logger.debug(
@@ -114,6 +133,7 @@ class AudioDeviceRecorder:
             return
         session_dir.mkdir(parents=True, exist_ok=True)
         file_path = self._make_filename(session_dir, trial_number)
+        timing_csv = self._make_timing_filename(file_path)
         wave_handle = wave.open(str(file_path), "wb")
         wave_handle.setnchannels(1)
         wave_handle.setsampwidth(AUDIO_BIT_DEPTH // 8)
@@ -121,18 +141,28 @@ class AudioDeviceRecorder:
 
         self._writer_stop.clear()
         self._write_queue = queue.Queue(maxsize=128)
-        self._active_handle = RecordingHandle(file_path=file_path, session_dir=session_dir, trial_number=trial_number)
+        self._chunk_counter = 0
+        self._total_frames = 0
+        handle = RecordingHandle(
+            file_path=file_path,
+            timing_csv_path=timing_csv,
+            session_dir=session_dir,
+            trial_number=trial_number,
+            device_id=self.device.device_id,
+            device_name=self.device.name,
+        )
+        self._active_handle = handle
         self._writer_thread = threading.Thread(
             target=self._writer_loop,
-            args=(wave_handle,),
+            args=(wave_handle, handle),
             name=f"AudioWriter-{self.device.device_id}",
             daemon=True,
         )
         self._writer_thread.start()
         self.recording = True
-        self.logger.info("Recording to %s", file_path.name)
+        self.logger.info("Recording to %s (timing -> %s)", file_path.name, timing_csv.name)
 
-    def finish_recording(self) -> Optional[Path]:
+    def finish_recording(self) -> Optional[RecordingHandle]:
         if not self.recording:
             return None
         self.recording = False
@@ -145,28 +175,55 @@ class AudioDeviceRecorder:
         self._active_handle = None
         self._dropped_blocks = 0
         if handle:
-            self.logger.info("Recording finished (%s)", handle.file_path.name)
-        return handle.file_path if handle else None
+            self.logger.info(
+                "Recording finished (%s) with timing metadata in %s",
+                handle.file_path.name,
+                handle.timing_csv_path.name,
+            )
+        return handle
 
     # ------------------------------------------------------------------
     # Audio callback
 
-    def _handle_callback(self, indata, status: sd.CallbackFlags) -> None:
+    def _handle_callback(self, indata, frames: int, time_info, status: sd.CallbackFlags) -> None:
         mono = indata[:, 0] if indata.ndim > 1 else indata
-        now = time.time()
+        now_unix = time.time()
+        now_monotonic = time.perf_counter()
         try:
-            self.level_meter.add_samples(mono.tolist(), now)
+            self.level_meter.add_samples(mono.tolist(), now_unix)
         except Exception:
             pass
 
-        if self.recording:
-            chunk = self._to_pcm_bytes(mono)
+        if self.recording and self._active_handle:
+            chunk_bytes = self._to_pcm_bytes(mono)
+            chunk_index = self._chunk_counter + 1
+            total_frames = self._total_frames + frames
+            adc_time = self._extract_time_info(time_info)
+            chunk = AudioChunk(
+                data=chunk_bytes,
+                frames=frames,
+                chunk_index=chunk_index,
+                unix_time=now_unix,
+                monotonic_time=now_monotonic,
+                adc_timestamp=adc_time,
+                total_frames=total_frames,
+            )
+            self._chunk_counter = chunk_index
+            self._total_frames = total_frames
+
+            if self._active_handle.start_time_unix is None:
+                self._active_handle.start_time_unix = adc_time or now_unix
+                self._active_handle.start_time_monotonic = now_monotonic
+
             try:
                 self._write_queue.put_nowait(chunk)
             except queue.Full:
                 self._dropped_blocks += 1
                 if self._dropped_blocks % 25 == 0:
-                    self.logger.warning("Dropped %d audio blocks due to slow writer", self._dropped_blocks)
+                    self.logger.warning(
+                        "Dropped %d audio blocks due to slow writer",
+                        self._dropped_blocks,
+                    )
 
         if status:
             status_str = str(status)
@@ -174,21 +231,52 @@ class AudioDeviceRecorder:
                 self.logger.warning("Audio callback status: %s", status_str)
                 self._last_status = status_str
 
-    def _writer_loop(self, wave_handle: wave.Wave_write) -> None:
+    def _writer_loop(self, wave_handle: wave.Wave_write, handle: RecordingHandle) -> None:
+        csv_file = None
+        writer = None
+        written_rows = 0
         try:
+            csv_file = open(handle.timing_csv_path, 'w', newline='', encoding='utf-8')
+            writer = csv.writer(csv_file)
+            writer.writerow([
+                'trial',
+                'chunk_index',
+                'write_time_unix',
+                'write_time_monotonic',
+                'adc_timestamp',
+                'frames',
+                'total_frames',
+            ])
+
             while not self._writer_stop.is_set() or not self._write_queue.empty():
                 try:
                     chunk = self._write_queue.get(timeout=0.2)
                 except queue.Empty:
                     continue
                 try:
-                    wave_handle.writeframes(chunk)
+                    wave_handle.writeframes(chunk.data)
+                    writer.writerow([
+                        handle.trial_number,
+                        chunk.chunk_index,
+                        f"{chunk.unix_time:.6f}",
+                        f"{chunk.monotonic_time:.9f}",
+                        f"{chunk.adc_timestamp:.9f}" if chunk.adc_timestamp is not None else '',
+                        chunk.frames,
+                        chunk.total_frames,
+                    ])
+                    written_rows += 1
+                    if written_rows % 20 == 0:
+                        csv_file.flush()
                 except Exception as exc:
-                    self.logger.error("Failed to write audio chunk: %s", exc)
+                    self.logger.error("Failed to persist audio chunk: %s", exc)
                     break
         finally:
             with contextlib.suppress(Exception):
                 wave_handle.close()
+            if csv_file is not None:
+                with contextlib.suppress(Exception):
+                    csv_file.flush()
+                    csv_file.close()
 
     def _to_pcm_bytes(self, samples) -> bytes:
         array = np.asarray(samples, dtype=np.float32)
@@ -214,5 +302,25 @@ class AudioDeviceRecorder:
         filename = f"{timestamp}_AUDIO_trial{trial_number:03d}_MIC{self.device.device_id}_{safe_name}.wav"
         return session_dir / filename
 
+    def _make_timing_filename(self, audio_path: Path) -> Path:
+        stem = audio_path.stem
+        if "_AUDIO_" in stem:
+            csv_stem = stem.replace("_AUDIO_", "_AUDIOTIMING_", 1)
+        else:
+            csv_stem = f"{stem}_timing"
+        return audio_path.with_name(f"{csv_stem}.csv")
 
-__all__ = ["AudioDeviceRecorder", "RecordingHandle"]
+    def _extract_time_info(self, time_info) -> Optional[float]:
+        if not time_info:
+            return None
+        for attr in ("input_buffer_adc_time", "current_time", "output_buffer_dac_time"):
+            value = getattr(time_info, attr, None)
+            if value:
+                try:
+                    return float(value)
+                except Exception:
+                    continue
+        return None
+
+
+__all__ = ["AudioDeviceRecorder", "RecordingHandle", "AudioChunk"]

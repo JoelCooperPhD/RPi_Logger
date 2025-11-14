@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -31,6 +34,27 @@ class StorageWriteResult:
     image_path: Optional[Path]
     video_fps: float
     writer_codec: Optional[str]
+
+
+@dataclass(slots=True)
+class OverlayRenderInfo:
+    """Metadata rendered into video/still overlays and the hardware encoder overlay."""
+
+    frame_number: int
+    timestamp_unix: float
+    sensor_timestamp_ns: Optional[int]
+
+    @property
+    def timestamp_text(self) -> str:
+        dt = datetime.fromtimestamp(self.timestamp_unix)
+        return dt.strftime("%H:%M:%S.%f")[:-3]
+
+    @property
+    def sensor_text(self) -> Optional[str]:
+        if self.sensor_timestamp_ns is None:
+            return None
+        microseconds = self.sensor_timestamp_ns // 1_000
+        return f"{microseconds}"
 
 
 class CameraStoragePipeline:
@@ -86,9 +110,14 @@ class CameraStoragePipeline:
         self._writer_fps: float = 30.0
         self._video_start_monotonic: Optional[float] = None
         self._video_fps_hint: Optional[float] = None
-        self._pending_video_frames: list[tuple[int, np.ndarray]] = []
+        self._pending_video_frames: list[tuple[OverlayRenderInfo, np.ndarray]] = []
         self._pending_frame_limit = 120
         self._pending_fps_warning_logged = False
+        self._overlay_metadata: deque[OverlayRenderInfo] = deque()
+        self._overlay_metadata_limit = self._pending_frame_limit * 4
+        self._overlay_lock = threading.Lock()
+        self.trial_number: int = 1
+        self.trial_label: str = ""
 
         self._codec_candidates = ("mp4v", "avc1", "H264", "XVID")
         self._fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -112,9 +141,10 @@ class CameraStoragePipeline:
         """Prepare CSV logger and reset video writer state."""
         await asyncio.to_thread(self.save_dir.mkdir, parents=True, exist_ok=True)
         slug = self.camera_slug or f"cam{self.camera_index}"
-        self._video_path = self.save_dir / f"{slug}_recording.mp4"
-        self._csv_path = self.save_dir / f"{slug}_frame_timing.csv"
-        csv_logger = CameraCSVLogger(self.camera_index, self._csv_path)
+        suffix = self._trial_suffix
+        self._video_path = self.save_dir / f"{slug}{suffix}_recording.mp4"
+        self._csv_path = self.save_dir / f"{slug}{suffix}_frame_timing.csv"
+        csv_logger = CameraCSVLogger(self.camera_index, self._csv_path, trial_number=self.trial_number)
         await csv_logger.start()
         self._csv_logger = csv_logger
         self._logger.info(
@@ -148,10 +178,12 @@ class CameraStoragePipeline:
         if fps_hint > 0:
             self._video_fps_hint = fps_hint
 
+        overlay_info = self._build_overlay_info(payload)
+
         if self.uses_hardware_encoder and self._picamera_encoder is not None:
             image_path: Optional[Path] = None
             if self.save_stills and pil_image is not None:
-                image_path = await self._save_image(pil_image, payload.capture_index, payload.timestamp)
+                image_path = await self._save_image(pil_image, overlay_info)
             self._video_frame_count += 1
             return StorageWriteResult(
                 video_written=True,
@@ -169,15 +201,15 @@ class CameraStoragePipeline:
         if not writer_ready:
             writer_ready = await self._try_prepare_video_writer(frame_size, fps_hint)
             if not writer_ready:
-                self._queue_pending_frame(rgb_frame, payload.capture_index)
+                self._queue_pending_frame(rgb_frame, overlay_info)
 
         if writer_ready and self._video_writer is not None:
-            video_written = await self._write_video_frame(rgb_frame, payload.capture_index)
+            video_written = await self._write_video_frame(rgb_frame, overlay_info)
 
         image_path: Optional[Path] = None
         if self.save_stills:
             target_image = pil_image if pil_image is not None else Image.fromarray(rgb_frame)
-            image_path = await self._save_image(target_image, payload.capture_index, payload.timestamp)
+            image_path = await self._save_image(target_image, overlay_info)
 
         return StorageWriteResult(
             video_written=video_written,
@@ -201,10 +233,45 @@ class CameraStoragePipeline:
         self._csv_logger.log_frame(
             payload.capture_index,
             frame_time_unix=payload.timestamp,
+            monotonic_time=payload.monotonic,
             sensor_timestamp_ns=payload.sensor_timestamp_ns,
+            hardware_frame_number=payload.hardware_frame_number,
             dropped_since_last=payload.dropped_since_last,
             storage_queue_drops=queue_drops,
         )
+
+    def record_overlay_metadata(
+        self,
+        *,
+        frame_number: int,
+        timestamp_unix: float,
+        sensor_timestamp_ns: Optional[int],
+    ) -> None:
+        """Queue overlay metadata so hardware encoders can stay in sync with CSV IDs."""
+        if not self.overlay_config.get("show_frame_number", True):
+            return
+        overlay = OverlayRenderInfo(
+            frame_number=frame_number,
+            timestamp_unix=timestamp_unix,
+            sensor_timestamp_ns=sensor_timestamp_ns,
+        )
+        with self._overlay_lock:
+            self._overlay_metadata.append(overlay)
+            while len(self._overlay_metadata) > self._overlay_metadata_limit:
+                self._overlay_metadata.popleft()
+
+    def _build_overlay_info(self, payload: "FramePayload") -> OverlayRenderInfo:
+        return OverlayRenderInfo(
+            frame_number=payload.capture_index,
+            timestamp_unix=payload.timestamp,
+            sensor_timestamp_ns=payload.sensor_timestamp_ns,
+        )
+
+    def _next_overlay_metadata(self) -> Optional[OverlayRenderInfo]:
+        with self._overlay_lock:
+            if self._overlay_metadata:
+                return self._overlay_metadata.popleft()
+        return None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -339,12 +406,12 @@ class CameraStoragePipeline:
     def _queue_pending_frame(
         self,
         rgb_frame: np.ndarray,
-        frame_number: int,
+        overlay: OverlayRenderInfo,
     ) -> None:
         if rgb_frame is None:
             return
         frame_copy = np.array(rgb_frame, copy=True)
-        self._pending_video_frames.append((frame_number, frame_copy))
+        self._pending_video_frames.append((overlay, frame_copy))
         if (
             len(self._pending_video_frames) >= self._pending_frame_limit
             and not self._pending_fps_warning_logged
@@ -361,10 +428,10 @@ class CameraStoragePipeline:
         pending = list(self._pending_video_frames)
         self._pending_video_frames.clear()
         self._pending_fps_warning_logged = False
-        for frame_number, frame in pending:
-            await self._write_video_frame(frame, frame_number)
+        for overlay, frame in pending:
+            await self._write_video_frame(frame, overlay)
 
-    async def _write_video_frame(self, rgb_frame: np.ndarray, frame_number: int) -> bool:
+    async def _write_video_frame(self, rgb_frame: np.ndarray, overlay: OverlayRenderInfo) -> bool:
         if self._video_writer is None:
             return False
 
@@ -374,14 +441,14 @@ class CameraStoragePipeline:
         def convert_and_write() -> bool:
             frame_rgb = np.ascontiguousarray(rgb_frame)
             frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-            self._burn_frame_number(frame_bgr, frame_number, overlay_cfg)
+            self._render_overlay(frame_bgr, overlay, overlay_cfg)
             writer.write(frame_bgr)
             return True
 
         try:
             success = await asyncio.to_thread(convert_and_write)
         except Exception as exc:  # pragma: no cover - defensive
-            self._logger.warning("Video write error (frame %d): %s", frame_number, exc)
+            self._logger.warning("Video write error (frame %d): %s", overlay.frame_number, exc)
             return False
 
         if success:
@@ -390,8 +457,8 @@ class CameraStoragePipeline:
                 self._video_start_monotonic = time.monotonic()
         return success
 
-    async def _save_image(self, image: Image.Image, frame_number: int, timestamp: float) -> Optional[Path]:
-        filename = self._image_filename(frame_number, timestamp)
+    async def _save_image(self, image: Image.Image, overlay: OverlayRenderInfo) -> Optional[Path]:
+        filename = self._image_filename(overlay.frame_number, overlay.timestamp_unix)
         path = self.save_dir / filename
         format_name = "JPEG" if self.save_format in {"jpeg", "jpg"} else self.save_format.upper()
         save_kwargs: dict[str, object] = {}
@@ -403,13 +470,13 @@ class CameraStoragePipeline:
             processed_image = await asyncio.to_thread(
                 self._prepare_image_with_overlay,
                 image,
-                frame_number,
+                overlay,
                 overlay_cfg,
             )
             await asyncio.to_thread(processed_image.save, path, format=format_name, **save_kwargs)
             return path
         except Exception as exc:  # pragma: no cover - defensive
-            self._logger.warning("Image save error (frame %d): %s", frame_number, exc)
+            self._logger.warning("Image save error (frame %d): %s", overlay.frame_number, exc)
             return None
 
     async def _release_video_writer(self) -> None:
@@ -457,7 +524,7 @@ class CameraStoragePipeline:
         base_name = dt.strftime("%Y%m%d_%H%M%S_%f")
         ext = "jpg" if self.save_format in {"jpeg", "jpg"} else self.save_format
         slug = self.camera_slug or f"cam{self.camera_index}"
-        return f"{slug}_frame{frame_number:06d}_{base_name}.{ext}"
+        return f"{slug}{self._trial_suffix}_frame{frame_number:06d}_{base_name}.{ext}"
 
     @staticmethod
     def _coerce_slug(candidate: Optional[str], default: str) -> str:
@@ -470,7 +537,7 @@ class CameraStoragePipeline:
     def _prepare_image_with_overlay(
         self,
         image: Image.Image,
-        frame_number: int,
+        overlay: OverlayRenderInfo,
         overlay_cfg: dict,
     ) -> Image.Image:
         """Return a copy of ``image`` with the frame number burned in."""
@@ -485,25 +552,36 @@ class CameraStoragePipeline:
             return working
 
         frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-        self._burn_frame_number(frame_bgr, frame_number, overlay_cfg)
+        self._render_overlay(frame_bgr, overlay, overlay_cfg)
         frame_rgb_with_overlay = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         return Image.fromarray(frame_rgb_with_overlay)
 
-    def _burn_frame_number(self, frame: np.ndarray, frame_number: int, overlay_cfg: dict) -> None:
+    def _render_overlay(self, frame: np.ndarray, overlay: OverlayRenderInfo, overlay_cfg: dict) -> None:
+        if not overlay_cfg.get('show_frame_number', True):
+            return
+
         font_scale = overlay_cfg.get('font_scale_base', 0.6)
         thickness = overlay_cfg.get('thickness_base', 1)
-
-        text_color_r = overlay_cfg.get('text_color_r', 0)
-        text_color_g = overlay_cfg.get('text_color_g', 0)
-        text_color_b = overlay_cfg.get('text_color_b', 0)
-        text_color = (text_color_r, text_color_g, text_color_b)
+        text_color = (
+            overlay_cfg.get('text_color_r', 0),
+            overlay_cfg.get('text_color_g', 0),
+            overlay_cfg.get('text_color_b', 0),
+        )
 
         margin_left = overlay_cfg.get('margin_left', 10)
         line_start_y = overlay_cfg.get('line_start_y', 30)
 
-        border_thickness = thickness * 3
+        border_thickness = max(1, thickness * 3)
         border_color = (0, 0, 0)
-        text = f"{frame_number}"
+
+        components = [f"{overlay.frame_number}"]
+        if overlay_cfg.get('show_recording_timestamp', True):
+            components.append(overlay.timestamp_text)
+        if overlay_cfg.get('show_sensor_timestamp', True):
+            sensor_text = overlay.sensor_text
+            if sensor_text:
+                components.append(sensor_text)
+        text = " | ".join(components)
 
         cv2.putText(
             frame,
@@ -515,7 +593,6 @@ class CameraStoragePipeline:
             border_thickness,
             cv2.LINE_AA,
         )
-
         cv2.putText(
             frame,
             text,
@@ -544,8 +621,17 @@ class CameraStoragePipeline:
         def callback(request) -> None:
             if previous:
                 previous(request)
-            self._overlay_frame_counter += 1
-            self._apply_overlay_to_request(request, self._overlay_frame_counter)
+            metadata = self._next_overlay_metadata()
+            if metadata is None:
+                self._overlay_frame_counter += 1
+                metadata = OverlayRenderInfo(
+                    frame_number=self._overlay_frame_counter,
+                    timestamp_unix=time.time(),
+                    sensor_timestamp_ns=None,
+                )
+            else:
+                self._overlay_frame_counter = metadata.frame_number
+            self._apply_overlay_to_request(request, metadata)
 
         self._overlay_previous_callback = previous
         self._overlay_callback = callback
@@ -560,7 +646,7 @@ class CameraStoragePipeline:
         self._overlay_previous_callback = None
         self._overlay_callback = None
 
-    def _apply_overlay_to_request(self, request, frame_number: int) -> None:
+    def _apply_overlay_to_request(self, request, overlay: OverlayRenderInfo) -> None:
         if MappedArray is None or not self.main_size:
             return
         width, height = self.main_size
@@ -575,11 +661,33 @@ class CameraStoragePipeline:
                 window = array[:expected_rows, :active_width]
                 yuv = np.ascontiguousarray(window)
                 bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
-                self._burn_frame_number(bgr, frame_number, dict(self.overlay_config))
+                self._render_overlay(bgr, overlay, dict(self.overlay_config))
                 updated = cv2.cvtColor(bgr, cv2.COLOR_BGR2YUV_I420)
                 window[:, :] = updated
         except Exception as exc:  # pragma: no cover - defensive
             self._logger.debug("Overlay application failed: %s", exc)
+
+    def set_trial_context(self, trial_number: Optional[int], trial_label: Optional[str] = None) -> None:
+        try:
+            if trial_number is None:
+                raise ValueError
+            numeric = int(trial_number)
+            if numeric <= 0:
+                raise ValueError
+            self.trial_number = numeric
+        except (TypeError, ValueError):
+            self.trial_number = 1
+        self.trial_label = (trial_label or "").strip()
+        self._logger.debug(
+            "Trial context updated -> trial=%s label=%s",
+            self.trial_number,
+            self.trial_label or "<none>",
+        )
+
+    @property
+    def _trial_suffix(self) -> str:
+        suffix_number = self.trial_number if self.trial_number > 0 else 1
+        return f"_{suffix_number}"
 
 
 __all__ = ["CameraStoragePipeline", "StorageWriteResult"]

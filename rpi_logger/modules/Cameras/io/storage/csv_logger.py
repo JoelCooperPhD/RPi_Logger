@@ -25,7 +25,9 @@ class CSVLogEntry:
     camera_id: int
     frame_number: int
     write_time_unix: float
+    monotonic_time: float
     sensor_timestamp_ns: Optional[int]
+    hardware_frame_number: Optional[int]
     dropped_since_last: Optional[int]
     total_hardware_drops: int
     storage_queue_drops: int
@@ -72,7 +74,8 @@ class CameraCSVLogger:
         self._file = open(self.csv_path, "a" if file_exists else "w", encoding="utf-8", buffering=8192)
         if not file_exists:
             self._file.write(
-                "trial,frame_number,write_time_unix,sensor_timestamp_ns,dropped_since_last,total_hardware_drops,storage_queue_drops\n"
+                "trial,frame_number,write_time_unix,monotonic_time,sensor_timestamp_ns,hardware_frame_number,"
+                "dropped_since_last,total_hardware_drops,storage_queue_drops\n"
             )
 
         self._queue = asyncio.Queue(maxsize=self.queue_size)
@@ -130,7 +133,9 @@ class CameraCSVLogger:
         frame_number: int,
         *,
         frame_time_unix: Optional[float] = None,
+        monotonic_time: float,
         sensor_timestamp_ns: Optional[int],
+        hardware_frame_number: Optional[int],
         dropped_since_last: Optional[int],
         storage_queue_drops: int = 0,
     ) -> None:
@@ -147,7 +152,9 @@ class CameraCSVLogger:
             camera_id=self.camera_id,
             frame_number=frame_number,
             write_time_unix=frame_time_unix,
+            monotonic_time=monotonic_time,
             sensor_timestamp_ns=sensor_timestamp_ns,
+            hardware_frame_number=hardware_frame_number,
             dropped_since_last=dropped_since_last,
             total_hardware_drops=self._total_hardware_drops,
             storage_queue_drops=storage_queue_drops,
@@ -203,19 +210,22 @@ class CameraCSVLogger:
 
         if entry.frame_number < FRAME_LOG_COUNT:
             logger.info(
-                "%s frame %d -> dropped=%s total_drops=%s sensor_ts=%s",
+                "%s frame %d -> dropped=%s total_drops=%s sensor_ts=%s hardware=%s",
                 self.camera_name,
                 entry.frame_number,
                 entry.dropped_since_last,
                 entry.total_hardware_drops,
                 entry.sensor_timestamp_ns,
+                entry.hardware_frame_number,
             )
 
         row = (
             f"{self.trial_number},"
             f"{entry.frame_number},"
             f"{entry.write_time_unix:.6f},"
+            f"{entry.monotonic_time:.9f},"
             f"{entry.sensor_timestamp_ns if entry.sensor_timestamp_ns is not None else ''},"
+            f"{entry.hardware_frame_number if entry.hardware_frame_number is not None else ''},"
             f"{entry.dropped_since_last if entry.dropped_since_last is not None else ''},"
             f"{entry.total_hardware_drops},"
             f"{entry.storage_queue_drops}\n"

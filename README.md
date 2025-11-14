@@ -279,6 +279,7 @@ All files use consistent trial-based naming:
 - Audio: `{timestamp}_AUDIO_trial{N:03d}_MIC{id}_{name}.wav`
 - Video: `{timestamp}_CAM_trial{N:03d}_CAM{id}_{w}x{h}_{fps}fps.mp4`
 - Audio CSV: `{timestamp}_AUDIOTIMING_trial{N:03d}_MIC{id}.csv`
+  - Columns: `trial, chunk_index, write_time_unix, write_time_monotonic, adc_timestamp, frames, total_frames`
 - Video CSV: `{timestamp}_CAMTIMING_trial{N:03d}_CAM{id}.csv`
 - Sync Metadata: `{timestamp}_SYNC_trial{N:03d}.json`
 - Muxed Output: `{timestamp}_AV_trial{N:03d}.mp4`

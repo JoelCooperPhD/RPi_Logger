@@ -27,7 +27,7 @@ from ..io.storage import CameraStoragePipeline, StorageWriteResult
 from ..io.media import frame_to_image as convert_frame_to_image
 from ..logging_utils import ensure_structured_logger
 from .camera_setup import CameraSetupManager
-from .pipeline import PreviewConsumer, StorageConsumer, StorageHooks
+from .pipeline import PreviewConsumer, StorageHooks
 from .slot import CameraSlot
 from .storage_manager import CameraStorageManager
 from .view_manager import CameraViewManager
@@ -195,6 +195,8 @@ class CameraController(ModuleRuntime):
 
         self._stop_event = asyncio.Event()
         self._previews: List[CameraSlot] = []
+        self._active_trial_number = 0
+        self._active_trial_label: str = ""
         self._storage_hooks = StorageHooks(
             save_enabled=lambda: bool(self.save_enabled),
             session_dir_provider=lambda: self.session_dir,
@@ -332,6 +334,11 @@ class CameraController(ModuleRuntime):
                 supervisor_dir = getattr(self.supervisor_model, "session_dir", None)
                 if supervisor_dir:
                     directory = supervisor_dir
+            trial_number = self._normalize_trial_number(command.get("trial_number"))
+            if trial_number is None:
+                trial_number = (self._active_trial_number or 0) + 1
+            self._active_trial_number = trial_number
+            self._active_trial_label = str(command.get("trial_label") or "").strip()
             previously_enabled = self.save_enabled
             success = await self._enable_saving(directory)
             if not success:
@@ -346,6 +353,7 @@ class CameraController(ModuleRuntime):
                 self.logger.info("Stop recording command ignored; recording already inactive")
                 return True
             await self._disable_saving()
+            self._active_trial_label = ""
             self.logger.info("Frame saving disabled via command")
             return True
         return False
@@ -1309,103 +1317,19 @@ class CameraController(ModuleRuntime):
         return 0.0
 
     async def _start_storage_resources(self, slot: CameraSlot) -> None:
-        if not self.session_dir:
-            self.logger.error("Cannot start storage for camera %s: session directory unavailable", slot.index)
-            return
-
-        if slot.storage_pipeline is not None:
-            await slot.storage_pipeline.stop()
-
-        try:
-            camera_dir = await asyncio.to_thread(self._ensure_camera_dir_sync, slot.index, self.session_dir)
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.error("Cannot prepare per-camera directory for cam %s: %s", slot.index, exc)
-            return
-        slot.session_camera_dir = camera_dir
-
-        camera_alias = slot.title or self.state.get_camera_alias(slot.index)
-        camera_slug = self.state.get_camera_alias_slug(slot.index)
-
-        pipeline = CameraStoragePipeline(
-            slot.index,
-            camera_dir,
-            camera_alias=camera_alias,
-            camera_slug=camera_slug,
-            main_size=slot.main_size,
-            save_format=self.save_format,
-            save_quality=self.save_quality,
-            max_fps=self.MAX_SENSOR_FPS,
-            overlay_config=dict(self.overlay_config),
-            save_stills=self.save_stills_enabled,
-            camera=slot.camera,
-            logger=self.logger.getChild(f"StorageCam{slot.index}"),
-        )
-        await pipeline.start()
-        fps_hint = await self._await_slot_fps(slot)
-        if fps_hint <= 0:
-            fps_hint = self._resolve_video_fps(slot)
-        await pipeline.start_video_recording(fps_hint)
-        slot.storage_pipeline = pipeline
-        self.logger.info(
-            "Storage ready for %s -> dir=%s | queue=%d",
-            camera_alias,
-            camera_dir,
-            slot.storage_queue_size,
-        )
+        await self.storage_manager.start_storage_resources(slot)
 
     def _start_storage_consumer(self, slot: CameraSlot) -> None:
-        if slot.storage_queue is None or slot.storage_task is not None:
-            return
-
-        storage_consumer = StorageConsumer(
-            stop_event=self._stop_event,
-            hooks=self._storage_hooks,
-            logger=self.logger.getChild(f"StorageCam{slot.index}"),
-        )
-        slot.storage_task = self.task_manager.create(
-            storage_consumer.run(slot),
-            name=f"CameraStorage{slot.index}",
-        )
+        self.storage_manager.start_storage_consumer(slot)
 
     async def _stop_storage_resources(self, slot: CameraSlot) -> None:
-        pipeline = slot.storage_pipeline
-        slot.storage_pipeline = None
-        if pipeline is None:
-            return
-
-        await pipeline.stop()
+        await self.storage_manager.stop_storage_resources(slot)
 
     async def _activate_storage_for_all_slots(self) -> None:
-        for slot in self._previews:
-            slot.saving_active = True
-            slot.capture_main_stream = True
-            if slot.storage_queue is None:
-                slot.storage_queue = asyncio.Queue(maxsize=self.storage_queue_size)
-                slot.storage_queue_size = self.storage_queue_size
-            self._start_storage_consumer(slot)
-            await self._start_storage_resources(slot)
+        await self.storage_manager.activate_storage_for_all_slots()
 
     async def _deactivate_storage_for_all_slots(self) -> None:
-        shutdown_tasks: list[asyncio.Task] = []
-        pending_slots: list[CameraSlot] = []
-
-        for slot in self._previews:
-            slot.saving_active = False
-            slot.capture_main_stream = False
-            queue = slot.storage_queue
-            if queue is not None:
-                self._shutdown_queue(queue)
-            if slot.storage_task is not None:
-                shutdown_tasks.append(slot.storage_task)
-            pending_slots.append(slot)
-
-        if shutdown_tasks:
-            await asyncio.gather(*shutdown_tasks, return_exceptions=True)
-
-        for slot in pending_slots:
-            await self._stop_storage_resources(slot)
-            slot.storage_queue = None
-            slot.storage_task = None
+        await self.storage_manager.deactivate_storage_for_all_slots()
 
     def _probe_slot_fps(self, slot: CameraSlot) -> float:
         for candidate in (
@@ -1492,12 +1416,13 @@ class CameraController(ModuleRuntime):
         )
         base_display = str(session_dir) if external_session else str(self.save_dir)
         self.logger.info(
-            "Recording enabled -> base=%s | session=%s | rate=%s | queue=%d | stills=%s",
+            "Recording enabled -> base=%s | session=%s | rate=%s | queue=%d | stills=%s | trial=%s",
             base_display,
             self.session_dir,
             rate_desc,
             self.storage_queue_size,
             "on" if self.save_stills_enabled else "off",
+            self.current_trial_number,
         )
         return True
 
@@ -1588,6 +1513,26 @@ class CameraController(ModuleRuntime):
         fraction = CameraController._clamp_preview_fraction(fraction)
         mapping = {1.0: 1, 0.5: 2, 1 / 3: 3, 0.25: 4}
         return mapping.get(fraction, 1)
+
+    @staticmethod
+    def _normalize_trial_number(value: Any) -> Optional[int]:
+        try:
+            if value is None:
+                return None
+            trial = int(value)
+            if trial <= 0:
+                return None
+            return trial
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def current_trial_number(self) -> int:
+        return self._active_trial_number or 1
+
+    @property
+    def current_trial_label(self) -> str:
+        return self._active_trial_label
 
     def _compute_lores_size(self, main_size: tuple[int, int]) -> Optional[tuple[int, int]]:
         return self.setup_manager.compute_lores_size(main_size)
