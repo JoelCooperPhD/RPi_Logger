@@ -253,19 +253,7 @@ class CameraSetupManager:
         return self._controller.state.enforce_native_aspect(width, height)
 
     def compute_lores_size(self, main_size: tuple[int, int]) -> Optional[tuple[int, int]]:
-        if not main_size:
-            return None
-        controller = self._controller
-        main_width, main_height = main_size
-        preview_width, preview_height = controller.PREVIEW_SIZE
-        if preview_width >= main_width or preview_height >= main_height:
-            return None
-        target_width = min(preview_width, main_width)
-        target_height = min(preview_height, main_height)
-        if target_width < 160 or target_height < 120:
-            return None
-        target_width, target_height = self.ensure_even_dimensions(target_width, target_height)
-        return (target_width, target_height)
+        return (320, 240)
 
     def coerce_capture_size(self, native_size: Optional[tuple[int, int]]) -> Optional[tuple[int, int]]:
         target = self.get_requested_resolution()
