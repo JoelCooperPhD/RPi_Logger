@@ -103,7 +103,27 @@ class ImagePipeline:
         if camera is None or queue is None:
             return
 
+        pause_event = getattr(slot, "capture_active_event", None)
+        idle_event = getattr(slot, "capture_idle_event", None)
+
         while not stop_event.is_set():
+            if pause_event is not None and not pause_event.is_set():
+                if idle_event and not idle_event.is_set():
+                    idle_event.set()
+                if stop_event.is_set():
+                    break
+                try:
+                    await asyncio.wait_for(pause_event.wait(), timeout=0.2)
+                except asyncio.TimeoutError:
+                    continue
+                except asyncio.CancelledError:
+                    raise
+                if idle_event and idle_event.is_set():
+                    idle_event.clear()
+                continue
+            if idle_event and idle_event.is_set():
+                idle_event.clear()
+
             capture_start = time.perf_counter()
             try:
                 request = await asyncio.to_thread(camera.capture_request)

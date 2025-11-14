@@ -74,10 +74,19 @@ class CameraViewManager:
             return
         slot.preview_enabled = enabled
         if enabled:
+            resumed = await controller.resume_camera_slot(slot)
+            if not resumed:
+                slot.preview_enabled = False
+                if self.adapter:
+                    self.adapter.update_camera_toggle_state(index, False)
+                    self.adapter.show_camera_hidden(slot)
+                self.refresh_status()
+                return
             slot.preview_gate.configure(slot.preview_gate.period)
             if self.adapter:
                 self.adapter.show_camera_waiting(slot)
         else:
+            await controller.pause_camera_slot(slot)
             if self.adapter:
                 self.adapter.show_camera_hidden(slot)
         self.refresh_status()
@@ -92,7 +101,9 @@ class CameraViewManager:
     def refresh_status(self) -> None:
         controller = self._controller
         previews = controller._previews
-        active_cameras = sum(1 for slot in previews if slot.camera is not None)
+        active_cameras = sum(
+            1 for slot in previews if slot.camera is not None and not getattr(slot, "capture_paused", False)
+        )
         if active_cameras == 0:
             message = "No cameras detected"
             if controller.save_enabled:
@@ -150,7 +161,9 @@ class CameraViewManager:
         controller = self._controller
         stage_keys = ("capture_fps", "process_fps", "preview_fps", "storage_fps")
         metrics = {key: 0.0 for key in stage_keys}
-        active_slots = [slot for slot in controller._previews if slot.camera is not None]
+        active_slots = [
+            slot for slot in controller._previews if slot.camera is not None and not getattr(slot, "capture_paused", False)
+        ]
         if not active_slots:
             return metrics
 

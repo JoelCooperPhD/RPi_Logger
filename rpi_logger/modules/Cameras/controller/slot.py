@@ -70,6 +70,17 @@ class CameraSlot:
     last_observed_fps: float = 0.0
     session_camera_dir: Optional[Path] = field(default=None, repr=False)
     slow_capture_warnings: int = 0
+    capture_paused: bool = False
+    capture_active_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    capture_idle_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+
+    def __post_init__(self) -> None:
+        # capture_active_event defaults to "running" so the capture loop can start immediately.
+        if not self.capture_active_event.is_set():
+            self.capture_active_event.set()
+        # idle event stays cleared until the capture loop voluntarily pauses.
+        if self.capture_idle_event.is_set():
+            self.capture_idle_event.clear()
 
     def attach_queues(
         self,

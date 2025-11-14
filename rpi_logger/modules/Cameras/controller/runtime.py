@@ -399,6 +399,50 @@ class CameraController(ModuleRuntime):
                 all_ready = False
         return all_ready
 
+    async def pause_camera_slot(self, slot: CameraSlot) -> bool:
+        if slot.capture_paused:
+            return True
+        slot.capture_paused = True
+        pause_event = getattr(slot, "capture_active_event", None)
+        idle_event = getattr(slot, "capture_idle_event", None)
+        if pause_event:
+            pause_event.clear()
+        if idle_event and not idle_event.is_set():
+            try:
+                await asyncio.wait_for(idle_event.wait(), timeout=1.5)
+            except asyncio.TimeoutError:
+                self.logger.warning("Timed out waiting for camera %s capture loop to pause", slot.index)
+        camera = slot.camera
+        if camera:
+            try:
+                await asyncio.to_thread(camera.stop)
+                self.logger.info("Camera %s paused", slot.index)
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.warning("Error pausing camera %s: %s", slot.index, exc)
+        return True
+
+    async def resume_camera_slot(self, slot: CameraSlot) -> bool:
+        if not slot.capture_paused:
+            return True
+        camera = slot.camera
+        if camera is None:
+            self.logger.error("Cannot resume camera %s: device unavailable", slot.index)
+            return False
+        try:
+            await asyncio.to_thread(camera.start)
+            self.logger.info("Camera %s resumed", slot.index)
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.error("Unable to resume camera %s: %s", slot.index, exc)
+            return False
+        idle_event = getattr(slot, "capture_idle_event", None)
+        if idle_event and idle_event.is_set():
+            idle_event.clear()
+        resume_event = getattr(slot, "capture_active_event", None)
+        if resume_event:
+            resume_event.set()
+        slot.capture_paused = False
+        return True
+
     def _shutdown_queue(self, queue: Optional[asyncio.Queue]) -> None:
         if not queue:
             return

@@ -52,6 +52,7 @@ class CameraViewAdapter:
         self._preview_padx = 6
         self._preview_pady = 6
         self._current_preview_columns = 0
+        self._preview_placeholder: Optional[tk.Label] = None
         self._preview_fps_var: Optional[tk.StringVar] = None
         self._preview_fraction_getter: Optional[Callable[[], Optional[float]]] = None
         self._preview_fraction_handler: Optional[Callable[[Optional[float]], Awaitable[None]]] = None
@@ -103,6 +104,7 @@ class CameraViewAdapter:
 
             row.rowconfigure(0, weight=1)
             self._preview_row = row
+            self._show_preview_placeholder()
 
         self.view.build_stub_content(builder)
 
@@ -111,6 +113,7 @@ class CameraViewAdapter:
             raise RuntimeError("Preview grid not initialized")
 
         self._preview_row.columnconfigure(index, weight=1)
+        self._hide_preview_placeholder()
 
         frame = tk.Frame(
             self._preview_row,
@@ -159,6 +162,44 @@ class CameraViewAdapter:
         canvas._preview_title = title  # type: ignore[attr-defined]
 
         return frame, canvas, canvas
+
+    def _show_preview_placeholder(self) -> None:
+        if tk is None or self._preview_row is None:
+            return
+        if self._preview_placeholder is None:
+            self._preview_placeholder = tk.Label(
+                self._preview_row,
+                text="No camera feeds enabled.\nUse Settings ▸ Camera Feeds to show a preview.",
+                bg=self.PREVIEW_BACKGROUND,
+                fg="#9a9a9a",
+                justify=tk.CENTER,
+                anchor=tk.CENTER,
+                font=("TkDefaultFont", 12),
+                wraplength=420,
+                padx=12,
+                pady=12,
+            )
+        try:
+            self._preview_placeholder.grid(
+                row=0,
+                column=0,
+                sticky="nsew",
+                padx=self._preview_padx,
+                pady=self._preview_pady,
+            )
+        except tk.TclError:
+            return
+        self._preview_row.columnconfigure(0, weight=1)
+        self._current_preview_columns = 1
+
+    def _hide_preview_placeholder(self) -> None:
+        placeholder = self._preview_placeholder
+        if not placeholder:
+            return
+        try:
+            placeholder.grid_remove()
+        except tk.TclError:
+            pass
 
     def register_camera_toggle(
         self,
@@ -658,19 +699,46 @@ class CameraViewAdapter:
         if tk is None or self._preview_row is None:
             return
 
-        total_columns = max(self._current_preview_columns, len(slots))
-        for col in range(total_columns + 1):
+        total_columns = max(self._current_preview_columns, len(slots), 1)
+        for col in range(total_columns):
             self._preview_row.columnconfigure(col, weight=0, uniform=None)
 
-        active_frames = [slot for slot in slots if getattr(slot, "preview_enabled", True)]
-        use_uniform = len(active_frames) > 1
-
-        active_col = 0
+        active_slots: list[Any] = []
         for slot in slots:
+            if not getattr(slot, "preview_enabled", True):
+                continue
             frame = getattr(slot, "frame", None)
             if frame is None:
                 continue
-            if getattr(slot, "preview_enabled", True):
+            try:
+                if not frame.winfo_exists():
+                    continue
+            except tk.TclError:
+                continue
+            active_slots.append(slot)
+
+        if not active_slots:
+            for slot in slots:
+                frame = getattr(slot, "frame", None)
+                if frame is not None:
+                    try:
+                        frame.grid_remove()
+                    except tk.TclError:
+                        pass
+            self._show_preview_placeholder()
+            self._current_preview_columns = 0
+            return
+
+        self._hide_preview_placeholder()
+        uniform_value = self._preview_uniform_group if len(active_slots) > 1 else None
+        active_slot_ids = {id(slot) for slot in active_slots}
+        active_col = 0
+
+        for slot in active_slots:
+            frame = getattr(slot, "frame", None)
+            if frame is None:
+                continue
+            try:
                 frame.grid(
                     row=0,
                     column=active_col,
@@ -678,14 +746,24 @@ class CameraViewAdapter:
                     padx=self._preview_padx,
                     pady=self._preview_pady,
                 )
-                frame.columnconfigure(0, weight=1)
-                frame.rowconfigure(0, weight=0)
-                frame.rowconfigure(1, weight=1)
-                uniform_value = self._preview_uniform_group if use_uniform else None
-                self._preview_row.columnconfigure(active_col, weight=1, uniform=uniform_value)
+            except tk.TclError:
                 active_col += 1
-            else:
-                frame.grid_remove()
+                continue
+            frame.columnconfigure(0, weight=1)
+            frame.rowconfigure(0, weight=0)
+            frame.rowconfigure(1, weight=1)
+            self._preview_row.columnconfigure(active_col, weight=1, uniform=uniform_value)
+            active_col += 1
+
+        for slot in slots:
+            if id(slot) in active_slot_ids:
+                continue
+            frame = getattr(slot, "frame", None)
+            if frame is not None:
+                try:
+                    frame.grid_remove()
+                except tk.TclError:
+                    pass
 
         self._current_preview_columns = active_col
 
