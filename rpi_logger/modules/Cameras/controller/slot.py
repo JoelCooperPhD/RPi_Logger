@@ -60,6 +60,7 @@ class CameraSlot:
     capture_index: int = 0
     last_hardware_fps: float = 0.0
     last_expected_interval_ns: Optional[int] = None
+    force_software_encoder: bool = False
     storage_pipeline: Optional[CameraStoragePipeline] = field(default=None, repr=False)
     storage_drop_since_last: int = 0
     storage_drop_total: int = 0

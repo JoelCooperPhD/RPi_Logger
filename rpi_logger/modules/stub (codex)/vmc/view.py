@@ -124,7 +124,8 @@ class StubCodexView:
         main_frame.rowconfigure(2, weight=0)
         self._main_frame = main_frame
 
-        self.stub_frame = ttk.LabelFrame(main_frame, text="Stub", padding="10")
+        preview_label = f"{self.display_name} Preview" if self.display_name else "Module Preview"
+        self.stub_frame = ttk.LabelFrame(main_frame, text=preview_label, padding="10")
         self.stub_frame.grid(row=0, column=0, sticky="nsew")
         self.logger.info("Stub frame added to main layout")
 
@@ -168,6 +169,14 @@ class StubCodexView:
 
         try:
             self.stub_frame.update_idletasks()
+        except tk.TclError:
+            pass
+
+    def set_preview_title(self, title: str) -> None:
+        if self.stub_frame is None:
+            return
+        try:
+            self.stub_frame.config(text=title)
         except tk.TclError:
             pass
 

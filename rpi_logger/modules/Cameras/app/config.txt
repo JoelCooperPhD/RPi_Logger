@@ -1,11 +1,13 @@
 display_name = Cameras
 enabled = False
-window_geometry = 320x200
-preview_fps = unlimited
+window_geometry = 973x441+725+1723
+preview_fps = 15.0
 save_width = 640
 save_height = 480
-save_fps = unlimited
+save_fps = 15.0
 save_format = jpeg
 save_quality = 90
 camera_1_alias = Camera 1
 camera_2_alias = Camera 2
+preview_resolution = auto
+preview_fraction = 1.0

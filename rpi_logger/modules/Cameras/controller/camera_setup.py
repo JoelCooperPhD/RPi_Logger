@@ -164,6 +164,7 @@ class CameraSetupManager:
                     view_resize_checker=view_resize_checker,
                     status_refresh=controller.view_manager.refresh_status,
                     fps_window_seconds=2.0,
+                    fps_health_checker=controller.telemetry.update_fps_health,
                 )
 
                 if saving_active:

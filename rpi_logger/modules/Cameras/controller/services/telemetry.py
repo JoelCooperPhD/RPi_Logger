@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
@@ -26,6 +27,7 @@ class TelemetryService:
         self._controller = controller
         self._sensor_sync_pending = False
         self._logger = controller.logger.getChild("telemetry")
+        self._fps_health: dict[int, bool] = {}
 
     # ------------------------------------------------------------------
     # Sensor cadence helpers
@@ -49,6 +51,7 @@ class TelemetryService:
                 except Exception as exc:  # pragma: no cover - defensive
                     self._logger.debug("FrameDuration reset failed for cam %s: %s", slot.index, exc)
                 slot.frame_duration_us = None
+                slot.force_software_encoder = False
             return
 
         frame_us = max(3333, int(target_interval * 1_000_000))
@@ -61,13 +64,20 @@ class TelemetryService:
                 {"FrameDurationLimits": (frame_us, frame_us)},
             )
             slot.frame_duration_us = frame_us
+            slot.force_software_encoder = False
             self._logger.info(
                 "Camera %s sensor frame duration set to %.2f ms",
                 slot.index,
                 frame_us / 1000.0,
             )
         except Exception as exc:  # pragma: no cover - defensive
-            self._logger.debug("Unable to set frame duration for cam %s: %s", slot.index, exc)
+            slot.force_software_encoder = True
+            name = self._camera_label(slot)
+            message = (
+                f"{name} cannot apply requested frame duration; falling back to software encoding ({exc})"
+            )
+            self._logger.error(message)
+            self._controller.view_manager.set_status(message, level=logging.ERROR)
 
     def current_sensor_interval(self) -> Optional[float]:
         controller = self._controller
@@ -108,6 +118,9 @@ class TelemetryService:
     # ------------------------------------------------------------------
     # FPS helpers
 
+    def _camera_label(self, slot: "CameraSlot") -> str:
+        return slot.title or self._controller.state.get_camera_alias(slot.index)
+
     def probe_slot_fps(self, slot: "CameraSlot") -> float:
         controller = self._controller
         for candidate in (
@@ -122,6 +135,43 @@ class TelemetryService:
             if fps > 0:
                 return min(fps, controller.MAX_SENSOR_FPS)
         return 0.0
+
+    def validate_slot_fps(
+        self,
+        slot: "CameraSlot",
+        *,
+        observed: Optional[float] = None,
+        strict: bool = False,
+    ) -> bool:
+        target_interval = self._controller.save_frame_interval
+        if not target_interval or target_interval <= 0:
+            self._fps_health.pop(slot.index, None)
+            return True
+        target_fps = 1.0 / target_interval
+        value = observed if observed is not None else self.probe_slot_fps(slot)
+        name = self._camera_label(slot)
+        if value <= 0:
+            message = f"{name} has not reported a stable FPS yet"
+            self._update_fps_health(slot, False, message, strict=strict)
+            return False
+        tolerance = max(0.5, target_fps * 0.1)
+        if abs(value - target_fps) > tolerance:
+            message = f"{name} is running at {value:.1f} fps but {target_fps:.1f} fps requested"
+            self._update_fps_health(slot, False, message, strict=strict)
+            return False
+        self._update_fps_health(slot, True)
+        return True
+
+    def enforce_target_fps(
+        self,
+        slot: "CameraSlot",
+        *,
+        observed: Optional[float] = None,
+    ) -> bool:
+        return self.validate_slot_fps(slot, observed=observed, strict=True)
+
+    def update_fps_health(self, slot: "CameraSlot") -> None:
+        self.validate_slot_fps(slot, strict=False)
 
     async def await_slot_fps(self, slot: "CameraSlot", timeout: float = 1.0) -> float:
         fps = self.probe_slot_fps(slot)
@@ -144,6 +194,29 @@ class TelemetryService:
             fps = 1.0 / controller.save_frame_interval
             return min(max(fps, 1.0), controller.MAX_SENSOR_FPS)
         return 30.0
+
+    def _update_fps_health(
+        self,
+        slot: "CameraSlot",
+        healthy: bool,
+        message: Optional[str] = None,
+        *,
+        strict: bool = False,
+    ) -> None:
+        previous = self._fps_health.get(slot.index, True)
+        if healthy:
+            self._fps_health[slot.index] = True
+            if not previous:
+                self._logger.info("%s sensor FPS aligned with request", self._camera_label(slot))
+                self._controller.view_manager.refresh_status()
+            return
+
+        self._fps_health[slot.index] = False
+        if not message:
+            message = f"{self._camera_label(slot)} FPS mismatch detected"
+        level = logging.ERROR if strict else logging.WARNING
+        self._logger.log(level, message)
+        self._controller.view_manager.set_status(message, level=level)
 
     # ------------------------------------------------------------------
     # Telemetry / queue health

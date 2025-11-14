@@ -278,7 +278,7 @@ tasks, and annotations. All modules are controlled from a single interface.
      • Cameras         - Multi-camera video (up to 2x IMX296 @ 1-60 FPS)
      • AudioRecorder   - Multi-microphone audio (8-192 kHz)
      • EyeTracker      - Pupil Labs gaze tracking with scene video
-     • NoteTaker       - Timestamped annotations during sessions
+     • Notes           - Stub-based annotations during sessions
      • DRT             - sDRT behavioral task devices
 
    ▸ Modules launch automatically when checked
@@ -360,7 +360,7 @@ data/session_20251024_120000/
 │   ├── session.log
 │   ├── scene_video_20251024_120000.mp4
 │   └── gaze_data_20251024_120000.csv
-├── NoteTaker/
+├── Notes/
 │   └── session_notes.csv
 └── DRT/
     └── sDRT_dev_ttyACM0_20251024_120000.csv
@@ -386,7 +386,7 @@ data/session_20251024_120000/
 ✓ Test modules individually before multi-modal sessions
 ✓ Verify adequate disk space before long sessions (check System Info)
 ✓ Let cameras/sensors warm up for 30 seconds after starting
-✓ Use NoteTaker to annotate events during recording
+✓ Use the Notes module to annotate events during recording
 ✓ Process recordings with `python -m rpi_logger.tools.muxing_tool` (or `python -m rpi_logger.tools.sync_and_mux`) immediately after session
 ✓ Check logs if modules fail: Help > Open Logs Directory
 ✓ Module windows auto-tile on launch for efficient workspace

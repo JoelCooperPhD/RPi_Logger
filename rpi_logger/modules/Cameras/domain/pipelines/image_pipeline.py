@@ -60,6 +60,7 @@ class ImagePipeline:
         view_resize_checker: Optional[Callable[[], bool]] = None,
         status_refresh: Optional[Callable[[], None]] = None,
         fps_window_seconds: float = 2.0,
+        fps_health_checker: Optional[Callable[[Any], None]] = None,
     ) -> None:
         self.camera_index = camera_index
         component = f"ImagePipeline.cam{camera_index}"
@@ -70,6 +71,7 @@ class ImagePipeline:
         )
         self._view_resize_checker = view_resize_checker or (lambda: False)
         self._status_refresh = status_refresh or (lambda: None)
+        self._fps_health_checker = fps_health_checker
         self.metrics = PipelineMetrics()
         self._capture_counter = RollingFpsCounter(fps_window_seconds)
         self._process_counter = RollingFpsCounter(fps_window_seconds)
@@ -263,6 +265,11 @@ class ImagePipeline:
             slot.last_expected_interval_ns = timing_update.expected_interval_ns
         if timing_update.observed_fps and timing_update.observed_fps > 0:
             slot.last_observed_fps = timing_update.observed_fps
+            if self._fps_health_checker:
+                try:
+                    self._fps_health_checker(slot)
+                except Exception:  # pragma: no cover - defensive
+                    self.logger.debug("FPS health checker failed for cam %s", slot.index)
 
         if capture_index < FRAME_LOG_COUNT:
             self.logger.info(

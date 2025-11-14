@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover - allows dev environments without Picamera
     MappedArray = None  # type: ignore[arg-type]
 
 from .csv_logger import CameraCSVLogger
+from .fps_tracker import VideoFpsTracker
 from ...domain.model import FramePayload
 from ...logging_utils import ensure_structured_logger
 
@@ -105,10 +106,8 @@ class CameraStoragePipeline:
         self._overlay_callback = None
         self._overlay_frame_counter = 0
         self._video_path: Optional[Path] = None
-        self._video_frame_count = 0
         self._writer_codec: Optional[str] = None
         self._writer_fps: float = 30.0
-        self._video_start_monotonic: Optional[float] = None
         self._video_fps_hint: Optional[float] = None
         self._pending_video_frames: list[tuple[OverlayRenderInfo, np.ndarray]] = []
         self._pending_frame_limit = 120
@@ -116,8 +115,15 @@ class CameraStoragePipeline:
         self._overlay_metadata: deque[OverlayRenderInfo] = deque()
         self._overlay_metadata_limit = self._pending_frame_limit * 4
         self._overlay_lock = threading.Lock()
+        self._fps_tracker = VideoFpsTracker()
         self.trial_number: int = 1
         self.trial_label: str = ""
+        self._sensor_last_timestamp_ns: Optional[int] = None
+        self._sensor_fps_estimate: Optional[float] = None
+        self._sensor_smoothing = 0.2
+        self._sensor_timestamp_failures = 0
+        self._sensor_timestamp_failure_limit = 15
+        self._waiting_for_sensor_fps = True
 
         self._codec_candidates = ("mp4v", "avc1", "H264", "XVID")
         self._fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -135,11 +141,16 @@ class CameraStoragePipeline:
 
     @property
     def video_frame_count(self) -> int:
-        return self._video_frame_count
+        return self._fps_tracker.frame_count
 
     async def start(self) -> None:
         """Prepare CSV logger and reset video writer state."""
         await asyncio.to_thread(self.save_dir.mkdir, parents=True, exist_ok=True)
+        self._sensor_last_timestamp_ns = None
+        self._sensor_fps_estimate = None
+        self._sensor_timestamp_failures = 0
+        self._fps_tracker.reset()
+        self._waiting_for_sensor_fps = True
         slug = self.camera_slug or f"cam{self.camera_index}"
         suffix = self._trial_suffix
         self._video_path = self.save_dir / f"{slug}{suffix}_recording.mp4"
@@ -175,6 +186,11 @@ class CameraStoragePipeline:
         pil_image: Optional[Image.Image] = None,
     ) -> StorageWriteResult:
         """Persist a frame to disk and optionally to the video writer."""
+        sensor_fps = self._update_sensor_fps(payload)
+        if sensor_fps is not None:
+            fps_hint = sensor_fps
+        elif self._waiting_for_sensor_fps:
+            fps_hint = 0.0
         if fps_hint > 0:
             self._video_fps_hint = fps_hint
 
@@ -184,7 +200,8 @@ class CameraStoragePipeline:
             image_path: Optional[Path] = None
             if self.save_stills and pil_image is not None:
                 image_path = await self._save_image(pil_image, overlay_info)
-            self._video_frame_count += 1
+            if not self._fps_tracker.hardware_tracking:
+                self._fps_tracker.record_fallback_hardware_frame()
             return StorageWriteResult(
                 video_written=True,
                 image_path=image_path,
@@ -220,10 +237,7 @@ class CameraStoragePipeline:
 
     @property
     def video_output_fps(self) -> float:
-        if self._video_frame_count == 0 or self._video_start_monotonic is None:
-            return 0.0
-        elapsed = max(time.monotonic() - self._video_start_monotonic, 1e-3)
-        return self._video_frame_count / elapsed
+        return self._fps_tracker.output_fps()
 
     def log_frame(self, payload: "FramePayload", *, queue_drops: int = 0) -> None:
         """Record frame metadata to CSV if logging is active."""
@@ -278,11 +292,20 @@ class CameraStoragePipeline:
     # ------------------------------------------------------------------
     async def start_video_recording(self, fps_hint: Optional[float] = None) -> None:
         """Start Picamera2-based recording when a camera handle is available."""
-        if not self.uses_hardware_encoder or self.camera is None or self._video_path is None:
+        self._fps_tracker.reset()
+
+        hardware_active = bool(self.uses_hardware_encoder and self.camera and self._video_path)
+        if not hardware_active:
             self.uses_hardware_encoder = False
+            self._video_fps_hint = None
             return
         if self._picamera_encoder is not None:
             return
+
+        if fps_hint is not None and fps_hint > 0:
+            self._video_fps_hint = self._normalize_fps(fps_hint)
+        else:
+            self._video_fps_hint = self.max_fps
 
         try:
             from picamera2.encoders import H264Encoder, Quality
@@ -317,9 +340,7 @@ class CameraStoragePipeline:
 
         self._picamera_encoder = encoder
         self._picamera_output = output
-        self._video_frame_count = 0
         self._writer_codec = "H264"
-        self._video_start_monotonic = time.monotonic()
         self._install_overlay_callback()
         self._logger.info("Picamera2 recording started -> %s", self._video_path)
 
@@ -343,10 +364,11 @@ class CameraStoragePipeline:
         self._logger.info(
             "Picamera2 recording stopped -> %s (%d frames)",
             self._video_path,
-            self._video_frame_count,
+            self._fps_tracker.frame_count,
         )
         self._picamera_encoder = None
         self._picamera_output = None
+        self._fps_tracker.stop_hardware_tracking()
 
     async def _ensure_video_writer(self, frame_size: tuple[int, int], fps_hint: float) -> None:
         if self._video_writer is not None or self.uses_hardware_encoder:
@@ -374,11 +396,10 @@ class CameraStoragePipeline:
             writer, fourcc = result
             self._video_writer = writer
             self._video_path = video_path
-            self._video_frame_count = 0
             self._writer_codec = codec
             self._writer_fps = fps
-            self._video_start_monotonic = None
             self._fourcc = fourcc
+            self._fps_tracker.reset()
             self._logger.info(
                 "Video writer opened -> %s (fps=%.2f, size=%dx%d, codec=%s)",
                 video_path,
@@ -452,9 +473,7 @@ class CameraStoragePipeline:
             return False
 
         if success:
-            self._video_frame_count += 1
-            if self._video_start_monotonic is None:
-                self._video_start_monotonic = time.monotonic()
+            self._fps_tracker.record_software_frame()
         return success
 
     async def _save_image(self, image: Image.Image, overlay: OverlayRenderInfo) -> Optional[Path]:
@@ -482,12 +501,12 @@ class CameraStoragePipeline:
     async def _release_video_writer(self) -> None:
         if self._video_writer is None:
             if self._picamera_encoder is None:
-                self._video_frame_count = 0
+                self._fps_tracker.reset()
             return
 
         writer = self._video_writer
         video_path = self._video_path
-        frame_count = self._video_frame_count
+        frame_count = self._fps_tracker.frame_count
         writer_codec = self._writer_codec
 
         def _release() -> None:
@@ -498,11 +517,10 @@ class CameraStoragePipeline:
 
         await asyncio.to_thread(_release)
         self._video_writer = None
-        self._video_frame_count = 0
         self._writer_codec = None
-        self._video_start_monotonic = None
         self._pending_video_frames.clear()
         self._pending_fps_warning_logged = False
+        self._fps_tracker.reset()
 
         if video_path is not None:
             self._logger.info(
@@ -516,6 +534,36 @@ class CameraStoragePipeline:
         if fps_hint and fps_hint > 0:
             return max(1.0, min(float(fps_hint), self.max_fps))
         return min(self.max_fps, 30.0)
+
+    def _update_sensor_fps(self, payload: "FramePayload") -> Optional[float]:
+        sensor_ts = payload.sensor_timestamp_ns
+        if sensor_ts is None:
+            self._sensor_timestamp_failures += 1
+            if self._sensor_timestamp_failures >= self._sensor_timestamp_failure_limit:
+                self._waiting_for_sensor_fps = False
+            return None
+        self._sensor_timestamp_failures = 0
+        last_ts = self._sensor_last_timestamp_ns
+        self._sensor_last_timestamp_ns = sensor_ts
+        if last_ts is None or sensor_ts <= last_ts:
+            return None
+        frames_spanned = max(1, (payload.dropped_since_last or 0) + 1)
+        delta_ns = sensor_ts - last_ts
+        interval_ns = delta_ns / frames_spanned
+        if interval_ns <= 0:
+            return None
+        fps = 1_000_000_000.0 / interval_ns
+        if fps <= 0:
+            return None
+        if self._sensor_fps_estimate is None:
+            self._sensor_fps_estimate = fps
+        else:
+            alpha = self._sensor_smoothing
+            self._sensor_fps_estimate = (1 - alpha) * self._sensor_fps_estimate + alpha * fps
+        self._sensor_fps_estimate = min(self._sensor_fps_estimate, self.max_fps)
+        self._video_fps_hint = self._sensor_fps_estimate
+        self._waiting_for_sensor_fps = False
+        return self._sensor_fps_estimate
 
     def _image_filename(self, frame_number: int, timestamp: float) -> str:
         from datetime import datetime
@@ -636,6 +684,7 @@ class CameraStoragePipeline:
         self._overlay_previous_callback = previous
         self._overlay_callback = callback
         self.camera.post_callback = callback
+        self._fps_tracker.start_hardware_tracking()
 
     def _remove_overlay_callback(self) -> None:
         if not self.camera or not hasattr(self.camera, "post_callback"):
@@ -645,6 +694,7 @@ class CameraStoragePipeline:
         self.camera.post_callback = self._overlay_previous_callback
         self._overlay_previous_callback = None
         self._overlay_callback = None
+        self._fps_tracker.stop_hardware_tracking()
 
     def _apply_overlay_to_request(self, request, overlay: OverlayRenderInfo) -> None:
         if MappedArray is None or not self.main_size:
@@ -666,6 +716,8 @@ class CameraStoragePipeline:
                 window[:, :] = updated
         except Exception as exc:  # pragma: no cover - defensive
             self._logger.debug("Overlay application failed: %s", exc)
+        finally:
+            self._fps_tracker.record_hardware_frame()
 
     def set_trial_context(self, trial_number: Optional[int], trial_label: Optional[str] = None) -> None:
         try:
@@ -688,6 +740,5 @@ class CameraStoragePipeline:
     def _trial_suffix(self) -> str:
         suffix_number = self.trial_number if self.trial_number > 0 else 1
         return f"_{suffix_number}"
-
 
 __all__ = ["CameraStoragePipeline", "StorageWriteResult"]

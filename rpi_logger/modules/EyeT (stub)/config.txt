@@ -82,9 +82,11 @@ discovery_retry = 3.0     # Seconds between retries
 ################################################################################
 # MASTER LOGGER WINDOW STATE (AUTOSAVED)
 ################################################################################
-enabled = false           # Autostart from master logger
+enabled = false
 window_x = 1010
 window_y = 349
 window_width = 1419
 window_height = 699
 ################################################################################
+window_geometry = 1419x699+1482+1479
+preview_resolution = auto

@@ -204,7 +204,7 @@ async def test_all_modules():
         ("DRT", modules_root / "DRT" / "main_DRT.py"),
         ("EyeTracker", modules_root / "EyeTracker" / "main_eye_tracker.py"),
         ("GPS", modules_root / "GPS" / "main_GPS.py"),
-        ("NoteTaker", modules_root / "NoteTaker" / "main_notes.py"),
+        ("Notes", modules_root / "Notes" / "main_notes.py"),
     ]
 
     all_results = []

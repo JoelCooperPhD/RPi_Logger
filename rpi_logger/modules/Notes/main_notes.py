@@ -1,4 +1,4 @@
-"""Notes stub module entry point leveraging the stub (codex) VMC stack."""
+"""Notes module entry point leveraging the Codex VMC stack."""
 
 from __future__ import annotations
 
@@ -34,13 +34,13 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 from vmc.constants import PLACEHOLDER_GEOMETRY
 
-from notes_runtime import NotesStubRuntime
+from notes_runtime import NotesRuntime
 from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.modules.base.config_paths import resolve_writable_module_config
 
-DISPLAY_NAME = "Notes (Stub)"
-MODULE_ID = "notes_stub"
-DEFAULT_OUTPUT_SUBDIR = Path("notes-stub")
+DISPLAY_NAME = "Notes"
+MODULE_ID = "notes"
+DEFAULT_OUTPUT_SUBDIR = Path("notes")
 DEFAULT_HISTORY_LIMIT = 200
 CONFIG_PATH = resolve_writable_module_config(MODULE_DIR, MODULE_ID)
 CONFIG_MANAGER = get_config_manager()
@@ -141,7 +141,7 @@ def parse_args(argv: Optional[list[str]] = None):
 
 
 def build_runtime(context):
-    return NotesStubRuntime(context)
+    return NotesRuntime(context)
 
 
 def _load_notes_config() -> dict[str, str]:
@@ -213,7 +213,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
 
     if not args.enable_commands:
-        logger.error("Notes stub module must be launched by the logger controller.")
+        logger.error("Notes module must be launched by the logger controller.")
         return
 
     module_dir = MODULE_DIR

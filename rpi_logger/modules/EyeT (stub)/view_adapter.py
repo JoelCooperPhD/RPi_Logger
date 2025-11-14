@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from pathlib import Path
-from typing import Awaitable, Callable, Optional
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -24,10 +22,6 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 FrameProvider = Callable[[], Optional[np.ndarray]]
-ActionDispatcher = Callable[[str], None]
-AsyncCallback = Callable[[], Awaitable[None]]
-SnapshotCallback = Callable[[], Awaitable[Optional[Path]]]
-ReconnectCallback = Callable[[], Awaitable[None]]
 
 
 class EyeTViewAdapter:
@@ -41,11 +35,6 @@ class EyeTViewAdapter:
         logger: logging.Logger,
         frame_provider: FrameProvider,
         preview_hz: int,
-        action_dispatcher: Optional[ActionDispatcher],
-        start_callback: Optional[AsyncCallback],
-        stop_callback: Optional[AsyncCallback],
-        snapshot_callback: Optional[SnapshotCallback],
-        reconnect_callback: Optional[ReconnectCallback],
         disabled_message: Optional[str] = None,
     ) -> None:
         self.view = view
@@ -53,18 +42,12 @@ class EyeTViewAdapter:
         self.logger = logger
         self.frame_provider = frame_provider
         self.preview_interval_ms = max(50, int(1000 / max(1, preview_hz)))
-        self._action_dispatcher = action_dispatcher
-        self._start_callback = start_callback
-        self._stop_callback = stop_callback
-        self._snapshot_callback = snapshot_callback
-        self._reconnect_callback = reconnect_callback
         self._disabled_message = disabled_message
 
         self._preview_after_handle: Optional[str] = None
-        self._status_var: Optional[tk.StringVar] = None
-        self._recording_var: Optional[tk.StringVar] = None
-        self._snapshot_var: Optional[tk.StringVar] = None
-        self._canvas: Optional[tk.Canvas] = None
+        self._status_var: Optional[tk.StringVar] = None if tk else None  # type: ignore[assignment]
+        self._recording_var: Optional[tk.StringVar] = None if tk else None  # type: ignore[assignment]
+        self._canvas: Optional[tk.Canvas] = None  # type: ignore[assignment]
         self._photo_ref = None
 
         self._build()
@@ -78,38 +61,13 @@ class EyeTViewAdapter:
             return
 
         def builder(parent: tk.Widget) -> None:
-            frame = ttk.Frame(parent, padding="6")
-            frame.grid(row=0, column=0, sticky="nsew")
-            frame.columnconfigure(0, weight=1)
-            frame.rowconfigure(2, weight=1)
+            parent.columnconfigure(0, weight=1)
+            parent.rowconfigure(0, weight=1)
 
-            self._status_var = tk.StringVar(value="Device: searching..." if not self._disabled_message else self._disabled_message)
-            status_label = ttk.Label(frame, textvariable=self._status_var, anchor="w")
-            status_label.grid(row=0, column=0, sticky="ew")
-
-            controls = ttk.Frame(frame)
-            controls.grid(row=1, column=0, sticky="ew", pady=(6, 6))
-            controls.columnconfigure(4, weight=1)
-
-            start_btn = ttk.Button(controls, text="Start Recording", command=self._on_start_clicked, width=18)
-            start_btn.grid(row=0, column=0, padx=(0, 6))
-            stop_btn = ttk.Button(controls, text="Stop", command=self._on_stop_clicked, width=10)
-            stop_btn.grid(row=0, column=1, padx=(0, 6))
-            snap_btn = ttk.Button(controls, text="Snapshot", command=self._on_snapshot_clicked, width=10)
-            snap_btn.grid(row=0, column=2, padx=(0, 6))
-            reconnect_btn = ttk.Button(controls, text="Reconnect", command=self._on_reconnect_clicked, width=12)
-            reconnect_btn.grid(row=0, column=3, padx=(0, 6))
-
-            self._recording_var = tk.StringVar(value="Recording: idle")
-            recording_label = ttk.Label(frame, textvariable=self._recording_var, anchor="w")
-            recording_label.grid(row=3, column=0, sticky="ew", pady=(6, 0))
-
-            self._snapshot_var = tk.StringVar(value="")
-            snapshot_label = ttk.Label(frame, textvariable=self._snapshot_var, anchor="w", font=("TkDefaultFont", 9, "italic"))
-            snapshot_label.grid(row=4, column=0, sticky="ew")
-
-            canvas = tk.Canvas(frame, width=self.model.saved_preview_width or 640, height=self.model.saved_preview_height or 480, bg="#000000")
-            canvas.grid(row=2, column=0, sticky="nsew")
+            canvas_width = self.model.saved_preview_width or 640
+            canvas_height = self.model.saved_preview_height or 480
+            canvas = tk.Canvas(parent, width=canvas_width, height=canvas_height, bg="#000000")
+            canvas.grid(row=0, column=0, sticky="nsew")
             self._canvas = canvas
 
             if self._disabled_message:
@@ -121,42 +79,33 @@ class EyeTViewAdapter:
                 )
 
         self.view.build_stub_content(builder)
-        self.view.hide_io_stub()
+        if hasattr(self.view, "set_preview_title"):
+            try:
+                self.view.set_preview_title("Preview")
+            except Exception:
+                pass
+        self._build_status_panel()
         if not self._disabled_message:
             self._schedule_preview()
 
-    # ------------------------------------------------------------------
-    # Button handlers
-
-    def _on_start_clicked(self) -> None:
-        self._dispatch_action("start_recording")
-        if self._start_callback:
-            asyncio.create_task(self._start_callback())
-
-    def _on_stop_clicked(self) -> None:
-        self._dispatch_action("stop_recording")
-        if self._stop_callback:
-            asyncio.create_task(self._stop_callback())
-
-    def _on_snapshot_clicked(self) -> None:
-        if not self._snapshot_callback:
+    def _build_status_panel(self) -> None:
+        if tk is None or ttk is None or not self.view:
             return
-        asyncio.create_task(self._run_snapshot())
 
-    def _on_reconnect_clicked(self) -> None:
-        if self._reconnect_callback:
-            asyncio.create_task(self._reconnect_callback())
+        initial_status = self._disabled_message or "Device: searching..."
+        self._status_var = tk.StringVar(value=initial_status)
+        self._recording_var = tk.StringVar(value="Recording: idle")
 
-    async def _run_snapshot(self) -> None:
-        path = await self._snapshot_callback()  # type: ignore[misc]
-        if path and self._snapshot_var:
-            self._snapshot_var.set(f"Snapshot saved: {path.name}")
-            self._clear_snapshot_label_later()
+        def builder(parent: tk.Widget) -> None:
+            parent.columnconfigure(0, weight=1)
+            status_label = ttk.Label(parent, textvariable=self._status_var, anchor="w")
+            status_label.grid(row=0, column=0, sticky="ew")
+            recording_label = ttk.Label(parent, textvariable=self._recording_var, anchor="w")
+            recording_label.grid(row=1, column=0, sticky="ew", pady=(4, 0))
 
-    def _clear_snapshot_label_later(self) -> None:
-        if not self.view or tk is None:
-            return
-        self.view.root.after(4000, lambda: self._snapshot_var.set("") if self._snapshot_var else None)
+        self.view.set_io_stub_title("Module Status")
+        self.view.build_io_stub_content(builder)
+        self.view.show_io_stub()
 
     # ------------------------------------------------------------------
     # Preview loop
@@ -209,22 +158,8 @@ class EyeTViewAdapter:
         status = "Recording: active" if active else "Recording: idle"
         self._recording_var.set(status)
 
-    def notify_snapshot(self, path: Path) -> None:
-        if self._snapshot_var is None:
-            return
-        self._snapshot_var.set(f"Snapshot saved: {path.name}")
-        self._clear_snapshot_label_later()
-
     # ------------------------------------------------------------------
     # Helpers
-
-    def _dispatch_action(self, action: str) -> None:
-        if not self._action_dispatcher:
-            return
-        try:
-            self._action_dispatcher(action)
-        except Exception as exc:
-            self.logger.debug("Action dispatch failed: %s", exc)
 
     def close(self) -> None:
         if not self.view or self._preview_after_handle is None:

@@ -61,6 +61,12 @@ class CameraStorageManager:
         camera_alias = slot.title or controller.state.get_camera_alias(slot.index)
         camera_slug = controller.state.get_camera_alias_slug(slot.index)
 
+        camera_handle = None if slot.force_software_encoder else slot.camera
+        if slot.force_software_encoder:
+            self.logger.warning(
+                "Camera %s using software encoding due to frame-rate constraints",
+                slot.index,
+            )
         pipeline = CameraStoragePipeline(
             slot.index,
             camera_dir,
@@ -72,7 +78,7 @@ class CameraStorageManager:
             max_fps=controller.MAX_SENSOR_FPS,
             overlay_config=dict(controller.overlay_config),
             save_stills=controller.save_stills_enabled,
-            camera=slot.camera,
+            camera=camera_handle,
             logger=self.logger.getChild(f"cam{slot.index}"),
         )
         pipeline.set_trial_context(
@@ -80,9 +86,10 @@ class CameraStorageManager:
             controller.current_trial_label,
         )
         await pipeline.start()
-        fps_hint = await controller.telemetry.await_slot_fps(slot)
-        if fps_hint <= 0:
-            fps_hint = controller.telemetry.resolve_video_fps(slot)
+        observed_fps = await controller.telemetry.await_slot_fps(slot)
+        if observed_fps <= 0:
+            observed_fps = controller.telemetry.resolve_video_fps(slot)
+        fps_hint = observed_fps if pipeline.uses_hardware_encoder else None
         await pipeline.start_video_recording(fps_hint)
         slot.storage_pipeline = pipeline
         self.logger.info(
@@ -121,6 +128,13 @@ class CameraStorageManager:
     async def activate_storage_for_all_slots(self) -> None:
         controller = self._controller
         for slot in controller._previews:
+            if controller.save_frame_interval > 0:
+                fps_sample = await controller.telemetry.await_slot_fps(slot, timeout=1.0)
+                if not controller.telemetry.enforce_target_fps(slot, observed=fps_sample):
+                    alias = controller.state.get_camera_alias(slot.index)
+                    raise RuntimeError(
+                        f"{alias} cannot match the requested recording FPS. Reduce the target or wait for the sensor."
+                    )
             slot.saving_active = True
             slot.capture_main_stream = True
             if slot.storage_queue is None:
@@ -195,7 +209,17 @@ class CameraStorageManager:
         controller.capture_preferences_enabled = True
         controller._storage_failure_reported = False
         controller._saved_count = 0
-        await self.activate_storage_for_all_slots()
+        try:
+            await self.activate_storage_for_all_slots()
+        except RuntimeError as exc:
+            self.logger.error("Unable to enable recording: %s", exc)
+            await self.deactivate_storage_for_all_slots()
+            controller.save_enabled = False
+            controller.capture_preferences_enabled = False
+            controller.session_dir = None
+            controller.view_manager.set_status(str(exc), level=logging.ERROR)
+            return False
+
         controller.telemetry.request_sensor_sync()
         controller.view_manager.sync_record_toggle()
         controller.view_manager.refresh_status()

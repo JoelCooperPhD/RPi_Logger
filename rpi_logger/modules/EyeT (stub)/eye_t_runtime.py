@@ -35,11 +35,6 @@ except Exception as exc:  # pragma: no cover - defensive import guard
 else:
     TRACKER_IMPORT_ERROR = None
 
-try:
-    import cv2  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    cv2 = None  # type: ignore[assignment]
-
 from view_adapter import EyeTViewAdapter
 
 
@@ -70,6 +65,7 @@ class EyeTStubRuntime(ModuleRuntime):
         self._tracker_handler: Optional[TrackerHandler] = None
         self._tracker_task: Optional[asyncio.Task] = None
         self._device_task: Optional[asyncio.Task] = None
+        self._device_ready_event: Optional[asyncio.Event] = None
         self._view_adapter: Optional[EyeTViewAdapter] = None
         self._session_dir: Optional[Path] = None
         self._import_error = TRACKER_IMPORT_ERROR
@@ -92,9 +88,8 @@ class EyeTStubRuntime(ModuleRuntime):
         self._build_tracker_components()
         self._attach_view()
 
-        await self.shutdown_guard.start()
-
-        self._device_task = self.task_manager.create(self._ensure_tracker_ready())
+        self._device_ready_event = asyncio.Event()
+        self._start_device_monitor()
 
         if getattr(self.args, "auto_start_recording", False):
             self._auto_start_task = self.task_manager.create(self._auto_start_recording())
@@ -104,17 +99,20 @@ class EyeTStubRuntime(ModuleRuntime):
             return
         self._shutdown.set()
 
+        await self.shutdown_guard.start()
+
         if self._auto_start_task and not self._auto_start_task.done():
             self._auto_start_task.cancel()
 
-        await self.task_manager.shutdown()
-        await self._stop_tracker()
+        try:
+            await self.task_manager.shutdown()
+            await self._stop_tracker()
 
-        if self._recording_manager and self._recording_manager.is_recording:
-            with contextlib.suppress(Exception):
-                await self._recording_manager.stop_recording()
-
-        await self.shutdown_guard.cancel()
+            if self._recording_manager and self._recording_manager.is_recording:
+                with contextlib.suppress(Exception):
+                    await self._recording_manager.stop_recording()
+        finally:
+            await self.shutdown_guard.cancel()
 
     async def cleanup(self) -> None:
         if self._tracker_handler:
@@ -136,17 +134,14 @@ class EyeTStubRuntime(ModuleRuntime):
             return await self._start_recording_flow(command)
         if action == "stop_recording":
             return await self._stop_recording_flow()
-        if action == "take_snapshot":
-            await self.capture_snapshot()
+        if action in {"reconnect", "refresh_device", "eyet_reconnect"}:
+            await self.request_reconnect()
             return True
         return False
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
         normalized = (action or "").lower()
-        if normalized == "take_snapshot":
-            await self.capture_snapshot()
-            return True
-        if normalized in ("eyet_reconnect", "refresh_device"):
+        if normalized in {"refresh_device", "eyet_reconnect"}:
             await self.request_reconnect()
             return True
         return False
@@ -221,18 +216,40 @@ class EyeTStubRuntime(ModuleRuntime):
             logger=self.logger.getChild("ViewAdapter"),
             frame_provider=self._get_latest_frame,
             preview_hz=preview_hz,
-            action_dispatcher=self._dispatch_controller_action,
-            start_callback=self._start_recording_from_view,
-            stop_callback=self._stop_recording_from_view,
-            snapshot_callback=self.capture_snapshot,
-            reconnect_callback=self.request_reconnect,
             disabled_message=disabled_message,
         )
+
+    def _start_device_monitor(self, *, force: bool = False) -> None:
+        if self._shutdown.is_set():
+            return
+
+        if self._device_connected:
+            if self._device_ready_event:
+                self._device_ready_event.set()
+            return
+
+        if force and self._device_task and not self._device_task.done():
+            self._device_task.cancel()
+            self._device_task = None
+
+        if self._device_task and not self._device_task.done():
+            return
+
+        if self._device_ready_event:
+            self._device_ready_event.clear()
+
+        self._device_task = self.task_manager.create(
+            self._ensure_tracker_ready(),
+            name="EyeTDeviceConnect",
+        )
+        self._device_task.add_done_callback(lambda _: setattr(self, "_device_task", None))
 
     async def _ensure_tracker_ready(self) -> None:
         if self._tracker_handler is None or self._device_manager is None:
             return
         if self._tracker_task and not self._tracker_task.done():
+            return
+        if self._shutdown.is_set():
             return
 
         timeout = max(1.0, float(getattr(self.args, "discovery_timeout", 5.0)))
@@ -247,6 +264,8 @@ class EyeTStubRuntime(ModuleRuntime):
 
             if connected:
                 self._device_connected = True
+                if self._device_ready_event:
+                    self._device_ready_event.set()
                 self.logger.info("Eye tracker connected")
                 if self._view_adapter:
                     self._view_adapter.set_device_status("Connected", connected=True)
@@ -285,8 +304,12 @@ class EyeTStubRuntime(ModuleRuntime):
     def _on_tracker_stopped(self) -> None:
         self.logger.info("Gaze tracker loop exited")
         self._device_connected = False
+        if self._device_ready_event:
+            self._device_ready_event.clear()
         if self._view_adapter:
             self._view_adapter.set_device_status("Disconnected", connected=False)
+        if not self._shutdown.is_set():
+            self._start_device_monitor()
 
     async def _stop_tracker(self) -> None:
         if self._tracker_handler:
@@ -294,8 +317,26 @@ class EyeTStubRuntime(ModuleRuntime):
                 await self._tracker_handler.stop()
         self._tracker_task = None
         self._device_connected = False
+        if self._device_ready_event:
+            self._device_ready_event.clear()
         if self._view_adapter:
             self._view_adapter.set_device_status("Stopped", connected=False)
+
+    async def request_reconnect(self) -> None:
+        if self._shutdown.is_set():
+            return
+
+        self.logger.info("Reconnect requested")
+        await self._stop_tracker()
+
+        if self._device_manager:
+            with contextlib.suppress(Exception):
+                await self._device_manager.cleanup()
+
+        if self._view_adapter:
+            self._view_adapter.set_device_status("Searching for device...", connected=False)
+
+        self._start_device_monitor(force=True)
 
     # ------------------------------------------------------------------
     # Recording helpers
@@ -306,11 +347,20 @@ class EyeTStubRuntime(ModuleRuntime):
             self.model.recording = False
             return False
 
-        await self._ensure_tracker_ready()
         if not self._device_connected:
-            self.logger.warning("Cannot start recording: device not connected")
-            self.model.recording = False
-            return False
+            self._start_device_monitor()
+            wait_timeout = max(1.0, float(getattr(self.args, "discovery_timeout", 5.0)))
+            ready_event = self._device_ready_event
+            if ready_event is not None:
+                self.logger.info("Waiting up to %.1fs for eye tracker connection", wait_timeout)
+                try:
+                    await asyncio.wait_for(ready_event.wait(), timeout=wait_timeout)
+                except asyncio.TimeoutError:
+                    pass
+            if not self._device_connected:
+                self.logger.warning("Cannot start recording: device not connected")
+                self.model.recording = False
+                return False
 
         session_dir = payload.get("session_dir")
         session_path: Optional[Path] = None
@@ -327,6 +377,7 @@ class EyeTStubRuntime(ModuleRuntime):
         self._session_dir = session_path
         trial_number = int(payload.get("trial_number") or (self.model.trial_number or 1))
         self._recording_manager.set_session_context(session_path, trial_number)
+        self.model.trial_number = trial_number
 
         try:
             await self._recording_manager.start_recording(session_path, trial_number)
@@ -348,6 +399,7 @@ class EyeTStubRuntime(ModuleRuntime):
         if self._view_adapter:
             self._view_adapter.set_recording_state(True)
         self.logger.info("Recording started -> %s", session_path)
+        self.model.recording = True
         return True
 
     async def _stop_recording_flow(self) -> bool:
@@ -370,6 +422,7 @@ class EyeTStubRuntime(ModuleRuntime):
         if self._view_adapter:
             self._view_adapter.set_recording_state(False)
         self.logger.info("Recording stopped")
+        self.model.recording = False
         return True
 
     async def _generate_session_dir(self) -> Path:
@@ -383,22 +436,7 @@ class EyeTStubRuntime(ModuleRuntime):
         return path
 
     # ------------------------------------------------------------------
-    # View callbacks
-
-    def _dispatch_controller_action(self, action: str) -> None:
-        if not self.view or not self.view.action_callback:
-            return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        loop.create_task(self.view.action_callback(action))
-
-    async def _start_recording_from_view(self) -> None:
-        await self._start_recording_flow({})
-
-    async def _stop_recording_from_view(self) -> None:
-        await self._stop_recording_flow()
+    # View helpers
 
     def _get_latest_frame(self) -> Optional[np.ndarray]:
         if not self._tracker_handler:
@@ -406,38 +444,7 @@ class EyeTStubRuntime(ModuleRuntime):
         return self._tracker_handler.get_display_frame()
 
     # ------------------------------------------------------------------
-    # Snapshot & reconnect helpers
-
-    async def capture_snapshot(self) -> Optional[Path]:
-        frame = self._get_latest_frame()
-        if frame is None:
-            self.logger.warning("No frame available for snapshot")
-            return None
-
-        session_dir = self._session_dir or self.model.session_dir or await self._generate_session_dir()
-        session_dir.mkdir(parents=True, exist_ok=True)
-        filename = session_dir / f"snapshot_eyet_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
-
-        try:
-            if cv2 is not None:
-                cv2.imwrite(str(filename), frame.copy())  # type: ignore[arg-type]
-            else:
-                from PIL import Image  # Lazy import to avoid dependency when unavailable
-
-                image = Image.fromarray(frame[:, :, ::-1])  # BGR -> RGB
-                image.save(str(filename), format="JPEG")
-        except Exception as exc:
-            self.logger.error("Failed to save snapshot: %s", exc)
-            return None
-
-        self.logger.info("Saved snapshot -> %s", filename)
-        if self._view_adapter:
-            self._view_adapter.notify_snapshot(filename)
-        return filename
-
-    async def request_reconnect(self) -> None:
-        await self._stop_tracker()
-        await self._ensure_tracker_ready()
+    # Recording automation
 
     async def _auto_start_recording(self) -> None:
         await asyncio.sleep(3.0)

@@ -120,8 +120,8 @@ Pupil Labs eye tracking integration with gaze overlay and scene video recording.
 python3 rpi_logger/modules/EyeTracker/main_eye_tracker.py --target-fps 30
 ```
 
-### NoteTaker
-Timestamped note-taking interface for annotating sessions in real-time.
+### Notes
+Stub-based note-taking interface (built on the Codex VMC stack) for annotating sessions in real-time alongside other modules.
 
 **Key Features:**
 - Millisecond-precision timestamps
@@ -132,7 +132,7 @@ Timestamped note-taking interface for annotating sessions in real-time.
 
 **Standalone Usage:**
 ```bash
-python3 rpi_logger/modules/NoteTaker/main_notes.py --mode gui
+python3 rpi_logger/modules/Notes/main_notes.py --mode gui
 ```
 
 ### DRT (Detection Response Task)
@@ -255,7 +255,7 @@ data/
     │   ├── scene_video_20251024_120000.mp4
     │   ├── gaze_data_20251024_120000.csv
     │   └── frame_timing_20251024_120000.csv
-    ├── NoteTaker/
+    ├── Notes/
     │   ├── session.log
     │   └── session_notes.csv
     └── DRT/
@@ -421,7 +421,7 @@ RPi_Logger/
 │   │   ├── Audio/          # Audio module
 │   │   ├── Cameras/        # Camera module
 │   │   ├── EyeTracker/     # Eye tracking module
-│   │   ├── NoteTaker/      # Note taking module
+│   │   ├── Notes/          # Stub Codex-based notes module
 │   │   └── DRT/            # Detection response task
 │   └── tools/              # Post-processing + diagnostics
 ├── config.txt              # Main configuration
@@ -450,7 +450,7 @@ python -m rpi_logger
 
 To create a new module:
 
-1. **Copy Template**: Use existing module as template (e.g., NoteTaker for simple modules)
+1. **Copy Template**: Use existing module as template (e.g., Notes for simple modules)
 2. **Implement Core**: Create `<module>_system.py` inheriting from `BaseSystem`
 3. **Add Recording**: Implement recording manager with `get_sync_metadata()` method
 4. **Create GUI**: Inherit from `TkinterGuiBase` for consistency

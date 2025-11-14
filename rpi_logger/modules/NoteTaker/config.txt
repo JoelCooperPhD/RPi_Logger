@@ -1,9 +1,0 @@
-enabled = false
-window_x = 5808
-window_y = 2724
-window_width = 605
-window_height = 413
-541
-window_y = 2724
-window_width = 605
-window_height = 413

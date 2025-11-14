@@ -1,4 +1,4 @@
-"""Notes runtime built on the stub (codex) VMC stack."""
+"""Notes runtime built on the Codex VMC stack."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ class NoteRecord:
     """Lightweight container for an individual note."""
 
     index: int
+    trial_number: int
     text: str
     timestamp: float
     timestamp_iso: str
@@ -39,9 +40,9 @@ class NoteRecord:
 
 
 class NotesArchive:
-    """Manage on-disk persistence for stub notes using the legacy format."""
+    """Manage on-disk persistence for notes using the legacy format."""
 
-    HEADER = "Note,Content,Timestamp"
+    HEADER = "Note,trial,Content,Timestamp"
 
     def __init__(self, base_dir: Path, logger: logging.Logger, *, encoding: str = "utf-8") -> None:
         self.base_dir = base_dir
@@ -94,6 +95,7 @@ class NotesArchive:
         modules: Sequence[str],
         *,
         posted_at: Optional[float] = None,
+        trial_number: int,
     ) -> NoteRecord:
         if not self.recording:
             raise RuntimeError("Notes archive is not active")
@@ -108,17 +110,18 @@ class NotesArchive:
         if self._start_timestamp is None:
             self._start_timestamp = timestamp
 
-        await asyncio.to_thread(self._append_row, sanitized, timestamp)
+        await asyncio.to_thread(self._append_row, sanitized, timestamp, trial_number)
 
         self.note_count += 1
 
         modules_str = ";".join(sorted(modules)) if modules else ""
-        file_line = f"Note,{sanitized},{timestamp}"
+        file_line = f"Note,{trial_number},{sanitized},{timestamp}"
         iso_stamp = datetime.fromtimestamp(timestamp).isoformat(timespec="seconds")
         elapsed_display = self.format_elapsed(timestamp - self._start_timestamp)
 
         return NoteRecord(
             index=self.note_count,
+            trial_number=trial_number,
             text=sanitized,
             timestamp=timestamp,
             timestamp_iso=iso_stamp,
@@ -168,10 +171,10 @@ class NotesArchive:
                 continue
             count += 1
             if first_timestamp is None:
-                parts = stripped.split(",", 2)
-                if len(parts) >= 3:
+                parts = stripped.split(",", 3)
+                if len(parts) >= 4:
                     try:
-                        ts_candidate = float(parts[2])
+                        ts_candidate = float(parts[3])
                     except ValueError:
                         ts_candidate = None
                     if ts_candidate is not None:
@@ -181,9 +184,9 @@ class NotesArchive:
             self._start_timestamp = first_timestamp
         return count
 
-    def _append_row(self, text: str, timestamp: float) -> None:
+    def _append_row(self, text: str, timestamp: float, trial_number: int) -> None:
         with self.file_path.open("a", encoding=self.encoding) as handle:
-            handle.write(f"Note,{text},{timestamp}\n")
+            handle.write(f"Note,{trial_number},{text},{timestamp}\n")
 
     def _read_records(self, limit: int) -> List[NoteRecord]:
         try:
@@ -201,12 +204,16 @@ class NotesArchive:
         records: List[NoteRecord] = []
         for idx, line in enumerate(note_lines[start_index:], start=start_index + 1):
             raw = line.rstrip("\n")
-            parts = raw.split(",", 2)
-            if len(parts) < 3:
+            parts = raw.split(",", 3)
+            if len(parts) < 4:
                 continue
-            note_text = parts[1]
             try:
-                timestamp = float(parts[2])
+                trial_number = int(parts[1])
+            except ValueError:
+                trial_number = 0
+            note_text = parts[2]
+            try:
+                timestamp = float(parts[3])
             except ValueError:
                 timestamp = 0.0
 
@@ -218,6 +225,7 @@ class NotesArchive:
             records.append(
                 NoteRecord(
                     index=idx,
+                    trial_number=trial_number,
                     text=note_text,
                     timestamp=timestamp,
                     timestamp_iso=iso_stamp or "",
@@ -246,8 +254,8 @@ class NotesArchive:
         return joined.replace(",", "-")
 
 
-class NotesStubRuntime(ModuleRuntime):
-    """Interactive note-taking runtime built atop the stub supervisor."""
+class NotesRuntime(ModuleRuntime):
+    """Interactive note-taking runtime built atop the Codex supervisor."""
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
@@ -259,7 +267,7 @@ class NotesStubRuntime(ModuleRuntime):
         self.logger = base_logger.getChild("NotesRuntime") if base_logger else logging.getLogger("NotesRuntime")
         self.display_name = context.display_name
 
-        self.task_manager = BackgroundTaskManager("NotesStubTasks", self.logger)
+        self.task_manager = BackgroundTaskManager("NotesTasks", self.logger)
         timeout = getattr(self.args, "shutdown_timeout", 15.0)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=timeout)
         self._stop_event = asyncio.Event()
@@ -528,9 +536,15 @@ class NotesStubRuntime(ModuleRuntime):
         if not archive:
             return False
 
+        trial_number = int(self.model.trial_number or 0)
         modules = await self._read_recording_modules()
         try:
-            record = await archive.add_note(note_text, modules, posted_at=posted_at)
+            record = await archive.add_note(
+                note_text,
+                modules,
+                posted_at=posted_at,
+                trial_number=trial_number,
+            )
         except ValueError as exc:
             self.logger.debug("Cannot add note: %s", exc)
             return False
@@ -547,6 +561,7 @@ class NotesStubRuntime(ModuleRuntime):
 
         self._emit_status("note_added", {
             "note_index": record.index,
+            "trial_number": record.trial_number,
             "note_text": record.text,
             "timestamp": record.timestamp_iso,
             "elapsed": record.elapsed,
