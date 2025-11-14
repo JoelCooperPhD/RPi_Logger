@@ -35,46 +35,51 @@ from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 from vmc.constants import PLACEHOLDER_GEOMETRY
 
 from notes_runtime import NotesStubRuntime
+from rpi_logger.core.config_manager import get_config_manager
+from rpi_logger.modules.base.config_paths import resolve_writable_module_config
 
 DISPLAY_NAME = "Notes (Stub)"
 MODULE_ID = "notes_stub"
 DEFAULT_OUTPUT_SUBDIR = Path("notes-stub")
 DEFAULT_HISTORY_LIMIT = 200
+CONFIG_PATH = resolve_writable_module_config(MODULE_DIR, MODULE_ID)
+CONFIG_MANAGER = get_config_manager()
 
 logger = logging.getLogger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):
+    config = _load_notes_config()
     parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} module")
 
     parser.add_argument(
         "--mode",
         choices=("gui", "headless"),
-        default="gui",
+        default=_normalize_mode(_config_text(config, "mode") or "gui"),
         help="Execution mode set by the module manager",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=DEFAULT_OUTPUT_SUBDIR,
+        default=_config_path(config, "output_dir", DEFAULT_OUTPUT_SUBDIR),
         help="Session root provided by the module manager",
     )
     parser.add_argument(
         "--session-prefix",
         type=str,
-        default=MODULE_ID,
+        default=_config_text(config, "session_prefix") or MODULE_ID,
         help="Prefix for generated session directories",
     )
     parser.add_argument(
         "--log-level",
         type=str,
-        default="info",
+        default=_config_text(config, "log_level") or "info",
         help="Logging verbosity",
     )
     parser.add_argument(
         "--log-file",
         type=Path,
-        default=None,
+        default=_config_optional_path(config, "log_file"),
         help="Optional explicit log file path",
     )
     parser.add_argument(
@@ -86,7 +91,7 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--window-geometry",
         type=str,
-        default=None,
+        default=_config_text(config, "window_geometry"),
         help=(
             "Initial window geometry when launched with GUI "
             f"(fallback to saved config or {PLACEHOLDER_GEOMETRY})"
@@ -95,14 +100,22 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--history-limit",
         type=int,
-        default=DEFAULT_HISTORY_LIMIT,
+        default=_config_int(config, "history_limit", DEFAULT_HISTORY_LIMIT),
         help="Maximum number of notes retained in the on-screen history",
     )
-    parser.add_argument(
+
+    auto_group = parser.add_mutually_exclusive_group()
+    auto_group.add_argument(
         "--auto-start",
+        dest="auto_start",
         action="store_true",
-        default=False,
         help="Automatically begin recording when the module starts",
+    )
+    auto_group.add_argument(
+        "--no-auto-start",
+        dest="auto_start",
+        action="store_false",
+        help="Disable automatic recording on startup",
     )
 
     console_group = parser.add_mutually_exclusive_group()
@@ -116,15 +129,84 @@ def parse_args(argv: Optional[list[str]] = None):
         "--no-console",
         dest="console_output",
         action="store_false",
-        help="Disable console logging (default)",
+        help="Disable console logging",
     )
-    parser.set_defaults(console_output=False)
+
+    parser.set_defaults(
+        auto_start=_config_bool(config, "auto_start", False),
+        console_output=_config_bool(config, "console_output", False),
+    )
 
     return parser.parse_args(argv)
 
 
 def build_runtime(context):
     return NotesStubRuntime(context)
+
+
+def _load_notes_config() -> dict[str, str]:
+    try:
+        return CONFIG_MANAGER.read_config(CONFIG_PATH)
+    except Exception:  # pragma: no cover - defensive logging
+        logger.debug("Failed to read notes config from %s", CONFIG_PATH, exc_info=True)
+        return {}
+
+
+def _config_text(config: dict[str, str], key: str) -> Optional[str]:
+    raw = config.get(key)
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _config_bool(config: dict[str, str], key: str, default: bool) -> bool:
+    text = _config_text(config, key)
+    if text is None:
+        return default
+    lowered = text.lower()
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _config_int(config: dict[str, str], key: str, default: int) -> int:
+    text = _config_text(config, key)
+    if text is None:
+        return default
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return default
+
+
+def _config_path(config: dict[str, str], key: str, default: Path) -> Path:
+    text = _config_text(config, key)
+    if text is None:
+        return default
+    try:
+        return Path(text)
+    except Exception:
+        return default
+
+
+def _config_optional_path(config: dict[str, str], key: str) -> Optional[Path]:
+    text = _config_text(config, key)
+    if text is None:
+        return None
+    try:
+        return Path(text)
+    except Exception:
+        return None
+
+
+def _normalize_mode(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"headless", "cli"}:
+        return "headless"
+    return "gui"
 
 
 async def main(argv: Optional[list[str]] = None) -> None:

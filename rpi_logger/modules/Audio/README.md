@@ -21,5 +21,7 @@ command-line interaction otherwise.
 
 Only `sounddevice`, `numpy`, and the codex helpers are required.
 
-The module persists the last selected devices in `config.txt` via the
-`selected_devices` entry so relaunching the UI keeps the previous layout.
+The module persists the last selected devices inside the user-specific config
+(`~/.rpi_logger/module_configs/audio/config.txt`) via the `selected_devices`
+entry so relaunching the UI keeps the previous layout even when the repository
+is read-only.

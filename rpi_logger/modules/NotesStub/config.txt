@@ -1,5 +1,0 @@
-# Configuration placeholder for the Notes (Stub) module built on the stub (codex) stack.
-enabled = false
-display_name = Notes (Stub)
-window_geometry = 836x479+5493+4137
-preview_resolution = auto

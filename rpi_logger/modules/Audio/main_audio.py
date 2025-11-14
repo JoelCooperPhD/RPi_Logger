@@ -34,11 +34,12 @@ from vmc import StubCodexSupervisor
 
 from rpi_logger.core.logging_config import configure_logging
 from rpi_logger.modules.Audio.config import parse_cli_args
+from rpi_logger.modules.base.config_paths import resolve_writable_module_config
 from rpi_logger.modules.Audio.runtime import AudioRuntime
 
 DISPLAY_NAME = "Audio"
 MODULE_ID = "audio"
-CONFIG_PATH = MODULE_DIR / "config.txt"
+CONFIG_PATH = resolve_writable_module_config(MODULE_DIR, MODULE_ID)
 
 logger = logging.getLogger("Audio")
 
