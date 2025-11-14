@@ -44,6 +44,7 @@ examples_output/
 
 # GPS map tiles
 rpi_logger/modules/GPS/offline_tiles.db
+rpi_logger/modules/GPS (stub)/offline_tiles.db
 
 # Development notes
 AGENTS.md

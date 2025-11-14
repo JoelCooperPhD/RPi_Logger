@@ -29,6 +29,24 @@ to a local `offline_tiles.db` file inside this module; if it is missing the
 runtime automatically copies `modules/GPS/offline_tiles.db` so existing downloads
 continue to work.
 
+## Offline tiles workflow
+
+The OpenStreetMap tile database is **not** committed to Git. Create or copy it
+locally before launching the module:
+
+1. Generate a seed database via the original GPS module helper:
+   ```bash
+   cd rpi_logger/modules/GPS
+   uv run python download_offline_tiles.py
+   ```
+2. Copy the resulting `offline_tiles.db` into `rpi_logger/modules/GPS (stub)/`.
+   The runtime also copies the file automatically if it detects
+   `modules/GPS/offline_tiles.db`.
+3. Keep these databases out of Git history (they are ignored via `.gitignore`).
+
+Without the file the stub automatically falls back to online tiles, so normal
+testing still works even when you skip the download step.
+
 ## Requirements
 
 - `serial_asyncio` (pyserial async transport) for GPS communication

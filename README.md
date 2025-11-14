@@ -73,6 +73,16 @@ python main_logger.py --mode gui
 7. **Process Data**: Run `python -m rpi_logger.tools.muxing_tool` and select the session folder
    (CLI alternative: `python -m rpi_logger.tools.sync_and_mux <session_dir> --all-trials`)
 
+## Data & large files
+
+To keep the repository lean, runtime artifacts and media are ignored via `.gitignore`:
+
+- Camera/audio outputs (`*.mp4`, `*.h264`, `*.wav`, `recordings/`, etc.) stay on disk only.
+- GPS offline tile caches (`rpi_logger/modules/GPS/offline_tiles.db` and `rpi_logger/modules/GPS (stub)/offline_tiles.db`) must be generated locally with `uv run python rpi_logger/modules/GPS/download_offline_tiles.py` before copying into the module folders.
+- Any additional large assets should live outside the repo or use an appropriate storage mechanism (e.g., Git LFS or shared storage), never regular Git history.
+
+If you accidentally add a binary asset, run `git rm --cached <file>` and re-check `.gitignore` before committing.
+
 ## Available Modules
 
 ### Cameras
