@@ -9,8 +9,6 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
-from rpi_logger.core.config_manager import get_config_manager
-
 try:
     import tkinter as tk
     from tkinter import ttk, scrolledtext
@@ -131,10 +129,9 @@ class GPSViewAdapter:
         self._nmea_widget: Optional[scrolledtext.ScrolledText] = None  # type: ignore[assignment]
         self._nmea_limit = 200
         self._fallback_canvas: Optional[tk.Canvas] = None  # type: ignore[assignment]
+        self._fallback_base_image: Optional[Image.Image] = None  # type: ignore[assignment, attr-defined]
         self._fallback_image = None
-        self._zoom_var: Optional[tk.StringVar] = None  # type: ignore[assignment]
-        self._zoom_controls: Optional[ttk.Frame] = None  # type: ignore[assignment]
-        self._zoom_controls_target: Optional[tk.Widget] = None
+        self._initial_view_applied = False
 
         self.logger.info(
             "Initializing GPS view adapter (center=%s, zoom=%s, offline_tiles=%s)",
@@ -215,17 +212,14 @@ class GPSViewAdapter:
             return
 
         widget = MapCls(container, **kwargs)
-        widget.grid(row=0, column=0, sticky="nsew")
+        widget.pack(fill="both", expand=True)
         self.map_widget = widget
         try:
             widget.set_tile_server("https://a.tile.openstreetmap.org/{z}/{x}/{y}.png")
         except Exception as exc:
             self.logger.debug("Failed to set tile server (will rely on default): %s", exc)
-        try:
-            widget.set_zoom(int(self.map_zoom))
-            widget.set_position(self.map_center[0], self.map_center[1])
-        except Exception as exc:
-            self.logger.debug("Failed to set initial map state: %s", exc)
+        self._initial_view_applied = False
+        self._schedule_initial_view()
 
         mode = "offline" if "database_path" in kwargs else "online"
         self.logger.info(
@@ -252,10 +246,35 @@ class GPSViewAdapter:
         except Exception as exc:
             self.logger.debug("Unable to schedule map state logging: %s", exc)
 
-        self._ensure_zoom_controls(widget)
-
         if self.map_status_label:
             self.map_status_label.grid_remove()
+
+    def _schedule_initial_view(self) -> None:
+        widget = self.map_widget
+        if not widget:
+            return
+
+        def _apply():
+            self._apply_initial_view(force=True)
+
+        try:
+            widget.after(100, _apply)
+        except Exception as exc:
+            self.logger.debug("Failed to schedule initial map view: %s", exc)
+            self._apply_initial_view(force=True)
+
+    def _apply_initial_view(self, force: bool = False) -> None:
+        if not self.map_widget:
+            return
+        if self._initial_view_applied and not force:
+            return
+        try:
+            self.map_widget.set_zoom(int(round(self.map_zoom)))
+            self.map_widget.set_position(self.map_center[0], self.map_center[1])
+            self._initial_view_applied = True
+            self.logger.debug("Initial map view applied (center=%s zoom=%s)", self.map_center, self.map_zoom)
+        except Exception as exc:
+            self.logger.debug("Failed to apply initial map view: %s", exc)
 
     def _build_io_content(self) -> None:
         if not self.view or tk is None or ttk is None:
@@ -527,15 +546,8 @@ class GPSViewAdapter:
             except Exception:
                 pass
             self._fallback_canvas = None
+        self._fallback_base_image = None
         self._fallback_image = None
-        if self._zoom_controls is not None:
-            try:
-                self._zoom_controls.destroy()
-            except Exception:
-                pass
-            self._zoom_controls = None
-            self._zoom_var = None
-        self._zoom_controls_target = None
 
     def _log_map_widget_state(self) -> None:
         widget = self.map_widget
@@ -589,16 +601,12 @@ class GPSViewAdapter:
                 self.map_status_label.grid_remove()
             tile_size = 256
             grid = 3
-            canvas_size = tile_size * grid
             if self._fallback_canvas is None:
-                canvas = tk.Canvas(self.map_frame, width=canvas_size, height=canvas_size, bg="#cccccc")
-                canvas.grid(row=0, column=0, sticky="nsew")
+                canvas = tk.Canvas(self.map_frame, bg="#cccccc", highlightthickness=0)
+                canvas.pack(fill="both", expand=True)
+                canvas.bind("<Configure>", self._on_fallback_canvas_resize)
                 self._fallback_canvas = canvas
-            else:
-                canvas = self._fallback_canvas
-                canvas.delete("all")
-            self._ensure_zoom_controls(self._fallback_canvas)
-
+            canvas = self._fallback_canvas
             lat, lon = self.map_center
             zoom = int(round(self.map_zoom))
 
@@ -610,7 +618,8 @@ class GPSViewAdapter:
                 return xtile, ytile
 
             cx, cy = _tile_coords(lat, lon, zoom)
-            image = Image.new("RGB", (canvas_size, canvas_size), (210, 210, 210))
+            image_size = tile_size * grid
+            image = Image.new("RGB", (image_size, image_size), (210, 210, 210))
 
             conn = sqlite3.connect(str(self.offline_tiles))
             cur = conn.cursor()
@@ -635,9 +644,8 @@ class GPSViewAdapter:
                     image.paste(tile_img, (px, py))
             conn.close()
 
-            photo = ImageTk.PhotoImage(image)
-            canvas.create_image(canvas_size // 2, canvas_size // 2, image=photo)
-            self._fallback_image = photo
+            self._fallback_base_image = image
+            self._update_fallback_canvas_image()
             self.logger.info(
                 "Static offline preview rendered (zoom=%s, center tiles=%s,%s)",
                 zoom,
@@ -647,62 +655,27 @@ class GPSViewAdapter:
         except Exception as exc:
             self.logger.error("Static preview rendering failed: %s", exc, exc_info=True)
 
-    def _ensure_zoom_controls(self, container: tk.Widget) -> None:
-        if not tk or not ttk or container is None:
-            return
-        if self._zoom_controls and self._zoom_controls_target is not container:
-            try:
-                self._zoom_controls.destroy()
-            except Exception:
-                pass
-            self._zoom_controls = None
-            self._zoom_var = None
+    def _on_fallback_canvas_resize(self, event) -> None:
+        self._update_fallback_canvas_image(event.width, event.height)
 
-        if self._zoom_controls:
-            try:
-                self._zoom_controls.lift()
-            except Exception:
-                pass
-            self._zoom_controls_target = container
+    def _update_fallback_canvas_image(self, width: Optional[int] = None, height: Optional[int] = None) -> None:
+        if (
+            self._fallback_canvas is None
+            or Image is None
+            or ImageTk is None
+            or self._fallback_base_image is None
+        ):
             return
 
-        frame = ttk.Frame(container)
-        frame.place(relx=1.0, rely=0.0, anchor="ne", x=-12, y=12)
-        self._zoom_controls = frame
-        self._zoom_controls_target = container
-        ttk.Button(frame, text="+", width=3, command=lambda: self._change_zoom(1)).grid(row=0, column=0, pady=1)
-        ttk.Button(frame, text="-", width=3, command=lambda: self._change_zoom(-1)).grid(row=1, column=0, pady=1)
-        self._zoom_var = tk.StringVar(value=f"Zoom {int(round(self.map_zoom))}")
-        ttk.Label(frame, textvariable=self._zoom_var).grid(row=2, column=0, pady=(4, 0))
+        canvas = self._fallback_canvas
+        width = max(1, int(width or canvas.winfo_width()))
+        height = max(1, int(height or canvas.winfo_height()))
+
         try:
-            frame.lift()
-        except Exception:
-            pass
-
-    def _change_zoom(self, delta: float) -> None:
-        new_zoom = max(1.0, min(19.0, float(self.map_zoom) + delta))
-        if abs(new_zoom - self.map_zoom) < 1e-3:
-            return
-        self.map_zoom = new_zoom
-        self.logger.info("Zoom updated to %.1f", self.map_zoom)
-        if self.map_widget:
-            try:
-                self.map_widget.set_zoom(new_zoom)
-            except Exception as exc:
-                self.logger.debug("Failed to update map widget zoom: %s", exc)
-        else:
-            self._render_static_preview()
-        if self._zoom_var:
-            self._zoom_var.set(f"Zoom {int(round(self.map_zoom))}")
-        self._persist_map_zoom()
-
-    def _persist_map_zoom(self) -> None:
-        config_path = getattr(self.model, "config_path", None)
-        if not config_path:
-            return
-        try:
-            value = int(round(self.map_zoom))
-            get_config_manager().write_config(Path(config_path), {"map_zoom": value})
-            self.logger.debug("Persisted map_zoom=%s to %s", value, config_path)
+            resized = self._fallback_base_image.resize((width, height), Image.BILINEAR)
+            photo = ImageTk.PhotoImage(resized)
+            canvas.delete("fallback_image")
+            canvas.create_image(width // 2, height // 2, image=photo, anchor="center", tags="fallback_image")
+            self._fallback_image = photo
         except Exception as exc:
-            self.logger.debug("Failed to persist map zoom: %s", exc)
+            self.logger.debug("Failed to update fallback canvas image: %s", exc)

@@ -189,6 +189,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.nmea_panel: Optional[GPSNMEAPanel] = None
         self._latest_log_path: Optional[Path] = None
         self._nmea_snapshot: list[str] = []
+        self._initial_view_applied = False
 
         self.initialize_gui_framework(
             title="GPS Monitor",
@@ -421,13 +422,9 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             self.map_widget.set_tile_server("https://a.tile.openstreetmap.org/{z}/{x}/{y}.png")
 
         self.map_status_label.grid_remove()
-        self.map_widget.grid(row=0, column=0, sticky='nsew')
-
-        try:
-            self.map_widget.set_zoom(int(self.map_zoom))
-            self.map_widget.set_position(self.map_center_lat, self.map_center_lon)
-        except Exception as exc:
-            logger.error("Failed to set initial map state: %s", exc, exc_info=True)
+        self.map_widget.pack(fill="both", expand=True)
+        self._initial_view_applied = False
+        self._schedule_initial_view()
 
     def _center_map(self):
         if self.map_widget and self._last_marker_coords:
@@ -700,3 +697,29 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 'map_center_lon': lon,
             }
         )
+
+    def _schedule_initial_view(self) -> None:
+        widget = self.map_widget
+        if not widget:
+            return
+
+        def _apply():
+            self._apply_initial_view(force=True)
+
+        try:
+            widget.after(100, _apply)
+        except Exception as exc:
+            logger.debug("Failed to schedule initial map view: %s", exc)
+            self._apply_initial_view(force=True)
+
+    def _apply_initial_view(self, force: bool = False) -> None:
+        if not self.map_widget:
+            return
+        if self._initial_view_applied and not force:
+            return
+        try:
+            self.map_widget.set_zoom(int(self.map_zoom))
+            self.map_widget.set_position(self.map_center_lat, self.map_center_lon)
+            self._initial_view_applied = True
+        except Exception as exc:
+            logger.error("Failed to apply initial map view: %s", exc, exc_info=True)

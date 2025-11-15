@@ -35,23 +35,23 @@ except Exception as exc:  # pragma: no cover - defensive import guard
 else:
     TRACKER_IMPORT_ERROR = None
 
-from view_adapter import EyeTViewAdapter
+from view_adapter import EyeTrackerViewAdapter
 
 
-class EyeTStubRuntime(ModuleRuntime):
+class EyeTrackerRuntime(ModuleRuntime):
     """Glue layer between the logger stub stack and tracker_core."""
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
         self.model = context.model
         self.controller = context.controller
-        base_logger = context.logger or logging.getLogger("EyeTStubRuntime")
+        base_logger = context.logger or logging.getLogger("EyeTrackerRuntime")
         self.logger = base_logger.getChild("Runtime")
         self.view = context.view
         self.display_name = context.display_name
         self.module_dir = context.module_dir
 
-        self.task_manager = BackgroundTaskManager("EyeTTasks", self.logger)
+        self.task_manager = BackgroundTaskManager("EyeTrackerTasks", self.logger)
         timeout = getattr(self.args, "shutdown_timeout", 20.0)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=max(5.0, float(timeout)))
 
@@ -66,7 +66,7 @@ class EyeTStubRuntime(ModuleRuntime):
         self._tracker_task: Optional[asyncio.Task] = None
         self._device_task: Optional[asyncio.Task] = None
         self._device_ready_event: Optional[asyncio.Event] = None
-        self._view_adapter: Optional[EyeTViewAdapter] = None
+        self._view_adapter: Optional[EyeTrackerViewAdapter] = None
         self._session_dir: Optional[Path] = None
         self._import_error = TRACKER_IMPORT_ERROR
         self._auto_start_task: Optional[asyncio.Task] = None
@@ -134,14 +134,14 @@ class EyeTStubRuntime(ModuleRuntime):
             return await self._start_recording_flow(command)
         if action == "stop_recording":
             return await self._stop_recording_flow()
-        if action in {"reconnect", "refresh_device", "eyet_reconnect"}:
+        if action in {"reconnect", "refresh_device", "eye_tracker_reconnect"}:
             await self.request_reconnect()
             return True
         return False
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
         normalized = (action or "").lower()
-        if normalized in {"refresh_device", "eyet_reconnect"}:
+        if normalized in {"refresh_device", "eye_tracker_reconnect"}:
             await self.request_reconnect()
             return True
         return False
@@ -210,7 +210,7 @@ class EyeTStubRuntime(ModuleRuntime):
         if not self.view:
             return
         preview_hz = max(1, int(getattr(self.args, "gui_preview_update_hz", 10)))
-        self._view_adapter = EyeTViewAdapter(
+        self._view_adapter = EyeTrackerViewAdapter(
             self.view,
             model=self.model,
             logger=self.logger.getChild("ViewAdapter"),
@@ -240,7 +240,7 @@ class EyeTStubRuntime(ModuleRuntime):
 
         self._device_task = self.task_manager.create(
             self._ensure_tracker_ready(),
-            name="EyeTDeviceConnect",
+            name="EyeTrackerDeviceConnect",
         )
         self._device_task.add_done_callback(lambda _: setattr(self, "_device_task", None))
 
@@ -470,5 +470,5 @@ class EyeTStubRuntime(ModuleRuntime):
     # Properties
 
     @property
-    def view_adapter(self) -> Optional[EyeTViewAdapter]:
+    def view_adapter(self) -> Optional[EyeTrackerViewAdapter]:
         return self._view_adapter

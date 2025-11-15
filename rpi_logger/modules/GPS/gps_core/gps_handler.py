@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import logging
+import time
 from collections import deque
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Dict, Any, Optional
@@ -24,6 +25,7 @@ class GPSHandler:
         self.running = False
         self.recent_sentences: deque[str] = deque(maxlen=500)
         self._stop_lock = asyncio.Lock()
+        self._last_sentence_time: Optional[float] = None
 
     async def start(self) -> None:
         logger.info("Connecting to GPS on %s @ %d baud", self.port, self.baudrate)
@@ -33,6 +35,7 @@ class GPSHandler:
             baudrate=self.baudrate
         )
 
+        self._last_sentence_time = self._loop_time()
         self.running = True
         self.read_task = asyncio.create_task(self._read_loop())
 
@@ -100,6 +103,7 @@ class GPSHandler:
             self.reader = None
             self.writer = None
             self.running = False
+            self._last_sentence_time = None
 
             logger.info("GPS handler stopped")
 
@@ -134,6 +138,7 @@ class GPSHandler:
                     logger.debug("RX [%d]: %s", sentence_count, sentence)
                     self.recent_sentences.append(sentence)
                     self.parser.parse_sentence(sentence)
+                    self._last_sentence_time = self._loop_time()
 
                     if sentence_count - last_log_count >= 50:
                         logger.info("Received %d GPS sentences (latest: %s)", sentence_count, sentence[:40])
@@ -152,3 +157,16 @@ class GPSHandler:
         if limit >= len(self.recent_sentences):
             return list(self.recent_sentences)
         return list(self.recent_sentences)[-limit:]
+
+    def seconds_since_last_sentence(self) -> Optional[float]:
+        if self._last_sentence_time is None:
+            return None
+        return max(0.0, self._loop_time() - self._last_sentence_time)
+
+    @staticmethod
+    def _loop_time() -> float:
+        try:
+            loop = asyncio.get_running_loop()
+            return loop.time()
+        except RuntimeError:
+            return time.monotonic()

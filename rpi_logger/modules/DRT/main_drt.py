@@ -1,4 +1,4 @@
-"""DRT module entry point built on the stub (codex) VMC framework."""
+"""DRT module entry point built on the shared stub VMC framework."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Re-use the stub (codex) VMC stack without copying its sources.
+# Re-use the stub VMC stack without copying its sources.
 STUB_FRAMEWORK_DIR = Path(__file__).parent.parent / "stub (codex)"
 if STUB_FRAMEWORK_DIR.exists() and str(STUB_FRAMEWORK_DIR) not in sys.path:
     sys.path.insert(0, str(STUB_FRAMEWORK_DIR))
@@ -27,8 +27,8 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor
 from vmc.constants import DISPLAY_NAME as STUB_DISPLAY_NAME
 
-from drt_codex.runtime import DRTModuleRuntime
-from drt_codex.view import DRTCodexView
+from drt.runtime import DRTModuleRuntime
+from drt.view import DRTView
 from rpi_logger.modules.DRT.drt_core.config import load_config_file
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def parse_args(argv: Optional[list[str]] = None):
     default_console = bool(config.get('console_output', False))
     default_window = config.get('window_geometry')
 
-    parser = argparse.ArgumentParser(description="DRT (codex) shell module")
+    parser = argparse.ArgumentParser(description="DRT shell module")
 
     parser.add_argument(
         "--mode",
@@ -140,21 +140,20 @@ async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
 
     if not args.enable_commands:
-        logger.error("DRT (codex) module must be launched by the logger controller (commands disabled).")
+        logger.error("DRT module must be launched by the logger controller (commands disabled).")
         return
 
     module_dir = Path(__file__).parent
-    display_name = args.config.get('display_name', 'DRT (codex)')
+    display_name = args.config.get('display_name', 'DRT')
 
     supervisor = StubCodexSupervisor(
         args,
         module_dir,
         logger.getChild('Supervisor'),
         runtime_factory=lambda context: DRTModuleRuntime(context),
-        view_factory=DRTCodexView,
-        view_kwargs={"display_name": display_name or STUB_DISPLAY_NAME},
+        view_factory=DRTView,
         display_name=display_name or STUB_DISPLAY_NAME,
-        module_id="drt_codex",
+        module_id="drt",
     )
 
     await supervisor.run()

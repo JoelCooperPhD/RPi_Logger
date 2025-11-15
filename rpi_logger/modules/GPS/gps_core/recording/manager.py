@@ -22,6 +22,11 @@ class GPSRecordingManager:
         self.file_handle = None
         self.record_task: Optional[asyncio.Task] = None
 
+    def set_gps_handler(self, gps_handler: 'GPSHandler') -> None:
+        """Swap the GPS data source without restarting the recorder."""
+        self.gps_handler = gps_handler
+        logger.debug("Recording manager GPS handler updated")
+
     async def start_recording(self, session_dir: Path, trial_number: int) -> bool:
         if self.recording:
             logger.warning("Already recording")

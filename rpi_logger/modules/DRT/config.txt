@@ -1,10 +1,18 @@
+# DRT module configuration
+# Values mirror the legacy DRT module defaults so behaviour stays consistent.
 enabled = false
-default_mode = gui
 window_geometry = 800x600+100+100
-device_vid = 9114
-device_pid = 32798
+output_dir = drt_data
+session_prefix = drt
+console_output = false
+auto_start_recording = false
+
+# USB device identification
+device_vid = 0x239A
+device_pid = 0x801E
 baudrate = 9600
-window_x = 5559
-window_y = 2594
-window_width = 1103
-window_height = 466
+
+# GUI layout toggles
+gui_show_session_output = true
+display_name = DRT
+preview_resolution = auto

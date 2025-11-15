@@ -20,6 +20,7 @@ from rpi_logger.cli.common import (
 )
 from rpi_logger.modules.base import load_window_geometry_from_config
 from gps_core import MODULE_NAME, MODULE_DESCRIPTION, GPSSupervisor, load_config_file
+from gps_core.constants import SERIAL_PORT, BAUD_RATE
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,14 @@ def parse_args(argv: Optional[list[str]] = None):
     default_output = Path(get_config_str(config, 'output_dir', 'data'))
     default_session_prefix = get_config_str(config, 'session_prefix', 'session')
     default_console = get_config_bool(config, 'console_output', True)
+
+    default_serial_port = get_config_str(config, 'serial_port', SERIAL_PORT)
+    baud_rate_raw = get_config_str(config, 'baud_rate', str(BAUD_RATE))
+    try:
+        default_baud_rate = int(baud_rate_raw)
+    except ValueError:
+        logger.warning("Invalid baud_rate value '%s' in config – using %d", baud_rate_raw, BAUD_RATE)
+        default_baud_rate = BAUD_RATE
 
     parser = argparse.ArgumentParser(
         description=f"{MODULE_NAME} - {MODULE_DESCRIPTION}"
@@ -44,6 +53,22 @@ def parse_args(argv: Optional[list[str]] = None):
         default_session_prefix=default_session_prefix,
         default_console_output=default_console,
         default_auto_start_recording=False,
+    )
+
+    parser.add_argument(
+        "--serial-port",
+        dest="serial_port",
+        type=str,
+        default=default_serial_port,
+        help=f"Serial device path for the GPS receiver (default: {default_serial_port})",
+    )
+
+    parser.add_argument(
+        "--baud-rate",
+        dest="baud_rate",
+        type=int,
+        default=default_baud_rate,
+        help=f"Baud rate for the GPS receiver (default: {default_baud_rate})",
     )
 
     args = parser.parse_args(argv)

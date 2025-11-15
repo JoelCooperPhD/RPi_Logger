@@ -13,6 +13,6 @@ map_zoom = 9
 map_center_lat = 40.7608
 map_center_lon = -111.8910
 show_path = true
-window_geometry = 1326x843+1937+1462
+window_geometry = 1553x944+546+1211
 offline_tiles = offline_tiles.db
 preview_resolution = auto

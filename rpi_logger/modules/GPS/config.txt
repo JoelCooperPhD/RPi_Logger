@@ -1,8 +1,14 @@
 enabled = false
-window_x = 4720
-window_y = 2932
-window_width = 1023
-window_height = 498
+indow_x = 563
+window_y = 2295
+window_width = 1363
+window_height = 710
+
+# GPS hardware defaults
+serial_port = /dev/serial0
+baud_rate = 9600
+fix_timeout_seconds = 5.0
+data_watchdog_seconds = 6.0
 
 # Auto-generated settings (do not edit unless you know what you are doing)
 gui_show_gps_nmea_stream = true

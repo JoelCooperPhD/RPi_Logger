@@ -1,4 +1,4 @@
-"""Tkinter view adapter that renders EyeT status inside the stub view."""
+"""Tkinter view adapter that renders EyeTracker status inside the stub view."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - optional dependency
 FrameProvider = Callable[[], Optional[np.ndarray]]
 
 
-class EyeTViewAdapter:
+class EyeTrackerViewAdapter:
     """Lightweight UI helper that populates the stub frame with tracker widgets."""
 
     def __init__(

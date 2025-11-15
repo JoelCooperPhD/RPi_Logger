@@ -102,12 +102,19 @@ class ConfigLoader:
             value_lower = value.lower()
             return value_lower in ('true', 'yes', 'on', '1')
 
-        if target_type in (int, float):
+        if target_type is int:
             try:
-                return target_type(value)
+                return int(value, 0)  # Support decimal, hex (0x...), octal (0o...), binary (0b...)
             except ValueError:
-                logger.warning("Failed to parse '%s' as %s, using default", value, target_type.__name__)
-                return target_type()  # Return 0 or 0.0
+                logger.warning("Failed to parse '%s' as int, using default", value)
+                return target_type()
+
+        if target_type is float:
+            try:
+                return float(value)
+            except ValueError:
+                logger.warning("Failed to parse '%s' as float, using default", value)
+                return target_type()
 
         return value
 

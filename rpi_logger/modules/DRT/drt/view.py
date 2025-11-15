@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 try:
@@ -39,22 +40,33 @@ class _LoopAsyncBridge:
     """Lightweight bridge that schedules coroutines on the active asyncio loop."""
 
     def __init__(self) -> None:
-        try:
-            self.loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self.loop = None
+        self.loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Remember the supervising loop so Tk callbacks can reuse it."""
+        self.loop = loop
 
     def run_coroutine(self, coro):
-        if self.loop is None or self.loop.is_closed():
-            self.loop = asyncio.get_event_loop()
-        return self.loop.create_task(coro)
+        loop = self._resolve_loop()
+        return loop.create_task(coro)
+
+    def _resolve_loop(self) -> asyncio.AbstractEventLoop:
+        if self.loop and not self.loop.is_closed():
+            return self.loop
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError as exc:  # pragma: no cover - Tk thread without bound loop
+            raise RuntimeError("Tkinter bridge has no running event loop bound") from exc
+        self.loop = loop
+        return loop
 
 
-class CodexTkinterGUI(TkinterGUI):
-    """TkinterGUI variant that forwards recording controls via the stub controller."""
+class DRTTkinterGUI(TkinterGUI):
+    """Tkinter GUI variant that forwards recording controls via the stub controller."""
 
     def __init__(self, args, action_callback: ActionCallback):
         self._action_callback = action_callback
+        self._plot_recording_state: Optional[bool] = None
         super().__init__(_SystemPlaceholder(), args)
 
     async def _start_recording_async(self):  # type: ignore[override]
@@ -69,8 +81,41 @@ class CodexTkinterGUI(TkinterGUI):
             return
         await self._action_callback("stop_recording")
 
+    def sync_recording_state(self):  # type: ignore[override]
+        super().sync_recording_state()
+        self._sync_plotter_recording_state()
 
-class DRTCodexView:
+    def _sync_plotter_recording_state(self) -> None:
+        recording = bool(getattr(self.system, "recording", False))
+        if self._plot_recording_state == recording:
+            return
+        self._plot_recording_state = recording
+
+        for tab in getattr(self, "device_tabs", {}).values():
+            plotter = getattr(tab, "plotter", None)
+            if not plotter:
+                continue
+            if recording:
+                plotter.start_recording()
+            else:
+                plotter.stop_recording()
+
+    def handle_session_started(self) -> None:
+        self._plot_recording_state = None
+        for tab in getattr(self, "device_tabs", {}).values():
+            plotter = getattr(tab, "plotter", None)
+            if plotter:
+                plotter.start_session()
+
+    def handle_session_stopped(self) -> None:
+        self._plot_recording_state = None
+        for tab in getattr(self, "device_tabs", {}).values():
+            plotter = getattr(tab, "plotter", None)
+            if plotter:
+                plotter.stop()
+
+
+class DRTView:
     """Adapter that exposes the legacy GUI through the stub supervisor interface."""
 
     def __init__(
@@ -85,9 +130,9 @@ class DRTCodexView:
         self.args = args
         self.model = model
         self.action_callback = action_callback
-        self.display_name = display_name or "DRT (codex)"
-        self.logger = logger or logging.getLogger("DRTCodexView")
-        self.gui = CodexTkinterGUI(args, self._dispatch_action)
+        self.display_name = display_name or "DRT"
+        self.logger = logger or logging.getLogger("DRTView")
+        self.gui = DRTTkinterGUI(args, self._dispatch_action)
         self.gui.async_bridge = _LoopAsyncBridge()
         self.gui.set_close_handler(self._on_close)
         self._runtime = None
@@ -97,6 +142,9 @@ class DRTCodexView:
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
 
         self.model.subscribe(self._on_model_change)
+        self._initial_session_dir: Optional[Path] = None
+        self._active_session_dir: Optional[Path] = None
+        self._session_visual_active = False
 
     # ------------------------------------------------------------------
     # Wiring helpers
@@ -105,6 +153,10 @@ class DRTCodexView:
         """Allow the runtime to expose its API to the GUI once ready."""
         self._runtime = runtime
         self.gui.system = runtime
+        if isinstance(self.gui.async_bridge, _LoopAsyncBridge):
+            loop = getattr(runtime, "_loop", None)
+            if loop:
+                self.gui.async_bridge.bind_loop(loop)
 
     def attach_logging_handler(self) -> None:  # pragma: no cover - Tkinter widget already wires logging
         return
@@ -132,6 +184,30 @@ class DRTCodexView:
     def update_recording_state(self) -> None:
         self.call_in_gui(self.gui.sync_recording_state)
 
+    def _handle_session_dir_change(self, value) -> None:
+        if value:
+            try:
+                path = Path(value)
+            except (TypeError, ValueError):
+                return
+
+            if self._initial_session_dir is None:
+                self._initial_session_dir = path
+                return
+
+            if self._session_visual_active and self._active_session_dir == path:
+                return
+
+            self._active_session_dir = path
+            self._session_visual_active = True
+            self.call_in_gui(self.gui.handle_session_started)
+        else:
+            self._active_session_dir = None
+            if not self._session_visual_active:
+                return
+            self._session_visual_active = False
+            self.call_in_gui(self.gui.handle_session_stopped)
+
     # ------------------------------------------------------------------
     # Lifecycle controls
 
@@ -144,6 +220,9 @@ class DRTCodexView:
                 self._event_loop = asyncio.get_running_loop()
             except RuntimeError:
                 self._event_loop = None
+
+        if isinstance(self.gui.async_bridge, _LoopAsyncBridge) and self._event_loop:
+            self.gui.async_bridge.bind_loop(self._event_loop)
 
         if self._loop_running:
             return 0.0
@@ -188,6 +267,8 @@ class DRTCodexView:
     def _on_model_change(self, prop: str, value) -> None:
         if prop == "recording":
             self.update_recording_state()
+        elif prop == "session_dir":
+            self._handle_session_dir_change(value)
 
     def _on_close(self) -> None:
         if self._close_requested:
