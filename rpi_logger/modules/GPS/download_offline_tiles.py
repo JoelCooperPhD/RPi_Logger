@@ -1,48 +1,33 @@
 #!/usr/bin/env python3
-"""
-Download offline map tiles for the GPS module.
+"""Download offline map tiles for the GPS module."""
 
-This creates a database of offline tiles that can be used without internet.
-Adjust the coordinates and zoom levels for your region.
-"""
-
-import tkintermapview
 from pathlib import Path
 
-# Salt Lake City and Tooele, Utah area
-# Covers SLC (40.76°N, 111.89°W) to Tooele (40.53°N, 112.30°W)
-top_left_position = (40.95, -112.5)      # Northwest corner
-bottom_right_position = (40.4, -111.7)   # Southeast corner
+try:
+    from tkintermapview import OfflineLoader
+except Exception as exc:  # pragma: no cover - optional dependency
+    raise SystemExit(f"tkintermapview is required: {exc}") from exc
 
-# Zoom levels - higher = more detail but larger file
-zoom_min = 0   # World view
-zoom_max = 15  # Street level detail (reduced to 15 to save space)
+MODULE_DIR = Path(__file__).parent
+DATABASE_PATH = MODULE_DIR / "offline_tiles.db"
 
-# Output path
-script_dir = Path(__file__).parent
-database_path = script_dir / "offline_tiles.db"
+# Salt Lake City / Tooele region
+TOP_LEFT = (40.95, -112.5)
+BOTTOM_RIGHT = (40.4, -111.7)
+ZOOM_MIN = 0
+ZOOM_MAX = 15
 
-print(f"Downloading tiles for region:")
-print(f"  Top-left: {top_left_position}")
-print(f"  Bottom-right: {bottom_right_position}")
-print(f"  Zoom levels: {zoom_min}-{zoom_max}")
-print(f"  Output: {database_path}")
-print()
-print("This may take several minutes and download ~100MB...")
+print("Downloading tiles for GPS module:")
+print(f"  Region: {TOP_LEFT} -> {BOTTOM_RIGHT}")
+print(f"  Zoom levels: {ZOOM_MIN}-{ZOOM_MAX}")
+print(f"  Output: {DATABASE_PATH}")
 print()
 
-# Create OfflineLoader instance
-loader = tkintermapview.OfflineLoader(
-    path=str(database_path),
-    tile_server="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+loader = OfflineLoader(
+    path=str(DATABASE_PATH),
+    tile_server="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
 )
-
-# Download the tiles
-loader.save_offline_tiles(top_left_position, bottom_right_position, zoom_min, zoom_max)
-
-# Print summary
-print()
-print("Download complete!")
-print()
-print("Loaded regions:")
+loader.save_offline_tiles(TOP_LEFT, BOTTOM_RIGHT, ZOOM_MIN, ZOOM_MAX)
+print("Done! Offline tiles saved to", DATABASE_PATH)
+print("Loaded sections:")
 loader.print_loaded_sections()

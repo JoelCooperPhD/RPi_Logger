@@ -1,19 +1,19 @@
+# Toggle via the main logger UI
 enabled = false
-indow_x = 563
-window_y = 2295
-window_width = 1363
-window_height = 710
 
-# GPS hardware defaults
+# Display name shown in the module list
+display_name = GPS
+
+# Default preview settings consumed by the GPS preview
+window_geometry = 772x695+670+263
+offline_db = offline_tiles.db
+center_lat = 40.7608
+center_lon = -111.8910
+zoom = 13
+preview_resolution = auto
+
+# BerryGPS serial configuration
 serial_port = /dev/serial0
 baud_rate = 9600
-fix_timeout_seconds = 5.0
-data_watchdog_seconds = 6.0
-
-# Auto-generated settings (do not edit unless you know what you are doing)
-gui_show_gps_nmea_stream = true
-gui_show_gps_session_log = true
-gui_logger_visible = true
-map_zoom = 11
-map_center_lat = 40.760799999999996
-map_center_lon = -111.891
+reconnect_delay_s = 3
+nmea_history = 30

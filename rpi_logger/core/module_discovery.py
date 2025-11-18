@@ -25,6 +25,26 @@ class ModuleInfo:
         return f"ModuleInfo(name={self.name}, entry={self.entry_point.name})"
 
 
+def parse_bool(value, default: bool = True) -> bool:
+    """Parse common string representations into booleans."""
+    if value is None:
+        return default
+
+    if isinstance(value, bool):
+        return value
+
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+
+    if normalized in {'1', 'true', 'yes', 'on'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'off'}:
+        return False
+
+    return default
+
+
 def extract_module_name_from_entry(entry_point: Path) -> Optional[str]:
     match = re.match(r'main_(.+)\.py$', entry_point.name)
     if not match:
@@ -146,8 +166,14 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
 
         config = load_module_config(module_dir)
         display_name = module_name  # Default to module name
+        is_visible = True
         if config and isinstance(config, dict):
             display_name = config.get('display_name', display_name) or display_name
+            is_visible = parse_bool(config.get('visible'), default=True)
+
+        if not is_visible:
+            logger.info("Module %s marked hidden via config, skipping", module_name)
+            continue
 
         info = ModuleInfo(
             name=module_name,
