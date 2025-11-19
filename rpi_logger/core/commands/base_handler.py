@@ -1,5 +1,5 @@
 
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
@@ -11,7 +11,7 @@ class BaseCommandHandler(ABC):
     def __init__(self, system: Any, gui: Optional[Any] = None):
         self.system = system
         self.gui = gui
-        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self.logger = get_module_logger(f"{self.__class__.__name__}")
 
     async def handle_command(self, command_data: Dict[str, Any]) -> bool:
         command = command_data.get("command", "").lower()

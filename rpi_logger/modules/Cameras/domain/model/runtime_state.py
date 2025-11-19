@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from ...logging_utils import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 
 module_logger = get_module_logger(__name__)
 

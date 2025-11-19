@@ -1,7 +1,7 @@
 
 import asyncio
 import datetime
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import subprocess
 import sys
 import tkinter as tk
@@ -22,7 +22,7 @@ from .timer_manager import TimerManager
 class MainController:
 
     def __init__(self, logger_system: LoggerSystem, timer_manager: TimerManager):
-        self.logger = logging.getLogger("MainController")
+        self.logger = get_module_logger("MainController")
         self.logger_system = logger_system
         self.logger_system.ui_callback = self._status_callback
         self.timer_manager = timer_manager

@@ -7,7 +7,7 @@ from typing import Any, Optional
 import numpy as np
 from PIL import Image
 
-from ...logging_utils import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 

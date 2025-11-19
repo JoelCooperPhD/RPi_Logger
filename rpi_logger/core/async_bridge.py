@@ -1,11 +1,12 @@
+
 import asyncio
 import threading
 import time
 import tkinter as tk
 from typing import Optional
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 
-logger = logging.getLogger(__name__)
+# Removed: logger = logging.getLogger(__name__)
 
 
 class AsyncBridge:

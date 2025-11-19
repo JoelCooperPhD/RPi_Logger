@@ -2,7 +2,7 @@
 import asyncio
 import errno
 import hashlib
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -12,12 +12,14 @@ import aiofiles
 from .logging_config import configure_logging
 from .paths import PROJECT_ROOT, USER_CONFIG_OVERRIDES_DIR
 
-logger = logging.getLogger("ConfigManager")
+
+logger = get_module_logger("ConfigManager")
 
 
 class ConfigManager:
 
     def __init__(self):
+        self.logger = get_module_logger("ConfigManager")
         self.lock = asyncio.Lock()
         try:
             self._project_root = PROJECT_ROOT.resolve()

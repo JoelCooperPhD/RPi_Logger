@@ -6,7 +6,7 @@ conditions and ensure clean teardown of all system components.
 """
 
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from enum import Enum
 from typing import Optional, Callable, Awaitable
 
@@ -36,7 +36,7 @@ class ShutdownCoordinator:
     """
 
     def __init__(self):
-        self.logger = logging.getLogger("ShutdownCoordinator")
+        self.logger = get_module_logger("ShutdownCoordinator")
         self._state = ShutdownState.RUNNING
         self._shutdown_event = asyncio.Event()
         self._cleanup_callbacks: list[Callable[[], Awaitable[None]]] = []

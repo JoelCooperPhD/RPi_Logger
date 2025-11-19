@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Any, Optional, Dict, List, Tuple
 
@@ -7,7 +7,8 @@ from rpi_logger.modules.base import BaseSystem, RecordingStateMixin, USBDeviceCo
 from . import DRTInitializationError
 from .drt_handler import DRTHandler
 
-logger = logging.getLogger(__name__)
+# Remove the module-level logger initialization
+# logger = logging.getLogger(__name__)
 
 
 class DRTSystem(BaseSystem, RecordingStateMixin):

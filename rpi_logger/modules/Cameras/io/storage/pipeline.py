@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - allows dev environments without Picamera
 from .csv_logger import CameraCSVLogger
 from .fps_tracker import VideoFpsTracker
 from ...domain.model import FramePayload
-from ...logging_utils import ensure_structured_logger
+from rpi_logger.core.logging_utils import get_module_logger, ensure_structured_logger
 
 
 @dataclass(slots=True)

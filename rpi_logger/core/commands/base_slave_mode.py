@@ -1,6 +1,6 @@
 
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import sys
 from abc import ABC, abstractmethod
 from typing import Any, Optional
@@ -13,7 +13,7 @@ class BaseSlaveMode(ABC):
 
     def __init__(self, system: Any):
         self.system = system
-        self.logger = logging.getLogger(f"{self.__class__.__name__}")
+        self.logger = get_module_logger(f"{self.__class__.__name__}")
         self._stdin_reader: Optional[asyncio.StreamReader] = None
         self._command_queue: asyncio.Queue = asyncio.Queue(maxsize=100)  # Bounded queue
         self._shutdown_event = asyncio.Event()

@@ -10,7 +10,7 @@ from typing import Any, Optional
 from ..domain.pipelines import FrameTimingTracker, ImagePipeline
 from ..domain.model import CapturedFrame, FrameGate, FramePayload
 from ..io.storage import CameraStoragePipeline
-from ..logging_utils import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 

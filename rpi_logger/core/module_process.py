@@ -1,6 +1,6 @@
 
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import sys
 from enum import Enum
 from pathlib import Path
@@ -42,7 +42,7 @@ class ModuleProcess:
         self.log_level = log_level
         self.window_geometry = window_geometry
 
-        self.logger = logging.getLogger(f"ModuleProcess.{module_info.name}")
+        self.logger = get_module_logger(f"ModuleProcess.{module_info.name}")
 
         self.process: Optional[asyncio.subprocess.Process] = None
         self.state = ModuleState.STOPPED
@@ -96,11 +96,18 @@ class ModuleProcess:
             import os
             env = os.environ.copy()
             pythonpath_root = PROJECT_ROOT
+            # Add the stub directory to PYTHONPATH to support vmc module
+            stub_path = PROJECT_ROOT / "rpi_logger" / "modules" / "stub (codex)"
+            
+            paths_to_add = [str(pythonpath_root)]
+            if stub_path.exists():
+                paths_to_add.append(str(stub_path))
+                
             existing_pythonpath = env.get('PYTHONPATH')
             if existing_pythonpath:
-                env['PYTHONPATH'] = os.pathsep.join((str(pythonpath_root), existing_pythonpath))
-            else:
-                env['PYTHONPATH'] = str(pythonpath_root)
+                paths_to_add.append(existing_pythonpath)
+                
+            env['PYTHONPATH'] = os.pathsep.join(paths_to_add)
 
             self.process = await asyncio.create_subprocess_exec(
                 *cmd,

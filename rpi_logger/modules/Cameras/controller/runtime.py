@@ -19,7 +19,7 @@ from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 from ..domain.model import CameraModel
 from ..ui import CameraViewAdapter
 from ..io.media import frame_to_image as convert_frame_to_image
-from ..logging_utils import ensure_structured_logger
+from rpi_logger.core.logging_utils import ensure_structured_logger
 from .camera_setup import CameraSetupManager
 from .pipeline import StorageHooks
 from .services import CaptureSettingsService, TelemetryService

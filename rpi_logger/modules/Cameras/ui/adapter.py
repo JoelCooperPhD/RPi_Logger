@@ -16,7 +16,7 @@ except Exception:  # pragma: no cover - defensive import
 from PIL import Image, ImageTk
 
 from ..io.media import frame_to_image as convert_frame_to_image
-from ..logging_utils import ensure_structured_logger
+from rpi_logger.core.logging_utils import ensure_structured_logger
 
 try:  # Pillow 10+
     DEFAULT_RESAMPLE = Image.Resampling.BILINEAR

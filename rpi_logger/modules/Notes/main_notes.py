@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 import sys
 from typing import Optional
@@ -45,7 +45,7 @@ DEFAULT_HISTORY_LIMIT = 200
 CONFIG_PATH = resolve_writable_module_config(MODULE_DIR, MODULE_ID)
 CONFIG_MANAGER = get_config_manager()
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger("MainNotes")
 
 
 def parse_args(argv: Optional[list[str]] = None):

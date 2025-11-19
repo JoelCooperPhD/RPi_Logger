@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import sys
 from pathlib import Path
 from typing import Optional
@@ -42,7 +42,7 @@ from drt.runtime import DRTModuleRuntime
 from drt.view import DRTView
 from rpi_logger.modules.DRT.drt_core.config import load_config_file
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger("MainDRT")
 
 
 def parse_args(argv: Optional[list[str]] = None):

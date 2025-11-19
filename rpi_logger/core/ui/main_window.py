@@ -1,6 +1,7 @@
 
 import asyncio
 import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
@@ -53,7 +54,7 @@ class TextHandler(logging.Handler):
 class MainWindow:
 
     def __init__(self, logger_system: LoggerSystem):
-        self.logger = logging.getLogger("MainWindow")
+        self.logger = get_module_logger("MainWindow")
         self.logger_system = logger_system
 
         self.timer_manager = TimerManager()
@@ -148,7 +149,7 @@ class MainWindow:
         menubar.add_cascade(label="Modules", menu=modules_menu)
 
         for idx, module_info in enumerate(self.logger_system.get_available_modules()):
-            is_enabled = self.logger_system.is_module_selected(module_info.name)
+            is_enabled = self.logger_system.is_module_enabled(module_info.name)
             var = tk.BooleanVar(value=is_enabled)
             self.module_vars[module_info.name] = var
 

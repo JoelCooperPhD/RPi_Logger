@@ -2,13 +2,13 @@
 import asyncio
 import csv
 import datetime
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Optional
 
 import aiofiles
 
-logger = logging.getLogger("EventLogger")
+logger = get_module_logger("EventLogger")
 
 
 class EventLogger:

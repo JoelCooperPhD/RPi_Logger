@@ -1,12 +1,10 @@
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from typing import TYPE_CHECKING, Optional
 
 from rpi_logger.core.commands import BaseCommandHandler, StatusMessage
 
 if TYPE_CHECKING:
     from ..drt_system import DRTSystem
-
-logger = logging.getLogger(__name__)
 
 
 class CommandHandler(BaseCommandHandler):

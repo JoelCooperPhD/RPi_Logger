@@ -1,6 +1,6 @@
 
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +9,7 @@ from typing import List, Optional
 from .paths import MODULES_DIR
 from .logging_config import configure_logging
 
-logger = logging.getLogger("ModuleDiscovery")
+logger = get_module_logger("ModuleDiscovery")
 
 
 @dataclass

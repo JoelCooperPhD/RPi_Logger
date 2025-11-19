@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional, TYPE_CHECKING
 
 from ...domain.model import CameraModel
-from ...logging_utils import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..slot import CameraSlot

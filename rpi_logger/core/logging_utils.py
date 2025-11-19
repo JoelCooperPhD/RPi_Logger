@@ -1,12 +1,12 @@
-"""Shared logging helpers for the Cameras module."""
+"""Shared logging helpers for the RPi Logger project."""
 
 from __future__ import annotations
 
 import logging
 from typing import Optional, Union
 
-MODULE_LOGGER_NAMESPACE = "rpi_logger.modules.Cameras"
-DEFAULT_COMPONENT = "Cameras"
+MODULE_LOGGER_NAMESPACE = "rpi_logger"
+DEFAULT_COMPONENT = "Core"
 DEFAULT_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s | %(message)s"
 
 _root_configured = False
@@ -51,7 +51,9 @@ class StructuredLogger:
         object.__setattr__(self, "_logger", logger)
         resolved_component = component or _derive_component(logger.name)
         object.__setattr__(self, "_component", resolved_component or DEFAULT_COMPONENT)
-        logger.setLevel(logging.DEBUG)
+        # We don't force setLevel(DEBUG) here anymore to respect global config,
+        # but we can ensure it's at least NOTSET so it bubbles up.
+        # logger.setLevel(logging.DEBUG) 
 
     # ------------------------------------------------------------------
     # Core plumbing helpers
@@ -156,14 +158,13 @@ def ensure_structured_logger(
 
     if target is None:
         target = get_module_logger(fallback_name)
-    else:
-        target.setLevel(logging.DEBUG)
+    
     return target
 
 
 def get_module_logger(name: Optional[str] = None) -> StructuredLogger:
-    """Return a structured DEBUG logger scoped to the Cameras module."""
-    _configure_root_logger()
+    """Return a structured logger scoped to the rpi_logger namespace."""
+    # _configure_root_logger() # Defer root config to main entry point
     normalized = _normalize_logger_name(name)
     base = logging.getLogger(normalized)
     return StructuredLogger(base)

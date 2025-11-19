@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -278,7 +278,7 @@ class NotesRuntime(ModuleRuntime):
         self.supervisor = context.supervisor
         self.view = context.view
         base_logger = context.logger
-        self.logger = base_logger.getChild("NotesRuntime") if base_logger else logging.getLogger("NotesRuntime")
+        self.logger = base_logger.getChild("NotesRuntime") if base_logger else get_module_logger("NotesRuntime")
         self.display_name = context.display_name
 
         self.task_manager = BackgroundTaskManager("NotesTasks", self.logger)

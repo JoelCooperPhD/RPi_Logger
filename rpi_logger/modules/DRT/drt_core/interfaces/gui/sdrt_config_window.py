@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import tkinter as tk
 from tkinter import ttk
 from pathlib import Path
@@ -10,12 +10,11 @@ if TYPE_CHECKING:
     from ...drt_system import DRTSystem
     from ...drt_handler import DRTHandler
 
-logger = logging.getLogger(__name__)
-
 
 class SDRTConfigWindow:
 
     def __init__(self, drt_system: 'DRTSystem', async_bridge, parent=None):
+        self.logger = get_module_logger("SDRTConfigWindow")
         self.system = drt_system
         self.async_bridge = async_bridge
         self.parent = parent

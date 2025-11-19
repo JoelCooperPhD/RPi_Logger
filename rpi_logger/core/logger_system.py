@@ -8,7 +8,7 @@ WindowManager, and other components. It provides a unified API for the UI.
 import asyncio
 import datetime
 import json
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, TYPE_CHECKING
 
@@ -42,7 +42,7 @@ class LoggerSystem:
         log_level: str = "info",
         ui_callback: Optional[Callable] = None,
     ):
-        self.logger = logging.getLogger("LoggerSystem")
+        self.logger = get_module_logger("LoggerSystem")
         self.idle_session_dir = Path(session_dir)
         self._session_dir = Path(session_dir)
         self.session_prefix = session_prefix
@@ -179,21 +179,15 @@ class LoggerSystem:
         """Get list of all discovered modules."""
         return self.module_manager.get_available_modules()
 
-    def select_module(self, module_name: str) -> bool:
-        """Select a module for use."""
-        return self.module_manager.select_module(module_name)
 
-    def deselect_module(self, module_name: str) -> None:
-        """Deselect a module."""
-        self.module_manager.deselect_module(module_name)
+
+
 
     def get_selected_modules(self) -> List[str]:
         """Get list of selected module names."""
         return self.module_manager.get_selected_modules()
 
-    def is_module_selected(self, module_name: str) -> bool:
-        """Check if a module is selected."""
-        return self.module_manager.is_module_selected(module_name)
+
 
     def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """Update a module's enabled state in config."""

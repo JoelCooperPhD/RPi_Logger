@@ -18,7 +18,7 @@ except AttributeError:  # pragma: no cover - compatibility shim
 
 from ..domain.model import FramePayload, RollingFpsCounter
 from ..io.storage import StorageWriteResult
-from ..logging_utils import ensure_structured_logger
+from rpi_logger.core.logging_utils import ensure_structured_logger
 from ..ui import CameraViewAdapter
 from .slot import CameraSlot
 

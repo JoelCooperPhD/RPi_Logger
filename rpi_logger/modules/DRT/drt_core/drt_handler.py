@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime
@@ -8,8 +8,6 @@ from rpi_logger.modules.base import USBSerialDevice
 from rpi_logger.modules.base.storage_utils import module_filename_prefix
 from rpi_logger.core.commands import StatusMessage
 from .constants import DRT_COMMANDS, DRT_RESPONSE_TYPES, ISO_PRESET_CONFIG
-
-logger = logging.getLogger(__name__)
 
 
 class DRTHandler:

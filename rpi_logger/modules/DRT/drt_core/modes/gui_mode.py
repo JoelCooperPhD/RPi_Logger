@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from typing import Any, TYPE_CHECKING, Dict
 
 from rpi_logger.modules.base.modes import BaseGUIMode
@@ -8,13 +8,14 @@ from ..commands import CommandHandler
 if TYPE_CHECKING:
     from ..drt_system import DRTSystem
 
-logger = logging.getLogger(__name__)
+# Removed: logger = logging.getLogger(__name__)
 
 
 class GUIMode(BaseGUIMode):
 
     def __init__(self, system: 'DRTSystem', enable_commands: bool = False):
         super().__init__(system, enable_commands)
+        self.logger = get_module_logger("GUIMode")
 
     async def on_async_bridge_started(self) -> None:
         logger.info("Async bridge started - device detection will begin after mainloop starts")

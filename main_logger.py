@@ -4,11 +4,10 @@
 from __future__ import annotations
 
 import sys
-
-from rpi_logger.app.master import run as _run_master
-
+import asyncio
 
 def main() -> int:
+    from rpi_logger.app.master import run as _run_master
     return _run_master(sys.argv[1:])
 
 

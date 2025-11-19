@@ -1,6 +1,6 @@
 display_name = Cameras
 enabled = False
-window_geometry = 667x579+682+435
+window_geometry = 667x579+222+679
 preview_fps = 3.75
 save_width = 640
 save_height = 480

@@ -36,7 +36,7 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 from vmc.constants import PLACEHOLDER_GEOMETRY
 
-from ..logging_utils import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 from .camera_runtime import CamerasRuntime
 
 DISPLAY_NAME = "Cameras"

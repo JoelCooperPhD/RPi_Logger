@@ -1,6 +1,6 @@
 # DRT module configuration
 # Values mirror the legacy DRT module defaults so behaviour stays consistent.
-enabled = false
+enabled = true
 window_geometry = 800x600+100+100
 output_dir = drt_data
 session_prefix = drt

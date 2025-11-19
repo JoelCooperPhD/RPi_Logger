@@ -6,7 +6,7 @@ discovery, selection state, and process lifecycle management.
 """
 
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Set
 
@@ -35,7 +35,7 @@ class ModuleManager:
         log_level: str = "info",
         status_callback: Optional[Callable] = None,
     ):
-        self.logger = logging.getLogger("ModuleManager")
+        self.logger = get_module_logger("ModuleManager")
         self.session_dir = Path(session_dir)
         self.session_prefix = session_prefix
         self.log_level = log_level
@@ -177,36 +177,15 @@ class ModuleManager:
         """Get all module enabled states."""
         return self.module_enabled_state.copy()
 
-    def select_module(self, module_name: str) -> bool:
-        """
-        Mark a module as enabled (LEGACY - prefer set_module_enabled).
 
-        Args:
-            module_name: Name of the module to select
 
-        Returns:
-            True if module exists and was selected, False otherwise
-        """
-        if not any(m.name == module_name for m in self.available_modules):
-            self.logger.warning("Module not found: %s", module_name)
-            return False
 
-        self.module_enabled_state[module_name] = True
-        self.logger.info("Selected module: %s", module_name)
-        return True
-
-    def deselect_module(self, module_name: str) -> None:
-        """Remove a module from selection (LEGACY - prefer set_module_enabled)."""
-        self.module_enabled_state[module_name] = False
-        self.logger.info("Deselected module: %s", module_name)
 
     def get_selected_modules(self) -> List[str]:
         """Get list of currently enabled module names."""
         return [name for name, enabled in self.module_enabled_state.items() if enabled]
 
-    def is_module_selected(self, module_name: str) -> bool:
-        """Check if a module is currently enabled (LEGACY - prefer is_module_enabled)."""
-        return self.module_enabled_state.get(module_name, False)
+
 
     def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """

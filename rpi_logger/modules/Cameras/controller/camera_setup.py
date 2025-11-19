@@ -7,7 +7,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 from ..domain.model import CameraModel
 from ..domain.pipelines import ImagePipeline
-from ..logging_utils import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 from .pipeline import PreviewConsumer
 from .slot import CameraSlot
 

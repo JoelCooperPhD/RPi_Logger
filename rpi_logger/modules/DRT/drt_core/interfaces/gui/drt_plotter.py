@@ -4,15 +4,14 @@ matplotlib.use('TkAgg')
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.animation import FuncAnimation
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import time
-
-logger = logging.getLogger(__name__)
 
 
 class DRTPlotter:
     def __init__(self, parent_frame):
         self._parent = parent_frame
+        self.logger = get_module_logger("DRTPlotter")
         self._time_array = np.arange(-60, 0, 0.1)
 
         self._fig = Figure(figsize=(4, 2), dpi=100)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
@@ -125,13 +125,12 @@ class DRTView:
         action_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         *,
         display_name: str,
-        logger: Optional[logging.Logger] = None,
     ) -> None:
         self.args = args
         self.model = model
         self.action_callback = action_callback
         self.display_name = display_name or "DRT"
-        self.logger = logger or logging.getLogger("DRTView")
+        self.logger = get_module_logger("DRTView")
         self.gui = DRTTkinterGUI(args, self._dispatch_action)
         self.gui.async_bridge = _LoopAsyncBridge()
         self.gui.set_close_handler(self._on_close)

@@ -6,7 +6,7 @@ including session start/stop and trial recording control.
 """
 
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -24,7 +24,7 @@ class SessionManager:
     """
 
     def __init__(self):
-        self.logger = logging.getLogger("SessionManager")
+        self.logger = get_module_logger("SessionManager")
         self.recording = False
 
     async def start_session_all(

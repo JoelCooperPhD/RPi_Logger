@@ -1,7 +1,7 @@
 
 import asyncio
 import datetime
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 from tkinter import ttk
 from typing import Optional
 
@@ -11,7 +11,7 @@ from ..system_monitor import SystemMonitor
 class TimerManager:
 
     def __init__(self):
-        self.logger = logging.getLogger("TimerManager")
+        self.logger = get_module_logger("TimerManager")
 
         self.current_time_label: Optional[ttk.Label] = None
         self.session_timer_label: Optional[ttk.Label] = None

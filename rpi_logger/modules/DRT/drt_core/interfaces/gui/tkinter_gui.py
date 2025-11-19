@@ -1,5 +1,5 @@
 import asyncio
-import logging
+from rpi_logger.core.logging_utils import get_module_logger
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 from typing import TYPE_CHECKING, Optional, Dict, Any
@@ -13,8 +13,6 @@ from .quick_status_panel import QuickStatusPanel
 
 if TYPE_CHECKING:
     from ...drt_system import DRTSystem
-
-logger = logging.getLogger("TkinterGUI")
 
 
 class DeviceTab:

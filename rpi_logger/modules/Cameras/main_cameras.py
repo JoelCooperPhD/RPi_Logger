@@ -34,7 +34,7 @@ if __package__ in {None, ""}:
 
 from .app.main_cameras import *  # noqa: F401,F403
 from .app.main_cameras import main as _app_main
-from .logging_utils import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 logger.debug("main_cameras shim imported")

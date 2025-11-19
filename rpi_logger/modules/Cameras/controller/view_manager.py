@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Optional, TYPE_CHECKING
 
-from ..logging_utils import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .runtime import CameraController

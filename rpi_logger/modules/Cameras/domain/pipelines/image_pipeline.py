@@ -12,7 +12,7 @@ import numpy as np
 
 from ..model.runtime_state import CapturedFrame, FramePayload
 from ...io.storage.constants import FRAME_LOG_COUNT
-from ...logging_utils import ensure_structured_logger
+from rpi_logger.core.logging_utils import ensure_structured_logger
 
 
 class RollingFpsCounter:
