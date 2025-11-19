@@ -18,7 +18,8 @@ from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
 from ..domain.model import CameraModel
 from ..ui import CameraViewAdapter
-from ..io.media import frame_to_image as convert_frame_to_image
+from ..io.media import frame_to_bgr as convert_frame_to_bgr
+
 from rpi_logger.core.logging_utils import ensure_structured_logger
 from .camera_setup import CameraSetupManager
 from .pipeline import StorageHooks
@@ -95,13 +96,7 @@ class CameraController(ModuleRuntime):
     def save_quality(self, value: int) -> None:
         self.state.save_quality = value
 
-    @property
-    def save_stills_enabled(self) -> bool:
-        return self.state.save_stills_enabled
 
-    @save_stills_enabled.setter
-    def save_stills_enabled(self, value: bool) -> None:
-        self.state.save_stills_enabled = value
 
     @property
     def session_retention(self) -> int:
@@ -199,8 +194,7 @@ class CameraController(ModuleRuntime):
         self._storage_hooks = StorageHooks(
             save_enabled=lambda: bool(self.save_enabled),
             session_dir_provider=lambda: self.session_dir,
-            save_stills_enabled=lambda: bool(self.save_stills_enabled),
-            frame_to_image=lambda frame, fmt, size_hint=None: convert_frame_to_image(
+            frame_to_bgr=lambda frame, fmt, size_hint=None: convert_frame_to_bgr(
                 frame,
                 fmt,
                 size_hint=size_hint,
@@ -228,11 +222,10 @@ class CameraController(ModuleRuntime):
                 else f"{1.0 / self.save_frame_interval:.2f} fps"
             )
             self.logger.info(
-                "Frame saving enabled -> %s (rate %s, format %s, stills=%s)",
+                "Frame saving enabled -> %s (rate %s, format %s)",
                 self.session_dir,
                 save_rate,
                 self.save_format,
-                "on" if self.save_stills_enabled else "off",
             )
 
     async def start(self) -> None:

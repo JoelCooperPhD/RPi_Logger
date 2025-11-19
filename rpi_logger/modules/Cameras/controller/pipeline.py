@@ -9,12 +9,8 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 import numpy as np
-from PIL import Image
+import numpy as np
 
-try:  # Pillow 10+
-    DEFAULT_RESAMPLE = Image.Resampling.BILINEAR
-except AttributeError:  # pragma: no cover - compatibility shim
-    DEFAULT_RESAMPLE = Image.BILINEAR  # type: ignore[attr-defined]
 
 from ..domain.model import FramePayload, RollingFpsCounter
 from ..io.storage import StorageWriteResult
@@ -29,8 +25,7 @@ class StorageHooks:
 
     save_enabled: Callable[[], bool]
     session_dir_provider: Callable[[], Optional[Path]]
-    save_stills_enabled: Callable[[], bool]
-    frame_to_image: Callable[[Any, str, Optional[tuple[int, int]]], Image.Image]
+    frame_to_bgr: Callable[[Any, str, Optional[tuple[int, int]]], np.ndarray]
     resolve_video_fps: Callable[[CameraSlot], float]
     on_frame_written: Callable[[CameraSlot, FramePayload, StorageWriteResult, int], Awaitable[bool]]
     handle_failure: Callable[[CameraSlot, str], Awaitable[None]]
@@ -171,39 +166,37 @@ class StorageConsumer:
 
                 fps_hint = self._hooks.resolve_video_fps(slot)
                 uses_hw_encoder = pipeline.uses_hardware_encoder
-                need_stills = self._hooks.save_stills_enabled()
-                rgb_frame: Optional[np.ndarray] = None
-                still_image: Optional[Image.Image] = None
                 pixel_format = latest.pixel_format or slot.main_format or slot.preview_format
-
-                if uses_hw_encoder and not need_stills:
+                
+                if uses_hw_encoder:
                     storage_result = await pipeline.write_frame(
                         None,
                         latest,
                         fps_hint=fps_hint,
-                        pil_image=None,
                     )
                 else:
-                    image = await asyncio.to_thread(
-                        self._hooks.frame_to_image,
+                    # Optimization: Convert directly to BGR for video if possible
+                    bgr_frame: Optional[np.ndarray] = None
+                    
+                    bgr_frame = await asyncio.to_thread(
+                        self._hooks.frame_to_bgr,
                         frame,
                         pixel_format,
                         size_hint=slot.main_size,
                     )
                     target_size = slot.save_size or slot.main_size
-                    if target_size and image.size != target_size:
-                        image = await asyncio.to_thread(image.resize, target_size, DEFAULT_RESAMPLE)
-                    if image.mode != "RGB":
-                        image = await asyncio.to_thread(image.convert, "RGB")
-                    if not uses_hw_encoder:
-                        rgb_frame = np.asarray(image)
-                    if need_stills:
-                        still_image = image
+                    if target_size and (bgr_frame.shape[1] != target_size[0] or bgr_frame.shape[0] != target_size[1]):
+                        bgr_frame = await asyncio.to_thread(
+                            cv2.resize,
+                            bgr_frame,
+                            target_size,
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+
                     storage_result = await pipeline.write_frame(
-                        rgb_frame,
+                        bgr_frame,
                         latest,
                         fps_hint=fps_hint,
-                        pil_image=still_image,
                     )
 
                 should_continue = await self._hooks.on_frame_written(

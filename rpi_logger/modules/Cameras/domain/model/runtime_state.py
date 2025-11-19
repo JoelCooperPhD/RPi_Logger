@@ -184,7 +184,7 @@ class CameraModel:
 
         self.save_format = self._compute_save_format()
         self.save_quality = self._compute_save_quality()
-        self.save_stills_enabled = bool(getattr(self.args, "save_stills", False))
+
 
         retention_arg = self._safe_int(getattr(self.args, "session_retention", self.SESSION_RETENTION_DEFAULT))
         self.session_retention = max(0, retention_arg or self.SESSION_RETENTION_DEFAULT)

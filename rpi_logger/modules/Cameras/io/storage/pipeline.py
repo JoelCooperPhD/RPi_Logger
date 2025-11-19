@@ -10,11 +10,11 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 import cv2
 import numpy as np
-from PIL import Image
+
 
 try:
     from picamera2.request import MappedArray
@@ -74,7 +74,7 @@ class CameraStoragePipeline:
         save_quality: int = 90,
         max_fps: float = 60.0,
         overlay_config: Optional[dict] = None,
-        save_stills: bool = False,
+
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self.camera_index = camera_index
@@ -87,7 +87,7 @@ class CameraStoragePipeline:
         self.save_quality = save_quality
         self.max_fps = max_fps
         self.overlay_config = overlay_config or {}
-        self.save_stills = save_stills
+
         component = f"StoragePipeline.cam{camera_index}"
         self._logger = ensure_structured_logger(
             logger,
@@ -179,13 +179,18 @@ class CameraStoragePipeline:
 
     async def write_frame(
         self,
-        rgb_frame: Optional[np.ndarray],
+        bgr_frame: Optional[np.ndarray],
         payload: "FramePayload",
         *,
         fps_hint: float,
-        pil_image: Optional[Image.Image] = None,
     ) -> StorageWriteResult:
-        """Persist a frame to disk and optionally to the video writer."""
+        """Persist a frame to disk and optionally to the video writer.
+        
+        Args:
+            bgr_frame: BGR numpy array (OpenCV format) for video writing.
+            payload: Metadata for the frame.
+            fps_hint: Expected FPS for video writing.
+        """
         sensor_fps = self._update_sensor_fps(payload)
         if sensor_fps is not None:
             fps_hint = sensor_fps
@@ -204,29 +209,26 @@ class CameraStoragePipeline:
                 self._fps_tracker.record_fallback_hardware_frame()
             return StorageWriteResult(
                 video_written=True,
-                image_path=image_path,
+                image_path=None,
                 video_fps=self.video_output_fps,
                 writer_codec=self._writer_codec,
             )
 
-        if rgb_frame is None:
-            raise RuntimeError("RGB frame required for software encoding path")
+        if bgr_frame is None:
+            raise RuntimeError("BGR frame required for software encoding path")
 
         video_written = False
         writer_ready = self._video_writer is not None
-        frame_size = (rgb_frame.shape[1], rgb_frame.shape[0])
+        frame_size = (bgr_frame.shape[1], bgr_frame.shape[0])
         if not writer_ready:
             writer_ready = await self._try_prepare_video_writer(frame_size, fps_hint)
             if not writer_ready:
-                self._queue_pending_frame(rgb_frame, overlay_info)
+                self._queue_pending_frame(bgr_frame, overlay_info)
 
         if writer_ready and self._video_writer is not None:
-            video_written = await self._write_video_frame(rgb_frame, overlay_info)
+            video_written = await self._write_video_frame(bgr_frame, overlay_info)
 
-        image_path: Optional[Path] = None
-        if self.save_stills:
-            target_image = pil_image if pil_image is not None else Image.fromarray(rgb_frame)
-            image_path = await self._save_image(target_image, overlay_info)
+
 
         return StorageWriteResult(
             video_written=video_written,
@@ -426,12 +428,12 @@ class CameraStoragePipeline:
 
     def _queue_pending_frame(
         self,
-        rgb_frame: np.ndarray,
+        bgr_frame: np.ndarray,
         overlay: OverlayRenderInfo,
     ) -> None:
-        if rgb_frame is None:
+        if bgr_frame is None:
             return
-        frame_copy = np.array(rgb_frame, copy=True)
+        frame_copy = np.array(bgr_frame, copy=True)
         self._pending_video_frames.append((overlay, frame_copy))
         if (
             len(self._pending_video_frames) >= self._pending_frame_limit
@@ -452,7 +454,7 @@ class CameraStoragePipeline:
         for overlay, frame in pending:
             await self._write_video_frame(frame, overlay)
 
-    async def _write_video_frame(self, rgb_frame: np.ndarray, overlay: OverlayRenderInfo) -> bool:
+    async def _write_video_frame(self, bgr_frame: np.ndarray, overlay: OverlayRenderInfo) -> bool:
         if self._video_writer is None:
             return False
 
@@ -460,8 +462,17 @@ class CameraStoragePipeline:
         overlay_cfg = dict(self.overlay_config)
 
         def convert_and_write() -> bool:
-            frame_rgb = np.ascontiguousarray(rgb_frame)
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            # Input is already BGR, just copy to avoid modifying the original if we render overlay
+            # (Actually, we can modify in place if we are sure it's a copy or we don't care, 
+            # but let's be safe and copy if we render overlay. 
+            # Wait, _render_overlay modifies in place.
+            # The bgr_frame comes from frame_to_bgr which returns a new array.
+            # But it might be used for stills too.
+            # If we modify it here, the still save might see the overlay if it happens after?
+            # In write_frame, video write happens before still save.
+            # So we should copy if we are saving stills too?
+            # Or just copy always to be safe.)
+            frame_bgr = bgr_frame.copy()
             self._render_overlay(frame_bgr, overlay, overlay_cfg)
             writer.write(frame_bgr)
             return True
@@ -476,27 +487,7 @@ class CameraStoragePipeline:
             self._fps_tracker.record_software_frame()
         return success
 
-    async def _save_image(self, image: Image.Image, overlay: OverlayRenderInfo) -> Optional[Path]:
-        filename = self._image_filename(overlay.frame_number, overlay.timestamp_unix)
-        path = self.save_dir / filename
-        format_name = "JPEG" if self.save_format in {"jpeg", "jpg"} else self.save_format.upper()
-        save_kwargs: dict[str, object] = {}
-        if format_name == "JPEG":
-            save_kwargs["quality"] = self.save_quality
 
-        try:
-            overlay_cfg = dict(self.overlay_config)
-            processed_image = await asyncio.to_thread(
-                self._prepare_image_with_overlay,
-                image,
-                overlay,
-                overlay_cfg,
-            )
-            await asyncio.to_thread(processed_image.save, path, format=format_name, **save_kwargs)
-            return path
-        except Exception as exc:  # pragma: no cover - defensive
-            self._logger.warning("Image save error (frame %d): %s", overlay.frame_number, exc)
-            return None
 
     async def _release_video_writer(self) -> None:
         if self._video_writer is None:
@@ -565,15 +556,6 @@ class CameraStoragePipeline:
         self._waiting_for_sensor_fps = False
         return self._sensor_fps_estimate
 
-    def _image_filename(self, frame_number: int, timestamp: float) -> str:
-        from datetime import datetime
-
-        dt = datetime.fromtimestamp(timestamp)
-        base_name = dt.strftime("%Y%m%d_%H%M%S_%f")
-        ext = "jpg" if self.save_format in {"jpeg", "jpg"} else self.save_format
-        slug = self.camera_slug or f"cam{self.camera_index}"
-        return f"{slug}{self._trial_suffix}_frame{frame_number:06d}_{base_name}.{ext}"
-
     @staticmethod
     def _coerce_slug(candidate: Optional[str], default: str) -> str:
         if not candidate:
@@ -582,27 +564,7 @@ class CameraStoragePipeline:
         cleaned = cleaned.strip('._')
         return cleaned or default
 
-    def _prepare_image_with_overlay(
-        self,
-        image: Image.Image,
-        overlay: OverlayRenderInfo,
-        overlay_cfg: dict,
-    ) -> Image.Image:
-        """Return a copy of ``image`` with the frame number burned in."""
 
-        try:
-            working = image.convert("RGB") if image.mode != "RGB" else image.copy()
-        except Exception:
-            return image
-
-        frame_rgb = np.asarray(working)
-        if frame_rgb.ndim != 3 or frame_rgb.shape[2] < 3:
-            return working
-
-        frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-        self._render_overlay(frame_bgr, overlay, overlay_cfg)
-        frame_rgb_with_overlay = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        return Image.fromarray(frame_rgb_with_overlay)
 
     def _render_overlay(self, frame: np.ndarray, overlay: OverlayRenderInfo, overlay_cfg: dict) -> None:
         if not overlay_cfg.get('show_frame_number', True):
