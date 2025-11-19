@@ -13,9 +13,14 @@ except Exception:  # pragma: no cover - defensive import
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
 from PIL import Image, ImageTk
 
-from ..io.media import frame_to_image as convert_frame_to_image
+from ..io.media import frame_to_rgb_array
 from rpi_logger.core.logging_utils import ensure_structured_logger
 
 try:  # Pillow 10+
@@ -860,6 +865,33 @@ class CameraViewAdapter:
         target_size: tuple[int, int],
         native_size: Optional[tuple[int, int]],
     ) -> tuple[Image.Image, tuple[int, int], bool]:
+        # Optimization: Resize using OpenCV on the RGB array before Pillow conversion
+        # This avoids the expensive PIL resize operation.
+        rgb_array = None
+        if cv2 is not None:
+             rgb_array = frame_to_rgb_array(frame, pixel_format, size_hint=stream_size)
+
+        if rgb_array is not None:
+            source_h, source_w = rgb_array.shape[:2]
+            source_size = (source_w, source_h)
+            
+            # Handle cropping (e.g. if stream is padded)
+            if native_size and (source_w > native_size[0] or source_h > native_size[1]):
+                crop_w = min(native_size[0], source_w)
+                crop_h = min(native_size[1], source_h)
+                rgb_array = rgb_array[:crop_h, :crop_w]
+                source_size = (crop_w, crop_h)
+
+            resized = False
+            if source_size != target_size:
+                # cv2.resize expects (width, height)
+                rgb_array = cv2.resize(rgb_array, target_size, interpolation=cv2.INTER_LINEAR)
+                resized = True
+            
+            return Image.fromarray(rgb_array, mode="RGB"), source_size, resized
+
+        # Fallback to original Pillow path
+        from ..io.media import frame_to_image as convert_frame_to_image
         image = convert_frame_to_image(frame, pixel_format, size_hint=stream_size)
         source_size = image.size
 

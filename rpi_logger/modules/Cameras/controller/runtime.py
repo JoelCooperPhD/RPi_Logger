@@ -99,6 +99,10 @@ class CameraController(ModuleRuntime):
 
 
     @property
+    def save_stills_enabled(self) -> bool:
+        return bool(getattr(self.args, "save_stills", False))
+
+    @property
     def session_retention(self) -> int:
         return self.state.session_retention
 

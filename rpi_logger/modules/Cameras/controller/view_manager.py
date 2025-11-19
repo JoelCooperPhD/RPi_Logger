@@ -141,8 +141,6 @@ class CameraViewManager:
             drop_total = sum(slot.storage_drop_total for slot in previews)
             if drop_total:
                 message += f" | queue drops {drop_total}"
-            if not controller.save_stills_enabled:
-                message += " | stills=off"
             fps_values = [slot.last_video_fps for slot in previews if slot.last_video_fps > 0]
             if fps_values:
                 avg_fps = sum(fps_values) / len(fps_values)

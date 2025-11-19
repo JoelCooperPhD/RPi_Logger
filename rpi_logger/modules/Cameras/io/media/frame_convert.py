@@ -50,14 +50,13 @@ def _sanitize_even_dimension(value: Optional[Tuple[int, int] | int], index: Opti
     return max(2, numeric)
 
 
-def frame_to_image(
+def frame_to_rgb_array(
     frame: Any,
     pixel_format: str,
     *,
     size_hint: Optional[Tuple[int, int]] = None,
-) -> Image.Image:
-    """Convert a Picamera2 frame into a Pillow image suitable for preview/storage."""
-
+) -> Optional[np.ndarray]:
+    """Convert a Picamera2 frame into an RGB numpy array."""
     fmt = normalize_pixel_format(pixel_format)
     log_frame_format(frame, fmt)
 
@@ -65,16 +64,50 @@ def frame_to_image(
     if planar_candidate and (fmt in YUV_PLANAR_FORMATS or _is_planar_yuv_candidate(frame, fmt)):
         array = frame if isinstance(frame, np.ndarray) else np.asarray(frame)
         if array.ndim == 2:
-            rgb = _convert_yuv420_to_rgb(array, size_hint)
-            return Image.fromarray(rgb, mode="RGB")
+            return _convert_yuv420_to_rgb(array, size_hint)
 
-    converted_rgb = convert_rgb_frame(frame, fmt)
-    if converted_rgb is not None:
-        return converted_rgb
+    # Use color_convert helpers for packed formats
+    # We need to intercept the array before it becomes a PIL Image if possible,
+    # but convert_rgb_frame currently returns a PIL Image. 
+    # For now, we will use the existing PIL path for packed formats as they are less critical
+    # than the YUV path which is the primary one for cameras.
+    # However, to be efficient, we should see if we can get the array from convert_rgb_frame logic.
+    # Since convert_rgb_frame is imported, we might just have to convert back if we use it, 
+    # or accept that for RGB888 input (less common) we might be less optimized.
+    # BUT: The main path is YUV420.
+    
+    # Fallback for non-planar:
+    image = convert_rgb_frame(frame, fmt)
+    if image:
+        return np.asarray(image)
 
     if getattr(frame, "ndim", 0) == 2:
-        return Image.fromarray(frame, mode="L")
+         # Grayscale to RGB
+         gray = np.asarray(frame)
+         return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
 
+    # Last resort
+    try:
+        return np.asarray(frame)
+    except Exception:
+        return None
+
+
+def frame_to_image(
+    frame: Any,
+    pixel_format: str,
+    *,
+    size_hint: Optional[Tuple[int, int]] = None,
+) -> Image.Image:
+    """Convert a Picamera2 frame into a Pillow image suitable for preview/storage."""
+    
+    # Optimization: Get RGB array first (efficient for YUV)
+    rgb_array = frame_to_rgb_array(frame, pixel_format, size_hint=size_hint)
+    if rgb_array is not None:
+        return Image.fromarray(rgb_array, mode="RGB")
+        
+    # Legacy/Fallback path if array conversion failed but generic conversion might work
+    # (Though frame_to_rgb_array covers most cases)
     return Image.fromarray(np.asarray(frame)).convert("RGB")
 
 

@@ -346,27 +346,29 @@ class ImagePipeline:
             return
 
         if preview_queue and emit_preview and preview_frame is not None and slot.preview_enabled:
-            payload = FramePayload(
-                frame=preview_frame,
-                timestamp=timestamp,
-                monotonic=monotonic,
-                metadata=metadata,
-                pixel_format=preview_pixel_format,
-                stream=slot.preview_stream,
-                capture_index=capture_index,
-                hardware_frame_number=timing_result.hardware_frame_number,
-                dropped_since_last=timing_result.dropped_since_last,
-                sensor_timestamp_ns=timing_result.sensor_timestamp_ns,
-            )
-            self._offer_queue(
-                preview_queue,
-                payload,
-                drop_hook=lambda idx=payload.capture_index: self._log_frame_skip(
-                    slot,
-                    idx,
-                    "preview_queue_drop",
-                ),
-            )
+            # Enforce preview FPS cap using the time-based gate
+            if slot.preview_gate.should_emit(monotonic):
+                payload = FramePayload(
+                    frame=preview_frame,
+                    timestamp=timestamp,
+                    monotonic=monotonic,
+                    metadata=metadata,
+                    pixel_format=preview_pixel_format,
+                    stream=slot.preview_stream,
+                    capture_index=capture_index,
+                    hardware_frame_number=timing_result.hardware_frame_number,
+                    dropped_since_last=timing_result.dropped_since_last,
+                    sensor_timestamp_ns=timing_result.sensor_timestamp_ns,
+                )
+                self._offer_queue(
+                    preview_queue,
+                    payload,
+                    drop_hook=lambda idx=payload.capture_index: self._log_frame_skip(
+                        slot,
+                        idx,
+                        "preview_queue_drop",
+                    ),
+                )
 
         # Preview frames are emitted after storage so the stretch/skip logic never starves disk writes.
 
@@ -390,6 +392,11 @@ class ImagePipeline:
     def _copy_frame(frame: Any) -> Any:
         if frame is None:
             return None
+        # Optimization: If it's already a numpy array, assume it's safe to use.
+        # Picamera2's make_array typically returns a copy from the buffer.
+        # We avoid the redundant copy here.
+        if isinstance(frame, np.ndarray):
+            return frame
         try:
             return np.array(frame, copy=True)
         except Exception:
