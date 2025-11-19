@@ -51,6 +51,12 @@ class PersistedSelection:
         serialized = _serialize_entries(entries)
         return cls(entries=entries, serialized=serialized)
 
+    @classmethod
+    def from_entries(cls, entries: Iterable[PersistedDevice]) -> "PersistedSelection":
+        normalized = _normalize_entries(entries)
+        serialized = _serialize_entries(normalized)
+        return cls(entries=normalized, serialized=serialized)
+
 
 # ---------------------------------------------------------------------------
 # Serialization helpers
@@ -63,7 +69,7 @@ def serialize_selected_devices(devices: Dict[int, AudioDeviceInfo]) -> str:
         PersistedDevice(device_id=device_id, name=info.name)
         for device_id, info in sorted(devices.items(), key=lambda item: item[0])
     ]
-    return _serialize_entries(entries)
+    return PersistedSelection.from_entries(entries).serialized
 
 
 def _parse_raw_selection(raw: Any) -> list[PersistedDevice]:

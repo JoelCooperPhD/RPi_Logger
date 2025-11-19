@@ -1,5 +1,6 @@
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Optional, Tuple
@@ -8,6 +9,20 @@ from rpi_logger.cli.common import get_config_int
 from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
+
+# Offset to subtract from Y coordinate to account for window decorations (title bar).
+# This prevents the "window creep" effect where windows move down by the title bar height
+# each time they are saved and restored.
+WINDOW_TITLE_BAR_OFFSET = 28
+
+# Reserve space for the system bar that lives at the bottom of the Raspberry Pi display.
+# A slightly generous default keeps module windows from disappearing under the RPi5 title bar
+# while still allowing an override via RPILOGGER_BOTTOM_UI_MARGIN for other hosts.
+_BOTTOM_MARGIN_ENV = "RPILOGGER_BOTTOM_UI_MARGIN"
+try:
+    SCREEN_BOTTOM_RESERVED = max(0, int(os.environ.get(_BOTTOM_MARGIN_ENV, "48")))
+except ValueError:
+    SCREEN_BOTTOM_RESERVED = 48
 
 
 def parse_geometry_string(geometry_str: str) -> Optional[Tuple[int, int, int, int]]:
@@ -29,6 +44,79 @@ def parse_geometry_string(geometry_str: str) -> Optional[Tuple[int, int, int, in
         return None
 
 
+def format_geometry_string(width: int, height: int, x: int, y: int) -> str:
+    return f"{width}x{height}+{x}+{y}"
+
+
+def normalize_geometry_values(
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    *,
+    screen_height: Optional[int] = None,
+) -> Tuple[int, int, int, int]:
+    """Normalize geometry before persisting or publishing.
+
+    Returns the size unchanged but adjusts Y so that:
+      • values are expressed in client coordinates (subtracting the title bar)
+      • the bottom of the window stays above the reserved Pi title bar
+    """
+
+    width = int(width)
+    height = int(height)
+    x = int(x)
+    y = int(y)
+
+    adjusted_y = max(0, y - WINDOW_TITLE_BAR_OFFSET)
+
+    if screen_height is not None and screen_height > 0:
+        bottom_limit = max(0, screen_height - SCREEN_BOTTOM_RESERVED)
+        max_adjusted_y = max(0, bottom_limit - height - WINDOW_TITLE_BAR_OFFSET)
+        if adjusted_y > max_adjusted_y:
+            logger.debug(
+                "Clamping window bottom to visible region (screen=%d, reserve=%d, height=%d)",
+                screen_height,
+                SCREEN_BOTTOM_RESERVED,
+                height,
+            )
+        adjusted_y = min(adjusted_y, max_adjusted_y)
+
+    return width, height, x, adjusted_y
+
+
+def _get_screen_height(root_widget) -> Optional[int]:
+    try:
+        return int(root_widget.winfo_screenheight())
+    except Exception:
+        return None
+
+
+def denormalize_geometry_values(
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+) -> Tuple[int, int, int, int]:
+    """Convert normalized geometry (client coords) back to Tk coordinates."""
+
+    width = int(width)
+    height = int(height)
+    x = int(x)
+    raw_y = max(0, int(y) + WINDOW_TITLE_BAR_OFFSET)
+    return width, height, x, raw_y
+
+
+def build_geometry_string_from_normalized(
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+) -> str:
+    width, height, x, raw_y = denormalize_geometry_values(width, height, x, y)
+    return format_geometry_string(width, height, x, raw_y)
+
+
 def save_window_geometry(root_widget, config_path: Path) -> bool:
     logger.debug("Saving window geometry to config")
 
@@ -42,8 +130,27 @@ def save_window_geometry(root_widget, config_path: Path) -> bool:
         if not parsed:
             return False
 
-        width, height, x, y = parsed
-        logger.debug("Parsed geometry: width=%d, height=%d, x=%d, y=%d", width, height, x, y)
+        width, height, raw_x, raw_y = parsed
+        logger.debug("Parsed geometry: width=%d, height=%d, x=%d, y=%d", width, height, raw_x, raw_y)
+
+        normalized = normalize_geometry_values(
+            width,
+            height,
+            raw_x,
+            raw_y,
+            screen_height=_get_screen_height(root_widget),
+        )
+        width, height, x, y = normalized
+        if raw_y != y + WINDOW_TITLE_BAR_OFFSET:
+            logger.debug(
+                "Normalized geometry: raw=(%d,%d) -> stored=(%d,%d)",
+                raw_x,
+                raw_y,
+                x,
+                y,
+            )
+
+        stored_geometry = build_geometry_string_from_normalized(width, height, x, y)
 
         logger.debug("Config path: %s", config_path)
         if not config_path.exists():
@@ -55,6 +162,7 @@ def save_window_geometry(root_widget, config_path: Path) -> bool:
             'window_y': y,
             'window_width': width,
             'window_height': height,
+            'window_geometry': stored_geometry,
         }
         logger.debug("Calling ConfigLoader.update_config_values() with: %s", updates)
 
@@ -89,14 +197,22 @@ def send_geometry_to_parent(root_widget) -> bool:
             logger.error("Failed to parse geometry: '%s'", geometry_str)
             return False
 
-        width, height, x, y = parsed
-        logger.debug("Parsed values: width=%d, height=%d, x=%d, y=%d", width, height, x, y)
+        width, height, raw_x, raw_y = parsed
+        logger.debug("Parsed values: width=%d, height=%d, x=%d, y=%d", width, height, raw_x, raw_y)
+
+        width, height, x, y = normalize_geometry_values(
+            width,
+            height,
+            raw_x,
+            raw_y,
+            screen_height=_get_screen_height(root_widget),
+        )
 
         payload = {
             "width": width,
             "height": height,
             "x": x,
-            "y": y
+            "y": y,
         }
         logger.debug("Sending StatusMessage with payload: %s", payload)
         StatusMessage.send("geometry_changed", payload)
@@ -136,7 +252,12 @@ def load_window_geometry_from_config(config: dict, current_geometry: Optional[st
         window_height = get_config_int(config, 'window_height', None)
 
         if all(v is not None for v in [window_x, window_y, window_width, window_height]):
-            geometry_str = f"{window_width}x{window_height}+{window_x}+{window_y}"
+            geometry_str = build_geometry_string_from_normalized(
+                window_width,
+                window_height,
+                window_x,
+                window_y,
+            )
             logger.debug("Loaded window geometry from config (old format): %s", geometry_str)
             return geometry_str
         else:

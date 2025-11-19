@@ -52,7 +52,7 @@ class HeadlessController:
         if self.logger_system.event_logger:
             await self.logger_system.event_logger.log_button_press(f"module_{module_name}", "enable")
 
-        self.logger_system.toggle_module_enabled(module_name, True)
+        await self.logger_system.toggle_module_enabled(module_name, True)
         self.logger.info("Starting module: %s", module_name)
 
         success = await self.logger_system.set_module_enabled(module_name, True)

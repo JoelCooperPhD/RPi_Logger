@@ -1,6 +1,6 @@
 display_name = Notes
 enabled = false
-window_geometry = 912x232+439+881
+window_geometry = 289x352+817+36
 preview_width = 640
 preview_height = 480
 preview_fps = unlimited
@@ -9,4 +9,6 @@ save_height = 480
 save_fps = unlimited
 save_format = jpeg
 save_quality = 90
-preview_resolution = 640x480
+preview_resolution = auto
+gui_io_stub_visible = false
+gui_logger_visible = false

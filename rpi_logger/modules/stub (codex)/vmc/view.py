@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.modules.base import gui_utils
 
 from async_tkinter_loop import async_handler
 
@@ -96,7 +97,15 @@ class StubCodexView:
         except tk.TclError:
             pass
 
-        self._last_geometry = self._current_geometry_string()
+        initial_geometry = self._current_geometry_string()
+        normalized_geometry = self._normalize_geometry_string(initial_geometry)
+        if normalized_geometry and normalized_geometry != initial_geometry:
+            try:
+                self.root.geometry(normalized_geometry)
+                self.logger.debug("Adjusted initial geometry to stay within safe bounds: %s -> %s", initial_geometry, normalized_geometry)
+            except tk.TclError:
+                pass
+        self._last_geometry = normalized_geometry or initial_geometry
         self.root.bind("<Configure>", self._on_configure)
 
         elapsed = (time.perf_counter() - start) * 1000.0
@@ -566,10 +575,11 @@ class StubCodexView:
             getattr(event, 'y', -1),
         )
         self._logged_first_configure = True
-        if not geometry or geometry == self._last_geometry:
+        normalized_geometry = self._normalize_geometry_string(geometry)
+        if not normalized_geometry or normalized_geometry == self._last_geometry:
             return
-        self._last_geometry = geometry
-        updated = self.model.set_window_geometry(geometry)
+        self._last_geometry = normalized_geometry
+        updated = self.model.set_window_geometry(normalized_geometry)
         if updated or self.model.has_pending_window_geometry():
             self._schedule_geometry_persist()
 
@@ -632,3 +642,32 @@ class StubCodexView:
 
     def is_resizing(self) -> bool:
         return bool(self._resize_active)
+
+    def _normalize_geometry_string(self, geometry: Optional[str]) -> Optional[str]:
+        if not geometry:
+            return None
+
+        parsed = gui_utils.parse_geometry_string(geometry)
+        if not parsed:
+            return None
+
+        width, height, x, y = parsed
+        normalized = gui_utils.normalize_geometry_values(
+            width,
+            height,
+            x,
+            y,
+            screen_height=self._get_screen_height(),
+        )
+        normalized_string = gui_utils.build_geometry_string_from_normalized(*normalized)
+        if normalized_string != geometry:
+            self.logger.debug("Normalized geometry for persistence: %s -> %s", geometry, normalized_string)
+        return normalized_string
+
+    def _get_screen_height(self) -> Optional[int]:
+        if tk is None:
+            return None
+        try:
+            return int(self.root.winfo_screenheight())
+        except tk.TclError:
+            return None

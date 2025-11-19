@@ -68,14 +68,14 @@ class MainController:
         self.trial_label_var = trial_label_var
 
 
-    def on_module_menu_toggle(self, module_name: str) -> None:
+    async def on_module_menu_toggle(self, module_name: str) -> None:
         desired_state = self.module_vars[module_name].get()
 
         if self.logger_system.event_logger:
             action = "enable" if desired_state else "disable"
-            asyncio.create_task(self.logger_system.event_logger.log_button_press(f"module_{module_name}", action))
+            await self.logger_system.event_logger.log_button_press(f"module_{module_name}", action)
 
-        self.logger_system.toggle_module_enabled(module_name, desired_state)
+        await self.logger_system.toggle_module_enabled(module_name, desired_state)
 
         self.logger.info("%s module: %s", "Starting" if desired_state else "Stopping", module_name)
         asyncio.create_task(self._handle_module_toggle(module_name, desired_state))

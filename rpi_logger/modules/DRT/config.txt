@@ -1,7 +1,7 @@
 # DRT module configuration
 # Values mirror the legacy DRT module defaults so behaviour stays consistent.
 enabled = false
-window_geometry = 800x600+100+100
+window_geometry = 815x541+9+463
 output_dir = drt_data
 session_prefix = drt
 console_output = false
@@ -13,6 +13,13 @@ device_pid = 0x801E
 baudrate = 9600
 
 # GUI layout toggles
-gui_show_session_output = true
+gui_show_session_output = false
 display_name = DRT
 preview_resolution = auto
+
+# Auto-generated settings (do not edit unless you know what you are doing)
+gui_logger_visible = false
+window_x = 9
+window_y = 435
+window_width = 815
+window_height = 541

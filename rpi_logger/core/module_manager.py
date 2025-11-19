@@ -187,7 +187,7 @@ class ModuleManager:
 
 
 
-    def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
+    async def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """
         Update a module's enabled state in its config file.
 
@@ -206,7 +206,7 @@ class ModuleManager:
             self.logger.warning("Cannot update enabled state - no config for %s", module_name)
             return False
 
-        success = self.config_manager.write_config(
+        success = await self.config_manager.write_config_async(
             module_info.config_path,
             {'enabled': enabled}
         )

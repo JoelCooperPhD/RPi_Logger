@@ -206,6 +206,8 @@ class AudioApp:
         while not self._stop_event.is_set():
             await asyncio.sleep(interval)
             _, new_ids = await self.device_manager.discover_devices()
+            if new_ids:
+                await self.startup_manager.restore_new_devices(self.device_manager, new_ids)
             if self.settings.auto_select_new and new_ids:
                 await self.device_manager.auto_select(new_ids)
 

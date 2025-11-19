@@ -176,7 +176,20 @@ class BaseCommandHandler(ABC):
             parsed = gui_utils.parse_geometry_string(geometry_str)
 
             if parsed:
-                width, height, x, y = parsed
+                width, height, raw_x, raw_y = parsed
+
+                try:
+                    screen_height = int(window.winfo_screenheight())
+                except Exception:
+                    screen_height = None
+
+                width, height, x, y = gui_utils.normalize_geometry_values(
+                    width,
+                    height,
+                    raw_x,
+                    raw_y,
+                    screen_height=screen_height,
+                )
 
                 StatusMessage.send("geometry_changed", {
                     "width": width,
@@ -184,7 +197,15 @@ class BaseCommandHandler(ABC):
                     "x": x,
                     "y": y
                 })
-                self.logger.debug("Sent geometry to parent: %dx%d+%d+%d", width, height, x, y)
+                self.logger.debug(
+                    "Sent normalized geometry to parent: %dx%d+%d+%d (raw=%dx%d)",
+                    width,
+                    height,
+                    x,
+                    y,
+                    raw_x,
+                    raw_y,
+                )
             else:
                 StatusMessage.send("error", {"message": f"Failed to parse window geometry: {geometry_str}"})
 

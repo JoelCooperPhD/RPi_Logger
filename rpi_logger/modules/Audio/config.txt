@@ -1,6 +1,6 @@
 display_name = Audio
 enabled = false
-window_geometry = 890x171+399+759
+window_geometry = 570x91+816+64
 preview_width = 640
 preview_height = 480
 preview_fps = unlimited
@@ -9,5 +9,7 @@ save_height = 480
 save_fps = unlimited
 save_format = jpeg
 save_quality = 90
-preview_resolution = 640x480
-selected_devices = [{"id":2,"name":"USB Microphoner: Audio (hw:2,0)"}]
+preview_resolution = auto
+selected_devices = [{"id":1,"name":"USB Microphoner: Audio (hw:2,0)"}]
+gui_logger_visible = false
+gui_io_stub_visible = false

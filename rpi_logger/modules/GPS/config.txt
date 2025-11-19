@@ -5,7 +5,7 @@ enabled = false
 display_name = GPS
 
 # Default preview settings consumed by the GPS preview
-window_geometry = 832x763+564+1138
+window_geometry = 320x200+800+451
 offline_db = offline_tiles.db
 center_lat = 40.7608
 center_lon = -111.8910
@@ -17,3 +17,5 @@ serial_port = /dev/serial0
 baud_rate = 9600
 reconnect_delay_s = 3
 nmea_history = 30
+gui_io_stub_visible = false
+gui_logger_visible = false

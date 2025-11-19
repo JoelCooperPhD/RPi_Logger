@@ -16,6 +16,7 @@ from .module_discovery import ModuleInfo
 from .module_process import ModuleState
 from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
+from rpi_logger.modules.base import gui_utils
 from .config_manager import get_config_manager
 from .paths import STATE_FILE, SESSION_STAGING_DIR
 from .module_manager import ModuleManager
@@ -189,9 +190,9 @@ class LoggerSystem:
 
 
 
-    def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
+    async def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """Update a module's enabled state in config."""
-        return self.module_manager.toggle_module_enabled(module_name, enabled)
+        return await self.module_manager.toggle_module_enabled(module_name, enabled)
 
     def is_module_running(self, module_name: str) -> bool:
         """Check if a module is running."""
@@ -233,6 +234,16 @@ class LoggerSystem:
         """Get all module enabled states."""
         return self.module_manager.get_module_enabled_states()
 
+    def _normalize_geometry(self, geometry: WindowGeometry) -> WindowGeometry:
+        width, height, x, y = gui_utils.normalize_geometry_values(
+            geometry.width,
+            geometry.height,
+            geometry.x,
+            geometry.y,
+            screen_height=self.window_manager.screen_height,
+        )
+        return WindowGeometry(x=x, y=y, width=width, height=height)
+
     async def _load_module_geometry(self, module_name: str) -> Optional[WindowGeometry]:
         """Load saved window geometry for a module."""
         modules = self.module_manager.get_available_modules()
@@ -243,6 +254,20 @@ class LoggerSystem:
             return None
 
         config = await self.config_manager.read_config_async(module_info.config_path)
+
+        # First try to load from "window_geometry" string
+        geometry_str = self.config_manager.get_str(config, 'window_geometry', default=None)
+        if geometry_str:
+            try:
+                geometry = WindowGeometry.from_geometry_string(geometry_str)
+                if geometry:
+                    normalized = self._normalize_geometry(geometry)
+                    self.logger.debug("Loaded geometry string for %s: %s", module_name, geometry_str)
+                    return normalized
+            except Exception:
+                self.logger.warning("Failed to parse window_geometry for %s: %s", module_name, geometry_str)
+
+        # Fallback to decomposed fields
         x = self.config_manager.get_int(config, 'window_x', default=None)
         y = self.config_manager.get_int(config, 'window_y', default=None)
         width = self.config_manager.get_int(config, 'window_width', default=None)
@@ -250,10 +275,10 @@ class LoggerSystem:
 
         if all(v is not None for v in [x, y, width, height]):
             geometry = WindowGeometry(x=x, y=y, width=width, height=height)
-            self.logger.debug("Loaded geometry for %s: %s", module_name, geometry.to_geometry_string())
+            self.logger.debug("Loaded legacy geometry for %s: %s", module_name, geometry.to_geometry_string())
             return geometry
         else:
-            self.logger.debug("No saved geometry found for %s (some values missing)", module_name)
+            self.logger.debug("No saved geometry found for %s", module_name)
             return None
 
     async def stop_module(self, module_name: str) -> bool:

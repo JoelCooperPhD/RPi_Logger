@@ -88,5 +88,7 @@ window_y = 349
 window_width = 1419
 window_height = 699
 ################################################################################
-window_geometry = 493x425+552+139
+window_geometry = 320x200
 preview_resolution = auto
+gui_io_stub_visible = false
+gui_logger_visible = false

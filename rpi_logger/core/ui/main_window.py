@@ -156,7 +156,7 @@ class MainWindow:
             modules_menu.add_checkbutton(
                 label=module_info.display_name,
                 variable=var,
-                command=lambda name=module_info.name: self.controller.on_module_menu_toggle(name)
+                command=lambda name=module_info.name: asyncio.create_task(self.controller.on_module_menu_toggle(name))
             )
 
         config_manager = get_config_manager()

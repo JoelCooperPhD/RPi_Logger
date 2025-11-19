@@ -1,13 +1,16 @@
 # Cameras module built on the stub (codex) runtime stack
 enabled = false
 display_name = Cameras
-window_geometry = 682x505+2681+1862
-preview_fps = 5.0
+window_geometry = 320x200
+preview_fps = 30.0
 save_width = 720
 save_height = 540
-save_fps = 5.0
+save_fps = 30.0
 save_format = jpeg
 save_quality = 90
 preview_fraction = 1.0
 camera_1_alias = Camera 1
 camera_2_alias = Camera 2
+gui_io_stub_visible = false
+gui_logger_visible = false
+preview_resolution = auto

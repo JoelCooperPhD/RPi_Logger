@@ -11,6 +11,7 @@ from .module_discovery import ModuleInfo
 from .config_manager import get_config_manager
 from .window_manager import WindowGeometry
 from .paths import PROJECT_ROOT
+from rpi_logger.modules.base import gui_utils
 
 
 class ModuleState(Enum):
@@ -70,7 +71,7 @@ class ModuleProcess:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
             venv_python = self._find_venv_python()
-            mode = self._determine_start_mode()
+            mode = await self._determine_start_mode()
 
             base_args = [
                 "--mode", mode,
@@ -82,8 +83,14 @@ class ModuleProcess:
             ]
 
             if self.window_geometry and mode == "gui":
+                geometry_str = gui_utils.build_geometry_string_from_normalized(
+                    self.window_geometry.width,
+                    self.window_geometry.height,
+                    self.window_geometry.x,
+                    self.window_geometry.y,
+                )
                 base_args.extend([
-                    "--window-geometry", self.window_geometry.to_geometry_string()
+                    "--window-geometry", geometry_str
                 ])
 
             if venv_python:
@@ -141,7 +148,7 @@ class ModuleProcess:
 
         return None
 
-    def _determine_start_mode(self) -> str:
+    async def _determine_start_mode(self) -> str:
         """Determine which --mode argument to pass when launching the module.
 
         Currently only the DRT module overrides the default GUI mode, so we keep
@@ -150,7 +157,7 @@ class ModuleProcess:
         if self.module_info.name != "DRT":
             return "gui"
 
-        config = self.load_module_config()
+        config = await self.load_module_config()
         if not config:
             return "gui"
 
@@ -409,6 +416,7 @@ class ModuleProcess:
                     'window_y': y,
                     'window_width': width,
                     'window_height': height,
+                    'window_geometry': gui_utils.build_geometry_string_from_normalized(width, height, x, y),
                 }
                 self.logger.info("GEOMETRY_SAVE (parent): Writing updates: %s", updates)
                 success = config_manager.write_config(config_path, updates)
@@ -440,32 +448,32 @@ class ModuleProcess:
         except Exception as e:
             self.logger.error("Error updating enabled state: %s", e, exc_info=True)
 
-    def load_module_config(self) -> dict:
+    async def load_module_config(self) -> dict:
         if not self.module_info.config_path:
             self.logger.debug("No config file for module %s", self.module_info.name)
             return {}
 
         config_manager = get_config_manager()
-        return config_manager.read_config(self.module_info.config_path)
+        return await config_manager.read_config_async(self.module_info.config_path)
 
-    def get_enabled_state(self) -> bool:
-        config = self.load_module_config()
+    async def get_enabled_state(self) -> bool:
+        config = await self.load_module_config()
         config_manager = get_config_manager()
         return config_manager.get_bool(config, 'enabled', default=True)
 
-    def update_enabled_state(self, enabled: bool) -> bool:
+    async def update_enabled_state(self, enabled: bool) -> bool:
         if not self.module_info.config_path:
             self.logger.warning("No config file to update enabled state")
             return False
 
         config_manager = get_config_manager()
-        return config_manager.write_config(
+        return await config_manager.write_config_async(
             self.module_info.config_path,
             {'enabled': enabled}
         )
 
-    def load_window_geometry(self) -> Optional[WindowGeometry]:
-        config = self.load_module_config()
+    async def load_window_geometry(self) -> Optional[WindowGeometry]:
+        config = await self.load_module_config()
         if not config:
             return None
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 from typing import Optional
 
-MODULE_DIR = Path(__file__).resolve().parent
+MODULE_DIR = Path(__file__).resolve().parent.parent
 
 
 def _find_project_root(start: Path) -> Path:
