@@ -34,6 +34,7 @@ class DRTModuleRuntime(ModuleRuntime):
         self.view = context.view
         self.display_name = context.display_name
         self.config_path = self.module_dir / "config.txt"
+        self.config_file_path = self.config_path
         self.config: Dict[str, Any] = load_config_file(self.config_path)
 
         self.device_vid = self._coerce_int(

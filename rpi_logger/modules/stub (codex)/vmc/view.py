@@ -108,8 +108,19 @@ class StubCodexView:
     def _build_ui(self) -> None:
         assert tk is not None and ttk is not None and scrolledtext is not None
 
-        self.io_view_visible_var = tk.BooleanVar(value=True)
-        self.log_visible_var = tk.BooleanVar(value=True)
+        io_visible = True
+        if hasattr(self.model, 'config_data'):
+            val = self.model.config_data.get('gui_io_stub_visible', 'true')
+            io_visible = str(val).lower() in ('true', 'yes', 'on', '1')
+
+        self.io_view_visible_var = tk.BooleanVar(value=io_visible)
+
+        log_visible = True
+        if hasattr(self.model, 'config_data'):
+            val = self.model.config_data.get('gui_logger_visible', 'true')
+            log_visible = str(val).lower() in ('true', 'yes', 'on', '1')
+
+        self.log_visible_var = tk.BooleanVar(value=log_visible)
 
         self.menubar: Optional[tk.Menu] = None
         self.view_menu: Optional[tk.Menu] = None
@@ -144,7 +155,7 @@ class StubCodexView:
 
         self.log_text = scrolledtext.ScrolledText(
             self.log_frame,
-            height=2,
+            height=4,
             wrap=tk.WORD,
             state=tk.DISABLED,
             bg="#f5f5f5",
@@ -289,12 +300,16 @@ class StubCodexView:
     def _toggle_io_view(self) -> None:
         if not self.io_view_frame or not self.io_view_visible_var:
             return
-        if self.io_view_visible_var.get():
+        visible = self.io_view_visible_var.get()
+        if visible:
             self.io_view_frame.grid()
             self._set_io_row_visible(True)
         else:
             self.io_view_frame.grid_remove()
             self._set_io_row_visible(False)
+
+        if self._event_loop and hasattr(self.model, 'persist_preferences'):
+            self._event_loop.create_task(self.model.persist_preferences({'gui_io_stub_visible': visible}))
 
     def show_io_stub(self) -> None:
         if not self.io_view_frame or not self.io_view_visible_var:
@@ -382,10 +397,14 @@ class StubCodexView:
     def _toggle_log_visibility(self) -> None:
         if not self.log_frame or not self.log_visible_var:
             return
-        if self.log_visible_var.get():
+        visible = self.log_visible_var.get()
+        if visible:
             self.log_frame.grid()
         else:
             self.log_frame.grid_remove()
+
+        if self._event_loop and hasattr(self.model, 'persist_preferences'):
+            self._event_loop.create_task(self.model.persist_preferences({'gui_logger_visible': visible}))
 
     def show_logger(self) -> None:
         if not self.log_frame or not self.log_visible_var:

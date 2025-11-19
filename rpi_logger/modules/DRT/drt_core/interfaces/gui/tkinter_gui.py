@@ -67,7 +67,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self._stop_recording()
 
     def _create_widgets(self):
-        content_frame = self.create_standard_layout(logger_height=2, content_title="DRT Controls")
+        content_frame = self.create_standard_layout(logger_height=4, content_title="DRT Controls", enable_content_toggle=False)
 
         main_frame = content_frame.master
         if main_frame is not None:
@@ -107,9 +107,13 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.devices_panel_visible_var = getattr(self, 'io_view_visible_var', None)
         if io_frame is not None:
             io_frame.grid_configure(padx=0, pady=(0, 0), sticky='ew')
+            if self.devices_panel_visible_var and not self.devices_panel_visible_var.get():
+                io_frame.grid_remove()
 
         if hasattr(self, 'log_frame') and self.log_frame.winfo_manager():
             self.log_frame.grid_configure(row=2, column=0, sticky='ew')
+            if hasattr(self, 'logger_visible_var') and not self.logger_visible_var.get():
+                self.log_frame.grid_remove()
 
         self.quick_panel = QuickStatusPanel(io_frame)
         self.quick_panel.build(container=io_frame)

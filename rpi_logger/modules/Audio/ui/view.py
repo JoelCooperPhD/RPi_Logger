@@ -62,8 +62,6 @@ class AudioView:
         self._meter_panel = MeterPanel(self.logger)
         self._vmc_view.build_stub_content(self._build_content)
         self._model.subscribe(self._on_snapshot)
-        self._vmc_view.hide_io_stub()
-        self._vmc_view.show_logger()
         self._rename_stub_label()
         self.logger.info("Audio view attached")
 

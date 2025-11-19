@@ -247,7 +247,6 @@ class GPSPreviewRuntime(ModuleRuntime):
                 if callable(configure_sidecar):
                     min_width = int(GRID_SIZE * TILE_SIZE / 2)
                     configure_sidecar(min_width)
-            self.view.hide_io_stub()
 
         self._log_event(
             "runtime_start",

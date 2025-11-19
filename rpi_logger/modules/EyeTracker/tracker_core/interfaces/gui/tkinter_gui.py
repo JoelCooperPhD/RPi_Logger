@@ -55,7 +55,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self._stop_recording()
 
     def _create_widgets(self):
-        content_frame = self.create_standard_layout(logger_height=3, content_title="Eye Tracker")
+        content_frame = self.create_standard_layout(logger_height=4, content_title="Eye Tracker")
         content_frame.columnconfigure(0, weight=1)
         content_frame.rowconfigure(0, weight=0)  # Label row (fixed)
         content_frame.rowconfigure(1, weight=1)  # Canvas row (expandable)

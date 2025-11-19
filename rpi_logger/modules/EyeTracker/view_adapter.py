@@ -105,7 +105,6 @@ class EyeTrackerViewAdapter:
 
         self.view.set_io_stub_title("Module Status")
         self.view.build_io_stub_content(builder)
-        self.view.show_io_stub()
 
     # ------------------------------------------------------------------
     # Preview loop

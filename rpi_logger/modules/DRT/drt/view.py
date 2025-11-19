@@ -26,6 +26,10 @@ class _SystemPlaceholder:
     recording: bool = False
     trial_label: str = ""
 
+    def __init__(self, args=None):
+        self.config = getattr(args, 'config', {})
+        self.config_file_path = getattr(args, 'config_file_path', None)
+
     async def start_recording(self) -> bool:  # pragma: no cover - never called directly
         return False
 
@@ -68,7 +72,7 @@ class DRTTkinterGUI(TkinterGUI):
         self._action_callback = action_callback
         self._plot_recording_state: Optional[bool] = None
         self.logger = ensure_structured_logger(logger, fallback_name="DRTTkinterGUI") if logger else get_module_logger("DRTTkinterGUI")
-        super().__init__(_SystemPlaceholder(), args)
+        super().__init__(_SystemPlaceholder(args), args)
 
     async def _start_recording_async(self):  # type: ignore[override]
         if not self._action_callback:
@@ -249,6 +253,7 @@ class DRTView:
         if tk is None:
             return
         try:
+            self.gui.handle_window_close()
             self.gui.destroy_window()
         except tk.TclError:
             pass

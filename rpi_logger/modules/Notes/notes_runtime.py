@@ -442,7 +442,6 @@ class NotesRuntime(ModuleRuntime):
             self._post_button.grid(row=1, column=1, sticky="ew")
 
         self.view.build_stub_content(builder)
-        self.view.hide_io_stub()
         self._render_history()
 
     def _render_history(self) -> None:

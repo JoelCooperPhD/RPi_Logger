@@ -93,7 +93,7 @@ class TkinterGUIBase:
             logger.debug("Applied default window geometry: %dx%d", default_width, default_height)
 
 
-    def create_standard_layout(self, logger_height: int = 3, content_title: str = "Module"):
+    def create_standard_layout(self, logger_height: int = 4, content_title: str = "Module", enable_content_toggle: bool = True):
         from tkinter import ttk
         import re
 
@@ -119,10 +119,14 @@ class TkinterGUIBase:
         self.log_frame = self.create_logger_display(main_frame, height=logger_height)
         self.log_frame.grid(row=2, column=0, sticky='ew')
 
+        if hasattr(self, 'logger_visible_var') and not self.logger_visible_var.get():
+            self.log_frame.grid_remove()
+
         config_key = "gui_show_" + re.sub(r'[^a-zA-Z0-9]+', '_', content_title.lower()).strip('_')
         toggle_label = f"Show {content_title}"
 
-        if hasattr(self, 'add_view_toggle'):
+        self.module_content_visible_var = None
+        if enable_content_toggle and hasattr(self, 'add_view_toggle'):
             self.module_content_visible_var = self.add_view_toggle(
                 toggle_label,
                 self.module_content_frame,
