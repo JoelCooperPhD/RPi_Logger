@@ -57,25 +57,36 @@ class VideoEncoder:
                 raise RuntimeError("Failed to start OpenCV video writer")
             self._writer = writer
 
-    def write_frame(self, frame: np.ndarray) -> None:
-        width, height = self.resolution
+    @staticmethod
+    def _resize_and_encode(frame: np.ndarray, resolution: Tuple[int, int]) -> bytes:
+        width, height = resolution
         if frame.shape[:2] != (height, width):
             frame = cv2.resize(frame, (width, height))
+        return np.ascontiguousarray(frame).tobytes()
 
-        frame_data = np.ascontiguousarray(frame)
+    @staticmethod
+    def _resize_only(frame: np.ndarray, resolution: Tuple[int, int]) -> np.ndarray:
+        width, height = resolution
+        if frame.shape[:2] != (height, width):
+            frame = cv2.resize(frame, (width, height))
+        return np.ascontiguousarray(frame)
 
+    async def write_frame(self, frame: np.ndarray) -> None:
         if self.use_ffmpeg:
+            # Offload resize and byte conversion to thread
+            frame_bytes = await asyncio.to_thread(self._resize_and_encode, frame, self.resolution)
+            
             if not self._process or self._process.returncode is not None:
                 return
-            try:
-                assert self._process.stdin is not None
-                self._process.stdin.write(frame_data.tobytes())
-                self._process.stdin.flush()
-            except Exception:  # pragma: no cover - defensive
-                pass
+            assert self._process.stdin is not None
+            self._process.stdin.write(frame_bytes)
+            await self._process.stdin.drain()
         else:
+            # Offload resize to thread
+            processed_frame = await asyncio.to_thread(self._resize_only, frame, self.resolution)
+            
             if self._writer is not None:
-                self._writer.write(frame_data)
+                self._writer.write(processed_frame)
 
     async def stop(self) -> None:
         if self.use_ffmpeg:

@@ -71,25 +71,10 @@ def parse_args(argv: Optional[list[str]] = None):
     default_height = get_config_int(config, "resolution_height", 720)
     default_resolution = (default_width, default_height)
     default_fps = get_config_float(config, "target_fps", 5.0)
-    default_preview_preset = get_config_int(config, "preview_preset", 4)
-
-    PREVIEW_PRESETS = {
-        0: (1600, 1200),
-        1: (1280, 960),
-        2: (1024, 768),
-        3: (800, 600),
-        4: (640, 480),
-        5: (480, 360),
-        6: (320, 240),
-        7: (240, 180),
-        8: (160, 120),
-    }
-    default_preview_width, default_preview_height = PREVIEW_PRESETS.get(
-        default_preview_preset,
-        (get_config_int(config, "preview_width", 640), None),
-    )
-    if default_preview_height is None:
-        default_preview_height = int(default_preview_width * 3 / 4)
+    
+    # Default to 640x480 to match Cameras module and ensure good performance
+    default_preview_width = get_config_int(config, "preview_width", 640)
+    default_preview_height = get_config_int(config, "preview_height", 480)
 
     parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} module")
     add_common_cli_arguments(
@@ -216,7 +201,7 @@ def parse_args(argv: Optional[list[str]] = None):
 
     args.width, args.height = args.resolution
     args.preview_width = getattr(args, "preview_width", default_preview_width)
-    args.preview_height = default_preview_height or int(args.preview_width * 3 / 4)
+    args.preview_height = int(args.preview_width * 3 / 4)
 
     args.enable_recording_overlay = get_config_bool(config, "enable_recording_overlay", True)
     args.include_gaze_in_recording = get_config_bool(config, "include_gaze_in_recording", True)

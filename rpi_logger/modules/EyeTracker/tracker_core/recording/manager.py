@@ -881,7 +881,7 @@ class RecordingManager(RecordingManagerBase):
             backlog_after = self._frame_queue.qsize()
 
             if self.use_ffmpeg:
-                await asyncio.to_thread(self._video_encoder.write_frame, queued.frame)
+                await self._video_encoder.write_frame(queued.frame)
             else:
                 self._video_encoder.write_frame(queued.frame)
 
