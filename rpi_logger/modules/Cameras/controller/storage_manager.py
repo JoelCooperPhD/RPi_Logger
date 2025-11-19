@@ -77,7 +77,6 @@ class CameraStorageManager:
             save_quality=controller.save_quality,
             max_fps=controller.MAX_SENSOR_FPS,
             overlay_config=dict(controller.overlay_config),
-            save_stills=controller.save_stills_enabled,
             camera=camera_handle,
             logger=self.logger.getChild(f"cam{slot.index}"),
         )

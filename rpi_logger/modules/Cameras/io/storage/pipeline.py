@@ -203,8 +203,7 @@ class CameraStoragePipeline:
 
         if self.uses_hardware_encoder and self._picamera_encoder is not None:
             image_path: Optional[Path] = None
-            if self.save_stills and pil_image is not None:
-                image_path = await self._save_image(pil_image, overlay_info)
+
             if not self._fps_tracker.hardware_tracking:
                 self._fps_tracker.record_fallback_hardware_frame()
             return StorageWriteResult(
@@ -321,10 +320,12 @@ class CameraStoragePipeline:
             self._video_fps_hint = fps_hint
         fps = self._normalize_fps(self._video_fps_hint or 0.0)
 
+        from fractions import Fraction
+
         try:
-            encoder = H264Encoder(framerate=fps, enable_sps_framerate=True)
+            encoder = H264Encoder(framerate=Fraction(fps), enable_sps_framerate=True)
         except TypeError:
-            encoder = H264Encoder(framerate=fps)
+            encoder = H264Encoder(framerate=Fraction(fps))
             if hasattr(encoder, "_enable_framerate"):
                 encoder._enable_framerate = True  # type: ignore[attr-defined]
         output = FfmpegOutput(str(self._video_path))
