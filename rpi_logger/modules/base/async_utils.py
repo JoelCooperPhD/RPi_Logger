@@ -4,8 +4,10 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, List, Optional, TypeVar
 
+from rpi_logger.core.logging_utils import get_module_logger
 
-logger = logging.getLogger(__name__)
+
+logger = get_module_logger(__name__)
 
 T = TypeVar('T')
 

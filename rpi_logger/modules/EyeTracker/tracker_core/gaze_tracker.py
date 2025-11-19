@@ -3,13 +3,14 @@ import asyncio
 import time
 import logging
 from typing import Optional
+from rpi_logger.core.logging_utils import get_module_logger
 from .config.tracker_config import TrackerConfig as Config
 from .device_manager import DeviceManager
 from .stream_handler import StreamHandler, FramePacket
 from .frame_processor import FrameProcessor
 from .recording import RecordingManager, FrameTimingMetadata
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class GazeTracker:

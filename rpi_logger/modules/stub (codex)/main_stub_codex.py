@@ -15,10 +15,11 @@ _venv_site = Path(__file__).parent.parent.parent / '.venv' / 'lib' / f'python{sy
 if _venv_site.exists() and str(_venv_site) not in sys.path:
     sys.path.insert(0, str(_venv_site))
 
+from rpi_logger.core.logging_utils import get_module_logger
 from vmc import StubCodexSupervisor
 from vmc.constants import DEFAULT_OUTPUT_SUBDIR, DISPLAY_NAME
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 

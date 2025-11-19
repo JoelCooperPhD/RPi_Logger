@@ -3,6 +3,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.base.modes import BaseGUIMode
 from ..interfaces.gui import TkinterGUI
 from ..commands import CommandHandler
@@ -11,7 +12,7 @@ if TYPE_CHECKING:
     from ..tracker_system import TrackerSystem
 
 
-logger = logging.getLogger("GUIMode")
+logger = get_module_logger("EyeTracker.GUIMode")
 
 
 class GUIMode(BaseGUIMode):

@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from rpi_logger.core.commands import StatusMessage, StatusType
+from rpi_logger.core.logging_utils import ensure_structured_logger
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
@@ -45,7 +46,7 @@ class EyeTrackerRuntime(ModuleRuntime):
         self.args = context.args
         self.model = context.model
         self.controller = context.controller
-        base_logger = context.logger or logging.getLogger("EyeTrackerRuntime")
+        base_logger = ensure_structured_logger(getattr(context, "logger", None), fallback_name="EyeTrackerRuntime")
         self.logger = base_logger.getChild("Runtime")
         self.view = context.view
         self.display_name = context.display_name

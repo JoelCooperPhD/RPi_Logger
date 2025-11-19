@@ -16,11 +16,12 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from rpi_logger.cli.common import ensure_directory, log_module_shutdown, log_module_startup, setup_module_logging
 from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.core.commands import StatusMessage, StatusType
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.paths import USER_MODULE_CONFIG_DIR
 from .constants import DISPLAY_NAME, MODULE_ID, PLACEHOLDER_GEOMETRY
 
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class ModuleState(Enum):

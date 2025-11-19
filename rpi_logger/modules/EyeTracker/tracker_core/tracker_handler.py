@@ -2,6 +2,8 @@ import asyncio
 import logging
 from typing import Optional
 
+from rpi_logger.core.logging_utils import get_module_logger
+
 from .gaze_tracker import GazeTracker
 
 
@@ -9,7 +11,7 @@ class TrackerHandler:
     """Coordinator for the gaze tracker runtime loops and state."""
 
     def __init__(self, config, device_manager, stream_handler, frame_processor, recording_manager):
-        self.logger = logging.getLogger("TrackerHandler")
+        self.logger = get_module_logger("TrackerHandler")
         self.config = config
         self.device_manager = device_manager
         self.stream_handler = stream_handler

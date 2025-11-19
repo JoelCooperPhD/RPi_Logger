@@ -4,7 +4,9 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger("CommandProtocol")
+from rpi_logger.core.logging_utils import get_module_logger
+
+logger = get_module_logger("CommandProtocol")
 
 
 class CommandMessage:

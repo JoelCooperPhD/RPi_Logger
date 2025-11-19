@@ -3,9 +3,10 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.base import ConfigLoader as BaseConfigLoader
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class ConfigLoader:

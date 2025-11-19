@@ -10,9 +10,10 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 import cv2
 import numpy as np
+from rpi_logger.core.logging_utils import get_module_logger
 from .config.tracker_config import TrackerConfig as Config
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class FrameProcessor:

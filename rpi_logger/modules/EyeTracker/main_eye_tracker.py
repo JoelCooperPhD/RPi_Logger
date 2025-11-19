@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import sys
 from pathlib import Path
 from typing import Optional
@@ -45,6 +44,7 @@ from rpi_logger.cli.common import (
     get_config_str,
 )
 from rpi_logger.modules.base import load_window_geometry_from_config
+from rpi_logger.core.logging_utils import get_module_logger
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 
 from rpi_logger.modules.EyeTracker.tracker_core.config import load_config_file
@@ -55,7 +55,7 @@ DISPLAY_NAME = "EyeTracker"
 MODULE_ID = "eye_tracker"
 DEFAULT_OUTPUT_SUBDIR = Path("eye-tracker")
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):

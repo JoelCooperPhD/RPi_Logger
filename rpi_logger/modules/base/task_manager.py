@@ -10,6 +10,8 @@ from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Optional
 
+from rpi_logger.core.logging_utils import get_module_logger
+
 
 @dataclass(slots=True)
 class _TaskRecord:
@@ -28,7 +30,7 @@ class AsyncTaskManager:
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self._name = name or self.__class__.__name__
-        self._logger = logger or logging.getLogger(self._name)
+        self._logger = logger or get_module_logger(self._name)
         self._closed = False
         self._records: dict[asyncio.Task, _TaskRecord] = {}
         self._name_index: dict[str, set[asyncio.Task]] = defaultdict(set)

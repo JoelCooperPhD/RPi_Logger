@@ -5,9 +5,11 @@ import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
+from rpi_logger.core.logging_utils import get_module_logger
+
 from .io_utils import sanitize_path_component
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 def detect_command_mode(args) -> bool:

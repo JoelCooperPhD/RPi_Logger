@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from rpi_logger.core.commands import StatusMessage, StatusType
+from rpi_logger.core.logging_utils import ensure_structured_logger
 
 from vmc.runtime import RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
@@ -35,7 +36,7 @@ class AudioApp:
     ) -> None:
         self.context = context
         self.settings = settings
-        base_logger = context.logger or logging.getLogger("Audio")
+        base_logger = ensure_structured_logger(getattr(context, "logger", None), fallback_name="Audio")
         self.logger = base_logger.getChild("App")
         level_name = getattr(self.settings, "log_level", "debug")
         desired_level = getattr(logging, str(level_name).upper(), logging.DEBUG)

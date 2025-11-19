@@ -17,7 +17,7 @@ from rpi_logger.modules.DRT.drt_core.interfaces.gui.tkinter_gui import TkinterGU
 
 ActionCallback = Optional[Callable[[str], Awaitable[None]]]
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class _SystemPlaceholder:

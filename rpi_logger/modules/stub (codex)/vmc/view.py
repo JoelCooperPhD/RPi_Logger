@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+from rpi_logger.core.logging_utils import get_module_logger
+
 from async_tkinter_loop import async_handler
 
 try:
@@ -26,7 +28,7 @@ else:
 from .model import StubCodexModel
 from .constants import PLACEHOLDER_GEOMETRY
 
-_BASE_LOGGER = logging.getLogger(__name__)
+_BASE_LOGGER = get_module_logger(__name__)
 
 class StubCodexView:
     """Tkinter view that mirrors model state and forwards user intent."""

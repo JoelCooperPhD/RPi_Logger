@@ -1,8 +1,8 @@
 import asyncio
-import logging
 import sys
 from pathlib import Path
-from typing import Optional
+
+from rpi_logger.core.logging_utils import get_module_logger
 
 from .headless_controller import HeadlessController
 from ..logger_system import LoggerSystem
@@ -16,7 +16,7 @@ class InteractiveShell:
     """
 
     def __init__(self, controller: HeadlessController):
-        self.logger = logging.getLogger("InteractiveShell")
+        self.logger = get_module_logger("InteractiveShell")
         self.controller = controller
         self.running = True
 

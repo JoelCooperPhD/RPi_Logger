@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.base import BaseSystem, ModuleInitializationError, RecordingStateMixin
 from .config.tracker_config import TrackerConfig
 from .device_manager import DeviceManager
@@ -13,7 +14,7 @@ from .recording import RecordingManager
 from .modes import GUIMode, HeadlessMode, SlaveMode
 from .tracker_handler import TrackerHandler
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class TrackerInitializationError(ModuleInitializationError):

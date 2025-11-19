@@ -1,12 +1,13 @@
 
 import asyncio
-import logging
 import os
 import sys
 import traceback
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
+
+from rpi_logger.core.logging_utils import ensure_structured_logger
 
 from .lifecycle_metrics import LifecycleTimer
 from .task_manager import AsyncTaskManager
@@ -23,7 +24,7 @@ class BaseSystem(ABC):
 
     def __init__(self, args: Any):
         self.args = args
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = ensure_structured_logger(getattr(args, "logger", None), fallback_name=self.__class__.__name__)
         self.running = False
         self.recording = False
         self.shutdown_event = asyncio.Event()

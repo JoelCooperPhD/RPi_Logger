@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import sys
 from pathlib import Path
 from typing import Optional
@@ -20,6 +19,7 @@ if STUB_ROOT.exists() and str(STUB_ROOT) not in sys.path:
     sys.path.insert(0, str(STUB_ROOT))
 
 from rpi_logger.cli.common import add_common_cli_arguments  # noqa: E402
+from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
 from vmc import StubCodexSupervisor  # noqa: E402
 
 from runtime import GPSPreviewRuntime  # noqa: E402
@@ -35,7 +35,7 @@ DEFAULT_BAUD_RATE = 9600
 DEFAULT_RECONNECT_DELAY = 3.0
 DEFAULT_NMEA_HISTORY = 30
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):

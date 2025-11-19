@@ -7,10 +7,12 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
+from rpi_logger.core.logging_utils import get_module_logger
+
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class TkinterMenuBase:

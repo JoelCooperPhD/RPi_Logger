@@ -39,6 +39,7 @@ except Exception as exc:  # pragma: no cover - GUI-less host
 else:  # pragma: no cover - GUI path
     TK_IMPORT_ERROR = None
 
+from rpi_logger.core.logging_utils import ensure_structured_logger
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
 
@@ -184,7 +185,7 @@ class GPSPreviewRuntime(ModuleRuntime):
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
-        base_logger = context.logger or logging.getLogger("GPSRuntime")
+        base_logger = ensure_structured_logger(getattr(context, "logger", None), fallback_name="GPSRuntime")
         self.logger = base_logger.getChild("Runtime")
         self.model = context.model
         self.controller = context.controller

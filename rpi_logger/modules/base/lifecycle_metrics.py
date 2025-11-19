@@ -3,12 +3,14 @@ import logging
 import time
 from typing import Dict, Optional
 
+from rpi_logger.core.logging_utils import get_module_logger
+
 
 class LifecycleTimer:
 
     def __init__(self, module_name: str):
         self.module_name = module_name
-        self.logger = logging.getLogger(f"LifecycleTimer.{module_name}")
+        self.logger = get_module_logger(f"LifecycleTimer.{module_name}")
         self.phases: Dict[str, float] = {}
         self.start_time = time.perf_counter()
         self.mark_phase("process_start")

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Optional, Any, List, Callable
 
 import numpy as np
+from rpi_logger.core.logging_utils import get_module_logger
 from pupil_labs.realtime_api import (
     receive_video_frames,
     receive_gaze_data,
@@ -16,7 +17,7 @@ from pupil_labs.realtime_api import (
 )
 from .rolling_fps import RollingFPS
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 @dataclass(slots=True)

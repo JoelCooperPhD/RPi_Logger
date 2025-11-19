@@ -7,12 +7,13 @@ from tkinter import ttk, scrolledtext
 from typing import Optional, TYPE_CHECKING
 import datetime
 
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase
 
 if TYPE_CHECKING:
     from ...tracker_system import TrackerSystem
 
-logger = logging.getLogger("TkinterGUI")
+logger = get_module_logger("EyeTracker.TkinterGUI")
 
 
 class TkinterGUI(TkinterGUIBase, TkinterMenuBase):

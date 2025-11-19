@@ -3,7 +3,9 @@ import asyncio
 import logging
 from .base_mode import BaseMode
 
-logger = logging.getLogger(__name__)
+from rpi_logger.core.logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
 
 
 class HeadlessMode(BaseMode):

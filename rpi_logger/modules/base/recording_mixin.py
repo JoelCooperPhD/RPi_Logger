@@ -1,7 +1,7 @@
-
 import asyncio
-import logging
 from typing import Optional
+
+from rpi_logger.core.logging_utils import get_module_logger
 
 
 class RecordingStateMixin:
@@ -10,7 +10,7 @@ class RecordingStateMixin:
         self._recording = False
         self._recording_count = 0
         self._recording_lock = asyncio.Lock()
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = get_module_logger(self.__class__.__name__)
 
     @property
     def recording(self) -> bool:

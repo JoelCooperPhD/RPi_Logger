@@ -4,12 +4,13 @@ from typing import TYPE_CHECKING
 
 from .base_mode import BaseMode
 from rpi_logger.core.commands import BaseSlaveMode, BaseCommandHandler, StatusMessage
+from rpi_logger.core.logging_utils import get_module_logger
 from ..commands import CommandHandler
 
 if TYPE_CHECKING:
     from ..tracker_system import TrackerSystem
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class SlaveMode(BaseSlaveMode, BaseMode):

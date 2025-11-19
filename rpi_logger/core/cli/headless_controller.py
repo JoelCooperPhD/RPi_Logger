@@ -1,8 +1,9 @@
 import asyncio
 import datetime
-import logging
 from pathlib import Path
 from typing import Optional, Dict
+
+from rpi_logger.core.logging_utils import get_module_logger
 
 from ..logger_system import LoggerSystem
 from ..module_process import ModuleState
@@ -18,7 +19,7 @@ class HeadlessController:
     """
 
     def __init__(self, logger_system: LoggerSystem):
-        self.logger = logging.getLogger("HeadlessController")
+        self.logger = get_module_logger("HeadlessController")
         self.logger_system = logger_system
         self.logger_system.ui_callback = self._status_callback
 

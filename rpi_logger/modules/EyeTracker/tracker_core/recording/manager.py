@@ -21,6 +21,7 @@ from rpi_logger.modules.base.storage_utils import (
     ensure_module_data_dir,
     module_filename_prefix,
 )
+from rpi_logger.core.logging_utils import get_module_logger
 from ..config.tracker_config import TrackerConfig as Config
 from .async_csv_writer import AsyncCSVWriter
 from .video_encoder import VideoEncoder
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from pupil_labs.realtime_api.streaming import AudioFrame
     from ..device_manager import DeviceManager
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 @dataclass(slots=True)

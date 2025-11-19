@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from rpi_logger.cli.common import get_config_int
+from rpi_logger.core.logging_utils import get_module_logger
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 def parse_geometry_string(geometry_str: str) -> Optional[Tuple[int, int, int, int]]:

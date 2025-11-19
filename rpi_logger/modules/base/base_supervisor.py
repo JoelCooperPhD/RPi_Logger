@@ -4,6 +4,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Generic, Optional, Type, TypeVar
 
+from rpi_logger.core.logging_utils import ensure_structured_logger
+
 SystemT = TypeVar('SystemT')
 ErrorT = TypeVar('ErrorT', bound=Exception)
 
@@ -12,7 +14,7 @@ class BaseSupervisor(ABC, Generic[SystemT, ErrorT]):
 
     def __init__(self, args: Any, default_retry_interval: float = 3.0):
         self.args = args
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = ensure_structured_logger(getattr(args, "logger", None), fallback_name=self.__class__.__name__)
         self.retry_interval = getattr(args, "discovery_retry", default_retry_interval)
         self.shutdown_event = asyncio.Event()
         self.system: Optional[SystemT] = None

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from pathlib import Path
 import sys
 from typing import Optional
@@ -33,6 +32,7 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor
 
 from rpi_logger.core.logging_config import configure_logging
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.Audio.config import AudioSettings, parse_cli_args
 from rpi_logger.modules.base.config_paths import resolve_writable_module_config
 from rpi_logger.modules.Audio.runtime import AudioRuntime
@@ -41,7 +41,7 @@ DISPLAY_NAME = "Audio"
 MODULE_ID = "audio"
 CONFIG_PATH = resolve_writable_module_config(MODULE_DIR, MODULE_ID)
 
-logger = logging.getLogger("Audio")
+logger = get_module_logger("Audio")
 
 _DEFAULT_LOG_LEVEL = AudioSettings().log_level.lower()
 _LEVEL_ALIASES = {

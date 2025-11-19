@@ -7,13 +7,15 @@ import logging
 import os
 from typing import Awaitable, Optional, Set
 
+from rpi_logger.core.logging_utils import get_module_logger
+
 
 class BackgroundTaskManager:
     """Track background tasks spawned by a runtime and cancel them safely."""
 
     def __init__(self, name: str = "StubBackgroundTasks", logger: Optional[logging.Logger] = None) -> None:
         self._name = name
-        self._logger = logger or logging.getLogger(name)
+        self._logger = logger or get_module_logger(name)
         self._tasks: Set[asyncio.Task] = set()
         self._closing = False
 
@@ -76,7 +78,7 @@ class ShutdownGuard:
     """Abort the process if cleanup takes too long."""
 
     def __init__(self, logger: Optional[logging.Logger] = None, *, timeout: float = 15.0, exit_code: int = 101) -> None:
-        self._logger = logger or logging.getLogger("StubShutdownGuard")
+        self._logger = logger or get_module_logger("StubShutdownGuard")
         self._timeout = max(0.5, float(timeout))
         self._exit_code = exit_code
         self._task: Optional[asyncio.Task] = None

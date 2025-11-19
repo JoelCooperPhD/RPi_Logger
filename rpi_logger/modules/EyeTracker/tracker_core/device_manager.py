@@ -6,8 +6,9 @@ from typing import Optional
 from pupil_labs.realtime_api.discovery import discover_devices
 from pupil_labs.realtime_api.device import Device
 from pupil_labs.realtime_api.models import ConnectionType, SensorName, Status
+from rpi_logger.core.logging_utils import get_module_logger
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class DeviceManager:

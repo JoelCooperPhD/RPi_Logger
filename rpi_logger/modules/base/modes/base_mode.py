@@ -1,14 +1,14 @@
 
-import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
+from rpi_logger.core.logging_utils import get_module_logger
 
 class BaseMode(ABC):
 
     def __init__(self, system: Any):
         self.system = system
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = get_module_logger(self.__class__.__name__)
 
     @abstractmethod
     async def run(self) -> None:

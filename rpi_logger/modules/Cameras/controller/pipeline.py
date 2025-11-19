@@ -174,6 +174,17 @@ class StorageConsumer:
                         latest,
                         fps_hint=fps_hint,
                     )
+                elif pipeline.accepts_yuv:
+                    # Optimization: Pass raw YUV frame for ffmpeg
+                    
+                    yuv_frame = frame if isinstance(frame, np.ndarray) else np.asarray(frame)
+                    
+                    storage_result = await pipeline.write_frame(
+                        None,
+                        latest,
+                        fps_hint=fps_hint,
+                        yuv_frame=yuv_frame,
+                    )
                 else:
                     # Optimization: Convert directly to BGR for video if possible
                     bgr_frame: Optional[np.ndarray] = None
