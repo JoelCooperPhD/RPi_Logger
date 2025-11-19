@@ -147,6 +147,11 @@ class LoggerSystem:
                 self.module_manager.cleanup_stopped_process(module_name)
                 if not self.module_manager.is_module_state_changing(module_name):
                     await self.module_manager.set_module_enabled(module_name, False)
+                if self.ui_callback:
+                    try:
+                        await self.ui_callback(module_name, process.get_state(), status)
+                    except Exception as e:
+                        self.logger.error("UI callback error: %s", e)
                 return
             elif status.is_error():
                 self.logger.error("Module %s error: %s",

@@ -21,6 +21,7 @@ except Exception:  # pragma: no cover - defensive import for headless environmen
     messagebox = None  # type: ignore
 
 from rpi_logger.core.commands import StatusMessage, StatusType
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module_filename_prefix
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
@@ -51,33 +52,44 @@ class NotesArchive:
         self.recording = False
         self.note_count = 0
         self._start_timestamp: Optional[float] = None
-        self.file_path = self._resolve_file_path()
+        self.file_path: Optional[Path] = None
+        self._current_trial_number: Optional[int] = None
 
-    async def start(self) -> Path:
-        """Prepare the legacy notes file (create or resume)."""
+    async def start(self, trial_number: int) -> Path:
+        """Prepare the notes file for the specified trial."""
 
-        if self.recording:
+        try:
+            normalized_trial = int(trial_number)
+        except (TypeError, ValueError):
+            normalized_trial = 1
+        normalized_trial = max(1, normalized_trial)
+
+        if self.recording and self.file_path:
             return self.file_path
 
         await asyncio.to_thread(self.base_dir.mkdir, parents=True, exist_ok=True)
 
-        exists = await asyncio.to_thread(self.file_path.exists)
+        target = self._resolve_file_path(normalized_trial)
+        self.file_path = target
+        self._current_trial_number = normalized_trial
+        self._start_timestamp = None
+
+        exists = await asyncio.to_thread(target.exists)
         if exists:
-            self.note_count = await asyncio.to_thread(self._count_existing_notes)
+            self.note_count = await asyncio.to_thread(self._count_existing_notes, target)
             self.logger.info(
                 "Appending to existing note file: %s (current notes: %d)",
-                self.file_path,
+                target,
                 self.note_count,
             )
         else:
-            await asyncio.to_thread(self._write_header)
+            await asyncio.to_thread(self._write_header, target)
             self.note_count = 0
-            self.logger.info("Created new note file: %s", self.file_path)
+            self.logger.info("Created new note file: %s", target)
 
-        if self._start_timestamp is None:
-            self._start_timestamp = time.time()
+        self._start_timestamp = time.time()
         self.recording = True
-        return self.file_path
+        return target
 
     async def stop(self) -> None:
         if not self.recording:
@@ -131,31 +143,30 @@ class NotesArchive:
         )
 
     async def load_recent(self, limit: int) -> List[NoteRecord]:
-        if not await asyncio.to_thread(self.file_path.exists):
+        path = self.file_path
+        if not path:
             return []
-
-        return await asyncio.to_thread(self._read_records, limit)
+        exists = await asyncio.to_thread(path.exists)
+        if not exists:
+            return []
+        return await asyncio.to_thread(self._read_records, limit, path)
 
     def current_elapsed(self) -> str:
         if not self.recording or self._start_timestamp is None:
             return "00:00:00"
         return self.format_elapsed(time.time() - self._start_timestamp)
 
-    def _resolve_file_path(self) -> Path:
-        dir_name = self.base_dir.name
-        if "_" in dir_name:
-            session_timestamp = dir_name.split("_", 1)[1]
-        else:
-            session_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return self.base_dir / f"{session_timestamp}_NOTES.txt"
+    def _resolve_file_path(self, trial_number: int) -> Path:
+        prefix = module_filename_prefix(self.base_dir, "Notes", trial_number, code="NOTES")
+        return self.base_dir / f"{prefix}.txt"
 
-    def _write_header(self) -> None:
-        with self.file_path.open("w", encoding=self.encoding) as handle:
+    def _write_header(self, path: Path) -> None:
+        with path.open("w", encoding=self.encoding) as handle:
             handle.write(f"{self.HEADER}\n")
 
-    def _count_existing_notes(self) -> int:
+    def _count_existing_notes(self, path: Path) -> int:
         try:
-            with self.file_path.open("r", encoding=self.encoding) as handle:
+            with path.open("r", encoding=self.encoding) as handle:
                 lines = handle.readlines()
         except FileNotFoundError:
             return 0
@@ -185,12 +196,14 @@ class NotesArchive:
         return count
 
     def _append_row(self, text: str, timestamp: float, trial_number: int) -> None:
+        if not self.file_path:
+            raise RuntimeError("Archive file path not set")
         with self.file_path.open("a", encoding=self.encoding) as handle:
             handle.write(f"Note,{trial_number},{text},{timestamp}\n")
 
-    def _read_records(self, limit: int) -> List[NoteRecord]:
+    def _read_records(self, limit: int, path: Path) -> List[NoteRecord]:
         try:
-            with self.file_path.open("r", encoding=self.encoding) as handle:
+            with path.open("r", encoding=self.encoding) as handle:
                 lines = handle.readlines()
         except FileNotFoundError:
             return []
@@ -256,6 +269,7 @@ class NotesArchive:
 
 class NotesRuntime(ModuleRuntime):
     """Interactive note-taking runtime built atop the Codex supervisor."""
+    MODULE_SUBDIR = "Notes"
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
@@ -275,6 +289,7 @@ class NotesRuntime(ModuleRuntime):
         self.project_root = context.module_dir.parent.parent
         self.history_limit = max(1, int(getattr(self.args, "history_limit", 200)))
         self.auto_start = bool(getattr(self.args, "auto_start", False))
+        self._module_dir: Optional[Path] = None
 
         self.archive: Optional[NotesArchive] = None
         self._history: List[NoteRecord] = []
@@ -474,12 +489,12 @@ class NotesRuntime(ModuleRuntime):
     # Recording lifecycle
 
     async def _start_recording(self) -> bool:
-        session_dir = await self._ensure_session_dir()
-        if session_dir is None:
+        module_dir = await self._ensure_module_dir()
+        if module_dir is None:
             return False
         archive = self.archive
 
-        if archive and archive.base_dir != session_dir:
+        if archive and archive.base_dir != module_dir:
             try:
                 await archive.stop()
             except Exception:
@@ -487,15 +502,17 @@ class NotesRuntime(ModuleRuntime):
             archive = None
 
         if archive is None:
-            archive = NotesArchive(session_dir, self.logger.getChild("Archive"))
+            archive = NotesArchive(module_dir, self.logger.getChild("Archive"))
             self.archive = archive
 
         if archive.recording:
             self.logger.debug("Notes archive already active: %s", archive.file_path)
             return False
 
+        trial_number = self._resolve_trial_number()
+
         try:
-            file_path = await archive.start()
+            file_path = await archive.start(trial_number)
         except Exception as exc:
             self.logger.exception("Failed to start note archive", exc_info=exc)
             return False
@@ -504,9 +521,10 @@ class NotesRuntime(ModuleRuntime):
         self.logger.info("Notes recording started -> %s", file_path)
         await self._refresh_history()
         self._emit_status(StatusType.RECORDING_STARTED, {
-            "session_dir": str(session_dir),
+            "session_dir": str(module_dir),
             "notes_file": str(file_path),
             "note_count": archive.note_count,
+            "trial_number": trial_number,
         })
         return True
 
@@ -519,11 +537,11 @@ class NotesRuntime(ModuleRuntime):
         except Exception:
             self.logger.exception("Error stopping notes archive")
 
-        session_dir = self.model.session_dir
+        module_dir = self._module_dir
         self.model.recording = False
         self.logger.info("Notes recording stopped (%d note(s))", self.archive.note_count)
         self._emit_status(StatusType.RECORDING_STOPPED, {
-            "session_dir": str(session_dir) if session_dir else None,
+            "session_dir": str(module_dir) if module_dir else None,
             "note_count": self.archive.note_count,
         })
         return True
@@ -536,7 +554,7 @@ class NotesRuntime(ModuleRuntime):
         if not archive:
             return False
 
-        trial_number = int(self.model.trial_number or 0)
+        trial_number = self._resolve_trial_number()
         modules = await self._read_recording_modules()
         try:
             record = await archive.add_note(
@@ -588,9 +606,11 @@ class NotesRuntime(ModuleRuntime):
         self.model.recording = False
 
         try:
-            await asyncio.to_thread(session_dir.mkdir, parents=True, exist_ok=True)
+            module_dir = await asyncio.to_thread(ensure_module_data_dir, session_dir, self.MODULE_SUBDIR)
         except Exception:
+            module_dir = session_dir / self.MODULE_SUBDIR
             self.logger.exception("Failed to ensure session directory exists", exc_info=True)
+        self._module_dir = module_dir
 
         self._missing_session_notice_shown = False
         self._history.clear()
@@ -618,13 +638,39 @@ class NotesRuntime(ModuleRuntime):
         session_dir = self.model.session_dir
         if session_dir:
             try:
-                await asyncio.to_thread(session_dir.mkdir, parents=True, exist_ok=True)
+                path = Path(session_dir)
+            except TypeError:
+                self.logger.exception("Session directory is invalid", exc_info=True)
+                return None
+            try:
+                await asyncio.to_thread(path.mkdir, parents=True, exist_ok=True)
             except Exception:
                 self.logger.exception("Failed to ensure session directory exists", exc_info=True)
-            return session_dir
+            return path
 
         self._prompt_session_required()
         return None
+
+    async def _ensure_module_dir(self) -> Optional[Path]:
+        session_dir = await self._ensure_session_dir()
+        if session_dir is None:
+            return None
+        try:
+            module_dir = await asyncio.to_thread(ensure_module_data_dir, session_dir, self.MODULE_SUBDIR)
+        except Exception:
+            self.logger.exception("Failed to ensure notes module directory exists", exc_info=True)
+            return None
+        self._module_dir = module_dir
+        return module_dir
+
+    def _resolve_trial_number(self) -> int:
+        try:
+            value = int(self.model.trial_number or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value <= 0:
+            value = 1
+        return value
 
     async def _ensure_archive_active(self) -> bool:
         archive = self.archive

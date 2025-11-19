@@ -5,22 +5,33 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Optional
 
-# Ensure the repository root is importable so shared packages resolve correctly.
-REPO_ROOT = Path(__file__).parent.parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+MODULE_DIR = Path(__file__).resolve().parent
+
+
+def _find_project_root(start: Path) -> Path:
+    """Walk up until we locate the repository root (parent of rpi_logger package)."""
+    for parent in start.parents:
+        if parent.name == "rpi_logger":
+            return parent.parent
+    return start.parents[-1]
+
+
+# Ensure the repository root (containing the rpi_logger package) is importable.
+PROJECT_ROOT = _find_project_root(MODULE_DIR)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Re-use the stub VMC stack without copying its sources.
-STUB_FRAMEWORK_DIR = Path(__file__).parent.parent / "stub (codex)"
+STUB_FRAMEWORK_DIR = MODULE_DIR.parent / "stub (codex)"
 if STUB_FRAMEWORK_DIR.exists() and str(STUB_FRAMEWORK_DIR) not in sys.path:
     sys.path.insert(0, str(STUB_FRAMEWORK_DIR))
 
 # Make sure any local virtual environment site-packages are available.
-_venv_site = REPO_ROOT / '.venv' / 'lib' / f'python{sys.version_info.major}.{sys.version_info.minor}' / 'site-packages'
+_venv_site = PROJECT_ROOT / ".venv" / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
 if _venv_site.exists() and str(_venv_site) not in sys.path:
     sys.path.insert(0, str(_venv_site))
 

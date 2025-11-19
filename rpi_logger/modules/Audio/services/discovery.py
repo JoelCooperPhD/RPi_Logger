@@ -31,7 +31,10 @@ class DeviceDiscoveryService:
             if channels <= 0:
                 continue
             sample_rate = float(info.get("default_samplerate") or self.sample_rate)
-            name = info.get("name", f"Device {index}")
+            name = str(info.get("name") or f"Device {index}")
+            if "usb" not in name.lower():
+                self.logger.debug("Ignoring non-USB device: %s", name)
+                continue
             discovered[index] = AudioDeviceInfo(
                 device_id=index,
                 name=name,

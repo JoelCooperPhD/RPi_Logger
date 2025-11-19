@@ -17,6 +17,7 @@ import numpy as np
 import sounddevice as sd
 
 from ..domain import AUDIO_BIT_DEPTH, AUDIO_CHANNELS_MONO, AudioDeviceInfo, LevelMeter
+from rpi_logger.modules.base.storage_utils import module_filename_prefix
 
 _CSV_FLUSH_INTERVAL = 200
 
@@ -298,12 +299,8 @@ class AudioDeviceRecorder:
             .replace("_", "-")
             .lower()
         )
-        session_name = session_dir.name
-        if "_" in session_name:
-            timestamp = session_name.split("_", 1)[1]
-        else:
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"{timestamp}_AUDIO_trial{trial_number:03d}_MIC{self.device.device_id}_{safe_name}.wav"
+        prefix = module_filename_prefix(session_dir, "Audio", trial_number, code="AUDIO")
+        filename = f"{prefix}_MIC{self.device.device_id}_{safe_name}.wav"
         return session_dir / filename
 
     def _make_timing_filename(self, audio_path: Path) -> Path:

@@ -374,7 +374,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             session_path = await self._generate_session_dir()
 
         session_path.mkdir(parents=True, exist_ok=True)
-        self._session_dir = session_path
         trial_number = int(payload.get("trial_number") or (self.model.trial_number or 1))
         self._recording_manager.set_session_context(session_path, trial_number)
         self.model.trial_number = trial_number
@@ -388,17 +387,21 @@ class EyeTrackerRuntime(ModuleRuntime):
                 self._view_adapter.set_recording_state(False)
             return False
 
+        module_session_dir = self._recording_manager.current_session_dir or session_path
+        self._session_dir = module_session_dir
+        self.model.session_dir = module_session_dir
+
         StatusMessage.send(
             StatusType.RECORDING_STARTED,
             {
                 "module": self.display_name,
-                "session_dir": str(session_path),
+                "session_dir": str(module_session_dir),
                 "trial_number": trial_number,
             },
         )
         if self._view_adapter:
             self._view_adapter.set_recording_state(True)
-        self.logger.info("Recording started -> %s", session_path)
+        self.logger.info("Recording started -> %s", module_session_dir)
         self.model.recording = True
         return True
 

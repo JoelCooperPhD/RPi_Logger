@@ -5,7 +5,7 @@ enabled = false
 display_name = GPS
 
 # Default preview settings consumed by the GPS preview
-window_geometry = 772x695+670+263
+window_geometry = 832x763+366+179
 offline_db = offline_tiles.db
 center_lat = 40.7608
 center_lon = -111.8910

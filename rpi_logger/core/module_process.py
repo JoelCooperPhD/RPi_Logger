@@ -10,6 +10,7 @@ from .commands import CommandMessage, StatusMessage, StatusType
 from .module_discovery import ModuleInfo
 from .config_manager import get_config_manager
 from .window_manager import WindowGeometry
+from .paths import PROJECT_ROOT
 
 
 class ModuleState(Enum):
@@ -94,11 +95,12 @@ class ModuleProcess:
 
             import os
             env = os.environ.copy()
-            project_root = self.module_info.directory.parent.parent
-            if 'PYTHONPATH' in env:
-                env['PYTHONPATH'] = f"{project_root}:{env['PYTHONPATH']}"
+            pythonpath_root = PROJECT_ROOT
+            existing_pythonpath = env.get('PYTHONPATH')
+            if existing_pythonpath:
+                env['PYTHONPATH'] = os.pathsep.join((str(pythonpath_root), existing_pythonpath))
             else:
-                env['PYTHONPATH'] = str(project_root)
+                env['PYTHONPATH'] = str(pythonpath_root)
 
             self.process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -126,8 +128,7 @@ class ModuleProcess:
             return False
 
     def _find_venv_python(self) -> Optional[str]:
-        project_root = self.module_info.directory.parent.parent
-        venv_python = project_root / ".venv" / "bin" / "python"
+        venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
         if venv_python.exists():
             return str(venv_python)
 

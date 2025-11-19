@@ -16,6 +16,7 @@ from rpi_logger.modules.base.usb_serial_manager import (
     USBDeviceMonitor,
     USBSerialDevice,
 )
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from rpi_logger.modules.DRT.drt_core.config import load_config_file
 from rpi_logger.modules.DRT.drt_core.constants import DRT_VID, DRT_PID
 from rpi_logger.modules.DRT.drt_core.drt_handler import DRTHandler
@@ -52,6 +53,8 @@ class DRTModuleRuntime(ModuleRuntime):
 
         self.output_root: Path = Path(getattr(self.args, "output_dir", Path("drt_data")))
         self.session_dir: Path = self.output_root
+        self.module_subdir: str = "DRT"
+        self.module_data_dir: Path = self.session_dir
         self.handlers: Dict[str, DRTHandler] = {}
         self.usb_monitor: Optional[USBDeviceMonitor] = None
         self.task_manager = BackgroundTaskManager(name="DRTRuntimeTasks", logger=self.logger)
@@ -60,6 +63,7 @@ class DRTModuleRuntime(ModuleRuntime):
         self._suppress_session_event = False
         self._recording_active = False
         self.trial_label: str = ""
+        self.active_trial_number: int = 1
 
     # ------------------------------------------------------------------
     # Lifecycle hooks
@@ -98,6 +102,7 @@ class DRTModuleRuntime(ModuleRuntime):
     async def handle_command(self, command: Dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
         if action == "start_recording":
+            self.active_trial_number = self._coerce_trial_number(command.get("trial_number"))
             self.trial_label = str(command.get("trial_label", "") or "")
             session_dir = command.get("session_dir")
             if session_dir:
@@ -170,7 +175,7 @@ class DRTModuleRuntime(ModuleRuntime):
     async def _on_device_connected(self, device: USBSerialDevice) -> None:
         port = device.port
         self.logger.info("sDRT connected on %s", port)
-        handler = DRTHandler(device, port, self.session_dir, system=self)
+        handler = DRTHandler(device, port, self.module_data_dir, system=self)
         handler.set_data_callback(self._on_device_data)
 
         await handler.initialize_device()
@@ -266,9 +271,10 @@ class DRTModuleRuntime(ModuleRuntime):
         else:
             self.session_dir = Path(new_dir)
         self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.module_data_dir = ensure_module_data_dir(self.session_dir, self.module_subdir)
 
         for handler in self.handlers.values():
-            handler.output_dir = self.session_dir
+            handler.output_dir = self.module_data_dir
 
         if update_model:
             self._suppress_session_event = True
@@ -295,3 +301,16 @@ class DRTModuleRuntime(ModuleRuntime):
             return int(str(value), 0)
         except (TypeError, ValueError):
             return default
+
+    def _coerce_trial_number(self, value: Any) -> int:
+        try:
+            candidate = int(value)
+        except (TypeError, ValueError):
+            candidate = getattr(self.model, "trial_number", None)
+            try:
+                candidate = int(candidate) if candidate is not None else 0
+            except (TypeError, ValueError):
+                candidate = 0
+        if candidate <= 0:
+            candidate = 1
+        return candidate

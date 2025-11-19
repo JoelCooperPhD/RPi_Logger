@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Deque, Optional, TextIO
 
 from PIL import Image, ImageDraw, ImageTk
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module_filename_prefix
 
 try:  # pragma: no cover - optional dependency on headless hosts
     import serial  # type: ignore
@@ -46,7 +47,7 @@ DEFAULT_OFFLINE_DB = (MODULE_DIR / "offline_tiles.db").resolve()
 TILE_SIZE = 256
 GRID_SIZE = 3  # produces a 768x768 view
 MIN_ZOOM_LEVEL = 10.0
-MAX_ZOOM_LEVEL = 16.0
+MAX_ZOOM_LEVEL = 15.0
 KMH_PER_KNOT = 1.852
 MPH_PER_KNOT = 1.15077945
 FIX_QUALITY_DESCRIPTIONS = {
@@ -190,6 +191,9 @@ class GPSPreviewRuntime(ModuleRuntime):
         self.view = context.view
         self.display_name = context.display_name
         self.module_dir = context.module_dir
+        self._module_subdir = "GPS"
+        self._data_dir: Optional[Path] = None
+        self._active_trial_number: int = 1
 
         self.serial_port = str(getattr(self.args, "serial_port", "/dev/serial0"))
         self.baud_rate = int(getattr(self.args, "baud_rate", 9600))
@@ -235,9 +239,14 @@ class GPSPreviewRuntime(ModuleRuntime):
                 raise RuntimeError(f"tkinter unavailable: {TK_IMPORT_ERROR}")
             self.view.set_preview_title(f"{self.display_name} Preview")
             self.view.build_stub_content(self._build_preview_layout)
-            self.view.set_io_stub_title(f"{self.display_name} Telemetry")
-            self.view.build_io_stub_content(self._build_io_panel)
-            self.view.show_io_stub()
+            telemetry_builder = getattr(self.view, "build_telemetry_content", None)
+            if callable(telemetry_builder):
+                telemetry_builder(self._build_telemetry_panel)
+                configure_sidecar = getattr(self.view, "set_preview_sidecar_minsize", None)
+                if callable(configure_sidecar):
+                    min_width = int(GRID_SIZE * TILE_SIZE / 2)
+                    configure_sidecar(min_width)
+            self.view.hide_io_stub()
 
         self._log_event(
             "runtime_start",
@@ -262,16 +271,15 @@ class GPSPreviewRuntime(ModuleRuntime):
 
         if self._serial_task and not self._serial_task.done():
             self._serial_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._serial_task
+            try:
+                await asyncio.wait_for(self._serial_task, timeout=3.0)
+            except asyncio.TimeoutError:
+                self._log_event("serial_cancel_timeout", level=logging.WARNING)
+            except asyncio.CancelledError:
+                pass
         self._serial_task = None
 
-        writer = self._serial_writer
-        if writer:
-            writer.close()
-            with contextlib.suppress(Exception):
-                await writer.wait_closed()
-            self._serial_writer = None
+        await self._close_serial_writer()
 
         await self._task_manager.shutdown()
 
@@ -301,14 +309,21 @@ class GPSPreviewRuntime(ModuleRuntime):
             await self._stop_recording()
         self._session_dir = path
         try:
-            await asyncio.to_thread((path / "GPS").mkdir, parents=True, exist_ok=True)
+            module_dir = await asyncio.to_thread(ensure_module_data_dir, path, self._module_subdir)
         except Exception:
-            self._log_event("session_dir_prepare_failed", level=logging.WARNING, path=path / "GPS")
+            module_dir = path / self._module_subdir
+            self._log_event(
+                "session_dir_prepare_failed",
+                level=logging.WARNING,
+                path=module_dir,
+            )
+        self._data_dir = module_dir
 
     async def _start_recording(self) -> None:
         if self._recording:
             self._log_event("recording_already_active", level=logging.DEBUG, path=self._record_path)
             return
+        self._active_trial_number = self._resolve_trial_number()
         record_path = await asyncio.to_thread(self._open_recording_file)
         if record_path:
             self._recording = True
@@ -331,27 +346,40 @@ class GPSPreviewRuntime(ModuleRuntime):
             return Path(session_dir)
         return None
 
-    def _extract_session_token(self, session_dir: Path) -> str:
-        name = session_dir.name
-        if "_" in name:
-            return name.split("_", 1)[1]
-        return dt.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-
-    def _resolve_record_dir(self) -> tuple[Optional[Path], Optional[str]]:
+    def _resolve_record_dir(self) -> Optional[Path]:
+        if self._data_dir is not None:
+            return self._data_dir
         session_dir = self._active_session_dir()
         if session_dir is None:
-            return None, None
-        token = self._extract_session_token(session_dir)
-        return session_dir / "GPS", token
+            return None
+        module_dir = session_dir / self._module_subdir
+        module_dir.mkdir(parents=True, exist_ok=True)
+        self._data_dir = module_dir
+        return module_dir
+
+    def _resolve_trial_number(self) -> int:
+        try:
+            value = int(getattr(self.model, "trial_number", 0) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value <= 0:
+            value = 1
+        return value
 
     def _open_recording_file(self) -> Optional[Path]:
-        record_dir, token = self._resolve_record_dir()
-        if record_dir is None or not token:
+        record_dir = self._resolve_record_dir()
+        if record_dir is None:
             self._log_event("recording_start_blocked", level=logging.WARNING, reason="missing_session")
             return None
         try:
             record_dir.mkdir(parents=True, exist_ok=True)
-            path = record_dir / f"{token}_GPS.csv"
+            prefix = module_filename_prefix(
+                record_dir,
+                self._module_subdir,
+                self._active_trial_number,
+                code="GPS",
+            )
+            path = record_dir / f"{prefix}.csv"
             handle = path.open("w", encoding="utf-8", newline="")
             writer = csv.writer(handle)
             writer.writerow(
@@ -408,7 +436,7 @@ class GPSPreviewRuntime(ModuleRuntime):
         fix = self._fix
         recorded_at_unix = time.time()
         fix_timestamp = fix.timestamp.isoformat() if fix.timestamp else ""
-        trial_number = int(getattr(self.model, "trial_number", 0) or 0)
+        trial_number = self._active_trial_number
         lat = fix.latitude
         lon = fix.longitude
         altitude = fix.altitude_m
@@ -511,13 +539,26 @@ class GPSPreviewRuntime(ModuleRuntime):
                 self._log_event("serial_loop_error", level=logging.WARNING, error=str(exc))
                 self._set_connection_state(False, error=str(exc))
             finally:
-                writer.close()
-                with contextlib.suppress(Exception):
-                    await writer.wait_closed()
-                self._serial_writer = None
+                await self._close_serial_writer()
 
             if not self._shutdown.is_set():
                 await asyncio.sleep(self.reconnect_delay)
+
+    async def _close_serial_writer(self) -> None:
+        writer = self._serial_writer
+        if writer is None:
+            return
+        self._serial_writer = None
+        with contextlib.suppress(Exception):
+            writer.close()
+        if not hasattr(writer, "wait_closed"):
+            return
+        try:
+            await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
+        except asyncio.TimeoutError:
+            self._log_event("serial_close_timeout", level=logging.DEBUG)
+        except Exception:
+            self._log_event("serial_close_failed", level=logging.DEBUG)
 
     def _set_connection_state(self, connected: bool, *, error: Optional[str]) -> None:
         changed = connected != self._connection_state or error != self._serial_error
@@ -778,24 +819,21 @@ class GPSPreviewRuntime(ModuleRuntime):
         except Exception:
             delayed_init()
 
-    def _build_io_panel(self, container) -> None:
+    def _build_telemetry_panel(self, container) -> None:
         assert tk is not None and ttk is not None
 
-        container.columnconfigure(0, weight=1)
-        container.rowconfigure(0, weight=1)
-
-        telemetry = ttk.Frame(container, padding="6")
-        telemetry.grid(row=0, column=0, sticky="nsew")
-        telemetry.columnconfigure(0, weight=1)
+        body = ttk.Frame(container, padding="6")
+        body.grid(row=0, column=0, sticky="nsew")
+        body.columnconfigure(0, weight=1)
 
         font = ("TkFixedFont", 10)
         self._telemetry_var = tk.StringVar(value=self._format_telemetry_text())
         ttk.Label(
-            telemetry,
+            body,
             textvariable=self._telemetry_var,
             font=font,
             justify="left",
-            anchor="w",
+            anchor="nw",
         ).grid(row=0, column=0, sticky="nsew")
         self._update_info_panel()
 
@@ -868,7 +906,7 @@ class GPSPreviewRuntime(ModuleRuntime):
             f"UTC:{time_text}",
             f"SENT:{sentence}",
         ]
-        return " | ".join(parts)
+        return "\n".join(parts)
 
     def _format_coordinate(self, value: Optional[float], positive: str, negative: str) -> str:
         if value is None:
@@ -947,13 +985,15 @@ class GPSPreviewRuntime(ModuleRuntime):
         zoom: float,
     ) -> tuple[Image.Image, str]:
         zoom_int = max(0, int(round(zoom)))
-        grid = GRID_SIZE
-        size = grid * TILE_SIZE
-        image = Image.new("RGB", (size, size), "#dcdcdc")
+        display_grid = GRID_SIZE
+        load_grid = display_grid + 2
+        display_size = display_grid * TILE_SIZE
+        load_size = load_grid * TILE_SIZE
+        image = Image.new("RGB", (load_size, load_size), "#dcdcdc")
 
         xtile, ytile = self._latlon_to_tile(lat, lon, zoom_int)
-        base_x = int(math.floor(xtile)) - grid // 2
-        base_y = int(math.floor(ytile)) - grid // 2
+        base_x = int(math.floor(xtile)) - load_grid // 2
+        base_y = int(math.floor(ytile)) - load_grid // 2
 
         total_loaded = 0
         conn = sqlite3.connect(db_path)
@@ -961,8 +1001,8 @@ class GPSPreviewRuntime(ModuleRuntime):
         n = 2 ** zoom_int
 
         try:
-            for gx in range(grid):
-                for gy in range(grid):
+            for gx in range(load_grid):
+                for gy in range(load_grid):
                     tx = (base_x + gx) % max(1, n)
                     ty = min(max(base_y + gy, 0), max(n - 1, 0))
                     tile = self._load_tile_image(cur, zoom_int, tx, ty)
@@ -974,8 +1014,19 @@ class GPSPreviewRuntime(ModuleRuntime):
         finally:
             conn.close()
 
-        self._draw_center_marker(image, xtile - base_x, ytile - base_y)
-        info = f"{total_loaded}/{grid * grid} tiles (zoom={zoom_int})"
+        tile_center_x = (xtile - base_x) * TILE_SIZE
+        tile_center_y = (ytile - base_y) * TILE_SIZE
+        crop_left = tile_center_x - (display_size / 2)
+        crop_top = tile_center_y - (display_size / 2)
+        max_offset = load_size - display_size
+        crop_left = int(round(max(0.0, min(max_offset, crop_left))))
+        crop_top = int(round(max(0.0, min(max_offset, crop_top))))
+        image = image.crop((crop_left, crop_top, crop_left + display_size, crop_top + display_size))
+
+        center_x = tile_center_x - crop_left
+        center_y = tile_center_y - crop_top
+        self._draw_center_marker(image, center_x, center_y)
+        info = f"{total_loaded}/{load_grid * load_grid} tiles (zoom={zoom_int})"
         return image, info
 
     def _load_tile_image(self, cursor, zoom: int, x: int, y: int) -> Optional[Image.Image]:
@@ -998,10 +1049,8 @@ class GPSPreviewRuntime(ModuleRuntime):
         ytile = (1.0 - math.log(math.tan(lat_rad) + (1 / math.cos(lat_rad))) / math.pi) / 2.0 * n
         return xtile, ytile
 
-    def _draw_center_marker(self, image: Image.Image, tile_x_offset: float, tile_y_offset: float) -> None:
+    def _draw_center_marker(self, image: Image.Image, x: float, y: float) -> None:
         draw = ImageDraw.Draw(image)
-        x = tile_x_offset * TILE_SIZE
-        y = tile_y_offset * TILE_SIZE
         radius = 8
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius),

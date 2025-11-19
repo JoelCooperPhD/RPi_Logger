@@ -265,6 +265,14 @@ class CameraController(ModuleRuntime):
         await self.shutdown_guard.start()
         self._stop_event.set()
 
+        if self.save_enabled:
+            try:
+                await asyncio.wait_for(self.storage_manager.disable_saving(), timeout=8.0)
+            except asyncio.TimeoutError:
+                self.logger.warning("Storage disable during shutdown timed out; forcing shutdown")
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.debug("Storage disable during shutdown failed: %s", exc)
+
         await self.task_manager.shutdown()
 
         slots = list(self._previews)

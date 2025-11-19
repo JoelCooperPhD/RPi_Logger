@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, Optional
 
 from rpi_logger.core.commands import StatusType
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 
 from ..domain import AudioState
 from ..services import RecorderService, SessionService
@@ -61,8 +62,11 @@ class RecordingManager:
                 return False
 
             session_dir = await self.ensure_session_dir(self.state.session_dir)
-            module_dir = session_dir / self._module_subdir
-            await asyncio.to_thread(module_dir.mkdir, parents=True, exist_ok=True)
+            module_dir = await asyncio.to_thread(
+                ensure_module_data_dir,
+                session_dir,
+                self._module_subdir,
+            )
             started = await self.recorder_service.begin_recording(device_ids, module_dir, trial_number)
             if started == 0:
                 self.logger.error("No recorders ready; aborting start")

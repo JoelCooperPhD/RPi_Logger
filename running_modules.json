@@ -1,0 +1,11 @@
+{
+  "timestamp": "2025-11-18T16:42:25.344277",
+  "running_modules": [
+    "Cameras",
+    "Gps",
+    "Drt",
+    "Notes",
+    "EyeTracker",
+    "Audio"
+  ]
+}
