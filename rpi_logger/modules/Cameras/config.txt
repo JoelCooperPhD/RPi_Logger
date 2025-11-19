@@ -1,5 +1,5 @@
 # Cameras module built on the stub (codex) runtime stack
-enabled = true
+enabled = false
 display_name = Cameras
 window_geometry = 682x505+2681+1862
 preview_fps = 5.0

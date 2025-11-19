@@ -36,6 +36,8 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.system = drt_system
         self.args = args
         self.async_bridge = None
+        if not hasattr(self, "logger"):
+            self.logger = get_module_logger("DRTTkinterGUI")
 
         self.notebook: Optional[ttk.Notebook] = None
         self.device_tabs: Dict[str, DeviceTab] = {}
@@ -166,7 +168,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         if self.async_bridge:
             self.async_bridge.run_coroutine(self._start_recording_async())
         else:
-            logger.error("No async_bridge available to start recording")
+            self.logger.error("No async_bridge available to start recording")
 
     async def _start_recording_async(self):
         if await self.system.start_recording():
@@ -174,15 +176,15 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             for tab in self.device_tabs.values():
                 if tab.plotter:
                     tab.plotter.start_recording()
-            logger.info("Recording started")
+            self.logger.info("Recording started")
         else:
-            logger.error("Failed to start recording")
+            self.logger.error("Failed to start recording")
 
     def _stop_recording(self):
         if self.async_bridge:
             self.async_bridge.run_coroutine(self._stop_recording_async())
         else:
-            logger.error("No async_bridge available to stop recording")
+            self.logger.error("No async_bridge available to stop recording")
 
     async def _stop_recording_async(self):
         if await self.system.stop_recording():
@@ -190,39 +192,39 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             for tab in self.device_tabs.values():
                 if tab.plotter:
                     tab.plotter.stop_recording()
-            logger.info("Recording stopped")
+            self.logger.info("Recording stopped")
         else:
-            logger.error("Failed to stop recording")
+            self.logger.error("Failed to stop recording")
 
     def _on_stimulus_on(self, port: str):
         handler = self.system.get_device_handler(port)
         if handler:
-            logger.info(f"Stimulus ON button pressed for {port}")
+            self.logger.info("Stimulus ON button pressed for %s", port)
 
             if self.async_bridge:
                 self.async_bridge.run_coroutine(handler.set_stimulus(True))
             else:
-                logger.error("No async_bridge available to send command")
+                self.logger.error("No async_bridge available to send command")
 
             self.stimulus_state[port] = 1
             if port in self.device_tabs and self.device_tabs[port].plotter:
                 self.device_tabs[port].plotter.update_stimulus_state(port, 1)
-            logger.info(f"Stimulus ON scheduled for {port}")
+            self.logger.info("Stimulus ON scheduled for %s", port)
 
     def _on_stimulus_off(self, port: str):
         handler = self.system.get_device_handler(port)
         if handler:
-            logger.info(f"Stimulus OFF button pressed for {port}")
+            self.logger.info("Stimulus OFF button pressed for %s", port)
 
             if self.async_bridge:
                 self.async_bridge.run_coroutine(handler.set_stimulus(False))
             else:
-                logger.error("No async_bridge available to send command")
+                self.logger.error("No async_bridge available to send command")
 
             self.stimulus_state[port] = 0
             if port in self.device_tabs and self.device_tabs[port].plotter:
                 self.device_tabs[port].plotter.update_stimulus_state(port, 0)
-            logger.info(f"Stimulus OFF scheduled for {port}")
+            self.logger.info("Stimulus OFF scheduled for %s", port)
 
     def _on_configure(self, port: str):
         if not self.config_window:
@@ -245,10 +247,10 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 if not self.system.recording:
                     self.quick_panel.set_module_state("Ready")
         except Exception as e:
-            logger.error(f"Error in on_device_connected: {e}", exc_info=True)
+            self.logger.error("Error in on_device_connected: %s", e, exc_info=True)
 
     def on_device_disconnected(self, port: str):
-        logger.info(f"GUI: Device disconnected from {port}")
+        self.logger.info("GUI: Device disconnected from %s", port)
 
         if port in self.device_tabs:
             tab = self.device_tabs[port]
@@ -259,7 +261,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                     break
 
             del self.device_tabs[port]
-            logger.info(f"Removed tab for device {port}")
+            self.logger.info("Removed tab for device %s", port)
 
         if self.empty_state_label and not self.device_tabs:
             self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)

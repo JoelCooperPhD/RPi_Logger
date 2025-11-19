@@ -12,6 +12,7 @@ class CommandHandler(BaseCommandHandler):
     def __init__(self, system: 'DRTSystem', gui: Optional[any] = None):
         super().__init__(system)
         self.gui = gui
+        self.logger = get_module_logger("DRTCommandHandler")
 
     async def _start_recording_impl(self, command_data: dict, trial_number: int) -> bool:
         return await self.system.start_recording()
@@ -25,10 +26,10 @@ class CommandHandler(BaseCommandHandler):
         if "session_dir" in command_data:
             from pathlib import Path
             session_dir = Path(command_data["session_dir"])
-            logger.info(f"Updating session_dir to: {session_dir}")
+            self.logger.info("Updating session_dir to: %s", session_dir)
             for port, handler in self.system.device_handlers.items():
                 handler.output_dir = session_dir
-                logger.info(f"Updated output_dir for device {port} to: {session_dir}")
+                self.logger.info("Updated output_dir for device %s to: %s", port, session_dir)
 
     def _get_recording_started_status_data(self, trial_number: int) -> dict:
         return {"device_count": len(self.system.device_handlers)}
@@ -49,28 +50,28 @@ class CommandHandler(BaseCommandHandler):
 
     async def handle_start_session(self, command_data: dict) -> None:
         await super().handle_start_session(command_data)
-        logger.info("Received start_session command")
+        self.logger.info("Received start_session command")
 
         if self.gui:
             for tab in self.gui.device_tabs.values():
                 if tab.plotter:
                     tab.plotter.start_session()
 
-        logger.info("Session started - plot cleared and animation started")
+        self.logger.info("Session started - plot cleared and animation started")
 
     async def handle_stop_session(self, command_data: dict) -> None:
         await super().handle_stop_session(command_data)
-        logger.info("Received stop_session command")
+        self.logger.info("Received stop_session command")
 
         if self.gui:
             for tab in self.gui.device_tabs.values():
                 if tab.plotter:
                     tab.plotter.stop()
 
-        logger.info("Session stopped - animation frozen")
+        self.logger.info("Session stopped - animation frozen")
 
     async def handle_get_status(self, command_data: dict) -> None:
-        logger.debug("Received get_status command")
+        self.logger.debug("Received get_status command")
 
         device_count = len(self.system.device_handlers)
         connected_ports = list(self.system.device_handlers.keys())

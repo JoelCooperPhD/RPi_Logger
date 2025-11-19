@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from rpi_logger.core.logging_utils import get_module_logger
 import sys
 from pathlib import Path
 from typing import Optional
@@ -40,6 +39,7 @@ from vmc.constants import DISPLAY_NAME as STUB_DISPLAY_NAME
 
 from drt.runtime import DRTModuleRuntime
 from drt.view import DRTView
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.DRT.drt_core.config import load_config_file
 
 logger = get_module_logger("MainDRT")

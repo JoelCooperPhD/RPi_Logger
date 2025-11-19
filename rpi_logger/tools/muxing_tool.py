@@ -3,13 +3,16 @@
 
 import argparse
 import asyncio
-import logging
 from pathlib import Path
 from typing import Optional
 
+from rpi_logger.core.logging_config import configure_logging
+from rpi_logger.core.logging_utils import get_module_logger
+
 from .sync_and_mux import discover_trial_numbers, process_session
 
-logger = logging.getLogger("muxing_tool")
+configure_logging()
+logger = get_module_logger("muxing_tool")
 
 
 def _prompt_for_session_dir(allow_gui: bool) -> Optional[Path]:

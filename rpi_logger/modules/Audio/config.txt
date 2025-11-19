@@ -10,4 +10,4 @@ save_fps = unlimited
 save_format = jpeg
 save_quality = 90
 preview_resolution = 640x480
-selected_devices = [{"id":1,"name":"USB Microphoner: Audio (hw:2,0)"}]
+selected_devices = [{"id":2,"name":"USB Microphoner: Audio (hw:2,0)"}]

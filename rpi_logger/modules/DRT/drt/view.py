@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from rpi_logger.core.logging_utils import get_module_logger
+import logging
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
+
+from rpi_logger.core.logging_utils import ensure_structured_logger, get_module_logger
 
 try:
     import tkinter as tk  # type: ignore
@@ -16,8 +18,6 @@ except Exception:  # pragma: no cover - tkinter unavailable in headless tests
 from rpi_logger.modules.DRT.drt_core.interfaces.gui.tkinter_gui import TkinterGUI
 
 ActionCallback = Optional[Callable[[str], Awaitable[None]]]
-
-logger = get_module_logger(__name__)
 
 
 class _SystemPlaceholder:
@@ -64,20 +64,21 @@ class _LoopAsyncBridge:
 class DRTTkinterGUI(TkinterGUI):
     """Tkinter GUI variant that forwards recording controls via the stub controller."""
 
-    def __init__(self, args, action_callback: ActionCallback):
+    def __init__(self, args, action_callback: ActionCallback, logger: Optional[logging.Logger] = None):
         self._action_callback = action_callback
         self._plot_recording_state: Optional[bool] = None
+        self.logger = ensure_structured_logger(logger, fallback_name="DRTTkinterGUI") if logger else get_module_logger("DRTTkinterGUI")
         super().__init__(_SystemPlaceholder(), args)
 
     async def _start_recording_async(self):  # type: ignore[override]
         if not self._action_callback:
-            logger.error("Start recording requested before action callback ready")
+            self.logger.error("Start recording requested before action callback ready")
             return
         await self._action_callback("start_recording")
 
     async def _stop_recording_async(self):  # type: ignore[override]
         if not self._action_callback:
-            logger.error("Stop recording requested before action callback ready")
+            self.logger.error("Stop recording requested before action callback ready")
             return
         await self._action_callback("stop_recording")
 
@@ -125,13 +126,14 @@ class DRTView:
         action_callback: Optional[Callable[[str], Awaitable[None]]] = None,
         *,
         display_name: str,
+        logger: Optional[logging.Logger] = None,
     ) -> None:
         self.args = args
         self.model = model
         self.action_callback = action_callback
         self.display_name = display_name or "DRT"
-        self.logger = get_module_logger("DRTView")
-        self.gui = DRTTkinterGUI(args, self._dispatch_action)
+        self.logger = ensure_structured_logger(logger, fallback_name="DRTView") if logger else get_module_logger("DRTView")
+        self.gui = DRTTkinterGUI(args, self._dispatch_action, logger=self.logger.getChild("GUI"))
         self.gui.async_bridge = _LoopAsyncBridge()
         self.gui.set_close_handler(self._on_close)
         self._runtime = None

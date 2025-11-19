@@ -301,6 +301,10 @@ class CameraStoragePipeline:
             fps_hint: Expected FPS for video writing.
             yuv_frame: Raw YUV420 planar array for ffmpeg encoding.
         """
+        # Initialize return values to prevent UnboundLocalError
+        image_path: Optional[Path] = None
+        video_written: bool = False
+        
         sensor_fps = self._update_sensor_fps(payload)
         if sensor_fps is not None:
             fps_hint = sensor_fps
@@ -312,8 +316,6 @@ class CameraStoragePipeline:
         overlay_info = self._build_overlay_info(payload)
 
         if self.uses_hardware_encoder and self._picamera_encoder is not None:
-            image_path: Optional[Path] = None
-
             if not self._fps_tracker.hardware_tracking:
                 self._fps_tracker.record_fallback_hardware_frame()
             return StorageWriteResult(

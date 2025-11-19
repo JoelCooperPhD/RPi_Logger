@@ -163,7 +163,7 @@ class DRTPlotter:
                 self._plot_lines.update(self._state_xy[unit_id])
 
             except (KeyError, IndexError) as e:
-                logger.debug(f"Animation error for {unit_id}: {e}")
+                self.logger.debug("Animation error for %s: %s", unit_id, e)
 
         return self._plot_lines
 
@@ -210,13 +210,13 @@ class DRTPlotter:
         self._state_now[port] = int(state)
 
     def pause(self):
-        logger.info("PAUSE: Creating gap in stimulus line, animation keeps running")
+        self.logger.info("PAUSE: Creating gap in stimulus line, animation keeps running")
         for port in list(self._state_now.keys()):
             self._state_now[port] = np.nan
         self._recording = False
 
     def stop(self):
-        logger.info("STOP: Freezing animation completely")
+        self.logger.info("STOP: Freezing animation completely")
         for port in list(self._state_now.keys()):
             self._state_array[port] = np.roll(self._state_array[port], -1)
             self._state_array[port][-1] = np.nan
@@ -226,19 +226,19 @@ class DRTPlotter:
         self._recording = False
 
     def start_session(self):
-        logger.info("START SESSION: Clearing plot and starting animation (blank)")
+        self.logger.info("START SESSION: Clearing plot and starting animation (blank)")
         self.clear_all()
         self.run = True
         self._session_active = True
         self._recording = False
 
     def start_recording(self):
-        logger.info("START RECORDING: Data will start appearing")
+        self.logger.info("START RECORDING: Data will start appearing")
         if not self._session_active:
-            logger.info("  First recording - clearing plot")
+            self.logger.info("  First recording - clearing plot")
             self.start_session()
         else:
-            logger.info("  Resuming animation from frozen state")
+            self.logger.info("  Resuming animation from frozen state")
             self.run = True
 
         for port in list(self._state_now.keys()):
@@ -247,7 +247,7 @@ class DRTPlotter:
         self._recording = True
 
     def stop_recording(self):
-        logger.info("STOP RECORDING: Creating gap, animation keeps marching")
+        self.logger.info("STOP RECORDING: Creating gap, animation keeps marching")
         for port in list(self._state_now.keys()):
             self._state_now[port] = np.nan
         self._recording = False
@@ -275,7 +275,7 @@ class DRTPlotter:
 
         self._unit_ids.discard(port)
 
-        logger.info(f"Removed device {port} from plotter")
+        self.logger.info("Removed device %s from plotter", port)
 
     def clear_all(self):
         for unit_id in self._state_array.keys():

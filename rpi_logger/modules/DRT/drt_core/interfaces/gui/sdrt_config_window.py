@@ -37,7 +37,7 @@ class SDRTConfigWindow:
         handler = self.system.get_device_handler(port)
 
         if not handler:
-            logger.error(f"No device handler found for port {port}")
+            self.logger.error("No device handler found for port %s", port)
             return
 
         self._create_window(port, handler)
@@ -46,7 +46,7 @@ class SDRTConfigWindow:
         devices = self.system.get_connected_devices()
 
         if not devices:
-            logger.warning("No devices connected to configure")
+            self.logger.warning("No devices connected to configure")
             return
 
         if len(devices) == 1:
@@ -159,7 +159,7 @@ class SDRTConfigWindow:
         if self.async_bridge:
             self.async_bridge.run_coroutine(self._load_current_config(handler))
         else:
-            logger.error("No async_bridge available to load config")
+            self.logger.error("No async_bridge available to load config")
 
         self.config_window.update_idletasks()
         self.config_window.geometry(f"+{self.config_window.winfo_screenwidth()//2 - self.config_window.winfo_width()//2}+"
@@ -179,7 +179,7 @@ class SDRTConfigWindow:
             if config_data:
                 self._update_fields(config_data)
         except Exception as e:
-            logger.warning(f"Could not load current device configuration: {e}")
+            self.logger.warning("Could not load current device configuration: %s", e)
 
     def _update_fields(self, config_data: Dict):
         if 'lowerISI' in config_data:
@@ -213,11 +213,11 @@ class SDRTConfigWindow:
                     handler, lower_isi, upper_isi, intensity, stim_dur
                 ))
             else:
-                logger.error("No async_bridge available to upload config")
+                self.logger.error("No async_bridge available to upload config")
 
-            logger.info(f"Uploading configuration to device on {self.current_port}")
+            self.logger.info("Uploading configuration to device on %s", self.current_port)
         except Exception as e:
-            logger.error(f"Error uploading configuration: {e}", exc_info=True)
+            self.logger.error("Error uploading configuration: %s", e, exc_info=True)
 
     async def _reload_config(self, handler: 'DRTHandler'):
         self._clear_settings()
@@ -237,24 +237,24 @@ class SDRTConfigWindow:
             await handler.set_upper_isi(upper_isi)
             await handler.set_intensity(intensity)
             await handler.set_stimulus_duration(stim_dur)
-            logger.info("Configuration uploaded successfully")
+            self.logger.info("Configuration uploaded successfully")
             await self._reload_config(handler)
         except Exception as e:
-            logger.error(f"Failed to send configuration: {e}", exc_info=True)
+            self.logger.error("Failed to send configuration: %s", e, exc_info=True)
 
     def _set_iso_preset(self, handler: 'DRTHandler'):
         if self.async_bridge:
             self.async_bridge.run_coroutine(self._send_iso_preset(handler))
         else:
-            logger.error("No async_bridge available to set ISO preset")
+            self.logger.error("No async_bridge available to set ISO preset")
 
     async def _send_iso_preset(self, handler: 'DRTHandler'):
         try:
             await handler.set_iso_params()
-            logger.info("ISO standard configuration sent to device")
+            self.logger.info("ISO standard configuration sent to device")
             await self._reload_config(handler)
         except Exception as e:
-            logger.error(f"Failed to send ISO preset: {e}", exc_info=True)
+            self.logger.error("Failed to send ISO preset: %s", e, exc_info=True)
 
     def _clear_settings(self):
         for setting in self.settings.values():

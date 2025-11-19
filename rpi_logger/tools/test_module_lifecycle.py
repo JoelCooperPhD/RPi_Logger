@@ -2,18 +2,18 @@
 
 import asyncio
 import json
-import logging
 import sys
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from rpi_logger.core.logging_config import configure_logging
+from rpi_logger.core.logging_utils import get_module_logger
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 configure_logging()
-logger = logging.getLogger("LifecycleTest")
+logger = get_module_logger("LifecycleTest")
 
 
 class ModuleLifecycleTest:

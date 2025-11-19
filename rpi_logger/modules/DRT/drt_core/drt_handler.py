@@ -1,8 +1,9 @@
 import asyncio
-from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 from datetime import datetime
+
+from rpi_logger.core.logging_utils import get_module_logger
 
 from rpi_logger.modules.base import USBSerialDevice
 from rpi_logger.modules.base.storage_utils import module_filename_prefix
@@ -23,6 +24,7 @@ class DRTHandler:
         self._config_future: Optional[asyncio.Future] = None
         self._click_count = 0
         self._buffered_trial_data: Optional[Dict[str, Any]] = None
+        self.logger = get_module_logger("DRTHandler")
 
     def set_data_callback(self, callback: Callable[[str, str, Dict[str, Any]], None]):
         self._data_callback = callback
@@ -35,7 +37,7 @@ class DRTHandler:
         loop = asyncio.get_running_loop()
         self._loop = loop
         self._read_task = loop.create_task(self._read_loop())
-        logger.info(f"Started DRT handler for {self.port}")
+        self.logger.info("Started DRT handler for %s", self.port)
 
     async def stop(self):
         if not self._running and not self._read_task:
@@ -59,13 +61,13 @@ class DRTHandler:
                     try:
                         await asyncio.wrap_future(future)
                     except RuntimeError as exc:
-                        logger.warning(
+                        self.logger.warning(
                             "Failed to await read loop task for %s on original loop: %s",
                             self.port,
                             exc,
                         )
                 else:
-                    logger.debug(
+                    self.logger.debug(
                         "Read loop task loop already stopped for %s; cancelling without await",
                         self.port,
                     )
@@ -74,7 +76,7 @@ class DRTHandler:
                 await self._cancel_read_task(task)
 
         self._loop = None
-        logger.info(f"Stopped DRT handler for {self.port}")
+        self.logger.info("Stopped DRT handler for %s", self.port)
 
     async def _cancel_read_task(self, task: asyncio.Task):
         try:
@@ -85,7 +87,7 @@ class DRTHandler:
 
     async def send_command(self, command: str, value: Optional[str] = None) -> bool:
         if command not in DRT_COMMANDS:
-            logger.warning(f"Unknown command: {command}")
+            self.logger.warning("Unknown command: %s", command)
             return False
 
         cmd_string = DRT_COMMANDS[command]
@@ -96,28 +98,28 @@ class DRTHandler:
             message = f"{cmd_string}\n\r"
 
         data = message.encode('utf-8')
-        logger.info(f"Sending command to {self.port}: {message.strip()}")
+        self.logger.info("Sending command to %s: %s", self.port, message.strip())
         success = await self.device.write(data)
 
         if success:
-            logger.info(f"Command sent successfully to {self.port}: {message.strip()}")
+            self.logger.info("Command sent successfully to %s: %s", self.port, message.strip())
         else:
-            logger.error(f"Failed to send command to {self.port}: {message.strip()}")
+            self.logger.error("Failed to send command to %s: %s", self.port, message.strip())
 
         return success
 
     async def initialize_device(self) -> bool:
-        logger.info(f"Initializing sDRT device on {self.port}")
+        self.logger.info("Initializing sDRT device on %s", self.port)
         return True
 
     async def close_device(self) -> bool:
-        logger.info(f"Closing sDRT device on {self.port}")
+        self.logger.info("Closing sDRT device on %s", self.port)
         return True
 
     async def start_experiment(self) -> bool:
         self._click_count = 0
         self._buffered_trial_data = None
-        logger.info(f"Starting experiment on {self.port}, reset click counter and buffer")
+        self.logger.info("Starting experiment on %s, reset click counter and buffer", self.port)
         return await self.send_command('exp_start')
 
     async def stop_experiment(self) -> bool:
@@ -140,7 +142,7 @@ class DRTHandler:
         return await self.send_command('set_intensity', str(value))
 
     async def get_device_config(self) -> Optional[Dict[str, Any]]:
-        logger.debug(f"Requesting configuration from {self.port}")
+        self.logger.debug("Requesting configuration from %s", self.port)
 
         self._config_future = asyncio.get_event_loop().create_future()
 
@@ -152,13 +154,13 @@ class DRTHandler:
             config_data = await asyncio.wait_for(self._config_future, timeout=2.0)
             return config_data
         except asyncio.TimeoutError:
-            logger.warning(f"Timeout waiting for config response from {self.port}")
+            self.logger.warning("Timeout waiting for config response from %s", self.port)
             return None
         finally:
             self._config_future = None
 
     async def set_iso_params(self) -> bool:
-        logger.info(f"Setting ISO preset parameters on {self.port}")
+        self.logger.info("Setting ISO preset parameters on %s", self.port)
         commands = [
             ('set_lowerISI', str(ISO_PRESET_CONFIG['lowerISI'])),
             ('set_upperISI', str(ISO_PRESET_CONFIG['upperISI'])),
@@ -170,7 +172,7 @@ class DRTHandler:
         for command, value in commands:
             result = await self.send_command(command, value)
             if not result:
-                logger.error(f"Failed to send {command} command to {self.port}")
+                self.logger.error("Failed to send %s command to %s", command, self.port)
                 success = False
 
         return success
@@ -188,10 +190,10 @@ class DRTHandler:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Error in read loop for {self.port}: {e}")
+            self.logger.error("Error in read loop for %s: %s", self.port, e)
 
     async def _process_response(self, response: str):
-        logger.debug(f"Response from {self.port}: {repr(response)}")
+        self.logger.debug("Response from %s: %s", self.port, repr(response))
 
         try:
             parts = response.split('>')
@@ -213,17 +215,17 @@ class DRTHandler:
             elif response_type == 'trial':
                 data = self._parse_trial(parts)
                 self._buffered_trial_data = data
-                logger.debug(f"Buffered trial data, current clicks: {self._click_count}")
+                self.logger.debug("Buffered trial data, current clicks: %s", self._click_count)
             elif response_type == 'experiment_end':
                 data = {'event': 'experiment_end', 'raw': response}
                 if self._buffered_trial_data:
-                    logger.debug(f"Experiment ended, writing buffered data")
+                    self.logger.debug("Experiment ended, writing buffered data")
                     await self._log_trial_data(self._buffered_trial_data)
                     self._buffered_trial_data = None
             elif response_type == 'stimulus':
                 data = self._parse_stimulus(parts)
                 if self._buffered_trial_data:
-                    logger.debug(f"Stimulus detected, writing buffered data")
+                    self.logger.debug("Stimulus detected, writing buffered data")
                     await self._log_trial_data(self._buffered_trial_data)
                     self._buffered_trial_data = None
             elif response_type == 'config':
@@ -246,7 +248,7 @@ class DRTHandler:
                 StatusMessage.send('drt_event', payload)
 
         except Exception as e:
-            logger.error(f"Error processing response from {self.port}: {e}")
+            self.logger.error("Error processing response from %s: %s", self.port, e)
 
     async def _dispatch_data_event(self, event_type: str, data: Dict[str, Any]) -> None:
         if not self._data_callback:
@@ -258,12 +260,12 @@ class DRTHandler:
             else:
                 self._data_callback(self.port, event_type, data)
         except Exception as exc:
-            logger.error(f"Error in data callback for {self.port}: {exc}")
+            self.logger.error("Error in data callback for %s: %s", self.port, exc)
 
     def _parse_click(self, parts: list) -> Dict[str, Any]:
         value = parts[1] if len(parts) > 1 else ''
         self._click_count += 1
-        logger.debug(f"Click detected on {self.port}, total clicks: {self._click_count}")
+        self.logger.debug("Click detected on %s, total clicks: %s", self.port, self._click_count)
         return {
             'event': 'click',
             'value': value,
@@ -286,7 +288,7 @@ class DRTHandler:
                     data['trial_number'] = int(values[1]) if values[1] else None
                     data['reaction_time'] = float(values[2]) if values[2] else None
             except (ValueError, IndexError) as e:
-                logger.warning(f"Could not parse trial data: {e}")
+                self.logger.warning("Could not parse trial data: %s", e)
 
         return data
 
@@ -320,7 +322,7 @@ class DRTHandler:
                         else:
                             config_data[key] = value
                     except ValueError:
-                        logger.warning(f"Could not parse config value for {key}: {value}")
+                        self.logger.warning("Could not parse config value for %s: %s", key, value)
                         config_data[key] = value
 
         return config_data
@@ -342,7 +344,7 @@ class DRTHandler:
                         f.write("Device ID, Label, Unix time in UTC, Milliseconds Since Record, Trial Number, Responses, Reaction Time\n")
 
                 await asyncio.to_thread(write_header)
-                logger.info(f"Created DRT data file: {data_file.name}")
+                self.logger.info("Created DRT data file: %s", data_file.name)
 
             port_clean = self.port.lstrip('/').replace('/', '_').replace('\\', '_')
             device_id = f"sDRT_{port_clean}"
@@ -375,7 +377,7 @@ class DRTHandler:
                     f.write(line)
 
             await asyncio.to_thread(append_line)
-            logger.debug(f"Logged trial: T={trial_number}, RT={rt}, Clicks={clicks}")
+            self.logger.debug("Logged trial: T=%s, RT=%s, Clicks=%s", trial_number, rt, clicks)
 
             log_payload = {
                 'device_id': device_id,
@@ -395,7 +397,7 @@ class DRTHandler:
             self._click_count = 0
 
         except Exception as e:
-            logger.error(f"Error logging trial data: {e}", exc_info=True)
+            self.logger.error("Error logging trial data: %s", e, exc_info=True)
 
     def _determine_trial_number(self, data: Dict[str, Any]) -> int:
         candidate = None

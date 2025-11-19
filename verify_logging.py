@@ -20,7 +20,7 @@ def verify_logging():
         return False
 
     # Test ensure_structured_logger
-    raw_logger = logging.getLogger("rpi_logger.Raw")
+    raw_logger = logging.Logger("rpi_logger.Raw")
     structured = ensure_structured_logger(raw_logger)
     print(f"Structured logger name: {structured.name}")
     

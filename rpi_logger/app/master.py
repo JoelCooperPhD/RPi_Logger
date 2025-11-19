@@ -1,7 +1,6 @@
 
 import argparse
 import asyncio
-import logging
 import signal
 import sys
 from pathlib import Path
@@ -21,9 +20,10 @@ from rpi_logger.core.cli import HeadlessController, InteractiveShell
 from rpi_logger.core.paths import CONFIG_PATH, MASTER_LOG_FILE, SESSION_STAGING_DIR, ensure_directories
 from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.core.logging_config import configure_logging
+from rpi_logger.core.logging_utils import get_module_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):

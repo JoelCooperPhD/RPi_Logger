@@ -11,6 +11,7 @@ from typing import Any, Optional, Sequence, Tuple
 
 from rpi_logger.core.logging_config import configure_logging
 from rpi_logger.core.paths import USER_MODULE_LOGS_DIR
+from rpi_logger.core.logging_utils import get_module_logger
 
 
 LOG_LEVELS: dict[str, int] = {
@@ -287,7 +288,7 @@ def setup_module_logging(
         log_file=log_file,
     )
 
-    runtime_logger = logging.getLogger(module_name or __name__)
+    runtime_logger = get_module_logger(module_name or __name__)
     if used_fallback:
         runtime_logger.warning(
             "Module log directory not writable (%s). Using fallback path %s",

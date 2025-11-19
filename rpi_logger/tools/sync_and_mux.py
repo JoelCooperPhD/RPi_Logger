@@ -14,7 +14,6 @@ Usage:
 
 import asyncio
 import argparse
-import logging
 import re
 import sys
 from pathlib import Path
@@ -28,9 +27,10 @@ from rpi_logger.modules.base.sync_metadata import SyncMetadataWriter
 from rpi_logger.modules.base.av_muxer import AVMuxer
 from rpi_logger.modules.base.constants import AV_MUXING_TIMEOUT_SECONDS, AV_DELETE_SOURCE_FILES
 from rpi_logger.core.logging_config import configure_logging
+from rpi_logger.core.logging_utils import get_module_logger
 
 configure_logging()
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 async def find_trial_files(session_dir: Path, trial_number: int) -> dict:

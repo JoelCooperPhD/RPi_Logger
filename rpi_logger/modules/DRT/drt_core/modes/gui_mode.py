@@ -18,7 +18,7 @@ class GUIMode(BaseGUIMode):
         self.logger = get_module_logger("GUIMode")
 
     async def on_async_bridge_started(self) -> None:
-        logger.info("Async bridge started - device detection will begin after mainloop starts")
+        self.logger.info("Async bridge started - device detection will begin after mainloop starts")
 
     def create_gui(self) -> Any:
         from ..interfaces.gui.tkinter_gui import TkinterGUI
@@ -42,19 +42,19 @@ class GUIMode(BaseGUIMode):
             self.gui.sync_recording_state()
 
     async def on_device_connected(self, port: str):
-        logger.info(f"GUIMode: on_device_connected called for {port}")
+        self.logger.info("GUIMode: on_device_connected called for %s", port)
         if self.gui and hasattr(self.gui, 'on_device_connected'):
-            logger.info(f"GUIMode: GUI instance has on_device_connected method")
+            self.logger.info("GUIMode: GUI instance has on_device_connected method")
 
             window = self.get_gui_window()
             if window:
-                logger.info(f"GUIMode: Scheduling GUI update via window.after() for {port}")
+                self.logger.info("GUIMode: Scheduling GUI update via window.after() for %s", port)
                 window.after(0, lambda: self.gui.on_device_connected(port))
-                logger.info(f"GUIMode: Scheduled GUI update for {port}")
+                self.logger.info("GUIMode: Scheduled GUI update for %s", port)
             else:
-                logger.warning(f"GUIMode: No window available for {port}")
+                self.logger.warning("GUIMode: No window available for %s", port)
         else:
-            logger.warning(f"GUIMode: GUI or on_device_connected method not available")
+            self.logger.warning("GUIMode: GUI or on_device_connected method not available")
 
     async def on_device_disconnected(self, port: str):
         if self.gui and hasattr(self.gui, 'on_device_disconnected'):
@@ -71,11 +71,11 @@ class GUIMode(BaseGUIMode):
                 self.gui.on_device_data(port, data_type, data)
 
     async def cleanup(self) -> None:
-        logger.info("Cleaning up GUI mode...")
+        self.logger.info("Cleaning up GUI mode...")
 
         try:
             if self.system.recording:
                 await self.system.stop_recording()
 
         except Exception as e:
-            logger.error("Error during GUI mode cleanup: %s", e, exc_info=True)
+            self.logger.error("Error during GUI mode cleanup: %s", e, exc_info=True)
