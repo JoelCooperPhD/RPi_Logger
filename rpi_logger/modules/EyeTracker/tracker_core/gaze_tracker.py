@@ -231,6 +231,18 @@ class GazeTracker:
                 # Phase 1.3: Scale early for display (reduces overlay CPU)
                 preview_frame = self.frame_processor.scale_for_preview(processed_frame)
 
+                # Optimization: Check if preview_frame shares memory with processed_frame
+                # If scale_for_preview returned the original frame (because dimensions match),
+                # they are the same object.
+                is_preview_shared = (preview_frame is processed_frame)
+
+                # If they share memory and we are recording, we must separate them to avoid
+                # burning display overlays into the recording (or vice-versa).
+                # We copy preview_frame to keep processed_frame clean for recording.
+                if is_preview_shared and self.recording_manager.is_recording:
+                    preview_frame = preview_frame.copy()
+                    is_preview_shared = False
+
                 # Use synchronous version to avoid event loop issues
                 display_frame = self.frame_processor.add_display_overlays(
                     preview_frame,
@@ -250,15 +262,18 @@ class GazeTracker:
                     # Minimal overlay for recording: frame number + optional gaze circle
                     if self.config.enable_recording_overlay:
                         frame_number = self.recording_manager.recorded_frame_count + 1  # +1 because we increment AFTER writing
+                        
+                        # OPTIMIZATION: Use processed_frame IN PLACE.
+                        # We ensured it is separate from display_frame above.
                         recording_frame = self.frame_processor.add_minimal_recording_overlay(
-                            processed_frame.copy(),
+                            processed_frame,
                             frame_number,
                             latest_gaze,
                             include_gaze=self.config.include_gaze_in_recording
                         )
                     else:
-                        # No overlay, use raw processed frame
-                        recording_frame = processed_frame.copy()
+                        # No overlay, use raw processed frame directly
+                        recording_frame = processed_frame
 
                 # Store display frame if generated
                 if display_frame is not None:

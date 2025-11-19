@@ -542,7 +542,7 @@ class RecordingManager(RecordingManagerBase):
         if not self._is_recording:
             return
 
-        self._latest_frame = frame.copy()  # Make a copy to avoid race conditions
+        self._latest_frame = frame  # Reference only - assume ownership/immutability
         metadata = metadata or FrameTimingMetadata(requested_fps=self.config.fps)
         metadata.is_duplicate = False  # This is a new frame
         self._latest_frame_metadata = metadata
@@ -1071,11 +1071,11 @@ class RecordingManager(RecordingManagerBase):
             write_time_unix = time.time()
 
             if self._latest_frame is not None:
-                frame_to_write = self._latest_frame.copy()
+                frame_to_write = self._latest_frame
                 metadata = self._latest_frame_metadata
                 last_frame_used = frame_to_write
             elif last_frame_used is not None:
-                frame_to_write = last_frame_used.copy()
+                frame_to_write = last_frame_used
                 metadata = FrameTimingMetadata(
                     capture_monotonic=None,  # This is a duplicate, no new capture time
                     capture_unix=None,       # This is a duplicate, no new capture time
