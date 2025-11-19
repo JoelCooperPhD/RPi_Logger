@@ -75,13 +75,11 @@ async def test_write_frame_no_crash():
             
             # Check that result has the expected fields
             assert hasattr(result, 'video_written')
-            assert hasattr(result, 'image_path')
             assert hasattr(result, 'video_fps')
             assert hasattr(result, 'writer_codec')
             
             print("✓ Test passed: write_frame completed without UnboundLocalError")
             print(f"  - video_written: {result.video_written}")
-            print(f"  - image_path: {result.image_path}")
             print(f"  - video_fps: {result.video_fps}")
             print(f"  - writer_codec: {result.writer_codec}")
             
@@ -138,8 +136,7 @@ async def test_write_frame_bgr_path():
             
             print("✓ Test passed: BGR path completed without UnboundLocalError")
             print(f"  - video_written: {result.video_written}")
-            print(f"  - image_path: {result.image_path}")
-            
+
             return True
             
         except UnboundLocalError as e:

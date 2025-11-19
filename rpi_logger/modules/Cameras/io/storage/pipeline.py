@@ -34,14 +34,13 @@ class StorageWriteResult:
     """Outcome of a storage pipeline write operation."""
 
     video_written: bool
-    image_path: Optional[Path]
     video_fps: float
     writer_codec: Optional[str]
 
 
 @dataclass(slots=True)
 class OverlayRenderInfo:
-    """Metadata rendered into video/still overlays and the hardware encoder overlay."""
+    """Metadata rendered into video overlays and the hardware encoder overlay."""
 
     frame_number: int
     timestamp_unix: float
@@ -301,8 +300,6 @@ class CameraStoragePipeline:
             fps_hint: Expected FPS for video writing.
             yuv_frame: Raw YUV420 planar array for ffmpeg encoding.
         """
-        # Initialize return values to prevent UnboundLocalError
-        image_path: Optional[Path] = None
         video_written: bool = False
         
         sensor_fps = self._update_sensor_fps(payload)
@@ -320,7 +317,6 @@ class CameraStoragePipeline:
                 self._fps_tracker.record_fallback_hardware_frame()
             return StorageWriteResult(
                 video_written=True,
-                image_path=None,
                 video_fps=self.video_output_fps,
                 writer_codec=self._writer_codec,
             )
@@ -363,7 +359,6 @@ class CameraStoragePipeline:
 
         return StorageWriteResult(
             video_written=video_written,
-            image_path=image_path,
             video_fps=self.video_output_fps,
             writer_codec=self._writer_codec,
         )

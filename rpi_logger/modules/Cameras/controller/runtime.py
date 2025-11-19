@@ -99,10 +99,6 @@ class CameraController(ModuleRuntime):
 
 
     @property
-    def save_stills_enabled(self) -> bool:
-        return bool(getattr(self.args, "save_stills", False))
-
-    @property
     def session_retention(self) -> int:
         return self.state.session_retention
 
@@ -210,7 +206,6 @@ class CameraController(ModuleRuntime):
         self._sensor_mode_sizes: set[tuple[int, int]] = set()
         self._sensor_mode_bit_depths: dict[tuple[int, int], int] = {}
         self._metrics_task: Optional[asyncio.Task] = None
-        self._saved_count = 0
         self._storage_failure_reported = False
         self.preview_fraction = self.capture_settings.clamp_preview_fraction(
             getattr(self.args, "preview_fraction", getattr(self._state, "preview_fraction", 1.0))

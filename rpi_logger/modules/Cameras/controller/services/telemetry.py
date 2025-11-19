@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from ...domain.model import FramePayload
@@ -267,7 +266,6 @@ class TelemetryService:
         slot: "CameraSlot",
         payload: FramePayload,
         *,
-        image_path: Optional[Path],
         video_written: bool,
         queue_drops: int = 0,
         video_fps: float = 0.0,
@@ -277,7 +275,6 @@ class TelemetryService:
         drops = payload.dropped_since_last
         drop_part = f"drops={drops}" if drops is not None else "drops=0"
         video_part = "video=Y" if video_written else "video=N"
-        image_part = f"img={image_path.name}" if image_path is not None else ""
 
         components = [
             f"Cam{slot.index} frame {payload.capture_index}",
@@ -285,8 +282,6 @@ class TelemetryService:
             drop_part,
             video_part,
         ]
-        if image_part:
-            components.append(image_part)
         if queue_drops:
             components.append(f"qdrop={queue_drops}")
         if video_fps > 0:
@@ -302,19 +297,6 @@ class TelemetryService:
         storage_result: StorageWriteResult,
         queue_drops: int,
     ) -> bool:
-        controller = self._controller
-        image_path = storage_result.image_path
-        if image_path is not None:
-            controller._saved_count += 1
-            if controller._saved_count <= 3 or controller._saved_count % 25 == 0:
-                self._logger.info(
-                    "Camera %s stored still %d -> %s (total saved %d)",
-                    slot.index,
-                    payload.capture_index,
-                    image_path,
-                    controller._saved_count,
-                )
-
         pipeline = slot.storage_pipeline
         if pipeline is not None:
             pipeline.log_frame(payload, queue_drops=queue_drops)
@@ -322,7 +304,6 @@ class TelemetryService:
         self._emit_frame_telemetry(
             slot,
             payload,
-            image_path=image_path,
             video_written=storage_result.video_written,
             queue_drops=queue_drops,
             video_fps=storage_result.video_fps,

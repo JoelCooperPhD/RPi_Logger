@@ -8,7 +8,7 @@ This document captures the current structure of the Cameras stub runtime, highli
 - **Runtime adapter (`app/camera_runtime.py`)**: thin bridge that wires supervisor callbacks (start/shutdown/commands) into the controller layer.
 - **Controller layer (`controller/*`)**: `CameraController` orchestrates hardware discovery, preview grid wiring, frame routing, storage toggles, and user/command handling. `CameraSlot` encapsulates per-camera state, while `PreviewConsumer` and `StorageConsumer` drain queues and talk to the view or storage pipeline. View-specific wiring lives in `controller/view_manager.py`, the recording/session lifecycle is isolated in `controller/storage_manager.py`, and `controller/camera_setup.py` owns camera discovery + slot teardown so the runtime class focuses on orchestration.
 - **Domain (`domain/model`, `domain/pipelines`)**: `CameraModel` owns persisted preferences, IO thresholds, and output/session directories. `ImagePipeline` runs the capture loop, frame router, and FPS counters, emitting `FramePayload` objects into preview/storage queues. `FrameTimingTracker` normalizes metadata and detects drops.
-- **Storage IO (`io/storage/*`)**: `CameraStoragePipeline` handles CSV logging, still capture, and MP4 writing (software or hardware path). `CameraCSVLogger` and the local `constants.py` mirror production defaults.
+- **Storage IO (`io/storage/*`)**: `CameraStoragePipeline` handles CSV logging and MP4 writing (software or hardware path). `CameraCSVLogger` and the local `constants.py` mirror production defaults.
 - **Media utilities (`io/media/*`)**: frame conversion helpers, pixel-format normalization, and Pillow/Numpy bridges reused by UI + storage.
 - **View (`ui/*`)**: `CameraViewAdapter` maps the stub GUI (Tkinter) into preview canvases, menus, and status HUD updates, abstracting raw Tk widgets away from the controller.
 
@@ -27,7 +27,7 @@ CLI entry] --> B[CamerasRuntime]
     H --> J[PreviewConsumer → View]
     I --> K[StorageConsumer → Storage]
     K --> F
-    F --> L[CSV logger / MP4 / Stills]
+    F --> L[CSV logger / MP4]
 ```
 
 ### Key Data Objects

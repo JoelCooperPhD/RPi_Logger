@@ -207,7 +207,6 @@ class CameraStorageManager:
         controller.save_enabled = True
         controller.capture_preferences_enabled = True
         controller._storage_failure_reported = False
-        controller._saved_count = 0
         try:
             await self.activate_storage_for_all_slots()
         except RuntimeError as exc:
@@ -229,12 +228,11 @@ class CameraStorageManager:
         )
         base_display = str(session_dir) if external_session else str(controller.save_dir)
         self.logger.info(
-            "Recording enabled -> base=%s | session=%s | rate=%s | queue=%d | stills=%s",
+            "Recording enabled -> base=%s | session=%s | rate=%s | queue=%d",
             base_display,
             controller.session_dir,
             rate_desc,
             controller.storage_queue_size,
-            "on" if controller.save_stills_enabled else "off",
         )
         return True
 
@@ -243,7 +241,6 @@ class CameraStorageManager:
         if not controller.save_enabled:
             return
         total_drops = sum(slot.storage_drop_total for slot in controller._previews)
-        saved_frames = controller._saved_count
         await self.deactivate_storage_for_all_slots()
         controller.save_enabled = False
         controller.capture_preferences_enabled = False
@@ -252,11 +249,7 @@ class CameraStorageManager:
         controller.telemetry.request_sensor_sync()
         controller.view_manager.sync_record_toggle()
         controller.view_manager.refresh_status()
-        self.logger.info(
-            "Recording disabled (saved %d frames, drops=%d)",
-            saved_frames,
-            total_drops,
-        )
+        self.logger.info("Recording disabled (queue drops=%d)", total_drops)
 
     async def update_save_directory(self, directory: Any) -> None:
         controller = self._controller

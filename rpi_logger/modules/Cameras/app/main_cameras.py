@@ -179,12 +179,6 @@ def parse_args(argv: Optional[list[str]] = None):
         help="Quality for saved JPEG frames (1-100)",
     )
     parser.add_argument(
-        "--save-stills",
-        action="store_true",
-        default=False,
-        help="Also write individual JPEG stills alongside the MP4 (adds I/O overhead)",
-    )
-    parser.add_argument(
         "--session-retention",
         type=int,
         default=5,
