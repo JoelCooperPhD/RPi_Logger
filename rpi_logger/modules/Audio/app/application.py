@@ -16,12 +16,11 @@ from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 from ..config import AudioSettings
 from ..domain import AudioState
 from ..services import DeviceDiscoveryService, RecorderService, SessionService
-from ..ui import AudioView, ViewCallbacks
+from ..ui import AudioView
 from .command_router import CommandRouter
 from .device_manager import DeviceManager
 from .module_bridge import ModuleBridge
 from .recording_manager import RecordingManager
-from .startup import AudioStartupManager
 
 
 class AudioApp:
@@ -87,18 +86,10 @@ class AudioApp:
             self.logger,
             self._emit_status,
         )
-        self.startup_manager = AudioStartupManager(
-            context,
-            self.state,
-            task_submitter=self._submit_async,
-            logger=self.logger,
-        )
-        self.startup_manager.bind()
 
         self.view = AudioView(
             context.view,
             self.state,
-            callbacks=ViewCallbacks(toggle_device=self.toggle_device),
             submit_async=self._submit_async,
             logger=self.logger,
             mode=settings.mode,
@@ -111,28 +102,20 @@ class AudioApp:
 
     async def start(self) -> None:
         self.logger.debug(
-            "start() invoked (auto_select_new=%s, auto_start_recording=%s)",
-            self.settings.auto_select_new,
+            "start() invoked (auto_start_recording=%s)",
             self.settings.auto_start_recording,
         )
         devices, new_ids = await self.device_manager.discover_devices()
-        await self.startup_manager.restore_previous_selection(self.device_manager)
         if devices:
             self.logger.info(
                 "Discovered %d audio device(s) (%d new)",
                 len(devices),
                 len(new_ids),
             )
+            await self.device_manager.auto_select(devices.keys())
+            self.logger.info("Auto-enabled %d USB audio device(s)", len(devices))
         else:
             self.logger.warning("No audio devices discovered")
-
-        if self.settings.auto_select_new and not self.state.selected_devices:
-            if new_ids:
-                self.logger.info("Auto-selecting %d new device(s)", len(new_ids))
-                await self.device_manager.auto_select(new_ids)
-            else:
-                self.logger.debug("Auto-select enabled; selecting first available device")
-                await self.device_manager.auto_select_first_available()
 
         if self.settings.auto_start_recording:
             self.logger.info("Auto-start recording enabled; starting trial %d", self._pending_trial)
@@ -148,7 +131,6 @@ class AudioApp:
         self.logger.debug("Shutdown requested")
         await self.shutdown_guard.start()
         await self.stop_recording()
-        await self.startup_manager.flush()
         self._stop_event.set()
         await self.task_manager.shutdown()
         await self.recorder_service.stop_all()
@@ -207,8 +189,7 @@ class AudioApp:
             await asyncio.sleep(interval)
             _, new_ids = await self.device_manager.discover_devices()
             if new_ids:
-                await self.startup_manager.restore_new_devices(self.device_manager, new_ids)
-            if self.settings.auto_select_new and new_ids:
+                self.logger.info("Auto-enabling %d newly detected device(s)", len(new_ids))
                 await self.device_manager.auto_select(new_ids)
 
     async def _meter_refresh_loop(self) -> None:

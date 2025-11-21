@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
+from rpi_logger.modules.base.preferences import ScopedPreferences
 
 INTERACTION_MODES: tuple[str, str] = ("gui", "cli")
 
@@ -25,7 +26,6 @@ class AudioSettings:
     sample_rate: int = 48_000
     discovery_timeout: float = 5.0
     discovery_retry: float = 3.0
-    auto_select_new: bool = False
     auto_start_recording: bool = False
     console_output: bool = False
     meter_refresh_interval: float = 0.08
@@ -62,7 +62,6 @@ class AudioSettings:
             sample_rate=int(getattr(args, "sample_rate", defaults.sample_rate)),
             discovery_timeout=float(getattr(args, "discovery_timeout", defaults.discovery_timeout)),
             discovery_retry=float(getattr(args, "discovery_retry", defaults.discovery_retry)),
-            auto_select_new=_to_bool(getattr(args, "auto_select_new", defaults.auto_select_new)),
             auto_start_recording=_to_bool(
                 getattr(args, "auto_start_recording", defaults.auto_start_recording)
             ),
@@ -82,6 +81,34 @@ class AudioSettings:
             shutdown_timeout=float(getattr(args, "shutdown_timeout", defaults.shutdown_timeout)),
         )
 
+    @classmethod
+    def from_preferences(cls, prefs: ScopedPreferences, args: Any) -> "AudioSettings":
+        """Construct settings by overlaying CLI args on persisted preferences."""
+
+        base = cls.from_args(args)
+        merged = asdict(base)
+
+        def _maybe_update(key: str, cast):
+            stored = prefs.get(key)
+            if stored is None:
+                return
+            try:
+                merged[key] = cast(stored)
+            except Exception:
+                return
+
+        _maybe_update("session_prefix", str)
+        _maybe_update("log_level", str)
+        _maybe_update("window_geometry", str)
+        _maybe_update("sample_rate", int)
+        _maybe_update("discovery_timeout", float)
+        _maybe_update("discovery_retry", float)
+        _maybe_update("auto_start_recording", bool)
+        _maybe_update("console_output", bool)
+        _maybe_update("output_dir", lambda value: Path(value))
+
+        settings = cls(**merged)
+        return settings
 
 def read_config_file(path: Path) -> dict[str, object]:
     """Load key/value pairs from ``config.txt`` style files."""
@@ -176,7 +203,7 @@ def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
     parser.add_argument(
         "--window-geometry",
         type=str,
-        default=_config_value(config, "window_geometry", defaults.window_geometry),
+        default=defaults.window_geometry,
         help="Initial window geometry when launched with GUI",
     )
     parser.add_argument(
@@ -196,21 +223,6 @@ def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
         type=float,
         default=_config_value(config, "discovery_retry", defaults.discovery_retry),
         help="Device rediscovery interval (seconds)",
-    )
-
-    auto_select = parser.add_mutually_exclusive_group()
-    auto_select.add_argument(
-        "--auto-select-new",
-        dest="auto_select_new",
-        action="store_true",
-        default=_config_value(config, "auto_select_new", defaults.auto_select_new),
-        help="Automatically select newly detected devices",
-    )
-    auto_select.add_argument(
-        "--no-auto-select-new",
-        dest="auto_select_new",
-        action="store_false",
-        help="Disable automatic selection of new devices",
     )
 
     auto_start = parser.add_mutually_exclusive_group()

@@ -17,8 +17,17 @@ class AudioRuntime(ModuleRuntime):
 
     def __init__(self, context: RuntimeContext) -> None:
         self.context = context
-        self.settings = AudioSettings.from_args(context.args)
-        self.app = AudioApp(context, self.settings, status_callback=StatusMessage.send)
+        prefs = getattr(context.model, "preferences_scope", None)
+        if callable(prefs):
+            audio_prefs = prefs("audio")
+            self.settings = AudioSettings.from_preferences(audio_prefs, context.args)
+        else:
+            self.settings = AudioSettings.from_args(context.args)
+        self.app = AudioApp(
+            context,
+            self.settings,
+            status_callback=StatusMessage.send,
+        )
 
     async def start(self) -> None:
         await self.app.start()

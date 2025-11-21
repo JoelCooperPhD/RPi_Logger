@@ -34,8 +34,9 @@ from vmc import StubCodexSupervisor
 from rpi_logger.core.logging_config import configure_logging
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.Audio.config import AudioSettings, parse_cli_args
-from rpi_logger.modules.base.config_paths import resolve_writable_module_config
+from rpi_logger.modules.base.config_paths import resolve_module_config_path, resolve_writable_module_config
 from rpi_logger.modules.Audio.runtime import AudioRuntime
+from rpi_logger.cli.common import install_signal_handlers
 
 DISPLAY_NAME = "Audio"
 MODULE_ID = "audio"
@@ -99,6 +100,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     module_dir = MODULE_DIR
 
+    config_context = resolve_module_config_path(module_dir, MODULE_ID)
+    setattr(args, "config_path", config_context.writable_path)
+
     supervisor = StubCodexSupervisor(
         args,
         module_dir,
@@ -106,7 +110,11 @@ async def main(argv: Optional[list[str]] = None) -> None:
         runtime_factory=build_runtime,
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
+        config_path=config_context.writable_path,
     )
+
+    loop = asyncio.get_running_loop()
+    install_signal_handlers(supervisor, loop)
 
     try:
         await supervisor.run()

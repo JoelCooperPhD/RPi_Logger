@@ -1,5 +1,5 @@
 """User interface helpers for the audio module."""
 
-from .view import AudioView, SubmitCoroutine, ViewCallbacks
+from .view import AudioView, SubmitCoroutine
 
-__all__ = ["AudioView", "SubmitCoroutine", "ViewCallbacks"]
+__all__ = ["AudioView", "SubmitCoroutine"]

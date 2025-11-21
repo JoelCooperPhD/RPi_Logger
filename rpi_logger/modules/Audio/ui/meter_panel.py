@@ -23,8 +23,6 @@ class MeterPanel:
         self._container: "ttk.Frame | None" = None  # type: ignore[assignment]
         self._meter_canvases: Dict[int, "tk.Canvas"] = {}
         self._canvas_items: Dict[int, Dict[str, int]] = {}
-        self._label_widgets: Dict[int, "ttk.Label"] = {}
-        self._label_texts: Dict[int, str] = {}
         self._rendered_devices: Tuple[int, ...] = ()
 
     def attach(self, parent) -> None:
@@ -34,8 +32,7 @@ class MeterPanel:
             return
         container = ttk.Frame(parent)
         container.grid(row=0, column=0, sticky="nsew")
-        container.columnconfigure(0, weight=0, minsize=170)
-        container.columnconfigure(1, weight=1)
+        container.columnconfigure(0, weight=1)
         self._container = container
 
     def rebuild(self, snapshot: AudioSnapshot) -> None:
@@ -43,7 +40,6 @@ class MeterPanel:
             return
         desired_order = tuple(sorted(snapshot.selected_devices.keys()))
         if desired_order == self._rendered_devices:
-            self._refresh_labels(snapshot)
             return
 
         self._rendered_devices = desired_order
@@ -53,29 +49,36 @@ class MeterPanel:
 
         self._meter_canvases.clear()
         self._canvas_items.clear()
-        self._label_widgets.clear()
-        self._label_texts.clear()
 
         if not desired_order:
             return
 
         for row_index, device_id in enumerate(desired_order):
-            self._container.rowconfigure(row_index, weight=0)
-            label_text = self._build_label_text(snapshot, device_id)
-            label = ttk.Label(self._container, text=label_text)
-            label.grid(row=row_index, column=0, sticky="w", padx=(0, 6), pady=(0, 3))
-            self._label_widgets[device_id] = label
-            self._label_texts[device_id] = label_text
+            self._container.rowconfigure(row_index, weight=1)
 
+            # Frame for each device (label + meter)
+            device_frame = ttk.Frame(self._container)
+            device_frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 6))
+            device_frame.columnconfigure(0, weight=1)
+
+            # Device Label
+            device_info = snapshot.selected_devices.get(device_id)
+            device_name = device_info.name if device_info else f"Device {device_id}"
+            label = ttk.Label(
+                device_frame, text=device_name, anchor="w", font=("TkDefaultFont", 9)
+            )
+            label.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+
+            # Meter Canvas
             canvas = tk.Canvas(
-                self._container,
+                device_frame,
                 width=260,
-                height=24,
+                height=32,
                 bg="#1a1a1a",
                 highlightthickness=1,
                 highlightbackground="gray",
             )
-            canvas.grid(row=row_index, column=1, sticky="ew", pady=(0, 3))
+            canvas.grid(row=1, column=0, sticky="ew")
             self._meter_canvases[device_id] = canvas
 
     def draw(self, snapshot: AudioSnapshot, *, force: bool = False) -> None:
@@ -194,22 +197,6 @@ class MeterPanel:
             canvas.coords(items["peak_line"], 0, 0, 0, 0)
 
         meter.clear_dirty()
-
-
-    def _build_label_text(self, snapshot: AudioSnapshot, device_id: int) -> str:
-        device = snapshot.devices.get(device_id) or snapshot.selected_devices.get(device_id)
-        name = device.name if device else "Unknown device"
-        return f"Dev{device_id}: {name}"
-
-    def _refresh_labels(self, snapshot: AudioSnapshot) -> None:
-        for device_id, label in list(self._label_widgets.items()):
-            if not label.winfo_exists():
-                continue
-            new_text = self._build_label_text(snapshot, device_id)
-            if self._label_texts.get(device_id) == new_text:
-                continue
-            label.configure(text=new_text)
-            self._label_texts[device_id] = new_text
 
 
 __all__ = ["MeterPanel"]

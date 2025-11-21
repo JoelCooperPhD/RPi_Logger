@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 try:  # pragma: no cover - Tk unavailable on display-less hosts
@@ -14,16 +13,10 @@ except Exception:  # pragma: no cover
     ttk = None  # type: ignore
 
 from ..domain import AudioSnapshot, AudioState
-from .device_menu import DeviceMenuController
 from .meter_panel import MeterPanel
 
 
 SubmitCoroutine = Callable[[Awaitable[None], str], None]
-
-
-@dataclass(slots=True)
-class ViewCallbacks:
-    toggle_device: Callable[[int, bool], Awaitable[None]]
 
 
 class AudioView:
@@ -33,21 +26,19 @@ class AudioView:
         self,
         vmc_view,
         model: AudioState,
-        callbacks: ViewCallbacks,
         submit_async: SubmitCoroutine,
         logger: logging.Logger,
         mode: str = "gui",
     ) -> None:
         self._vmc_view = vmc_view
         self._model = model
-        self._callbacks = callbacks
         self._submit_callback = submit_async
         self.logger = logger.getChild("View")
         self.mode = mode
         self._snapshot: Optional[AudioSnapshot] = None
         self.enabled = bool(vmc_view and tk and ttk and mode == "gui")
-        self._menu_controller: DeviceMenuController | None = None
         self._meter_panel: MeterPanel | None = None
+        self._device_label: ttk.Label | None = None
 
         if not self.enabled:
             if mode != "gui":
@@ -58,7 +49,6 @@ class AudioView:
                 self.logger.debug("GUI container not available; view disabled")
             return
 
-        self._menu_controller = DeviceMenuController(self._vmc_view, self._submit, self.logger)
         self._meter_panel = MeterPanel(self.logger)
         self._vmc_view.build_stub_content(self._build_content)
         self._model.subscribe(self._on_snapshot)
@@ -70,8 +60,13 @@ class AudioView:
 
     def _on_snapshot(self, snapshot: AudioSnapshot) -> None:
         self._snapshot = snapshot
-        if self._menu_controller:
-            self._menu_controller.refresh(snapshot, self._callbacks.toggle_device)
+        if self._device_label:
+            text = self._build_device_label(snapshot)
+            if text:
+                self._device_label.configure(text=text)
+                self._device_label.grid()
+            else:
+                self._device_label.grid_remove()
         if self._meter_panel:
             self._meter_panel.rebuild(snapshot)
             self._meter_panel.draw(snapshot, force=True)
@@ -103,10 +98,23 @@ class AudioView:
         container = ttk.Frame(parent)
         container.grid(row=0, column=0, sticky="nsew")
         container.columnconfigure(0, weight=1)
-        container.rowconfigure(0, weight=1)
+        container.rowconfigure(0, weight=0)
+        container.rowconfigure(1, weight=1)
+
+        self._device_label = ttk.Label(
+            container,
+            text="Scanning Audio Devices...",
+            anchor="w",
+            font=("TkDefaultFont", 10, "bold"),
+        )
+        self._device_label.grid(row=0, column=0, sticky="ew", pady=(0, 4))
 
         if self._meter_panel:
-            self._meter_panel.attach(container)
+            meters_frame = ttk.Frame(container)
+            meters_frame.grid(row=1, column=0, sticky="nsew")
+            meters_frame.columnconfigure(0, weight=1)
+            meters_frame.rowconfigure(0, weight=1)
+            self._meter_panel.attach(meters_frame)
 
     def _rename_stub_label(self) -> None:
         stub_frame = getattr(self._vmc_view, "stub_frame", None)
@@ -115,3 +123,20 @@ class AudioView:
                 stub_frame.configure(text="Audio Control Panel")
             except Exception:
                 self.logger.debug("Unable to rename stub frame", exc_info=True)
+
+    def _build_device_label(self, snapshot: AudioSnapshot) -> str:
+        selected = list(snapshot.selected_devices.values())
+        
+        # If devices are selected, the meter panel shows them with individual labels.
+        # We just show a summary count here.
+        if selected:
+            return ""
+            
+        devices = list(snapshot.devices.values())
+        if not devices:
+            return "No Audio Devices Found"
+            
+        names = ", ".join(sorted(info.name for info in devices if info.name))
+        if not names:
+            return f"{len(devices)} device(s) available"
+        return f"Available Devices: {names}"

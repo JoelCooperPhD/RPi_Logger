@@ -10,7 +10,7 @@ command-line interaction otherwise.
   runtime.
 - `config/` contains the shared CLI + file parsing logic (`settings.py`).
 - `app/` hosts the high-level `AudioApp` orchestration (`application.py`) and
-  the persistence helpers that restore device selections (`startup.py`).
+  the supporting managers that coordinate discovery/recording.
 - `domain/` groups immutable constants, the observable state container, and the
   level meter logic.
 - `services/` keeps the pure device/session/recorder helpers that interact with
@@ -21,7 +21,7 @@ command-line interaction otherwise.
 
 Only `sounddevice`, `numpy`, and the codex helpers are required.
 
-The module persists the last selected devices inside the user-specific config
-(`~/.rpi_logger/module_configs/audio/config.txt`) via the `selected_devices`
-entry so relaunching the UI keeps the previous layout even when the repository
-is read-only.
+All USB audio input devices are enabled automatically whenever they appear, so
+no per-device configuration or persistence is required. The view reports their
+levels, while the recorder service immediately starts streaming from each
+detected USB microphone.
