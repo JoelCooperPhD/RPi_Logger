@@ -20,7 +20,7 @@ except ImportError:
 
 from PIL import Image, ImageTk
 
-from ..io.media import frame_to_rgb_array
+from ..hardware.media import frame_to_rgb_array
 from rpi_logger.core.logging_utils import ensure_structured_logger
 
 try:  # Pillow 10+
@@ -891,7 +891,7 @@ class CameraViewAdapter:
             return Image.fromarray(rgb_array, mode="RGB"), source_size, resized
 
         # Fallback to original Pillow path
-        from ..io.media import frame_to_image as convert_frame_to_image
+        from ..hardware.media import frame_to_image as convert_frame_to_image
         image = convert_frame_to_image(frame, pixel_format, size_hint=stream_size)
         source_size = image.size
 
@@ -939,10 +939,14 @@ class CameraViewAdapter:
         enabled = bool(var.get())
         result = handler(index, enabled)
         if asyncio.iscoroutine(result):
-            if self.task_manager:
-                self.task_manager.create(result, name=f"CameraToggle{index}")
-            else:
-                asyncio.create_task(result)
+            try:
+                if self.task_manager:
+                    self.task_manager.create(result, name=f"CameraToggle{index}")
+                else:
+                    asyncio.create_task(result)
+            except RuntimeError as exc:
+                # Window can emit toggles during shutdown; ignore instead of crashing.
+                self.logger.debug("Ignoring toggle while shutting down: %s", exc)
 
 
 __all__ = ["CameraViewAdapter"]

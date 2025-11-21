@@ -18,11 +18,12 @@ from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
 from ..domain.model import CameraModel
 from ..ui import CameraViewAdapter
-from ..io.media import frame_to_bgr as convert_frame_to_bgr
+from ..hardware.media import frame_to_bgr as convert_frame_to_bgr
 
 from rpi_logger.core.logging_utils import ensure_structured_logger
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from .camera_setup import CameraSetupManager
-from .pipeline import StorageHooks
+from ..storage import StorageHooks
 from .services import CaptureSettingsService, TelemetryService
 from .slot import CameraSlot
 from .storage_manager import CameraStorageManager
@@ -142,6 +143,14 @@ class CameraController(ModuleRuntime):
     def session_dir(self, value: Optional[Path]) -> None:
         self.state.session_dir = value
 
+    @property
+    def module_data_dir(self) -> Optional[Path]:
+        return self.state.module_data_dir
+
+    @module_data_dir.setter
+    def module_data_dir(self, value: Optional[Path]) -> None:
+        self.state.module_data_dir = value
+
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
         self.supervisor = context.supervisor
@@ -162,6 +171,9 @@ class CameraController(ModuleRuntime):
         timeout = getattr(self.args, "shutdown_timeout", 15.0)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=timeout)
 
+        scope_fn = getattr(self.supervisor_model, "preferences_scope", None)
+        self.camera_prefs = scope_fn("cameras") if callable(scope_fn) else None
+
         config_path = getattr(context.model, "config_path", None)
         self._state = CameraModel(
             args=self.args,
@@ -169,6 +181,7 @@ class CameraController(ModuleRuntime):
             display_name=self.display_name,
             logger=self.logger,
             config_path=config_path,
+            preferences=self.camera_prefs,
         )
 
         self.view_adapter: Optional[CameraViewAdapter] = None
@@ -301,6 +314,33 @@ class CameraController(ModuleRuntime):
     async def cleanup(self) -> None:
         return None
 
+    def get_preview_toggle_preference(self, index: int) -> bool:
+        if self.camera_prefs:
+            return self.camera_prefs.get_bool(f"preview_enabled.{index}", True)
+        return True
+
+    async def persist_preview_toggle_preference(self, index: int, enabled: bool) -> None:
+        if self.camera_prefs:
+            await self.camera_prefs.write_async({f"preview_enabled.{index}": enabled})
+
+    async def on_session_dir_available(self, session_dir: Path) -> None:
+        """Callback from the supervisor when a session directory is established."""
+        self.logger.info("Session directory available: %s", session_dir)
+        self.session_dir = session_dir
+        try:
+            module_dir = await asyncio.to_thread(
+                ensure_module_data_dir,
+                session_dir,
+                self.storage_manager.MODULE_SUBDIR,
+            )
+            self.module_data_dir = module_dir
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.error(
+                "Unable to prepare Cameras module directory under %s: %s",
+                session_dir,
+                exc,
+            )
+
     async def handle_command(self, command: dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
         if action in {"start_recording", "stop_recording"}:
@@ -310,10 +350,11 @@ class CameraController(ModuleRuntime):
                 or command.get("save_directory")
                 or command.get("path")
             )
-            if not directory and self.supervisor_model is not None:
-                supervisor_dir = getattr(self.supervisor_model, "session_dir", None)
-                if supervisor_dir:
-                    directory = supervisor_dir
+            # If the supervisor provided a session directory, it might already be set in the model
+            # via on_session_dir_available, but we respect the command payload if present.
+            if not directory and self.session_dir:
+                 directory = self.session_dir
+
             self.logger.info(
                 "Command received -> %s (dir=%s | save_enabled=%s | session=%s)",
                 action,
@@ -322,16 +363,17 @@ class CameraController(ModuleRuntime):
                 self.session_dir,
             )
         if action == "start_recording":
+            # The supervisor controller handles the high-level state (recording=True),
+            # so we focus on the mechanics of enabling storage.
             directory = (
                 command.get("session_dir")
                 or command.get("directory")
                 or command.get("save_directory")
                 or command.get("path")
             )
-            if not directory and self.supervisor_model is not None:
-                supervisor_dir = getattr(self.supervisor_model, "session_dir", None)
-                if supervisor_dir:
-                    directory = supervisor_dir
+            if not directory and self.session_dir:
+                directory = self.session_dir
+            
             trial_number = self._normalize_trial_number(command.get("trial_number"))
             if trial_number is None:
                 trial_number = (self._active_trial_number or 0) + 1

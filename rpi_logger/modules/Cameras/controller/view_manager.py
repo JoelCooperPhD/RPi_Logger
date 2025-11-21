@@ -9,7 +9,7 @@ from typing import Optional, TYPE_CHECKING
 from rpi_logger.core.logging_utils import get_module_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .runtime import CameraController
+    from .orchestration import CameraController
     from .slot import CameraSlot
 
 logger = get_module_logger(__name__)
@@ -54,6 +54,7 @@ class CameraViewManager:
         adapter = self.adapter
         if not adapter:
             return
+        slot.preview_enabled = self._controller.get_preview_toggle_preference(slot.index)
         adapter.register_camera_toggle(
             index=slot.index,
             title=slot.title,
@@ -81,6 +82,7 @@ class CameraViewManager:
                     self.adapter.update_camera_toggle_state(index, False)
                     self.adapter.show_camera_hidden(slot)
                 self.refresh_status()
+                await self._controller.persist_preview_toggle_preference(index, slot.preview_enabled)
                 return
             slot.preview_gate.configure(slot.preview_gate.period)
             if self.adapter:
@@ -90,6 +92,7 @@ class CameraViewManager:
             if self.adapter:
                 self.adapter.show_camera_hidden(slot)
         self.refresh_status()
+        await self._controller.persist_preview_toggle_preference(index, slot.preview_enabled)
         self.refresh_preview_layout()
 
     def refresh_preview_layout(self) -> None:

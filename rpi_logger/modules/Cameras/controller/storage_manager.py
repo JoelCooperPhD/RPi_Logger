@@ -6,16 +6,20 @@ import asyncio
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 
-from ..io.storage import CameraStoragePipeline
-from .pipeline import StorageConsumer
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
+from ..storage import CameraStoragePipeline
+from ..storage import StorageConsumer
 
 if TYPE_CHECKING:  # pragma: no cover - typing only helpers
-    from .runtime import CameraController
+    from .orchestration import CameraController
     from .slot import CameraSlot
 
 
 class CameraStorageManager:
     """Encapsulates recording/session lifecycle management."""
+
+    MODULE_SUBDIR = "Cameras"
+    MODULE_CODE = "CAM"
 
     def __init__(self, controller: "CameraController") -> None:
         self._controller = controller
@@ -32,13 +36,29 @@ class CameraStorageManager:
 
     async def start_storage_resources(self, slot: "CameraSlot") -> None:
         controller = self._controller
-        session_dir = controller.session_dir
-        if not session_dir:
+        module_dir = controller.module_data_dir or controller.session_dir
+        if not module_dir:
             self.logger.error(
-                "Cannot start storage for camera %s: session directory unavailable",
+                "Cannot start storage for camera %s: module/session directory unavailable",
                 slot.index,
             )
             return
+
+        if controller.module_data_dir is None:
+            try:
+                module_dir = await asyncio.to_thread(
+                    ensure_module_data_dir,
+                    module_dir,
+                    self.MODULE_SUBDIR,
+                )
+                controller.module_data_dir = module_dir
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.error(
+                    "Cannot prepare module directory for cam %s: %s",
+                    slot.index,
+                    exc,
+                )
+                return
 
         if slot.storage_pipeline is not None:
             await slot.storage_pipeline.stop()
@@ -47,7 +67,7 @@ class CameraStorageManager:
             camera_dir = await asyncio.to_thread(
                 controller.state.ensure_camera_dir_sync,
                 slot.index,
-                session_dir,
+                module_dir,
             )
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.error(
@@ -70,6 +90,9 @@ class CameraStorageManager:
         pipeline = CameraStoragePipeline(
             slot.index,
             camera_dir,
+            module_dir=module_dir,
+            module_name=self.MODULE_SUBDIR,
+            module_code=self.MODULE_CODE,
             camera_alias=camera_alias,
             camera_slug=camera_slug,
             main_size=slot.main_size,
@@ -173,6 +196,7 @@ class CameraStorageManager:
         external_session = False
         session_dir: Optional[Path] = None
         base_dir: Optional[Path] = None
+        module_dir: Optional[Path] = None
 
         if directory:
             try:
@@ -196,14 +220,43 @@ class CameraStorageManager:
             session_dir = await asyncio.to_thread(controller.state.prepare_session_directory_sync, base_dir)
             if session_dir is None:
                 return False
+            try:
+                module_dir = await asyncio.to_thread(
+                    ensure_module_data_dir,
+                    session_dir,
+                    self.MODULE_SUBDIR,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.error(
+                    "Unable to prepare Cameras data directory under %s: %s",
+                    session_dir,
+                    exc,
+                )
+                return False
 
         if session_dir is None:
             self.logger.error("Recording session directory unavailable")
             return False
 
+        if module_dir is None:
+            try:
+                module_dir = await asyncio.to_thread(
+                    ensure_module_data_dir,
+                    session_dir,
+                    self.MODULE_SUBDIR,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.error(
+                    "Unable to prepare Cameras data directory under %s: %s",
+                    session_dir,
+                    exc,
+                )
+                return False
+
         if not external_session:
             controller.save_dir = base_dir
         controller.session_dir = session_dir
+        controller.module_data_dir = module_dir
         controller.save_enabled = True
         controller.capture_preferences_enabled = True
         controller._storage_failure_reported = False
@@ -214,6 +267,7 @@ class CameraStorageManager:
             await self.deactivate_storage_for_all_slots()
             controller.save_enabled = False
             controller.capture_preferences_enabled = False
+            controller.module_data_dir = None
             controller.session_dir = None
             controller.view_manager.set_status(str(exc), level=logging.ERROR)
             return False
@@ -230,7 +284,7 @@ class CameraStorageManager:
         self.logger.info(
             "Recording enabled -> base=%s | session=%s | rate=%s | queue=%d",
             base_display,
-            controller.session_dir,
+            controller.module_data_dir,
             rate_desc,
             controller.storage_queue_size,
         )
@@ -244,6 +298,7 @@ class CameraStorageManager:
         await self.deactivate_storage_for_all_slots()
         controller.save_enabled = False
         controller.capture_preferences_enabled = False
+        controller.module_data_dir = None
         controller.session_dir = None
         controller._storage_failure_reported = False
         controller.telemetry.request_sensor_sync()
@@ -279,5 +334,18 @@ class CameraStorageManager:
                 )
                 return
             controller.session_dir = session_dir
+            try:
+                controller.module_data_dir = await asyncio.to_thread(
+                    ensure_module_data_dir,
+                    session_dir,
+                    self.MODULE_SUBDIR,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                self.logger.error(
+                    "Unable to prepare Cameras data directory under %s: %s",
+                    session_dir,
+                    exc,
+                )
+                return
             for slot in controller._previews:
                 await self.start_storage_resources(slot)

@@ -9,7 +9,7 @@ from rpi_logger.core.logging_utils import get_module_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..slot import CameraSlot
-    from ..runtime import CameraController
+    from ..orchestration import CameraController
 
 
 logger = get_module_logger(__name__)

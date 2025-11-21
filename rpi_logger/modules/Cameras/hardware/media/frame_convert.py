@@ -29,6 +29,7 @@ YUV_PLANAR_FORMATS = {
     "YUV420",
     "YUV420P",
     "I420",
+    "NV12",
 }
 
 def _sanitize_even_dimension(value: Optional[Tuple[int, int] | int], index: Optional[int] = None) -> Optional[int]:
@@ -64,6 +65,8 @@ def frame_to_rgb_array(
     if planar_candidate and (fmt in YUV_PLANAR_FORMATS or _is_planar_yuv_candidate(frame, fmt)):
         array = frame if isinstance(frame, np.ndarray) else np.asarray(frame)
         if array.ndim == 2:
+            if fmt == "NV12":
+                return _convert_nv12_to_rgb(array, size_hint)
             return _convert_yuv420_to_rgb(array, size_hint)
 
     # Use color_convert helpers for packed formats
@@ -124,49 +127,11 @@ def _is_planar_yuv_candidate(frame: Any, pixel_format: str) -> bool:
 
 
 def _convert_yuv420_to_rgb(frame: np.ndarray, size_hint: Optional[Tuple[int, int]]) -> np.ndarray:
-    if frame.dtype != np.uint8:
-        logger.debug("Converting planar frame dtype to uint8 | dtype=%s", frame.dtype)
-        frame = frame.astype(np.uint8, copy=False)
+    return _convert_planar_to_color(frame, size_hint, cv2.COLOR_YUV2RGB_I420)
 
-    rows, stride = frame.shape
-    stride = max(2, stride - (stride % 2))
 
-    hint_width = _sanitize_even_dimension(size_hint, 0) if size_hint else None
-    hint_height = _sanitize_even_dimension(size_hint, 1) if size_hint else None
-
-    height = max(2, ((rows * 2) // 3))
-    if height % 2:
-        height -= 1
-    if hint_height:
-        height = min(height, hint_height)
-
-    expected_rows = height * 3 // 2
-    if expected_rows > rows:
-        logger.debug(
-            "Planar frame shorter than expected rows; clamping | expected=%s rows=%s",
-            expected_rows,
-            rows,
-        )
-        expected_rows = rows - (rows % 2)
-        height = max(2, (expected_rows * 2) // 3)
-        if height % 2:
-            height -= 1
-
-    width = stride
-    if hint_width:
-        width = min(width, hint_width)
-
-    window = frame[:expected_rows, :width].copy(order="C")
-    rgb = cv2.cvtColor(window.reshape((expected_rows, width)), cv2.COLOR_YUV2RGB_I420)
-
-    target_w = hint_width or width
-    target_h = hint_height or height
-    target_w = min(target_w, rgb.shape[1])
-    target_h = min(target_h, rgb.shape[0])
-    if target_w != rgb.shape[1] or target_h != rgb.shape[0]:
-        rgb = rgb[:target_h, :target_w]
-
-    return rgb
+def _convert_nv12_to_rgb(frame: np.ndarray, size_hint: Optional[Tuple[int, int]]) -> np.ndarray:
+    return _convert_planar_to_color(frame, size_hint, cv2.COLOR_YUV2RGB_NV12)
 
 
 def frame_to_bgr(
@@ -183,6 +148,8 @@ def frame_to_bgr(
     if planar_candidate and (fmt in YUV_PLANAR_FORMATS or _is_planar_yuv_candidate(frame, fmt)):
         array = frame if isinstance(frame, np.ndarray) else np.asarray(frame)
         if array.ndim == 2:
+            if fmt == "NV12":
+                return _convert_nv12_to_bgr(array, size_hint)
             return _convert_yuv420_to_bgr(array, size_hint)
 
     # Fallback: convert to RGB first (using existing helpers) then to BGR
@@ -194,6 +161,19 @@ def frame_to_bgr(
 
 def _convert_yuv420_to_bgr(frame: np.ndarray, size_hint: Optional[Tuple[int, int]]) -> np.ndarray:
     """Convert YUV420 planar directly to BGR."""
+    return _convert_planar_to_color(frame, size_hint, cv2.COLOR_YUV2BGR_I420)
+
+
+def _convert_nv12_to_bgr(frame: np.ndarray, size_hint: Optional[Tuple[int, int]]) -> np.ndarray:
+    """Convert NV12 planar directly to BGR."""
+    return _convert_planar_to_color(frame, size_hint, cv2.COLOR_YUV2BGR_NV12)
+
+
+def _convert_planar_to_color(
+    frame: np.ndarray,
+    size_hint: Optional[Tuple[int, int]],
+    conversion_code: int,
+) -> np.ndarray:
     if frame.dtype != np.uint8:
         logger.debug("Converting planar frame dtype to uint8 | dtype=%s", frame.dtype)
         frame = frame.astype(np.uint8, copy=False)
@@ -222,20 +202,16 @@ def _convert_yuv420_to_bgr(frame: np.ndarray, size_hint: Optional[Tuple[int, int
         width = min(width, hint_width)
 
     window = frame[:expected_rows, :width].copy(order="C")
-    bgr = cv2.cvtColor(window.reshape((expected_rows, width)), cv2.COLOR_YUV2RGB_I420)
-    # Note: COLOR_YUV2RGB_I420 actually returns RGB. Wait, OpenCV docs say:
-    # CV_YUV2RGB_I420 is for YUV420p -> RGB.
-    # We want BGR. There is CV_YUV2BGR_I420.
-    bgr = cv2.cvtColor(window.reshape((expected_rows, width)), cv2.COLOR_YUV2BGR_I420)
+    output = cv2.cvtColor(window.reshape((expected_rows, width)), conversion_code)
 
     target_w = hint_width or width
     target_h = hint_height or height
-    target_w = min(target_w, bgr.shape[1])
-    target_h = min(target_h, bgr.shape[0])
-    if target_w != bgr.shape[1] or target_h != bgr.shape[0]:
-        bgr = bgr[:target_h, :target_w]
+    target_w = min(target_w, output.shape[1])
+    target_h = min(target_h, output.shape[0])
+    if target_w != output.shape[1] or target_h != output.shape[0]:
+        output = output[:target_h, :target_w]
 
-    return bgr
+    return output
 
 
 __all__ = ["frame_to_image", "frame_to_bgr"]

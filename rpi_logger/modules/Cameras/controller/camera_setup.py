@@ -8,11 +8,11 @@ from typing import Any, Optional, TYPE_CHECKING
 from ..domain.model import CameraModel
 from ..domain.pipelines import ImagePipeline
 from rpi_logger.core.logging_utils import get_module_logger
-from .pipeline import PreviewConsumer
+from ..ui.consumer import PreviewConsumer
 from .slot import CameraSlot
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .runtime import CameraController
+    from .orchestration import CameraController
 
 logger = get_module_logger(__name__)
 
@@ -73,10 +73,12 @@ class CameraSetupManager:
                     lores_size,
                     sensor_config,
                 )
+                controller.logger.info("Requested config: %s", config)
                 await asyncio.to_thread(camera.configure, config)
                 await asyncio.to_thread(camera.start)
 
                 actual_config = await asyncio.to_thread(camera.camera_configuration)
+                controller.logger.info("Actual config: %s", actual_config)
                 main_block = self.unwrap_config_block(actual_config, "main")
                 lores_block = self.unwrap_config_block(actual_config, "lores") if lores_size else None
 

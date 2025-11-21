@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from ...io.storage.constants import FRAME_LOG_COUNT
+from ...storage.constants import FRAME_LOG_COUNT
 from rpi_logger.core.logging_utils import ensure_structured_logger, get_module_logger
 
 module_logger = get_module_logger(__name__)

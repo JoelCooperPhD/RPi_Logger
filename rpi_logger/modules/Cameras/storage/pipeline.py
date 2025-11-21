@@ -6,17 +6,16 @@ import asyncio
 import logging
 import threading
 import time
-import subprocess
-import shutil
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 import cv2
 import numpy as np
 
+from rpi_logger.modules.base.overlay_renderer import build_overlay_text, render_overlay_bgr
 
 try:
     from picamera2.request import MappedArray
@@ -25,8 +24,9 @@ except Exception:  # pragma: no cover - allows dev environments without Picamera
 
 from .csv_logger import CameraCSVLogger
 from .fps_tracker import VideoFpsTracker
-from ...domain.model import FramePayload
+from ..domain.model import FramePayload
 from rpi_logger.core.logging_utils import get_module_logger, ensure_structured_logger
+from rpi_logger.modules.base.storage_utils import module_filename_prefix
 
 
 @dataclass(slots=True)
@@ -59,93 +59,6 @@ class OverlayRenderInfo:
         return f"{microseconds}"
 
 
-class FfmpegProcess:
-    """Manages a persistent ffmpeg subprocess for software encoding."""
-
-    def __init__(
-        self,
-        width: int,
-        height: int,
-        fps: float,
-        output_path: Path,
-        logger: logging.Logger,
-    ) -> None:
-        self.width = width
-        self.height = height
-        self.fps = fps
-        self.output_path = output_path
-        self.logger = logger
-        self._process: Optional[subprocess.Popen] = None
-        self._stdin: Optional[Any] = None
-
-    def start(self) -> bool:
-        if not shutil.which("ffmpeg"):
-            self.logger.error("ffmpeg binary not found in PATH")
-            return False
-
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f", "rawvideo",
-            "-vcodec", "rawvideo",
-            "-pix_fmt", "yuv420p",
-            "-s", f"{self.width}x{self.height}",
-            "-r", f"{self.fps:.2f}",
-            "-i", "-",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-f", "mp4",
-            str(self.output_path),
-        ]
-        
-        try:
-            self._process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,  # Could capture stderr for debugging if needed
-            )
-            self._stdin = self._process.stdin
-            self.logger.info("ffmpeg process started -> %s", " ".join(cmd))
-            return True
-        except Exception as exc:
-            self.logger.error("Failed to start ffmpeg: %s", exc)
-            return False
-
-    def write(self, frame_bytes: bytes) -> bool:
-        if self._process is None or self._stdin is None:
-            return False
-        try:
-            self._stdin.write(frame_bytes)
-            return True
-        except Exception as exc:
-            self.logger.error("ffmpeg write failed: %s", exc)
-            self.stop()
-            return False
-
-    def stop(self) -> None:
-        if self._process is None:
-            return
-        
-        if self._stdin:
-            try:
-                self._stdin.close()
-            except Exception:
-                pass
-            self._stdin = None
-
-        try:
-            self._process.wait(timeout=2.0)
-        except subprocess.TimeoutExpired:
-            self.logger.warning("ffmpeg process timed out, killing...")
-            self._process.kill()
-        except Exception as exc:
-            self.logger.error("Error stopping ffmpeg: %s", exc)
-        
-        self._process = None
-        self.logger.info("ffmpeg process stopped")
-
-
 class CameraStoragePipeline:
     """Encapsulates CSV logging, video writing, and image saving for a camera."""
 
@@ -154,6 +67,9 @@ class CameraStoragePipeline:
         camera_index: int,
         save_dir: Path,
         *,
+        module_dir: Optional[Path] = None,
+        module_name: str = "Cameras",
+        module_code: str = "CAM",
         camera_alias: Optional[str] = None,
         camera_slug: Optional[str] = None,
         main_size: Optional[tuple[int, int]] = None,
@@ -167,6 +83,9 @@ class CameraStoragePipeline:
     ) -> None:
         self.camera_index = camera_index
         self.save_dir = save_dir
+        self.module_dir = module_dir
+        self.module_name = module_name
+        self.module_code = module_code
         self.camera = camera
         self.camera_alias = camera_alias or f"Camera {camera_index + 1}"
         self.camera_slug = self._coerce_slug(camera_slug, f"cam{camera_index}")
@@ -175,6 +94,8 @@ class CameraStoragePipeline:
         self.save_quality = save_quality
         self.max_fps = max_fps
         self.overlay_config = overlay_config or {}
+        self.overlays_enabled = True
+        self._filename_prefix: Optional[str] = None
 
         component = f"StoragePipeline.cam{camera_index}"
         self._logger = ensure_structured_logger(
@@ -182,16 +103,13 @@ class CameraStoragePipeline:
             component=component,
             fallback_name=f"{__name__}.{component}",
         )
-        self.uses_hardware_encoder = camera is not None
-
-        self._csv_logger: Optional[CameraCSVLogger] = None
-        self._csv_path: Optional[Path] = None
+        # Pi 5 lacks hardware H.264; force software path regardless of camera handle.
+        self.uses_hardware_encoder = False
 
         self._csv_logger: Optional[CameraCSVLogger] = None
         self._csv_path: Optional[Path] = None
 
         self._video_writer: Optional[cv2.VideoWriter] = None
-        self._ffmpeg_process: Optional[FfmpegProcess] = None
         self._picamera_encoder: Optional[object] = None
         self._picamera_output: Optional[object] = None
         self._overlay_previous_callback: Optional[Callable] = None
@@ -240,9 +158,20 @@ class CameraStoragePipeline:
         return self._fps_tracker.frame_count
 
     @property
+    def video_fps(self) -> float:
+        """Latest configured/observed video FPS (compat shim for callers)."""
+        if self._writer_fps > 0:
+            return float(self._writer_fps)
+        if self._video_fps_hint is not None and self._video_fps_hint > 0:
+            return float(self._video_fps_hint)
+        output = self.video_output_fps
+        return float(output) if output > 0 else 0.0
+
+    @property
     def accepts_yuv(self) -> bool:
         """Returns True if the pipeline can accept raw YUV frames (ffmpeg mode)."""
-        return not self.uses_hardware_encoder and self._video_writer is None
+        # Force software conversion path to ensure correct color handling via frame_to_bgr
+        return False
 
     async def start(self) -> None:
         """Prepare CSV logger and reset video writer state."""
@@ -251,17 +180,30 @@ class CameraStoragePipeline:
         self._sensor_fps_estimate = None
         self._sensor_timestamp_failures = 0
         self._fps_tracker.reset()
-        self._sensor_last_timestamp_ns = None
-        self._sensor_fps_estimate = None
-        self._sensor_timestamp_failures = 0
-        self._fps_tracker.reset()
         self._pacing_start_ns = None
         self._pacing_frame_count = 0
         self._waiting_for_sensor_fps = True
+
+        base_dir = self.module_dir or self.save_dir.parent or self.save_dir
         slug = self.camera_slug or f"cam{self.camera_index}"
-        suffix = self._trial_suffix
-        self._video_path = self.save_dir / f"{slug}{suffix}_recording.mp4"
-        self._csv_path = self.save_dir / f"{slug}{suffix}_frame_timing.csv"
+        try:
+            self._filename_prefix = module_filename_prefix(
+                base_dir,
+                self.module_name,
+                self.trial_number,
+                code=self.module_code,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            self._logger.error(
+                "Falling back to legacy filename pattern for %s: %s",
+                slug,
+                exc,
+            )
+            self._filename_prefix = f"{slug}{self._trial_suffix}"
+
+        prefix = self._filename_prefix
+        self._video_path = self.save_dir / f"{prefix}_{slug}_recording.mp4"
+        self._csv_path = self.save_dir / f"{prefix}_{slug}_frame_timing.csv"
         csv_logger = CameraCSVLogger(self.camera_index, self._csv_path, trial_number=self.trial_number)
         await csv_logger.start()
         self._csv_logger = csv_logger
@@ -290,15 +232,13 @@ class CameraStoragePipeline:
         payload: "FramePayload",
         *,
         fps_hint: float,
-        yuv_frame: Optional[np.ndarray] = None,
     ) -> StorageWriteResult:
         """Persist a frame to disk and optionally to the video writer.
         
         Args:
-            bgr_frame: BGR numpy array (OpenCV format) for video writing (legacy/fallback).
+            bgr_frame: BGR numpy array (OpenCV format) for software video writing.
             payload: Metadata for the frame.
             fps_hint: Expected FPS for video writing.
-            yuv_frame: Raw YUV420 planar array for ffmpeg encoding.
         """
         video_written: bool = False
         
@@ -312,7 +252,7 @@ class CameraStoragePipeline:
 
         overlay_info = self._build_overlay_info(payload)
 
-        if self.uses_hardware_encoder and self._picamera_encoder is not None:
+        if self._picamera_output is not None:
             if not self._fps_tracker.hardware_tracking:
                 self._fps_tracker.record_fallback_hardware_frame()
             return StorageWriteResult(
@@ -321,39 +261,24 @@ class CameraStoragePipeline:
                 writer_codec=self._writer_codec,
             )
 
-        if self._ffmpeg_process is not None:
-            if yuv_frame is not None:
-                video_written = await self._write_ffmpeg_frame(yuv_frame, overlay_info)
-            elif bgr_frame is not None:
-                pass
-        
-        elif yuv_frame is not None and self._ffmpeg_process is None:
-             # Lazy init for ffmpeg
-             if self.main_size:
-                width, height = self.main_size
-                fps = self._normalize_fps(fps_hint or 30.0)
-                self._ffmpeg_process = FfmpegProcess(width, height, fps, self._video_path, self._logger)
-                if self._ffmpeg_process.start():
-                    self._logger.info("Initialized ffmpeg pipeline for %s", self._video_path)
-                    video_written = await self._write_ffmpeg_frame(yuv_frame, overlay_info)
-        
-        elif bgr_frame is None and yuv_frame is None:
-             raise RuntimeError("Frame data required (BGR or YUV)")
+        if bgr_frame is None:
+            raise RuntimeError("Frame data required (BGR)")
 
-        if not video_written and self._ffmpeg_process is None:
-            # Legacy cv2.VideoWriter path
-            if bgr_frame is None:
-                 pass
-            
-            writer_ready = self._video_writer is not None
-            if not writer_ready and bgr_frame is not None:
-                frame_size = (bgr_frame.shape[1], bgr_frame.shape[0])
-                writer_ready = await self._try_prepare_video_writer(frame_size, fps_hint)
-                if not writer_ready:
-                    self._queue_pending_frame(bgr_frame, overlay_info)
+        writer_ready = self._video_writer is not None
+        if not writer_ready:
+            frame_size = (bgr_frame.shape[1], bgr_frame.shape[0])
+            writer_ready = await self._try_prepare_video_writer(frame_size, fps_hint)
+            if not writer_ready:
+                self._queue_pending_frame(bgr_frame, overlay_info)
 
-            if writer_ready and self._video_writer is not None and bgr_frame is not None:
-                video_written = await self._write_video_frame(bgr_frame, overlay_info)
+        if writer_ready and self._video_writer is not None:
+            # Trim any padded columns/rows to the configured main size to avoid artifacts.
+            if self.main_size:
+                target_w, target_h = self.main_size
+                h, w = bgr_frame.shape[:2]
+                if w != target_w or h != target_h:
+                    bgr_frame = bgr_frame[: min(h, target_h), : min(w, target_w)]
+            video_written = await self._write_video_frame(bgr_frame, overlay_info)
 
 
 
@@ -390,7 +315,7 @@ class CameraStoragePipeline:
         sensor_timestamp_ns: Optional[int],
     ) -> None:
         """Queue overlay metadata so hardware encoders can stay in sync with CSV IDs."""
-        if not self.overlay_config.get("show_frame_number", True):
+        if not self.overlays_enabled:
             return
         overlay = OverlayRenderInfo(
             frame_number=frame_number,
@@ -419,80 +344,31 @@ class CameraStoragePipeline:
     # Internal helpers
     # ------------------------------------------------------------------
     async def start_video_recording(self, fps_hint: Optional[float] = None) -> None:
-        """Start Picamera2-based recording when a camera handle is available."""
+        """Start Picamera2-based recording using the canonical Picamera2 encoder/output."""
         self._fps_tracker.reset()
         self._pacing_start_ns = None
         self._pacing_frame_count = 0
 
-        hardware_active = bool(self.uses_hardware_encoder and self.camera and self._video_path)
-        if not hardware_active:
+        if not (self.camera and self._video_path):
+            self._logger.warning("Cannot start video recording: camera or video path missing.")
             self.uses_hardware_encoder = False
             self._video_fps_hint = None
             return
-        if self._picamera_encoder is not None:
+
+        if self._picamera_output is not None:
             return
 
+        # Hardware H.264 not available on Pi 5; stick to software writer.
         if fps_hint is not None and fps_hint > 0:
             self._video_fps_hint = self._normalize_fps(fps_hint)
         else:
-            self._video_fps_hint = self.max_fps
+            self._video_fps_hint = 30.0  # default software FPS target
+        self._writer_codec = None
+        self.uses_hardware_encoder = False
+        self._logger.info("Hardware recording disabled; using software writer (fps=%.2f)", self._video_fps_hint)
 
-        try:
-            from picamera2.encoders import H264Encoder, Quality
-            from picamera2.outputs import FfmpegOutput
-        except Exception as exc:  # pragma: no cover - Picamera2 should be available on target
-            self._logger.warning("Picamera2 encoder unavailable, falling back to software video writer: %s", exc)
-            self.uses_hardware_encoder = False
-            
-            # Try to start ffmpeg process
-            if self.main_size:
-                width, height = self.main_size
-                fps = self._normalize_fps(self._video_fps_hint or 30.0)
-                self._ffmpeg_process = FfmpegProcess(width, height, fps, self._video_path, self._logger)
-                if self._ffmpeg_process.start():
-                    self._logger.info("Initialized ffmpeg pipeline for %s", self._video_path)
-                    return
-
-            return
-
-        if fps_hint is not None:
-            self._video_fps_hint = fps_hint
-        fps = self._normalize_fps(self._video_fps_hint or 0.0)
-
-        from fractions import Fraction
-
-        try:
-            encoder = H264Encoder(framerate=Fraction(fps), enable_sps_framerate=True)
-        except TypeError:
-            encoder = H264Encoder(framerate=Fraction(fps))
-            if hasattr(encoder, "_enable_framerate"):
-                encoder._enable_framerate = True  # type: ignore[attr-defined]
-        output = FfmpegOutput(str(self._video_path))
-
-        try:
-            await asyncio.to_thread(self.camera.start_recording, encoder, output, Quality.HIGH)
-        except Exception as exc:
-            self._logger.error("Failed to start Picamera2 recording, using software fallback: %s", exc)
-            try:
-                await asyncio.to_thread(output.close)  # type: ignore[attr-defined]
-            except Exception:
-                pass
-            self.uses_hardware_encoder = False
-            return
-
-        self._picamera_encoder = encoder
-        self._picamera_output = output
-        self._writer_codec = "H264"
-        self._install_overlay_callback()
-        self._logger.info("Picamera2 recording started -> %s", self._video_path)
 
     async def stop_video_recording(self) -> None:
-        if self._ffmpeg_process is not None:
-            await asyncio.to_thread(self._ffmpeg_process.stop)
-            self._ffmpeg_process = None
-            self._fps_tracker.stop_hardware_tracking() # Re-use this for ffmpeg tracking stop if needed
-            return
-
         if self._picamera_encoder is None or self.camera is None:
             return
 
@@ -525,7 +401,8 @@ class CameraStoragePipeline:
         width, height = frame_size
         fps = self._normalize_fps(fps_hint or (self._video_fps_hint or 0.0))
         slug = self.camera_slug or f"cam{self.camera_index}"
-        video_path = self._video_path or (self.save_dir / f"{slug}_recording.mp4")
+        prefix = self._filename_prefix or f"{slug}{self._trial_suffix}"
+        video_path = self._video_path or (self.save_dir / f"{prefix}_{slug}_recording.mp4")
         last_error: Optional[str] = None
 
         def create_writer(codec: str) -> Optional[cv2.VideoWriter]:
@@ -545,8 +422,6 @@ class CameraStoragePipeline:
             self._video_writer = writer
             self._video_path = video_path
             self._writer_codec = codec
-            self._writer_fps = fps
-            self._fourcc = fourcc
             self._writer_fps = fps
             self._fourcc = fourcc
             self._fps_tracker.reset()
@@ -611,16 +486,15 @@ class CameraStoragePipeline:
 
         writer = self._video_writer
         overlay_cfg = dict(self.overlay_config)
-        
-        # Calculate repeats for pacing
+
         repeats = self._calculate_repeats(overlay, self._writer_fps)
         if repeats <= 0:
-            return True # Drop frame to catch up (or if it's too early)
+            return True  # Drop frame to catch up (or if it's too early)
 
         def convert_and_write() -> bool:
-            # Input is already BGR, just copy to avoid modifying the original if we render overlay
             frame_bgr = bgr_frame.copy()
-            self._render_overlay(frame_bgr, overlay, overlay_cfg)
+            if self.overlays_enabled:
+                self._render_overlay(frame_bgr, overlay, overlay_cfg)
             for _ in range(repeats):
                 writer.write(frame_bgr)
             return True
@@ -637,93 +511,6 @@ class CameraStoragePipeline:
             self._pacing_frame_count += repeats
             
         return success
-
-    async def _write_ffmpeg_frame(self, yuv_frame: np.ndarray, overlay: OverlayRenderInfo) -> bool:
-        if self._ffmpeg_process is None:
-            return False
-        
-        # Calculate repeats for pacing
-        fps = self._ffmpeg_process.fps
-        repeats = self._calculate_repeats(overlay, fps)
-        if repeats <= 0:
-            return True
-
-        # Render overlay directly on Y plane
-        self._render_yuv_overlay(yuv_frame, overlay, dict(self.overlay_config))
-        
-        # Write to ffmpeg stdin
-        # We can write the same bytes multiple times
-        frame_bytes = yuv_frame.tobytes()
-        
-        def write_loop() -> bool:
-            for _ in range(repeats):
-                if not self._ffmpeg_process.write(frame_bytes):
-                    return False
-            return True
-
-        success = await asyncio.to_thread(write_loop)
-        
-        if success:
-            for _ in range(repeats):
-                self._fps_tracker.record_software_frame()
-            self._pacing_frame_count += repeats
-            
-        return success
-
-    def _render_yuv_overlay(self, yuv_frame: np.ndarray, overlay: OverlayRenderInfo, overlay_cfg: dict) -> None:
-        if not overlay_cfg.get('show_frame_number', True):
-            return
-            
-        if not self.main_size:
-            return
-            
-        width, height = self.main_size
-        # Y plane is the first height * width bytes
-        try:
-            # Access Y plane view
-            y_plane = yuv_frame[:height, :width]
-            
-            font_scale = overlay_cfg.get('font_scale_base', 0.6)
-            thickness = overlay_cfg.get('thickness_base', 1)
-            margin_left = overlay_cfg.get('margin_left', 10)
-            line_start_y = overlay_cfg.get('line_start_y', 30)
-            border_thickness = max(1, thickness * 3)
-
-            components = [f"{overlay.frame_number}"]
-            if overlay_cfg.get('show_recording_timestamp', True):
-                components.append(overlay.timestamp_text)
-            if overlay_cfg.get('show_sensor_timestamp', True):
-                sensor_text = overlay.sensor_text
-                if sensor_text:
-                    components.append(sensor_text)
-            text = " | ".join(components)
-
-            # Draw border (black -> 0)
-            cv2.putText(
-                y_plane,
-                text,
-                (margin_left, line_start_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                font_scale,
-                0,
-                border_thickness,
-                cv2.LINE_AA,
-            )
-            # Draw text (white -> 255)
-            cv2.putText(
-                y_plane,
-                text,
-                (margin_left, line_start_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                font_scale,
-                255,
-                thickness,
-                cv2.LINE_AA,
-            )
-        except Exception as exc:
-            self._logger.debug("YUV overlay render failed: %s", exc)
-
-
 
     async def _release_video_writer(self) -> None:
         if self._video_writer is None:
@@ -844,59 +631,13 @@ class CameraStoragePipeline:
         return repeats
 
     def _render_overlay(self, frame: np.ndarray, overlay: OverlayRenderInfo, overlay_cfg: dict) -> None:
-        if not overlay_cfg.get('show_frame_number', True):
-            return
-
-        font_scale = overlay_cfg.get('font_scale_base', 0.6)
-        thickness = overlay_cfg.get('thickness_base', 1)
-        text_color = (
-            overlay_cfg.get('text_color_r', 0),
-            overlay_cfg.get('text_color_g', 0),
-            overlay_cfg.get('text_color_b', 0),
-        )
-
-        margin_left = overlay_cfg.get('margin_left', 10)
-        line_start_y = overlay_cfg.get('line_start_y', 30)
-
-        border_thickness = max(1, thickness * 3)
-        border_color = (0, 0, 0)
-
-        components = [f"{overlay.frame_number}"]
-        if overlay_cfg.get('show_recording_timestamp', True):
-            components.append(overlay.timestamp_text)
-        if overlay_cfg.get('show_sensor_timestamp', True):
-            sensor_text = overlay.sensor_text
-            if sensor_text:
-                components.append(sensor_text)
-        text = " | ".join(components)
-
-        cv2.putText(
-            frame,
-            text,
-            (margin_left, line_start_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
-            border_color,
-            border_thickness,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            frame,
-            text,
-            (margin_left, line_start_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            font_scale,
-            text_color,
-            thickness,
-            cv2.LINE_AA,
-        )
+        render_overlay_bgr(frame, overlay, overlay_cfg)
 
     def _install_overlay_callback(self) -> None:
         if (
             not self.camera
             or not hasattr(self.camera, "post_callback")
             or not self.main_size
-            or not self.overlay_config.get("show_frame_number", True)
         ):
             return
         if MappedArray is None:

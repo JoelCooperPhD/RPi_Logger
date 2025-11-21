@@ -9,9 +9,11 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
+from rpi_logger.modules.base.overlay_defaults import CAMERA_OVERLAY_DEFAULTS as BASE_OVERLAY_DEFAULTS
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.modules.base.preferences import ModulePreferences
 
 module_logger = get_module_logger(__name__)
 
@@ -21,67 +23,8 @@ try:
     )
 except ModuleNotFoundError:
     module_logger.debug("camera_core overlay defaults unavailable; using fallback values")
-    CAMERA_OVERLAY_DEFAULTS = {
-        'resolution_preset': 0,
-        'resolution_width': 1920,
-        'resolution_height': 1080,
-        'preview_preset': 5,
-        'preview_width': 640,
-        'preview_height': 360,
-        'target_fps': 30.0,
-        'min_cameras': 1,
-        'allow_partial': True,
-        'discovery_timeout': 5.0,
-        'discovery_retry': 3.0,
-        'output_dir': 'recordings',
-        'session_prefix': 'session',
-        'auto_start_recording': False,
-        'show_preview': True,
-        'console_output': False,
-        'libcamera_log_level': 'WARN',
-        'font_scale_base': 0.6,
-        'thickness_base': 2,
-        'font_type': 'SIMPLEX',
-        'outline_enabled': True,
-        'outline_extra_thickness': 2,
-        'line_start_y': 30,
-        'line_spacing': 30,
-        'margin_left': 10,
-        'text_color_b': 255,
-        'text_color_g': 255,
-        'text_color_r': 255,
-        'outline_color_b': 0,
-        'outline_color_g': 0,
-        'outline_color_r': 0,
-        'line_type': 16,
-        'background_enabled': False,
-        'background_shape': 'rectangle',
-        'background_color_b': 0,
-        'background_color_g': 0,
-        'background_color_r': 0,
-        'background_opacity': 0.6,
-        'background_padding_top': 10,
-        'background_padding_bottom': 10,
-        'background_padding_left': 10,
-        'background_padding_right': 10,
-        'background_corner_radius': 10,
-        'show_camera_and_time': True,
-        'show_session': True,
-        'show_requested_fps': True,
-        'show_sensor_fps': True,
-        'show_display_fps': True,
-        'show_frame_counter': True,
-        'show_recording_info': True,
-        'show_recording_filename': True,
-        'show_controls': True,
-        'show_frame_number': True,
-        'scale_mode': 'auto',
-        'manual_scale_factor': 3.0,
-        'enable_csv_timing_log': True,
-        'disable_mp4_conversion': True,
-    }
+    CAMERA_OVERLAY_DEFAULTS = BASE_OVERLAY_DEFAULTS
 
-from rpi_logger.core.config_manager import get_config_manager
 from vmc.constants import PLACEHOLDER_GEOMETRY
 
 
@@ -161,18 +104,21 @@ class CameraModel:
         display_name: str,
         logger: logging.Logger,
         config_path: Optional[Path] = None,
+        preferences: Optional[ModulePreferences] = None,
     ) -> None:
         self.args = args
         self.module_dir = module_dir
         self.display_name = display_name
         self.logger = logger
         self.config_path = config_path or (module_dir / "config.txt")
+        self.preferences = preferences or ModulePreferences(self.config_path)
         self.overlay_config = dict(CAMERA_OVERLAY_DEFAULTS)
         self.camera_aliases: dict[int, str] = {}
         self._camera_alias_slugs: dict[int, str] = {}
 
         self._status_message = "Initializing"
-        self.ensure_module_config()
+        self.ensure_camera_config()
+        self.config_data: Dict[str, Any] = self.preferences.snapshot()
         self.apply_saved_preferences()
 
         self.save_frame_interval = self._compute_save_interval()
@@ -197,6 +143,7 @@ class CameraModel:
 
         self.save_dir: Optional[Path] = None
         self.session_dir: Optional[Path] = None
+        self.module_data_dir: Optional[Path] = None
         if self.save_enabled:
             base_dir = self.resolve_save_dir()
             if base_dir:
@@ -230,36 +177,44 @@ class CameraModel:
     # ------------------------------------------------------------------
     # Preference persistence
     # ------------------------------------------------------------------
-    def ensure_module_config(self) -> None:
+    def ensure_camera_config(self) -> None:
         path = self.config_path
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
         except Exception:  # pragma: no cover - defensive
             return
-        if path.exists():
-            return
+        
+        # We only need to ensure camera-specific defaults exist.
+        # StubCodexModel handles the base config file creation and common defaults.
         defaults = {
-            "enabled": "false",
-            "display_name": self.display_name,
-            "window_geometry": PLACEHOLDER_GEOMETRY,
-            "preview_fraction": "1.0",
-            "preview_fps": "unlimited",
-            "save_width": str(self.PREVIEW_SIZE[0]),
-            "save_height": str(self.PREVIEW_SIZE[1]),
-            "save_fps": "unlimited",
-            "save_format": "jpeg",
-            "save_quality": "90",
             "camera_1_alias": "Camera 1",
             "camera_2_alias": "Camera 2",
         }
-        lines = [f"{key} = {value}" for key, value in defaults.items()]
-        try:
-            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        except Exception:  # pragma: no cover - defensive
-            pass
+        
+        current_content = ""
+        if path.exists():
+            try:
+                current_content = path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        
+        updates = []
+        for key, value in defaults.items():
+            if key not in current_content: # Simple check, could be more robust but sufficient for defaults
+                 updates.append(f"{key} = {value}")
+        
+        if updates:
+            try:
+                with path.open("a", encoding="utf-8") as f:
+                    if current_content and not current_content.endswith("\n"):
+                        f.write("\n")
+                    f.write("\n".join(updates) + "\n")
+            except Exception:  # pragma: no cover - defensive
+                pass
 
     def apply_saved_preferences(self) -> None:
-        config = self._read_module_config()
+        config = dict(self.preferences.snapshot())
+        self.config_data = dict(config)
         updates: dict[str, Any] = {}
         if not config:
             self._load_camera_aliases({}, updates)
@@ -322,14 +277,7 @@ class CameraModel:
             self._write_module_preferences_sync(updates)
 
     def _read_module_config(self) -> dict[str, Any]:
-        path = self.config_path
-        if not path.exists():
-            return {}
-        try:
-            return get_config_manager().read_config(path)
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.debug("Config read failed: %s", exc)
-            return {}
+        return dict(self.preferences.snapshot())
 
     async def persist_module_preferences(self) -> None:
         path = self.config_path
@@ -366,24 +314,27 @@ class CameraModel:
         if not updates:
             return
 
-        config_manager = get_config_manager()
         try:
-            success = await config_manager.write_config_async(path, updates)
+            success = await self.preferences.write_async(updates)
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.warning("Failed to persist module prefs: %s", exc)
             return
-
         if not success:
             self.logger.warning("Unable to write module prefs to %s", path)
+            return
+        self.config_data.update({key: self.preferences.get(key) for key in updates})
 
     def _write_module_preferences_sync(self, updates: dict[str, Any]) -> None:
         path = self.config_path
         if not path.exists() or not updates:
             return
         try:
-            get_config_manager().write_config(path, updates)
+            success = self.preferences.write_sync(updates)
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.debug("Failed to sync-write module prefs: %s", exc)
+            return
+        if success:
+            self.config_data.update({key: self.preferences.get(key) for key in updates})
 
     # ------------------------------------------------------------------
     # Camera alias helpers
