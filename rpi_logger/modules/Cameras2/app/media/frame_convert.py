@@ -1,7 +1,17 @@
-"""
-Frame conversion specification.
+"""Frame conversion utilities."""
 
-- Purpose: convert backend frame formats (OpenCV BGR, libcamera formats) into preview-friendly images (Tk-compatible) and record-ready arrays.
-- Constraints: no blocking IO; prefer numpy ops; optional offloaded conversions via executor if heavy.
-- Logging: conversions that fail or exceed timing budgets; include camera id and format info.
-"""
+from __future__ import annotations
+
+import numpy as np
+
+
+def ensure_uint8(frame) -> np.ndarray:
+    """Ensure frame data is uint8 numpy array."""
+
+    if isinstance(frame, np.ndarray):
+        data = frame
+    else:
+        data = frame.data if hasattr(frame, "data") else frame
+    if isinstance(data, np.ndarray):
+        return data.astype(np.uint8, copy=False) if data.dtype != np.uint8 else data
+    return np.array(data, dtype=np.uint8)

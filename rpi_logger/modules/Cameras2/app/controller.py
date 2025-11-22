@@ -1,27 +1,45 @@
-"""
-Controller specification for Cameras2.
+"""Cameras2 controller stub."""
 
-Responsibilities:
-- Orchestrate discovery start/stop, handle user actions (select camera, enable preview, start/stop recording), and manage config dialog lifecycle.
-- Coordinate registry, preview pipeline, record pipeline, router, and backends; ensure per-camera tasks start/stop cleanly when tabs appear/disappear (hotplug behavior).
-- Bridge supervisor commands to runtime actions; implement healthcheck by querying pipelines/metrics.
-- Apply capture settings via services.capture_settings; emit telemetry via services.telemetry.
-- API outline (async unless noted):
-  - `start(runtime_ctx)`; `shutdown()` safe to call multiple times.
-  - `on_discovery_tick()` to schedule discovery iterations; `on_device_event(event)` for hotplug callbacks.
-  - UI actions: `enable_preview(camera_id, mode?)`, `disable_preview(camera_id)`, `start_record(camera_id, mode?)`, `stop_record(camera_id)`, `open_config_dialog()`, `apply_config(camera_id, requested_configs)`.
-  - Supervisor hooks: `handle_command(Command)`, `handle_user_action(Action)`, `healthcheck()` returning dict of status + metrics.
-  - Metrics/telemetry: `emit_telemetry_snapshot(throttle)`; wires runtime.metrics to ui telemetry service.
-- Stub (codex) alignment:
-  - Must cooperate with `StubCodexController` command/user-action flow; accept legacy verbs (`start_recording`, `stop_recording`, `get_status`, `quit`) and map to Cameras2 semantics.
-  - Expose shutdown request hook so supervisor `request_shutdown` works; honor `enable_commands` gating.
-  - Surface StatusMessage updates (INITIALIZING/IDLE/RECORDING/ERROR/QUITTING) consistent with stub, using model state transitions.
-  - `handle_command`/`handle_user_action` should return booleans to allow StubCodexController fallbacks/warnings; legacy CLI invocations (headless) must behave identically to GUI-driven actions so a user can configure in GUI then continue via CLI without losing state.
+from __future__ import annotations
 
-- Picamera2 alignment: when dealing with CSI cameras, drive configuration through Picamera2 APIs (mode selection, controls) via backend shims rather than custom code; keep controller semantics close to Picamera2's lifecycle (configure -> start -> stop) for predictability.
-Constraints:
-- asyncio-only; guard against blocking camera IO; use background tasks for any hardware interactions.
-- Robust hotplug: unplug -> stop pipelines, free handles, drop tab; plug -> probe (or load cache), create tab lazily.
-Logging:
-- Discovery events, selection changes, pipeline start/stop, errors, retries, and timing for start/stop paths.
-"""
+import asyncio
+from typing import Any, Dict
+
+from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
+from rpi_logger.modules.Cameras2.runtime import RuntimeStatus
+from rpi_logger.modules.Cameras2.runtime.registry import Registry
+
+
+class Cameras2Controller:
+    """Coordinates registry/router lifecycle and bridges commands."""
+
+    def __init__(self, registry: Registry, *, logger: LoggerLike = None) -> None:
+        self._logger = ensure_structured_logger(logger, fallback_name=__name__)
+        self._registry = registry
+
+    async def start(self) -> None:
+        self._logger.info("Cameras2 controller started")
+
+    async def shutdown(self) -> None:
+        self._logger.info("Cameras2 controller shutting down")
+
+    async def handle_command(self, command: Dict[str, Any]) -> bool:
+        action = (command.get("command") or "").lower()
+        if action in {"start_recording", "stop_recording", "get_status"}:
+            self._logger.debug("Received command %s", action)
+            return True
+        return False
+
+    async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
+        if action in {"start_recording", "stop_recording", "quit", "get_status"}:
+            self._logger.debug("User action %s", action)
+            return True
+        return False
+
+    async def healthcheck(self) -> Dict[str, Any]:
+        snapshot = self._registry.snapshot()
+        return {
+            "cameras": len(snapshot),
+            "statuses": {key: state.status.value for key, state in snapshot.items()},
+        }
+

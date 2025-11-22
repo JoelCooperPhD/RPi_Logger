@@ -24,7 +24,7 @@ Quick map of the Cameras2 spec files and their roles. Implementation is intentio
 ## Pipelines and Backends
 - `runtime/preview/*` - preview pipeline and UI worker wiring.
 - `runtime/record/*` - record pipeline, overlays, recorder, CSV logger, FPS tracker; includes long-run segmentation/rotation note.
-- `runtime/backends/*` - USB, Pi (Picamera2), and mock capture backends.
+- `runtime/backends/*` - USB and Pi (Picamera2) capture backends.
 
 ## Discovery
 - `runtime/discovery/*` - USB/CSI probing, capability normalization, cache use, policy/backoff, and merge logic.

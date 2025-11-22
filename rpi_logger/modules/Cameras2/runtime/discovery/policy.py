@@ -1,15 +1,38 @@
-"""
-Discovery policy specification.
+"""Discovery policy helpers."""
 
-- Purpose: decide when to trust cache vs reprobe, how often to refresh capabilities, and how to respond to device errors (retry/backoff/disable).
-- Responsibilities: provide policy hooks for controller/registry, including thresholds for revalidation and behavior on repeated failures.
-- Logging: policy decisions (cache used vs probe), backoff actions, disables, and recoveries.
-- Constraints: pure logic; no blocking IO; deterministic for reproducibility.
-- Suggested policy knobs:
-  - `max_failures_before_backoff` (default 3), exponential backoff capped at e.g., 60s.
-  - `capabilities_refresh_interval_ms` (e.g., 10 minutes) or on cache schema bump.
-  - `prefer_cache_until_reboot` boolean for stable devices; default false for USB, true for Pi cam.
-  - `ignore_flapping_threshold_ms` to skip rapid plug/unplug noise.
-  - Headless CLI and GUI share the same policy + cache files; cached capabilities/configs must be honored regardless of launch mode so a GUI-configured layout carries into CLI recording runs.
-- API sketch: `should_probe(descriptor, cache_entry) -> bool`; `next_probe_delay_ms(failure_count) -> int`; `should_disable(camera_id, failure_count) -> bool`.
-"""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass(slots=True)
+class DiscoveryPolicy:
+    max_failures_before_backoff: int = 3
+    backoff_cap_ms: int = 60_000
+    capabilities_refresh_interval_ms: int = 10 * 60_000
+    prefer_cache_until_reboot: bool = False
+    ignore_flapping_threshold_ms: int = 1_000
+
+    def should_probe(self, last_probe_ts_ms: Optional[float], cache_timestamp_ms: Optional[float]) -> bool:
+        """Return True if we should probe capabilities now."""
+
+        now_ms = time.time() * 1000
+        if last_probe_ts_ms is None:
+            return True
+        if cache_timestamp_ms and self.prefer_cache_until_reboot:
+            return False
+        return (now_ms - last_probe_ts_ms) >= self.capabilities_refresh_interval_ms
+
+    def next_probe_delay_ms(self, failure_count: int) -> int:
+        """Exponential backoff delay in ms."""
+
+        if failure_count <= 0:
+            return 0
+        exp = min(failure_count - 1, 5)
+        delay = (2**exp) * 1000
+        return min(delay, self.backoff_cap_ms)
+
+    def should_disable(self, failure_count: int) -> bool:
+        return failure_count >= self.max_failures_before_backoff

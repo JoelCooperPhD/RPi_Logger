@@ -1,7 +1,24 @@
-"""
-Discovery combiner specification.
+"""Combine discovery results from multiple backends."""
 
-- Purpose: merge results from USB and Pi camera discovery into a unified list, resolve id collisions, and apply filtering policies (max cameras, preferred backends).
-- Responsibilities: dedupe by stable identifiers, annotate source, and emit unified events to registry; handle partial failures gracefully.
-- Logging: summary of merged results, conflicts resolved, filtered devices, and errors.
-"""
+from __future__ import annotations
+
+from typing import Dict, Iterable, List
+
+from rpi_logger.modules.Cameras2.runtime import CameraDescriptor, CameraId
+
+
+def merge_descriptors(
+    usb: Iterable[CameraDescriptor],
+    picam: Iterable[CameraDescriptor],
+) -> List[CameraDescriptor]:
+    """Merge descriptors, preferring picam when stable_id clashes."""
+
+    combined: Dict[str, CameraDescriptor] = {}
+    for desc in usb:
+        combined[desc.camera_id.key] = desc
+    for desc in picam:
+        combined[desc.camera_id.key] = desc
+    return list(combined.values())
+
+
+__all__ = ["merge_descriptors"]

@@ -1,54 +1,6 @@
-# Cameras2 module configuration template (specification only; no runtime parsing yet).
-# Keys to define (with example defaults):
-# preview:
-#   resolution: 640x480
-#   fps_cap: 30
-#   format: RGB
-#   overlay: true
-# record:
-#   resolution: 1920x1080
-#   fps_cap: 30
-#   format: MJPEG
-#   overlay: true
-# discovery:
-#   interval_ms: 2000
-#   reprobe_backoff_ms: 5000
-#   cache_ttl_ms: 600000
-# guard:
-#   disk_free_gb_min: 1.0
-#   check_interval_ms: 5000
-# retention:
-#   max_sessions: 10
-#   prune_on_start: true
-# storage:
-#   base_path: ./data
-#   per_camera_subdir: true
-# telemetry:
-#   emit_interval_ms: 2000
-#   include_metrics: true
-# ui:
-#   geometry: persisted by supervisor unless overridden
-#   auto_start_preview: false
-# stub_prefs:
-#   preview_resolution: 640x480
-#   preview_fps: 30
-#   record_resolution: 1920x1080
-#   record_fps: 30
-#   record_format: mjpeg
-#   overlay_enabled: true
-#   view.show_io_panel: true
-#   view.show_logger: true
-# backend:
-#   mock_enabled: false
-#   picam_controls: {} # key/value overrides aligned with Picamera2 names
-# logging:
-#   level: INFO
-#   file: ./logs/cameras2.log
-# Notes:
-# - Persist defaults for preview/record (resolutions, FPS caps, formats, overlay toggles).
-# - Define discovery intervals, retry limits, cache TTLs for known cameras.
-# - Store UI geometry/config dialog state (if persisted here rather than prefs store).
-# - Provide storage paths, retention counts, disk guard thresholds, and logging verbosity default.
-# - This file should be read through base config loader; all values logged when applied; no blocking IO.
-# - Stick to stub (codex) `config.txt` conventions (key = value) so ModulePreferences/ModuleConfigContext can parse without custom loaders.
-# - CLI overrides should write back into these keys (where safe) so GUI/headless runs share settings; require the same config file for both GUI and CLI launches.
+window_geometry = 626x404+1049+491
+enabled = false
+view.show_io_panel = false
+view.show_logger = false
+display_name = Cameras2
+preview_resolution = auto

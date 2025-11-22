@@ -1,4 +1,6 @@
-"""Shared media utility specs for Cameras2 (frame/color conversion).
+"""Media utilities for Cameras2."""
 
-Modules here describe how preview/record pipelines normalize pixel formats and color spaces without blocking the event loop.
-"""
+from .color_convert import to_rgb
+from .frame_convert import ensure_uint8
+
+__all__ = ["to_rgb", "ensure_uint8"]

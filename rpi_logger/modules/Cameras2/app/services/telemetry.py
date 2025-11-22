@@ -1,8 +1,12 @@
-"""
-Telemetry service specification.
+"""Telemetry helpers (placeholder)."""
 
-- Purpose: emit structured metrics/events from Cameras2 (discovery counts, FPS, latency, drops, storage status) to the logger's telemetry sink.
-- Functions: build payloads from metrics panel/registry, throttle emissions, handle failures gracefully, and collect healthcheck summaries.
-- Stub (codex) alignment: can piggyback on StatusMessage/StatusType channels for high-level state, and use stub supervisor logger for detailed telemetry when GUI logging attached.
-- Constraints: asyncio, no blocking; logs every emit attempt and error; resilient to downstream telemetry outages.
-"""
+from __future__ import annotations
+
+from typing import Any, Dict
+
+
+def build_snapshot(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """Return metrics payload for telemetry/logging."""
+
+    return dict(metrics)
+

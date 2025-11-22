@@ -223,7 +223,7 @@ class StubCodexView:
         self.stub_frame.grid(row=0, column=0, sticky="nsew")
         self.logger.info("Stub frame added to main layout")
 
-        self.io_view_frame = ttk.LabelFrame(main_frame, text="IO Stub", padding="8")
+        self.io_view_frame = ttk.LabelFrame(main_frame, text="Capture Stats", padding="8")
         self.io_view_frame.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
         self.io_view_frame.columnconfigure(0, weight=1)
         self.io_view_frame.rowconfigure(0, weight=1)
@@ -289,7 +289,7 @@ class StubCodexView:
         self.view_menu = view_menu
         menubar.add_cascade(label="View", menu=view_menu)
         view_menu.add_checkbutton(
-            label="Show IO Stub",
+            label="Show Capture Stats",
             variable=self.io_view_visible_var,
             command=self._toggle_io_view,
         )

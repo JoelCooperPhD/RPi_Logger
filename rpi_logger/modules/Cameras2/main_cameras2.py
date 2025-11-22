@@ -1,13 +1,108 @@
-"""
-Specification for Cameras2 module entry point (no executable code yet).
+"""Cameras2 module entry point leveraging the stub (codex) stack."""
 
-- Purpose: parse module CLI options, resolve config paths, and bootstrap the Stub (codex) supervisor with Cameras2 runtime factory.
-- Constraints: asyncio-based; no blocking IO; heavy logging around argument parsing, config resolution, and supervisor lifecycle.
-- Responsibilities: build args (mode/gui/headless, preview + record defaults, retention/disk guards), inject config path, wire RuntimeRetryPolicy, install signal handlers, call supervisor.run()/shutdown().
-- Must preserve stub (codex) CLI shape: `--mode`, `--output-dir`, `--session-prefix`, `--enable-commands`, `--window-geometry`, `--log-level`, `--log-file`, `--close-delay-ms`, console toggles (`--console/--no-console`), plus Cameras2 options (`--preview-fps`, `--preview-size`, `--record-fps`, `--record-size`, `--format`, `--no-overlay`, `--disk-threshold`, `--max-sessions`, `--config-path`, `--mock-camera` toggles). Headless runs use the exact same args/prefs as GUI so a user can configure via GUI, quit, and relaunch from CLI without losing camera selections or defaults.
-- Apply precedence: CLI overrides config.txt overrides module defaults; log resolved values. When a CLI flag maps to a persisted pref (e.g., preview/record size/FPS/format, overlay toggle, disk thresholds), write back through ModulePreferences-compatible keys so future GUI/headless runs see the same settings. Pass resolved `window_geometry` into model/view args per StubCodexModel patterns even in headless mode to keep prefs consistent.
-- Resolve session paths via storage/session_paths to pass to runtime; align `output-dir`/`session-prefix` with base logger expectations.
-- Integration: relies on `bridge.py` to expose runtime factory; uses module_display/module_id constants to register with manager; respects window geometry persistence via ModulePreferences handled by StubCodexModel.
-- Validation: log parsed args, warn on unsupported combinations, and surface early failures cleanly before the runtime spins up. Validate mutually exclusive options (headless vs ui geometry persistence), supported formats per backend, and FPS caps. Honor `--enable-commands` requirement from stub supervisor.
-- Future: once implemented, should include unit coverage for arg parsing defaults and error cases; include smoke test for headless startup with mock backend plus GUI geometry persistence through ModulePreferences.
-"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import sys
+from pathlib import Path
+from typing import Optional
+
+
+MODULE_DIR = Path(__file__).resolve().parent
+
+
+def _find_project_root(start: Path) -> Path:
+    for parent in start.parents:
+        if parent.name == "rpi_logger":
+            return parent.parent
+    return start.parents[-1]
+
+
+PROJECT_ROOT = _find_project_root(MODULE_DIR)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+if __package__ in {None, ""}:
+    __package__ = "rpi_logger.modules.Cameras2"
+
+STUB_ROOT = MODULE_DIR.parent / "stub (codex)"
+if STUB_ROOT.exists() and str(STUB_ROOT) not in sys.path:
+    sys.path.insert(0, str(STUB_ROOT))
+
+_venv_site = PROJECT_ROOT / ".venv" / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+if _venv_site.exists() and str(_venv_site) not in sys.path:
+    sys.path.insert(0, str(_venv_site))
+
+from vmc import StubCodexSupervisor, RuntimeRetryPolicy  # type: ignore  # noqa: E402
+from vmc.constants import PLACEHOLDER_GEOMETRY  # type: ignore  # noqa: E402
+from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
+from rpi_logger.modules.base.config_paths import resolve_module_config_path  # noqa: E402
+from rpi_logger.cli.common import install_signal_handlers  # noqa: E402
+from .bridge import factory  # noqa: E402
+
+DISPLAY_NAME = "Cameras2"
+MODULE_ID = "cameras2"
+DEFAULT_OUTPUT_SUBDIR = Path("cameras2")
+
+logger = get_module_logger(__name__)
+
+
+def parse_args(argv: Optional[list[str]] = None):
+    parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} module")
+    parser.add_argument("--mode", choices=("gui", "headless"), default="gui")
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_SUBDIR)
+    parser.add_argument("--session-prefix", type=str, default=MODULE_ID)
+    parser.add_argument("--log-level", type=str, default="info")
+    parser.add_argument("--log-file", type=Path, default=None)
+    parser.add_argument("--enable-commands", action="store_true", default=False)
+    parser.add_argument("--window-geometry", type=str, default=None)
+
+    console_group = parser.add_mutually_exclusive_group()
+    console_group.add_argument(
+        "--console",
+        dest="console_output",
+        action="store_true",
+        help="Enable console logging (unused for manager launches)",
+    )
+    console_group.add_argument(
+        "--no-console",
+        dest="console_output",
+        action="store_false",
+        help="Disable console logging (default)",
+    )
+    parser.set_defaults(console_output=False)
+
+    return parser.parse_args(argv)
+
+
+async def main_async(argv: Optional[list[str]] = None) -> None:
+    args = parse_args(argv)
+    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID, filename="config.txt")
+
+    supervisor = StubCodexSupervisor(
+        args,
+        module_dir=MODULE_DIR,
+        logger=logger,
+        display_name=DISPLAY_NAME,
+        module_id=MODULE_ID,
+        runtime_factory=factory,
+        runtime_retry_policy=RuntimeRetryPolicy(),
+        config_path=config_ctx.writable_path,
+    )
+
+    loop = asyncio.get_running_loop()
+    install_signal_handlers(supervisor, loop)
+
+    try:
+        await supervisor.run()
+    finally:
+        await supervisor.shutdown()
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    asyncio.run(main_async(argv))
+
+
+if __name__ == "__main__":
+    main()
