@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import re
 import subprocess
 import sys
 import time
@@ -11,7 +13,6 @@ from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.base import gui_utils
 
 from async_tkinter_loop import async_handler
 
@@ -30,6 +31,75 @@ from .model import StubCodexModel
 from .constants import PLACEHOLDER_GEOMETRY
 
 _BASE_LOGGER = get_module_logger(__name__)
+PREF_SHOW_IO_PANEL = "view.show_io_panel"
+PREF_SHOW_LOGGER = "view.show_logger"
+
+# Geometry helpers local to the stub to avoid depending on other modules.
+WINDOW_TITLE_BAR_OFFSET = 28
+_BOTTOM_MARGIN_ENV = "RPILOGGER_BOTTOM_UI_MARGIN"
+try:
+    SCREEN_BOTTOM_RESERVED = max(0, int(os.environ.get(_BOTTOM_MARGIN_ENV, "48")))
+except ValueError:
+    SCREEN_BOTTOM_RESERVED = 48
+
+
+def _parse_geometry_string(geometry_str: str) -> Optional[tuple[int, int, int, int]]:
+    try:
+        match = re.match(r"(\d+)x(\d+)([\+\-]\d+)([\+\-]\d+)", geometry_str)
+        if not match:
+            _BASE_LOGGER.error("Failed to parse geometry string: '%s'", geometry_str)
+            return None
+        width = int(match.group(1))
+        height = int(match.group(2))
+        x = int(match.group(3))
+        y = int(match.group(4))
+        return width, height, x, y
+    except Exception as exc:  # pragma: no cover - defensive
+        _BASE_LOGGER.error("Exception parsing geometry string '%s': %s", geometry_str, exc)
+        return None
+
+
+def _normalize_geometry_values(
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+    *,
+    screen_height: Optional[int] = None,
+) -> tuple[int, int, int, int]:
+    width = int(width)
+    height = int(height)
+    x = int(x)
+    y = int(y)
+
+    adjusted_y = max(0, y - WINDOW_TITLE_BAR_OFFSET)
+
+    if screen_height is not None and screen_height > 0:
+        bottom_limit = max(0, screen_height - SCREEN_BOTTOM_RESERVED)
+        max_adjusted_y = max(0, bottom_limit - height - WINDOW_TITLE_BAR_OFFSET)
+        if adjusted_y > max_adjusted_y:
+            _BASE_LOGGER.debug(
+                "Clamping window bottom to visible region (screen=%d, reserve=%d, height=%d)",
+                screen_height,
+                SCREEN_BOTTOM_RESERVED,
+                height,
+            )
+        adjusted_y = min(adjusted_y, max_adjusted_y)
+
+    return width, height, x, adjusted_y
+
+
+def _denormalize_geometry_values(width: int, height: int, x: int, y: int) -> tuple[int, int, int, int]:
+    width = int(width)
+    height = int(height)
+    x = int(x)
+    raw_y = max(0, int(y) + WINDOW_TITLE_BAR_OFFSET)
+    return width, height, x, raw_y
+
+
+def _build_geometry_string_from_normalized(width: int, height: int, x: int, y: int) -> str:
+    width, height, x, raw_y = _denormalize_geometry_values(width, height, x, y)
+    return f"{width}x{height}+{x}+{raw_y}"
 
 class StubCodexView:
     """Tkinter view that mirrors model state and forwards user intent."""
@@ -117,17 +187,19 @@ class StubCodexView:
     def _build_ui(self) -> None:
         assert tk is not None and ttk is not None and scrolledtext is not None
 
-        io_visible = True
-        if hasattr(self.model, 'config_data'):
-            val = self.model.config_data.get('gui_io_stub_visible', 'true')
-            io_visible = str(val).lower() in ('true', 'yes', 'on', '1')
+        io_visible = self.model.get_preference_bool(
+            PREF_SHOW_IO_PANEL,
+            True,
+            fallback_keys=("gui_io_stub_visible",),
+        )
 
         self.io_view_visible_var = tk.BooleanVar(value=io_visible)
 
-        log_visible = True
-        if hasattr(self.model, 'config_data'):
-            val = self.model.config_data.get('gui_logger_visible', 'true')
-            log_visible = str(val).lower() in ('true', 'yes', 'on', '1')
+        log_visible = self.model.get_preference_bool(
+            PREF_SHOW_LOGGER,
+            True,
+            fallback_keys=("gui_logger_visible",),
+        )
 
         self.log_visible_var = tk.BooleanVar(value=log_visible)
 
@@ -318,7 +390,9 @@ class StubCodexView:
             self._set_io_row_visible(False)
 
         if self._event_loop and hasattr(self.model, 'persist_preferences'):
-            self._event_loop.create_task(self.model.persist_preferences({'gui_io_stub_visible': visible}))
+            self._event_loop.create_task(
+                self.model.persist_preferences({PREF_SHOW_IO_PANEL: visible})
+            )
 
     def show_io_stub(self) -> None:
         if not self.io_view_frame or not self.io_view_visible_var:
@@ -413,7 +487,9 @@ class StubCodexView:
             self.log_frame.grid_remove()
 
         if self._event_loop and hasattr(self.model, 'persist_preferences'):
-            self._event_loop.create_task(self.model.persist_preferences({'gui_logger_visible': visible}))
+            self._event_loop.create_task(
+                self.model.persist_preferences({PREF_SHOW_LOGGER: visible})
+            )
 
     def show_logger(self) -> None:
         if not self.log_frame or not self.log_visible_var:
@@ -647,19 +723,19 @@ class StubCodexView:
         if not geometry:
             return None
 
-        parsed = gui_utils.parse_geometry_string(geometry)
+        parsed = _parse_geometry_string(geometry)
         if not parsed:
             return None
 
         width, height, x, y = parsed
-        normalized = gui_utils.normalize_geometry_values(
+        normalized = _normalize_geometry_values(
             width,
             height,
             x,
             y,
             screen_height=self._get_screen_height(),
         )
-        normalized_string = gui_utils.build_geometry_string_from_normalized(*normalized)
+        normalized_string = _build_geometry_string_from_normalized(*normalized)
         if normalized_string != geometry:
             self.logger.debug("Normalized geometry for persistence: %s -> %s", geometry, normalized_string)
         return normalized_string

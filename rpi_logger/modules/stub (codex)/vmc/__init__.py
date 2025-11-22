@@ -11,6 +11,7 @@ from .supervisor import (
 )
 from .runtime import ModuleRuntime, RuntimeFactory, RuntimeContext
 from .runtime_helpers import BackgroundTaskManager, ShutdownGuard
+from .migration import LegacySystemRuntimeAdapter, LegacyTkViewBridge
 
 __all__ = [
     "StubCodexModel",
@@ -26,4 +27,6 @@ __all__ = [
     "RuntimeContext",
     "BackgroundTaskManager",
     "ShutdownGuard",
+    "LegacySystemRuntimeAdapter",
+    "LegacyTkViewBridge",
 ]

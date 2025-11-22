@@ -11,13 +11,14 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set
 
 from rpi_logger.cli.common import ensure_directory, log_module_shutdown, log_module_startup, setup_module_logging
 from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.paths import USER_MODULE_CONFIG_DIR
+from .preferences import ModulePreferences, PreferenceChange
 from .constants import DISPLAY_NAME, MODULE_ID, PLACEHOLDER_GEOMETRY
 
 
@@ -53,6 +54,8 @@ class StubCodexModel:
         *,
         display_name: str = DISPLAY_NAME,
         module_id: str = MODULE_ID,
+        config_path: Optional[Path] = None,
+        config_filename: str = "config.txt",
     ) -> None:
         self.args = args
         self.module_dir = module_dir
@@ -66,10 +69,14 @@ class StubCodexModel:
         self.session_name: Optional[str] = None
         self.log_file: Optional[Path] = None
         self.logs_dir = module_dir / "logs"
-        self._template_config_path = module_dir / "config.txt"
+        self._template_config_path = Path(config_path) if config_path else module_dir / config_filename
         self._using_fallback_config = False
         self.config_path = self._prepare_config_path()
-        self.config_data: Dict[str, Any] = {}
+        self.preferences = ModulePreferences(
+            self.config_path,
+            on_change=self._handle_preferences_changed,
+        )
+        self.config_data: Dict[str, Any] = self.preferences.snapshot()
         self.saved_window_geometry: Optional[str] = None
         self.saved_preview_resolution: Optional[str] = None
         self.saved_preview_width: Optional[int] = None
@@ -82,14 +89,10 @@ class StubCodexModel:
         self._error_message: Optional[str] = None
         self._observers: List[Callable[[str, Any], None]] = []
 
-        try:
-            config = get_config_manager().read_config(self.config_path)
-        except Exception:
-            config = {}
-        self.config_data = dict(config)
-        self.saved_window_geometry = config.get("window_geometry")
+        config_snapshot = self.config_data
+        self.saved_window_geometry = config_snapshot.get("window_geometry")
 
-        resolution, width, height, _ = self._resolve_preview_preferences(config)
+        resolution, width, height, _ = self._resolve_preview_preferences(config_snapshot)
         self.saved_preview_resolution = resolution
         self.saved_preview_width = width
         self.saved_preview_height = height
@@ -161,12 +164,20 @@ class StubCodexModel:
                     self.config_path,
                 )
 
-        self.saved_window_geometry = geometry or PLACEHOLDER_GEOMETRY
-        self.saved_preview_resolution = preview_resolution
-        self.saved_preview_width = preview_width
-        self.saved_preview_height = preview_height
-        self._apply_preview_preferences_to_args(preview_resolution, preview_width, preview_height)
-        self.config_data = dict(config)
+        self.preferences.reload()
+        self.config_data = self.preferences.snapshot()
+        self.saved_window_geometry = self.config_data.get("window_geometry") or PLACEHOLDER_GEOMETRY
+        (
+            self.saved_preview_resolution,
+            self.saved_preview_width,
+            self.saved_preview_height,
+            _,
+        ) = self._resolve_preview_preferences(self.config_data)
+        self._apply_preview_preferences_to_args(
+            self.saved_preview_resolution,
+            self.saved_preview_width,
+            self.saved_preview_height,
+        )
 
         self.args.output_dir = await output_task
 
@@ -260,6 +271,20 @@ class StubCodexModel:
             except Exception:
                 continue
 
+    def _handle_preferences_changed(self, change: PreferenceChange) -> None:
+        """Refresh cached config data when ModulePreferences writes succeed."""
+        self.config_data = self.preferences.snapshot()
+        geometry = self.config_data.get("window_geometry")
+        if geometry:
+            self.saved_window_geometry = geometry
+        (
+            self.saved_preview_resolution,
+            self.saved_preview_width,
+            self.saved_preview_height,
+            _,
+        ) = self._resolve_preview_preferences(self.config_data)
+        self._notify("preferences", change)
+
     @property
     def state(self) -> ModuleState:
         return self._state
@@ -330,6 +355,28 @@ class StubCodexModel:
             "error": self.error_message,
         }
 
+    def get_preference(self, key: str, default: Optional[Any] = None) -> Any:
+        return self.config_data.get(key, default)
+
+    def get_preference_bool(
+        self,
+        key: str,
+        default: bool = False,
+        *,
+        fallback_keys: Optional[Iterable[str]] = None,
+    ) -> bool:
+        candidates = [key]
+        if fallback_keys:
+            candidates.extend(fallback_keys)
+        for candidate in candidates:
+            if candidate in self.config_data:
+                value = str(self.config_data[candidate]).strip().lower()
+                return value in {"true", "1", "yes", "on"}
+        return default
+
+    def preferences_scope(self, namespace: str, *, separator: str = "."):
+        return self.preferences.scope(namespace, separator=separator)
+
     # Internal helpers -------------------------------------------------------
 
     def _prepare_config_path(self) -> Path:
@@ -339,7 +386,7 @@ class StubCodexModel:
 
         fallback_dir = USER_MODULE_CONFIG_DIR / self.module_id
         fallback_dir.mkdir(parents=True, exist_ok=True)
-        fallback_path = fallback_dir / "config.txt"
+        fallback_path = fallback_dir / template.name
         if not fallback_path.exists():
             try:
                 if template.exists():
@@ -390,12 +437,11 @@ class StubCodexModel:
             self._pending_window_geometry = None
             return
 
-        success = await get_config_manager().write_config_async(
-            self.config_path,
-            {"window_geometry": self._pending_window_geometry},
-        )
+        update = {"window_geometry": self._pending_window_geometry}
+        success = await self.preferences.write_async(update)
         if success:
             self.saved_window_geometry = self._pending_window_geometry
+            self.config_data["window_geometry"] = self.saved_window_geometry
             self._pending_window_geometry = None
 
     def has_pending_window_geometry(self) -> bool:
@@ -423,7 +469,7 @@ class StubCodexModel:
             updates["preview_width"] = width
             updates["preview_height"] = height
 
-        success = await get_config_manager().write_config_async(self.config_path, updates)
+        success = await self.preferences.write_async(updates)
         if not success:
             logger.warning("Failed to persist preview selection: %s", updates)
             return
@@ -431,6 +477,7 @@ class StubCodexModel:
         self.saved_preview_resolution = resolution
         self.saved_preview_width = width
         self.saved_preview_height = height
+        self.config_data.update({k: v for k, v in updates.items()})
         self._apply_preview_preferences_to_args(resolution, width, height)
 
     def _apply_preview_preferences_to_args(
@@ -541,12 +588,6 @@ class StubCodexModel:
         height = StubCodexModel._parse_int(height_str)
         return width, height
 
-    @staticmethod
-    def _stringify_value(value: Any) -> str:
-        if isinstance(value, bool):
-            return str(value).lower()
-        return str(value)
-
     def get_config_snapshot(self) -> Dict[str, Any]:
         return dict(self.config_data)
 
@@ -556,51 +597,12 @@ class StubCodexModel:
         *,
         remove_keys: Optional[Set[str]] = None,
     ) -> bool:
-        if not updates and not remove_keys:
-            return True
-        config_manager = get_config_manager()
-        success = True
-        if updates:
-            success = await config_manager.write_config_async(self.config_path, updates)
-            if success:
-                self.config_data.update({key: self._stringify_value(value) for key, value in updates.items()})
-            else:
-                logger.warning(
-                    "Failed to persist preferences %s to %s",
-                    list(updates.keys()),
-                    self.config_path,
-                )
-        if success and remove_keys:
-            await asyncio.to_thread(self._strip_keys_from_config, remove_keys)
-        return success
+        return await self.preferences.write_async(updates, remove_keys=remove_keys)
 
-    def persist_preferences_sync(self, updates: Dict[str, Any]) -> bool:
-        if not updates:
-            return True
-        config_manager = get_config_manager()
-        success = config_manager.write_config(self.config_path, updates)
-        if success:
-            self.config_data.update({key: self._stringify_value(value) for key, value in updates.items()})
-        return success
-
-    def _strip_keys_from_config(self, keys: Set[str]) -> None:
-        try:
-            if not self.config_path.exists():
-                return
-            lines = self.config_path.read_text(encoding="utf-8").splitlines()
-        except Exception:
-            return
-        filtered: List[str] = []
-        for line in lines:
-            stripped = line.strip()
-            if not stripped or stripped.startswith('#') or '=' not in stripped:
-                filtered.append(line)
-                continue
-            key = stripped.split('=', 1)[0].strip()
-            if key in keys:
-                continue
-            filtered.append(line)
-        try:
-            self.config_path.write_text("\n".join(filtered) + "\n", encoding="utf-8")
-        except Exception:
-            return
+    def persist_preferences_sync(
+        self,
+        updates: Dict[str, Any],
+        *,
+        remove_keys: Optional[Set[str]] = None,
+    ) -> bool:
+        return self.preferences.write_sync(updates, remove_keys=remove_keys)

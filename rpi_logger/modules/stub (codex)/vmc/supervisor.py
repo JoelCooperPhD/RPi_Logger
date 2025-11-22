@@ -67,6 +67,7 @@ class StubCodexSupervisor:
         module_id: Optional[str] = None,
         view_factory: Optional[Callable[..., StubCodexView]] = None,
         view_kwargs: Optional[dict[str, Any]] = None,
+        config_path: Optional[Path] = None,
     ) -> None:
         start = time.perf_counter()
 
@@ -81,11 +82,18 @@ class StubCodexSupervisor:
         self.module_dir = module_dir
         self._view_factory = view_factory or StubCodexView
         self._view_kwargs = dict(view_kwargs) if view_kwargs else {}
+        explicit_config_path: Optional[Path]
+        candidate = config_path or getattr(args, "config_path", None)
+        if candidate:
+            explicit_config_path = Path(candidate)
+        else:
+            explicit_config_path = None
         self.model = StubCodexModel(
             args,
             module_dir,
             display_name=self.display_name,
             module_id=self.module_id,
+            config_path=explicit_config_path,
         )
         self.controller = StubCodexController(
             args,
