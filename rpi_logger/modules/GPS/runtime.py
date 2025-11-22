@@ -42,6 +42,7 @@ else:  # pragma: no cover - GUI path
 from rpi_logger.core.logging_utils import ensure_structured_logger
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
+from rpi_logger.modules.base.preferences import ScopedPreferences
 
 MODULE_DIR = Path(__file__).resolve().parent
 DEFAULT_OFFLINE_DB = (MODULE_DIR / "offline_tiles.db").resolve()
@@ -185,6 +186,8 @@ class GPSPreviewRuntime(ModuleRuntime):
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
+        scope_fn = getattr(context.model, "preferences_scope", None)
+        self.preferences = scope_fn("gps") if callable(scope_fn) else None
         base_logger = ensure_structured_logger(getattr(context, "logger", None), fallback_name="GPSRuntime")
         self.logger = base_logger.getChild("Runtime")
         self.model = context.model
@@ -217,14 +220,14 @@ class GPSPreviewRuntime(ModuleRuntime):
         self._controls_overlay: Optional[ttk.Frame] = None
         initial_zoom = float(getattr(self.args, "zoom", 13.0))
         self._current_zoom = self._clamp_zoom(initial_zoom)
-        self._current_center = (
-            float(getattr(self.args, "center_lat", 40.7608)),
-            float(getattr(self.args, "center_lon", -111.8910)),
-        )
+        initial_lat = self._get_pref_float("center_lat", float(getattr(self.args, "center_lat", 40.7608)))
+        initial_lon = self._get_pref_float("center_lon", float(getattr(self.args, "center_lon", -111.8910)))
+        self._current_center = (initial_lat, initial_lon)
         self._current_db: Optional[Path] = None
         self._telemetry_var: Optional[tk.StringVar] = None
 
-        self._offline_db = getattr(self.args, "offline_db", DEFAULT_OFFLINE_DB)
+        pref_db = self.preferences.get("offline_db") if self.preferences else None
+        self._offline_db = getattr(self.args, "offline_db", pref_db or DEFAULT_OFFLINE_DB)
         self._session_dir: Optional[Path] = None
         self._recording = False
         self._record_path: Optional[Path] = None
@@ -569,6 +572,13 @@ class GPSPreviewRuntime(ModuleRuntime):
         if changed:
             self._log_event("connection_state", connected=connected, error=error)
             self._publish_state(location_changed=False)
+            if self.preferences:
+                self.preferences.write_sync(
+                    {
+                        "serial_connected": connected,
+                        "serial_last_error": error or "",
+                    }
+                )
 
     # ------------------------------------------------------------------
     # NMEA parsing
@@ -955,6 +965,17 @@ class GPSPreviewRuntime(ModuleRuntime):
             path=offline_db_path,
             info=tile_info,
         )
+        if self.preferences:
+            asyncio.create_task(
+                self.preferences.write_async(
+                    {
+                        "center_lat": center_lat,
+                        "center_lon": center_lon,
+                        "zoom": zoom,
+                        "offline_db": str(self._offline_db),
+                    }
+                )
+            )
         self._place_controls_overlay(parent)
 
     def _render_preview_image(
@@ -1146,4 +1167,14 @@ class GPSPreviewRuntime(ModuleRuntime):
         if isinstance(value, bool):
             return "1" if value else "0"
         return str(value)
+
+    def _get_pref_float(self, key: str, default: float) -> float:
+        if self.preferences:
+            raw = self.preferences.get(key)
+            if raw is not None:
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    self.logger.debug("Invalid stored value for %s: %s", key, raw)
+        return float(default)
 MPS_PER_KNOT = 0.514444

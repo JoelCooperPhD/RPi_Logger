@@ -41,19 +41,19 @@ from drt.runtime import DRTModuleRuntime
 from drt.view import DRTView
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.DRT.drt_core.config import load_config_file
+from rpi_logger.modules.base.config_paths import resolve_module_config_path, resolve_writable_module_config
+from rpi_logger.cli.common import install_signal_handlers
 
 logger = get_module_logger("MainDRT")
+CONFIG_CONTEXT = resolve_module_config_path(MODULE_DIR, "drt")
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    module_dir = Path(__file__).parent
-    config_path = module_dir / "config.txt"
-    config = load_config_file(config_path)
+    config = load_config_file(CONFIG_CONTEXT.writable_path)
 
     default_output = Path(config.get('output_dir', 'drt_data'))
     default_session_prefix = str(config.get('session_prefix', 'drt'))
     default_console = bool(config.get('console_output', False))
-    default_window = config.get('window_geometry')
 
     parser = argparse.ArgumentParser(description="DRT shell module")
 
@@ -96,7 +96,7 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--window-geometry",
         type=str,
-        default=default_window,
+        default=None,
         help="Window layout forwarded when running with the GUI",
     )
     parser.add_argument(
@@ -143,7 +143,7 @@ def parse_args(argv: Optional[list[str]] = None):
 
     args = parser.parse_args(argv)
     args.config = config
-    args.config_file_path = config_path
+    args.config_file_path = CONFIG_CONTEXT.writable_path
     return args
 
 
@@ -156,6 +156,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     module_dir = Path(__file__).parent
     display_name = args.config.get('display_name', 'DRT')
+    setattr(args, "config_path", CONFIG_CONTEXT.writable_path)
 
     supervisor = StubCodexSupervisor(
         args,
@@ -165,7 +166,11 @@ async def main(argv: Optional[list[str]] = None) -> None:
         view_factory=DRTView,
         display_name=display_name or STUB_DISPLAY_NAME,
         module_id="drt",
+        config_path=CONFIG_CONTEXT.writable_path,
     )
+
+    loop = asyncio.get_running_loop()
+    install_signal_handlers(supervisor, loop)
 
     await supervisor.run()
 

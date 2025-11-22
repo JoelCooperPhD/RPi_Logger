@@ -18,11 +18,12 @@ STUB_ROOT = MODULE_DIR.parent / "stub (codex)"
 if STUB_ROOT.exists() and str(STUB_ROOT) not in sys.path:
     sys.path.insert(0, str(STUB_ROOT))
 
-from rpi_logger.cli.common import add_common_cli_arguments  # noqa: E402
+from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers  # noqa: E402
 from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
 from vmc import StubCodexSupervisor  # noqa: E402
 
 from runtime import GPSPreviewRuntime  # noqa: E402
+from rpi_logger.modules.base.config_paths import resolve_module_config_path
 
 DISPLAY_NAME = "GPS"
 MODULE_ID = "gps"
@@ -117,6 +118,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
         logger.error("GPS module must be launched by the logger controller.")
         return
 
+    config_context = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+    setattr(args, "config_path", config_context.writable_path)
+
     supervisor = StubCodexSupervisor(
         args,
         MODULE_DIR,
@@ -124,7 +128,11 @@ async def main(argv: Optional[list[str]] = None) -> None:
         runtime_factory=build_runtime,
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
+        config_path=config_context.writable_path,
     )
+
+    loop = asyncio.get_running_loop()
+    install_signal_handlers(supervisor, loop)
 
     try:
         await supervisor.run()

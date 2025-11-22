@@ -5,7 +5,7 @@ enabled = false
 display_name = GPS
 
 # Default preview settings consumed by the GPS preview
-window_geometry = 320x200+800+451
+window_geometry = 1063x766+3712+3486
 offline_db = offline_tiles.db
 center_lat = 40.7608
 center_lon = -111.8910
@@ -19,3 +19,11 @@ reconnect_delay_s = 3
 nmea_history = 30
 gui_io_stub_visible = false
 gui_logger_visible = false
+view.show_io_panel = true
+view.show_logger = true
+gps.serial_connected = true
+gps.serial_last_error = 
+gps.center_lat = 40.7608
+gps.center_lon = -111.891
+gps.zoom = 13.0
+gps.offline_db = /home/rs-pi-2/Development/RPi_Logger/rpi_logger/modules/GPS/offline_tiles.db

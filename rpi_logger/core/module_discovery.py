@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from .paths import MODULES_DIR
 from .logging_config import configure_logging
+from rpi_logger.modules.base.config_paths import resolve_module_config_path
 
 logger = get_module_logger("ModuleDiscovery")
 
@@ -20,6 +21,8 @@ class ModuleInfo:
     entry_point: Path            # Path to main_*.py file
     config_path: Optional[Path]  # Path to config.txt (if exists)
     display_name: str            # Human-readable name
+    module_id: str = ""          # Lowercase identifier derived from entry name
+    config_template_path: Optional[Path] = None  # Original config template path
 
     def __repr__(self) -> str:
         return f"ModuleInfo(name={self.name}, entry={self.entry_point.name})"
@@ -56,6 +59,16 @@ def extract_module_name_from_entry(entry_point: Path) -> Optional[str]:
     title_case = ''.join(word if word.isupper() else word.capitalize() for word in parts)
 
     return title_case
+
+
+def extract_module_id(entry_point: Path, fallback_name: str) -> str:
+    """Return the lowercase module identifier derived from the entry filename."""
+    stem = entry_point.stem.lower()
+    if stem.startswith('main_'):
+        candidate = stem[5:]
+        if candidate:
+            return candidate
+    return fallback_name.lower()
 
 
 async def validate_module_structure_async(module_dir: Path, entry_point: Path) -> bool:
@@ -159,10 +172,31 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
             logger.warning("Module %s failed validation, skipping", module_dir.name)
             continue
 
-        config_path = module_dir / "config.txt"
-        if not config_path.exists():
-            config_path = None
-            logger.debug("No config.txt for %s", module_name)
+        module_id = extract_module_id(entry_point, module_name)
+
+        config_template_path = module_dir / "config.txt"
+        config_path: Optional[Path] = None
+
+        try:
+            config_context = resolve_module_config_path(module_dir, module_id)
+            config_path = config_context.writable_path
+            template_candidate = config_context.template_path
+            if template_candidate.exists():
+                config_template_path = template_candidate
+            else:
+                config_template_path = None
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.warning(
+                "Failed to resolve writable config for %s (%s): %s",
+                module_name,
+                module_dir,
+                exc,
+            )
+            if config_template_path.exists():
+                config_path = config_template_path
+            else:
+                config_template_path = None
+                logger.debug("No config.txt for %s", module_name)
 
         config = load_module_config(module_dir)
         display_name = module_name  # Default to module name
@@ -181,6 +215,8 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
             entry_point=entry_point,
             config_path=config_path,
             display_name=display_name,
+            module_id=module_id,
+            config_template_path=config_template_path,
         )
 
         discovered.append(info)

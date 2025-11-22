@@ -32,7 +32,14 @@ class DeviceTab:
 
 class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
-    def __init__(self, drt_system: 'DRTSystem', args):
+    def __init__(
+        self,
+        drt_system: 'DRTSystem',
+        args,
+        *,
+        master: Optional[tk.Widget] = None,
+        quick_panel: Optional[QuickStatusPanel] = None,
+    ):
         self.system = drt_system
         self.args = args
         self.async_bridge = None
@@ -45,20 +52,33 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.stimulus_state: Dict[str, int] = {}
         self.config_window: Optional[SDRTConfigWindow] = None
-        self.quick_panel: Optional[QuickStatusPanel] = None
+        self.quick_panel: Optional[QuickStatusPanel] = quick_panel
         self.devices_panel_visible_var = None
 
         self.initialize_gui_framework(
             title="DRT Monitor",
             default_width=800,
             default_height=600,
-            menu_bar_kwargs={'include_sources': False}
+            menu_bar_kwargs={'include_sources': False},
+            master=master,
         )
 
         self.config_window = None
 
     def set_close_handler(self, handler):
-        self.root.protocol("WM_DELETE_WINDOW", handler)
+        protocol_target = getattr(self.root, "protocol", None)
+        if callable(protocol_target):
+            protocol_target("WM_DELETE_WINDOW", handler)
+            return
+        resolver = getattr(self.root, "winfo_toplevel", None)
+        if callable(resolver):
+            try:
+                window = resolver()
+            except Exception:
+                return
+            protocol_target = getattr(window, "protocol", None)
+            if callable(protocol_target):
+                protocol_target("WM_DELETE_WINDOW", handler)
 
     def on_start_recording(self):
         self._start_recording()
@@ -67,35 +87,16 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self._stop_recording()
 
     def _create_widgets(self):
+        if getattr(self, "_embedded_mode", False):
+            container = self.root
+            container.columnconfigure(0, weight=1)
+            container.rowconfigure(0, weight=1)
+            self._build_main_controls(container)
+            return
+
         content_frame = self.create_standard_layout(logger_height=4, content_title="DRT Controls", enable_content_toggle=False)
-
-        main_frame = content_frame.master
-        if main_frame is not None:
-            main_frame.columnconfigure(0, weight=1)
-            main_frame.rowconfigure(0, weight=1)
-            main_frame.rowconfigure(1, weight=0)
-            main_frame.rowconfigure(2, weight=0)
-
-        content_frame.columnconfigure(0, weight=1)
-        content_frame.rowconfigure(0, weight=1)
-
-        notebook_container = ttk.Frame(content_frame)
-        notebook_container.grid(row=0, column=0, sticky='nsew', padx=5, pady=(5, 0))
-        notebook_container.columnconfigure(0, weight=1)
-        notebook_container.rowconfigure(0, weight=1)
-
-        self.notebook = ttk.Notebook(notebook_container, width=160)
-        self.notebook.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
-
-        self.empty_state_label = ttk.Label(
-            notebook_container,
-            text="⚠ No sDRT devices connected\n\nPlease connect a device to begin",
-            font=('TkDefaultFont', 12),
-            justify='center',
-            foreground='gray'
-        )
-        self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
-        self.empty_state_label.lift()
+        target = getattr(self, "module_content_frame", None) or content_frame
+        self._build_main_controls(target)
 
         io_frame = self.create_io_view_frame(
             title="Session Output",
@@ -115,8 +116,35 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             if hasattr(self, 'logger_visible_var') and not self.logger_visible_var.get():
                 self.log_frame.grid_remove()
 
-        self.quick_panel = QuickStatusPanel(io_frame)
-        self.quick_panel.build(container=io_frame)
+        if self.quick_panel is None and io_frame is not None:
+            self.quick_panel = QuickStatusPanel(io_frame)
+        if self.quick_panel and io_frame is not None:
+            self.quick_panel.parent = io_frame
+            self.quick_panel.build(container=io_frame)
+
+    def _build_main_controls(self, container: tk.Misc) -> None:
+        self.logger.debug("Building DRT controls (embedded=%s)", getattr(self, "_embedded_mode", False))
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
+
+        notebook_container = ttk.Frame(container)
+        notebook_container.grid(row=0, column=0, sticky='nsew', padx=5, pady=(5, 0))
+        notebook_container.columnconfigure(0, weight=1)
+        notebook_container.rowconfigure(0, weight=1)
+
+        self.notebook = ttk.Notebook(notebook_container, width=160)
+        self.notebook.grid(row=0, column=0, sticky='nsew', padx=5, pady=5)
+
+        self.empty_state_label = ttk.Label(
+            notebook_container,
+            text="⚠ No sDRT devices connected\n\nPlease connect a device to begin",
+            font=('TkDefaultFont', 12),
+            justify='center',
+            foreground='gray'
+        )
+        self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
+        self.empty_state_label.lift()
+
 
     def _create_device_tab(self, port: str) -> DeviceTab:
         tab_frame = ttk.Frame(self.notebook)
@@ -329,10 +357,22 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
     def update_window_title(self, recording: bool = False):
         base_title = "DRT Monitor"
+        target = getattr(self.root, "title", None)
+        if not callable(target):
+            resolver = getattr(self.root, "winfo_toplevel", None)
+            if callable(resolver):
+                try:
+                    window = resolver()
+                except Exception:
+                    window = None
+                if window:
+                    target = getattr(window, "title", None)
+        if not callable(target):
+            return
         if recording:
-            self.root.title(f"{base_title} - RECORDING")
+            target(f"{base_title} - RECORDING")
         else:
-            self.root.title(base_title)
+            target(base_title)
 
     def sync_recording_state(self):
         if self.system.recording:
@@ -350,6 +390,9 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
     def save_window_geometry_to_config(self):
         from rpi_logger.modules.base import gui_utils
+
+        if getattr(self, "_embedded_mode", False):
+            return
 
         config_path = gui_utils.get_module_config_path(Path(__file__))
         gui_utils.save_window_geometry(self.root, config_path)

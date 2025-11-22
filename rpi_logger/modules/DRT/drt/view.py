@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from rpi_logger.core.logging_utils import ensure_structured_logger, get_module_logger
+from vmc import LegacyTkViewBridge, StubCodexView
 
 try:
     import tkinter as tk  # type: ignore
+    from tkinter import ttk  # type: ignore
 except Exception:  # pragma: no cover - tkinter unavailable in headless tests
     tk = None  # type: ignore
+    ttk = None  # type: ignore
 
+from rpi_logger.modules.DRT.drt_core.interfaces.gui.quick_status_panel import QuickStatusPanel
 from rpi_logger.modules.DRT.drt_core.interfaces.gui.tkinter_gui import TkinterGUI
 
 ActionCallback = Optional[Callable[[str], Awaitable[None]]]
@@ -68,11 +71,18 @@ class _LoopAsyncBridge:
 class DRTTkinterGUI(TkinterGUI):
     """Tkinter GUI variant that forwards recording controls via the stub controller."""
 
-    def __init__(self, args, action_callback: ActionCallback, logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        args,
+        action_callback: ActionCallback,
+        logger: Optional[logging.Logger] = None,
+        embedded_parent: Optional["tk.Widget"] = None,
+        quick_panel: Optional[QuickStatusPanel] = None,
+    ):
         self._action_callback = action_callback
         self._plot_recording_state: Optional[bool] = None
         self.logger = ensure_structured_logger(logger, fallback_name="DRTTkinterGUI") if logger else get_module_logger("DRTTkinterGUI")
-        super().__init__(_SystemPlaceholder(args), args)
+        super().__init__(_SystemPlaceholder(args), args, master=embedded_parent, quick_panel=quick_panel)
 
     async def _start_recording_async(self):  # type: ignore[override]
         if not self._action_callback:
@@ -137,40 +147,81 @@ class DRTView:
         self.action_callback = action_callback
         self.display_name = display_name or "DRT"
         self.logger = ensure_structured_logger(logger, fallback_name="DRTView") if logger else get_module_logger("DRTView")
-        self.gui = DRTTkinterGUI(args, self._dispatch_action, logger=self.logger.getChild("GUI"))
-        self.gui.async_bridge = _LoopAsyncBridge()
-        self.gui.set_close_handler(self._on_close)
+        stub_logger = self.logger.getChild("Stub")
+        self._stub_view = StubCodexView(
+            args,
+            model,
+            action_callback=action_callback,
+            display_name=self.display_name,
+            logger=stub_logger,
+        )
+        self._bridge = LegacyTkViewBridge(self._stub_view, logger=self.logger.getChild("Bridge"))
+        self.gui: Optional[DRTTkinterGUI] = None
+        self.quick_panel: Optional[QuickStatusPanel] = None
         self._runtime = None
-        self._close_requested = False
-        self._window_duration_ms: float = 0.0
-        self._loop_running = False
-        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
-
-        self.model.subscribe(self._on_model_change)
         self._initial_session_dir: Optional[Path] = None
         self._active_session_dir: Optional[Path] = None
         self._session_visual_active = False
 
+        self._init_quick_panel()
+        self._bridge.mount(self._build_embedded_gui)
+        self._stub_view.set_preview_title("DRT Controls")
+        self.model.subscribe(self._on_model_change)
+
     # ------------------------------------------------------------------
     # Wiring helpers
+
+    def _build_embedded_gui(self, parent) -> Optional[Any]:
+        if tk is None:
+            self.logger.warning("Tkinter unavailable; cannot mount DRT GUI")
+            return None
+        frame_cls = ttk.Frame if ttk is not None else tk.Frame  # type: ignore[assignment]
+        if hasattr(parent, "columnconfigure"):
+            try:
+                parent.columnconfigure(0, weight=1)
+                parent.rowconfigure(0, weight=1)
+            except Exception:
+                pass
+        container = frame_cls(parent)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
+        gui = DRTTkinterGUI(
+            self.args,
+            self._dispatch_action,
+            logger=self.logger.getChild("GUI"),
+            quick_panel=self.quick_panel,
+            embedded_parent=container,
+        )
+        gui.async_bridge = _LoopAsyncBridge()
+        loop = getattr(self._stub_view, "_event_loop", None)
+        if loop and isinstance(gui.async_bridge, _LoopAsyncBridge):
+            gui.async_bridge.bind_loop(loop)
+        self.gui = gui
+        return container
 
     def bind_runtime(self, runtime) -> None:
         """Allow the runtime to expose its API to the GUI once ready."""
         self._runtime = runtime
+        if not self.gui:
+            return
         self.gui.system = runtime
         if isinstance(self.gui.async_bridge, _LoopAsyncBridge):
             loop = getattr(runtime, "_loop", None)
             if loop:
                 self.gui.async_bridge.bind_loop(loop)
 
-    def attach_logging_handler(self) -> None:  # pragma: no cover - Tkinter widget already wires logging
-        return
+    def attach_logging_handler(self) -> None:  # pragma: no cover - stub view wires logging
+        self._stub_view.attach_logging_handler()
 
     def call_in_gui(self, func, *args, **kwargs) -> None:
-        if tk is None or not hasattr(self.gui, 'root'):
+        if tk is None:
+            return
+        root = getattr(self._stub_view, "root", None)
+        if not root:
             return
         try:
-            self.gui.root.after(0, lambda: func(*args, **kwargs))
+            root.after(0, lambda: func(*args, **kwargs))
         except tk.TclError:  # pragma: no cover - Tk closing races
             return
 
@@ -178,15 +229,23 @@ class DRTView:
     # Runtime-to-view notifications
 
     def on_device_connected(self, port: str) -> None:
+        if not self.gui:
+            return
         self.call_in_gui(self.gui.on_device_connected, port)
 
     def on_device_disconnected(self, port: str) -> None:
+        if not self.gui:
+            return
         self.call_in_gui(self.gui.on_device_disconnected, port)
 
     def on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
+        if not self.gui:
+            return
         self.call_in_gui(self.gui.on_device_data, port, data_type, payload)
 
     def update_recording_state(self) -> None:
+        if not self.gui:
+            return
         self.call_in_gui(self.gui.sync_recording_state)
 
     def _handle_session_dir_change(self, value) -> None:
@@ -205,62 +264,35 @@ class DRTView:
 
             self._active_session_dir = path
             self._session_visual_active = True
-            self.call_in_gui(self.gui.handle_session_started)
+            if self.gui:
+                self.call_in_gui(self.gui.handle_session_started)
         else:
             self._active_session_dir = None
             if not self._session_visual_active:
                 return
             self._session_visual_active = False
-            self.call_in_gui(self.gui.handle_session_stopped)
+            if self.gui:
+                self.call_in_gui(self.gui.handle_session_stopped)
 
     # ------------------------------------------------------------------
     # Lifecycle controls
 
     async def run(self) -> float:
-        if tk is None:
-            raise RuntimeError("Tkinter is not available on this platform")
-
-        if self._event_loop is None:
-            try:
-                self._event_loop = asyncio.get_running_loop()
-            except RuntimeError:
-                self._event_loop = None
-
-        if isinstance(self.gui.async_bridge, _LoopAsyncBridge) and self._event_loop:
-            self.gui.async_bridge.bind_loop(self._event_loop)
-
-        if self._loop_running:
-            return 0.0
-
-        self._loop_running = True
-        opened = time.perf_counter()
-
-        try:
-            while not self._close_requested:
-                try:
-                    self.gui.root.update()
-                except tk.TclError as exc:
-                    self.logger.error("Tk root.update() failed: %s", exc, exc_info=exc)
-                    break
-                await asyncio.sleep(0.01)
-        finally:
-            self._window_duration_ms = max(0.0, (time.perf_counter() - opened) * 1000.0)
-            self._loop_running = False
-
-        return self._window_duration_ms
+        return await self._stub_view.run()
 
     async def cleanup(self) -> None:
-        if tk is None:
-            return
-        try:
-            self.gui.handle_window_close()
-            self.gui.destroy_window()
-        except tk.TclError:
-            pass
+        if self.gui:
+            try:
+                self.gui.handle_window_close()
+            except Exception:
+                pass
+        self._bridge.cleanup()
+        await self._stub_view.cleanup()
+        self.gui = None
 
     @property
     def window_duration_ms(self) -> float:
-        return self._window_duration_ms
+        return getattr(self._stub_view, "window_duration_ms", 0.0)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -276,20 +308,13 @@ class DRTView:
         elif prop == "session_dir":
             self._handle_session_dir_change(value)
 
-    def _on_close(self) -> None:
-        if self._close_requested:
+    def _init_quick_panel(self) -> None:
+        if tk is None:
             return
-        self._close_requested = True
-        if self.action_callback:
-            loop = self._event_loop
-            if loop is None:
-                try:
-                    loop = asyncio.get_running_loop()
-                except RuntimeError:
-                    loop = None
-            if loop:
-                loop.call_soon_threadsafe(lambda: loop.create_task(self.action_callback("quit")))
-        try:
-            self.gui.root.quit()
-        except Exception:
-            pass
+        io_frame = getattr(self._stub_view, "io_view_frame", None)
+        if not io_frame:
+            return
+        self._stub_view.set_io_stub_title("Session Output")
+        panel = QuickStatusPanel(io_frame)
+        panel.build(container=io_frame)
+        self.quick_panel = panel

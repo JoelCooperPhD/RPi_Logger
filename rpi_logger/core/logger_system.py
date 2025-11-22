@@ -209,7 +209,6 @@ class LoggerSystem:
 
     async def send_module_command(self, module_name: str, command: str, **kwargs) -> bool:
         """Send a command to a running module via its command interface."""
-        from .commands import CommandMessage
         payload = CommandMessage.create(command, **kwargs)
         return await self.module_manager.send_command(module_name, payload)
 
@@ -350,35 +349,14 @@ class LoggerSystem:
             await self.pause_all()
             self.logger.info("⏱️  Paused all modules in %.3fs", time.time() - pause_start)
 
-        # Request geometry from all running modules BEFORE shutting them down
-        # (skip on final shutdown since modules save their own geometry on exit)
         if request_geometry:
-            geom_start = time.time()
-            await self._request_geometries_from_all()
-            self.logger.info("⏱️  Requested geometries in %.3fs", time.time() - geom_start)
+            self.logger.debug(
+                "Skipping legacy geometry requests; module views persist their own layout."
+            )
 
         stop_start = time.time()
         await self.module_manager.stop_all()
         self.logger.info("⏱️  Stopped all modules in %.3fs", time.time() - stop_start)
-
-    async def _request_geometries_from_all(self) -> None:
-        """Request window geometry from all running modules."""
-        self.logger.info("Requesting geometry from all running modules...")
-
-        get_geometry_tasks = []
-        for module_name, process in self.module_manager.module_processes.items():
-            if process.is_running():
-                async def request_geometry(name: str, proc):
-                    try:
-                        await proc.send_command(CommandMessage.get_geometry())
-                        self.logger.debug("Requested geometry from %s", name)
-                    except Exception as e:
-                        self.logger.warning("Failed to request geometry from %s: %s", name, e)
-
-                get_geometry_tasks.append(request_geometry(module_name, process))
-
-        if get_geometry_tasks:
-            await asyncio.gather(*get_geometry_tasks, return_exceptions=True)
 
     async def save_running_modules_state(self) -> bool:
         """Persist snapshot of modules running at shutdown initiation."""

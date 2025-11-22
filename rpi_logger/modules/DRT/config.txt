@@ -1,25 +1,6 @@
-# DRT module configuration
-# Values mirror the legacy DRT module defaults so behaviour stays consistent.
 enabled = false
-window_geometry = 815x541+9+463
-output_dir = drt_data
-session_prefix = drt
-console_output = false
-auto_start_recording = false
-
-# USB device identification
-device_vid = 0x239A
-device_pid = 0x801E
-baudrate = 9600
-
-# GUI layout toggles
-gui_show_session_output = false
+view.show_io_panel = false
+view.show_logger = false
 display_name = DRT
+window_geometry = 1192x328+651+170
 preview_resolution = auto
-
-# Auto-generated settings (do not edit unless you know what you are doing)
-gui_logger_visible = false
-window_x = 9
-window_y = 435
-window_width = 815
-window_height = 541

@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional
 
 from vmc.runtime import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
-
 from rpi_logger.modules.base.usb_serial_manager import (
     USBDeviceConfig,
     USBDeviceMonitor,
@@ -33,7 +32,11 @@ class DRTModuleRuntime(ModuleRuntime):
         self.controller = context.controller
         self.view = context.view
         self.display_name = context.display_name
-        self.config_path = self.module_dir / "config.txt"
+        scope_fn = getattr(self.model, "preferences_scope", None)
+        pref_scope = scope_fn("drt") if callable(scope_fn) else None
+        from rpi_logger.modules.DRT.preferences import DRTPreferences
+        self.preferences = DRTPreferences(pref_scope)
+        self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
         self.config_file_path = self.config_path
         self.config: Dict[str, Any] = load_config_file(self.config_path)
 

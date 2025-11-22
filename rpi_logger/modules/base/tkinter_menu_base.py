@@ -21,11 +21,21 @@ class TkinterMenuBase:
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterMenuBase requires 'self.root' attribute")
 
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-
         logger_visible_default = self.get_logger_visible_from_config()
         self.logger_visible_var = tk.BooleanVar(value=logger_visible_default)
+        self._menus_available = not getattr(self, "_embedded_mode", False)
+
+        if not self._menus_available:
+            logger.debug("Skipping legacy menu bar creation for embedded GUI")
+            self.file_menu = None
+            self.sources_menu = None
+            self.view_menu = None
+            self.help_menu = None
+            self._apply_logger_visibility()
+            return
+
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
 
         self._create_file_menu(menubar)
 
@@ -81,6 +91,9 @@ class TkinterMenuBase:
 
     def add_source_toggle(self, label: str, variable: tk.BooleanVar,
                          command: Callable) -> int:
+        if not getattr(self, "_menus_available", True) or getattr(self, "sources_menu", None) is None:
+            logger.debug("Sources menu unavailable; cannot add toggle '%s'", label)
+            return -1
         idx = self.sources_menu.index('end')
         if idx is None:
             idx = -1
@@ -95,6 +108,9 @@ class TkinterMenuBase:
 
     def add_view_option(self, label: str, variable: tk.BooleanVar,
                        command: Callable) -> int:
+        if not getattr(self, "_menus_available", True) or getattr(self, "view_menu", None) is None:
+            logger.debug("View menu unavailable; cannot add option '%s'", label)
+            return -1
         idx = self.view_menu.index('end')
         if idx is None:
             idx = -1
@@ -154,6 +170,8 @@ class TkinterMenuBase:
         return var
 
     def enable_sources_menu(self, enabled: bool):
+        if not getattr(self, "_menus_available", True) or getattr(self, "sources_menu", None) is None:
+            return
         state = 'normal' if enabled else 'disabled'
         try:
             menu_size = self.sources_menu.index('end')

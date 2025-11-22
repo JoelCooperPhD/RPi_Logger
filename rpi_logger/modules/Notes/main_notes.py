@@ -35,15 +35,16 @@ from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 from vmc.constants import PLACEHOLDER_GEOMETRY
 
 from notes_runtime import NotesRuntime
-from rpi_logger.core.config_manager import get_config_manager
-from rpi_logger.modules.base.config_paths import resolve_writable_module_config
+from rpi_logger.modules.base.config_paths import resolve_module_config_path, resolve_writable_module_config
+from rpi_logger.modules.base.preferences import ModulePreferences
+from rpi_logger.cli.common import install_signal_handlers
 
 DISPLAY_NAME = "Notes"
 MODULE_ID = "notes"
 DEFAULT_OUTPUT_SUBDIR = Path("notes")
 DEFAULT_HISTORY_LIMIT = 200
 CONFIG_PATH = resolve_writable_module_config(MODULE_DIR, MODULE_ID)
-CONFIG_MANAGER = get_config_manager()
+PREFERENCES = ModulePreferences(CONFIG_PATH)
 
 logger = get_module_logger("MainNotes")
 
@@ -91,7 +92,7 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--window-geometry",
         type=str,
-        default=_config_text(config, "window_geometry"),
+        default=None,
         help=(
             "Initial window geometry when launched with GUI "
             f"(fallback to saved config or {PLACEHOLDER_GEOMETRY})"
@@ -145,11 +146,7 @@ def build_runtime(context):
 
 
 def _load_notes_config() -> dict[str, str]:
-    try:
-        return CONFIG_MANAGER.read_config(CONFIG_PATH)
-    except Exception:  # pragma: no cover - defensive logging
-        logger.debug("Failed to read notes config from %s", CONFIG_PATH, exc_info=True)
-        return {}
+    return PREFERENCES.snapshot()
 
 
 def _config_text(config: dict[str, str], key: str) -> Optional[str]:
@@ -218,6 +215,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     module_dir = MODULE_DIR
 
+    config_context = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+    setattr(args, "config_path", config_context.writable_path)
+
     supervisor = StubCodexSupervisor(
         args,
         module_dir,
@@ -226,7 +226,11 @@ async def main(argv: Optional[list[str]] = None) -> None:
         runtime_retry_policy=RuntimeRetryPolicy(interval=3.0, max_attempts=3),
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
+        config_path=config_context.writable_path,
     )
+
+    loop = asyncio.get_running_loop()
+    install_signal_handlers(supervisor, loop)
 
     try:
         await supervisor.run()

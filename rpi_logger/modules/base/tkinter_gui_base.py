@@ -17,7 +17,19 @@ class TkinterGUIBase:
     def get_geometry(self) -> str:
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
-        return self.root.geometry()
+        target = getattr(self.root, "geometry", None)
+        if callable(target):
+            return target()
+        resolver = getattr(self.root, "winfo_toplevel", None)
+        if callable(resolver):
+            try:
+                window = resolver()
+            except Exception as exc:  # pragma: no cover - defensive guard
+                raise AttributeError("Unable to resolve window geometry for embedded GUI") from exc
+            geometry = getattr(window, "geometry", None)
+            if callable(geometry):
+                return geometry()
+        raise AttributeError("TkinterGUIBase cannot determine geometry for this widget")
 
     def initialize_gui_framework(
         self,
@@ -25,7 +37,8 @@ class TkinterGUIBase:
         default_width: int,
         default_height: int,
         on_closing_callback: Optional[callable] = None,
-        menu_bar_kwargs: Optional[dict] = None
+        menu_bar_kwargs: Optional[dict] = None,
+        master: Optional["tk.Widget"] = None,
     ):
         """
         Template method for GUI initialization.
@@ -50,13 +63,17 @@ class TkinterGUIBase:
         if not hasattr(self, 'args'):
             raise AttributeError("GUI requires 'self.args' attribute to be set before calling initialize_gui_framework()")
 
-        # Step 1: Create root window
-        self.root = tk.Tk()
+        self._embedded_mode = master is not None
+        # Step 1: Create or re-use root window
+        self.root = master if master is not None else tk.Tk()
 
-        # Step 2: Set window title
-        self.root.title(title)
+        # Step 2: Set window title when we own the toplevel
+        if not self._embedded_mode:
+            self.root.title(title)
+        else:
+            logger.debug("Embedded GUI '%s' mounted inside host container", title)
 
-        # Step 3: Initialize window geometry
+        # Step 3: Initialize window geometry for standalone windows only
         self.initialize_window_geometry(default_width, default_height)
 
         # Step 4: Create menu bar (if available from TkinterMenuBase)
@@ -73,7 +90,23 @@ class TkinterGUIBase:
         # Step 6: Set window close protocol
         callback = on_closing_callback or (self._on_closing if hasattr(self, '_on_closing') else None)
         if callback:
-            self.root.protocol("WM_DELETE_WINDOW", callback)
+            protocol_target = getattr(self.root, "protocol", None)
+            target = self.root
+            if not callable(protocol_target):
+                resolver = getattr(self.root, "winfo_toplevel", None)
+                if callable(resolver):
+                    try:
+                        target = resolver()
+                        protocol_target = getattr(target, "protocol", None)
+                    except Exception:
+                        protocol_target = None
+            if callable(protocol_target):
+                try:
+                    protocol_target("WM_DELETE_WINDOW", callback)
+                except Exception:
+                    logger.warning("Unable to bind WM_DELETE_WINDOW handler", exc_info=True)
+            else:
+                logger.debug("No WM protocol target available; close handler not bound")
         else:
             logger.warning("No window close callback provided")
 
@@ -84,6 +117,9 @@ class TkinterGUIBase:
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
         if not hasattr(self, 'args'):
             raise AttributeError("TkinterGUIBase requires 'self.args' attribute")
+        if getattr(self, "_embedded_mode", False):
+            logger.debug("Embedded GUI inherits geometry from host window")
+            return
 
         if hasattr(self.args, 'window_geometry') and self.args.window_geometry:
             self.root.geometry(self.args.window_geometry)
@@ -291,6 +327,9 @@ class TkinterGUIBase:
         )
 
     def send_geometry_to_parent(self):
+        if getattr(self, "_embedded_mode", False):
+            logger.debug("Embedded GUI geometry managed by host; skipping send")
+            return
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
 
@@ -324,6 +363,9 @@ class TkinterGUIBase:
             logger.debug("Error destroying window: %s", e)
 
     def handle_window_close(self):
+        if getattr(self, "_embedded_mode", False):
+            logger.debug("Embedded GUI close handled by host container")
+            return
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
 

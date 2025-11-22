@@ -18,6 +18,12 @@ from .io_utils import (
     sanitize_path_component,
     sanitize_error_message,
 )
+from .config_paths import (
+    ModuleConfigContext,
+    resolve_module_config_path,
+    resolve_writable_module_config,
+)
+from .preferences import ModulePreferences, PreferenceChange
 from .session_utils import (
     detect_command_mode,
     create_session_directory,
@@ -75,6 +81,11 @@ __all__ = [
     'redirect_stderr_stdout',
     'sanitize_path_component',
     'sanitize_error_message',
+    'ModuleConfigContext',
+    'resolve_module_config_path',
+    'resolve_writable_module_config',
+    'ModulePreferences',
+    'PreferenceChange',
     'detect_command_mode',
     'create_session_directory',
     'setup_session_from_args',

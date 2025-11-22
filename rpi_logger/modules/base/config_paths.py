@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from rpi_logger.core.logging_utils import get_module_logger
@@ -13,22 +14,36 @@ from rpi_logger.core.paths import USER_MODULE_CONFIG_DIR
 logger = get_module_logger(__name__)
 
 
-def resolve_writable_module_config(
+@dataclass(frozen=True)
+class ModuleConfigContext:
+    """Describes where a module's config template lives and which path is writable."""
+
+    module_id: str
+    template_path: Path
+    writable_path: Path
+    using_template: bool
+
+    def as_path(self) -> Path:
+        """Backward-compatible helper that returns the writable config path."""
+        return self.writable_path
+
+
+def resolve_module_config_path(
     module_dir: Path,
     module_id: str,
     *,
     filename: str = "config.txt",
-) -> Path:
-    """Return a config path that is guaranteed to be user-writable.
-
-    When the template bundled with the module cannot be written (e.g. repo checkout),
-    we fall back to ~/.rpi_logger/module_configs/<module_id>/<filename> and seed it
-    with the template contents the first time it is needed.
-    """
+) -> ModuleConfigContext:
+    """Return template + writable paths for a module's config file."""
 
     template_path = module_dir / filename
     if template_path.exists() and _is_path_writable(template_path):
-        return template_path
+        return ModuleConfigContext(
+            module_id=module_id,
+            template_path=template_path,
+            writable_path=template_path,
+            using_template=True,
+        )
 
     fallback_dir = USER_MODULE_CONFIG_DIR / module_id
     try:
@@ -51,7 +66,27 @@ def resolve_writable_module_config(
         fallback_path,
         template_path,
     )
-    return fallback_path
+    return ModuleConfigContext(
+        module_id=module_id,
+        template_path=template_path,
+        writable_path=fallback_path,
+        using_template=False,
+    )
+
+
+def resolve_writable_module_config(
+    module_dir: Path,
+    module_id: str,
+    *,
+    filename: str = "config.txt",
+) -> Path:
+    """Backward-compatible helper that returns only the writable config path."""
+
+    return resolve_module_config_path(
+        module_dir,
+        module_id,
+        filename=filename,
+    ).writable_path
 
 
 def _is_path_writable(path: Path) -> bool:

@@ -24,6 +24,10 @@ from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module_filename_prefix
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
+try:  # Allow running as a script (no package context)
+    from .preferences import NotesPreferences  # type: ignore
+except ImportError:  # pragma: no cover - fallback for script execution
+    from preferences import NotesPreferences
 
 
 @dataclass(slots=True)
@@ -273,6 +277,9 @@ class NotesRuntime(ModuleRuntime):
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
+        scope_fn = getattr(context.model, "preferences_scope", None)
+        pref_scope = scope_fn("notes") if callable(scope_fn) else None
+        self.preferences = NotesPreferences(pref_scope)
         self.model = context.model
         self.controller = context.controller
         self.supervisor = context.supervisor
@@ -288,7 +295,13 @@ class NotesRuntime(ModuleRuntime):
 
         self.project_root = context.module_dir.parent.parent
         self.history_limit = max(1, int(getattr(self.args, "history_limit", 200)))
+        if self.preferences.prefs:
+            self.history_limit = max(1, self.preferences.history_limit(self.history_limit))
         self.auto_start = bool(getattr(self.args, "auto_start", False))
+        if self.preferences.prefs:
+            self.auto_start = self.preferences.auto_start(self.auto_start)
+            self.preferences.set_history_limit(self.history_limit)
+            self.preferences.set_auto_start(self.auto_start)
         self._module_dir: Optional[Path] = None
 
         self.archive: Optional[NotesArchive] = None
@@ -305,6 +318,9 @@ class NotesRuntime(ModuleRuntime):
             self.logger.info("GUI view unavailable; Notes runtime running headless")
         else:
             self._build_ui()
+
+        if self.preferences.prefs:
+            self.preferences.set_auto_start(self.auto_start)
 
         if self.auto_start:
             self._run_async(self._start_recording())
@@ -515,6 +531,7 @@ class NotesRuntime(ModuleRuntime):
         except Exception as exc:
             self.logger.exception("Failed to start note archive", exc_info=exc)
             return False
+        self.preferences.set_last_note_path(str(file_path))
 
         self.model.recording = True
         self.logger.info("Notes recording started -> %s", file_path)
