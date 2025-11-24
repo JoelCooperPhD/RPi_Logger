@@ -1,0 +1,127 @@
+"""Known camera cache persistence."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from pathlib import Path
+from typing import Dict, Iterable, Optional
+
+from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
+from rpi_logger.modules.Cameras.runtime import (
+    CameraId,
+    CameraRuntimeState,
+    deserialize_camera_state,
+    serialize_camera_state,
+)
+
+CACHE_SCHEMA_VERSION = 1
+
+
+class KnownCamerasCache:
+    """Async persistence for known camera descriptors/capabilities/configs."""
+
+    def __init__(self, cache_path: Path, *, logger: LoggerLike = None) -> None:
+        self._path = Path(cache_path)
+        self._logger = ensure_structured_logger(logger, fallback_name=__name__)
+        self._lock = asyncio.Lock()
+        self._entries: Dict[str, dict] = {}
+        self._loaded = False
+
+    # ------------------------------------------------------------------
+    # Public API
+
+    async def load(self) -> None:
+        if self._loaded:
+            return
+        async with self._lock:
+            if self._loaded:
+                return
+            data = await self._read_file()
+            self._entries = data
+            self._loaded = True
+            self._logger.debug("Known cameras cache loaded (%d entries)", len(self._entries))
+
+    async def save(self) -> None:
+        async with self._lock:
+            await self._write_file(self._entries)
+
+    async def get(self, camera_id: CameraId) -> Optional[CameraRuntimeState]:
+        await self.load()
+        payload = self._entries.get(camera_id.key)
+        if not payload:
+            return None
+        state = deserialize_camera_state(payload.get("state"))
+        return state
+
+    async def update(self, state: CameraRuntimeState) -> None:
+        await self.load()
+        async with self._lock:
+            entry = {
+                "updated_at": time.time(),
+                "state": serialize_camera_state(state),
+            }
+            self._entries[state.descriptor.camera_id.key] = entry
+            await self._write_file(self._entries)
+            self._logger.debug("Updated cache for %s", state.descriptor.camera_id.key)
+
+    async def remove(self, camera_id: CameraId) -> None:
+        await self.load()
+        async with self._lock:
+            if camera_id.key in self._entries:
+                self._entries.pop(camera_id.key, None)
+                await self._write_file(self._entries)
+                self._logger.debug("Removed cache entry for %s", camera_id.key)
+
+    async def list_ids(self) -> Iterable[str]:
+        await self.load()
+        return list(self._entries.keys())
+
+    async def snapshot(self) -> Dict[str, dict]:
+        await self.load()
+        return dict(self._entries)
+
+    # ------------------------------------------------------------------
+    # IO helpers
+
+    async def _read_file(self) -> Dict[str, dict]:
+        if not self._path.exists():
+            return {}
+        try:
+            text = await asyncio.to_thread(self._path.read_text, "utf-8")
+            parsed = json.loads(text)
+        except Exception:
+            self._logger.warning("Known cameras cache unreadable; starting fresh")
+            return {}
+
+        if not isinstance(parsed, dict):
+            return {}
+        if int(parsed.get("schema", 0) or 0) != CACHE_SCHEMA_VERSION:
+            self._logger.info("Known cameras cache schema mismatch; ignoring old data")
+            return {}
+
+        entries = parsed.get("entries") or {}
+        if not isinstance(entries, dict):
+            return {}
+        # Validate each entry structure
+        valid: Dict[str, dict] = {}
+        for key, payload in entries.items():
+            if not isinstance(payload, dict):
+                continue
+            if "state" not in payload:
+                continue
+            valid[key] = payload
+        return valid
+
+    async def _write_file(self, entries: Dict[str, dict]) -> None:
+        payload = {"schema": CACHE_SCHEMA_VERSION, "entries": entries}
+        text = json.dumps(payload, indent=2, sort_keys=True)
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(self._path.write_text, text, "utf-8")
+        except Exception:
+            self._logger.warning("Failed to write known cameras cache %s", self._path, exc_info=True)
+
+
+__all__ = ["CACHE_SCHEMA_VERSION", "KnownCamerasCache"]

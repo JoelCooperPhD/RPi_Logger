@@ -1,0 +1,898 @@
+{
+  "entries": {
+    "picam:0": {
+      "state": {
+        "capabilities": {
+          "color_formats": [],
+          "default_preview_mode": {
+            "controls": {},
+            "fps": 60.38,
+            "pixel_format": "RGB",
+            "size": [
+              1456,
+              1088
+            ]
+          },
+          "default_record_mode": {
+            "controls": {},
+            "fps": 60.38,
+            "pixel_format": "RGB",
+            "size": [
+              1456,
+              1088
+            ]
+          },
+          "limits": {},
+          "modes": [
+            {
+              "controls": {},
+              "fps": 60.38,
+              "pixel_format": "RGB",
+              "size": [
+                1456,
+                1088
+              ]
+            }
+          ],
+          "source": "probe",
+          "timestamp_ms": 1763952664494.7002
+        },
+        "descriptor": {
+          "camera_id": {
+            "backend": "picam",
+            "dev_path": null,
+            "friendly_name": "RPi:Cam0",
+            "stable_id": "0"
+          },
+          "hw_model": "imx296",
+          "location_hint": "/base/axi/pcie@1000120000/rp1/i2c@88000/imx296@1a",
+          "seen_at": 194541899.481419
+        },
+        "schema": 1,
+        "selected_configs": {
+          "preview": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 60.38,
+              "pixel_format": "RGB",
+              "size": [
+                1456,
+                1088
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "record": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 60.38,
+              "pixel_format": "RGB",
+              "size": [
+                1456,
+                1088
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "storage_profile": null
+        },
+        "status": "selected"
+      },
+      "updated_at": 1763952837.0959392
+    },
+    "picam:1": {
+      "state": {
+        "capabilities": {
+          "color_formats": [],
+          "default_preview_mode": {
+            "controls": {},
+            "fps": 60.38,
+            "pixel_format": "RGB",
+            "size": [
+              1456,
+              1088
+            ]
+          },
+          "default_record_mode": {
+            "controls": {},
+            "fps": 60.38,
+            "pixel_format": "RGB",
+            "size": [
+              1456,
+              1088
+            ]
+          },
+          "limits": {},
+          "modes": [
+            {
+              "controls": {},
+              "fps": 60.38,
+              "pixel_format": "RGB",
+              "size": [
+                1456,
+                1088
+              ]
+            }
+          ],
+          "source": "probe",
+          "timestamp_ms": 1763952836530.031
+        },
+        "descriptor": {
+          "camera_id": {
+            "backend": "picam",
+            "dev_path": null,
+            "friendly_name": "RPi:Cam1",
+            "stable_id": "1"
+          },
+          "hw_model": "imx296",
+          "location_hint": "/base/axi/pcie@1000120000/rp1/i2c@80000/imx296@1a",
+          "seen_at": 194541899.4859
+        },
+        "schema": 1,
+        "selected_configs": {
+          "preview": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 60.38,
+              "pixel_format": "RGB",
+              "size": [
+                1456,
+                1088
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "record": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 60.38,
+              "pixel_format": "RGB",
+              "size": [
+                1456,
+                1088
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "storage_profile": null
+        },
+        "status": "selected"
+      },
+      "updated_at": 1763952837.318726
+    },
+    "picam:imx296": {
+      "state": {
+        "capabilities": {
+          "color_formats": [],
+          "default_preview_mode": {
+            "controls": {},
+            "fps": 60.38,
+            "pixel_format": "RGB",
+            "size": [
+              1456,
+              1088
+            ]
+          },
+          "default_record_mode": {
+            "controls": {},
+            "fps": 60.38,
+            "pixel_format": "RGB",
+            "size": [
+              1456,
+              1088
+            ]
+          },
+          "limits": {},
+          "modes": [
+            {
+              "controls": {},
+              "fps": 60.38,
+              "pixel_format": "RGB",
+              "size": [
+                1456,
+                1088
+              ]
+            }
+          ],
+          "source": "probe",
+          "timestamp_ms": 1763771495639.0098
+        },
+        "descriptor": {
+          "camera_id": {
+            "backend": "picam",
+            "dev_path": null,
+            "friendly_name": "imx296",
+            "stable_id": "imx296"
+          },
+          "hw_model": "imx296",
+          "location_hint": "/base/axi/pcie@1000120000/rp1/i2c@80000/imx296@1a",
+          "seen_at": null
+        },
+        "schema": 1,
+        "status": "selected"
+      },
+      "updated_at": 1763771495.6961336
+    },
+    "usb:/dev/video8": {
+      "state": {
+        "capabilities": {
+          "color_formats": [],
+          "default_preview_mode": {
+            "controls": {},
+            "fps": 30.0,
+            "pixel_format": "MJPEG",
+            "size": [
+              640,
+              480
+            ]
+          },
+          "default_record_mode": {
+            "controls": {},
+            "fps": 30.0,
+            "pixel_format": "MJPEG",
+            "size": [
+              1920,
+              1080
+            ]
+          },
+          "limits": {},
+          "modes": [
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                800,
+                600
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                800,
+                600
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1280,
+                720
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1280,
+                720
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1280,
+                720
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1920,
+                1080
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1920,
+                1080
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1920,
+                1080
+              ]
+            }
+          ],
+          "source": "probe",
+          "timestamp_ms": 1763945302323.8774
+        },
+        "descriptor": {
+          "camera_id": {
+            "backend": "usb",
+            "dev_path": "/dev/video8",
+            "friendly_name": "USB:Arducam USB Camera: Arducam USB",
+            "stable_id": "/dev/video8"
+          },
+          "hw_model": "USB Camera",
+          "location_hint": "/dev/video8",
+          "seen_at": null
+        },
+        "schema": 1,
+        "selected_configs": {
+          "preview": {
+            "color_convert": true,
+            "keep_every": 2,
+            "mode": {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            "overlay": true,
+            "target_fps": null
+          },
+          "record": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1920,
+                1080
+              ]
+            },
+            "overlay": true,
+            "target_fps": 10.0
+          },
+          "storage_profile": null
+        },
+        "status": "selected"
+      },
+      "updated_at": 1763945401.6607335
+    },
+    "usb:/dev/video9": {
+      "state": {
+        "capabilities": {
+          "color_formats": [],
+          "default_preview_mode": {
+            "controls": {},
+            "fps": 30.0,
+            "pixel_format": "MJPEG",
+            "size": [
+              640,
+              480
+            ]
+          },
+          "default_record_mode": {
+            "controls": {},
+            "fps": 30.0,
+            "pixel_format": "MJPEG",
+            "size": [
+              640,
+              480
+            ]
+          },
+          "limits": {},
+          "modes": [
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            }
+          ],
+          "source": "probe",
+          "timestamp_ms": 1763945303535.3015
+        },
+        "descriptor": {
+          "camera_id": {
+            "backend": "usb",
+            "dev_path": "/dev/video9",
+            "friendly_name": "USB:UVC Camera (046d:0819)",
+            "stable_id": "/dev/video9"
+          },
+          "hw_model": "USB Camera",
+          "location_hint": "/dev/video9",
+          "seen_at": null
+        },
+        "schema": 1,
+        "selected_configs": {
+          "preview": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "record": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "storage_profile": null
+        },
+        "status": "selected"
+      },
+      "updated_at": 1763945303.8260055
+    },
+    "usb:usb1-1-1": {
+      "state": {
+        "capabilities": {
+          "color_formats": [],
+          "default_preview_mode": {
+            "controls": {},
+            "fps": 30.0,
+            "pixel_format": "MJPEG",
+            "size": [
+              640,
+              480
+            ]
+          },
+          "default_record_mode": {
+            "controls": {},
+            "fps": 30.0,
+            "pixel_format": "MJPEG",
+            "size": [
+              640,
+              480
+            ]
+          },
+          "limits": {},
+          "modes": [
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            }
+          ],
+          "source": "probe",
+          "timestamp_ms": 1763952665533.8987
+        },
+        "descriptor": {
+          "camera_id": {
+            "backend": "usb",
+            "dev_path": "/dev/video9",
+            "friendly_name": "USB:UVC Camera (046d:0819) [1-1]",
+            "stable_id": "usb1-1-1"
+          },
+          "hw_model": "USB Camera",
+          "location_hint": "/sys/devices/platform/axi/1000120000.pcie/1f00200000.usb/xhci-hcd.0/usb1/1-1",
+          "seen_at": 194541899.489104
+        },
+        "schema": 1,
+        "selected_configs": {
+          "preview": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "record": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "storage_profile": null
+        },
+        "status": "selected"
+      },
+      "updated_at": 1763952837.4178822
+    },
+    "usb:usb1-1-2": {
+      "state": {
+        "capabilities": {
+          "color_formats": [],
+          "default_preview_mode": {
+            "controls": {},
+            "fps": 30.0,
+            "pixel_format": "MJPEG",
+            "size": [
+              640,
+              480
+            ]
+          },
+          "default_record_mode": {
+            "controls": {},
+            "fps": 30.0,
+            "pixel_format": "MJPEG",
+            "size": [
+              1920,
+              1080
+            ]
+          },
+          "limits": {},
+          "modes": [
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                640,
+                480
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                800,
+                600
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                800,
+                600
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1280,
+                720
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1280,
+                720
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1280,
+                720
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 15.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1920,
+                1080
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 25.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1920,
+                1080
+              ]
+            },
+            {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1920,
+                1080
+              ]
+            }
+          ],
+          "source": "probe",
+          "timestamp_ms": 1763952665215.7124
+        },
+        "descriptor": {
+          "camera_id": {
+            "backend": "usb",
+            "dev_path": "/dev/video8",
+            "friendly_name": "USB:Arducam USB Camera: Arducam USB [1-2]",
+            "stable_id": "usb1-1-2"
+          },
+          "hw_model": "USB Camera",
+          "location_hint": "/sys/devices/platform/axi/1000120000.pcie/1f00200000.usb/xhci-hcd.0/usb1/1-2",
+          "seen_at": 194541899.48886302
+        },
+        "schema": 1,
+        "selected_configs": {
+          "preview": {
+            "color_convert": true,
+            "keep_every": 10,
+            "mode": {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                320,
+                240
+              ]
+            },
+            "overlay": true,
+            "target_fps": null
+          },
+          "record": {
+            "color_convert": true,
+            "keep_every": null,
+            "mode": {
+              "controls": {},
+              "fps": 30.0,
+              "pixel_format": "MJPEG",
+              "size": [
+                1920,
+                1080
+              ]
+            },
+            "overlay": true,
+            "target_fps": 30.0
+          },
+          "storage_profile": null
+        },
+        "status": "selected"
+      },
+      "updated_at": 1763952837.3212302
+    }
+  },
+  "schema": 1
+}
