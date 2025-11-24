@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from fractions import Fraction
@@ -35,6 +36,7 @@ class RecorderHandle:
     session_paths: Any
     metadata: RecordingMetadata
     kind: str  # "pyav" or "opencv"
+    record_start_ns: int = 0
     # PyAV fields
     container: Any | None = None
     stream: Any | None = None
@@ -157,6 +159,7 @@ class Recorder:
             container=container,
             stream=stream,
             time_base=time_base,
+            record_start_ns=time.monotonic_ns(),
         )
 
     async def _start_opencv(
@@ -182,6 +185,7 @@ class Recorder:
             session_paths=session_paths,
             metadata=metadata,
             kind="opencv",
+            record_start_ns=time.monotonic_ns(),
         )
 
     async def _writer_loop(self, handle: RecorderHandle) -> None:
@@ -239,7 +243,14 @@ class Recorder:
         if handle.start_pts_ns is None:
             handle.start_pts_ns = pts_ns_resolved
         base_ns = handle.start_pts_ns
+
+        # Keep PTS aligned to the actual recording start to avoid huge leading gaps.
+        elapsed_ns = max(0, time.monotonic_ns() - handle.record_start_ns)
         delta_ns = max(0, pts_ns_resolved - base_ns)
+        # If timestamps jump far ahead of real elapsed time (e.g., stale clocks), clamp to elapsed.
+        if delta_ns > elapsed_ns + 100_000_000:  # allow 100ms slack
+            delta_ns = elapsed_ns
+
         pts = int(delta_ns // 1000)  # microsecond ticks
         if handle.last_pts is not None and pts <= handle.last_pts:
             pts = handle.last_pts + 1  # enforce monotonic PTS even if timestamps repeat
