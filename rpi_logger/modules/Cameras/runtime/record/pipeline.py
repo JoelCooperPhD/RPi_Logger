@@ -38,7 +38,6 @@ class RecordPipeline:
         self._clock = clock
         self._task_manager = TaskManager(logger=self._logger)
         self._states: dict[str, dict[str, Any]] = {}
-        self._fps = FPSCounter()
 
     # ------------------------------------------------------------------
     def start(
@@ -63,6 +62,7 @@ class RecordPipeline:
             "csv": csv_logger,
             "trial": trial_number,
             "timing": FrameTimingTracker(),
+            "fps_counter": FPSCounter(window_size=30),
             "last_emit": 0.0,
             "drops": 0,
             "handle": None,
@@ -95,6 +95,7 @@ class RecordPipeline:
         selection: ModeSelection = state["selection"]
         csv_logger: CSVLogger = state["csv"]
         timing: FrameTimingTracker = state["timing"]
+        fps_counter: FPSCounter = state["fps_counter"]
         paths: SessionPaths = state["paths"]
 
         await csv_logger.start(paths.timing_path)
@@ -133,6 +134,8 @@ class RecordPipeline:
                     hardware_frame_number=hardware_frame_number,
                     storage_queue_drops=storage_q_drops,
                 )
+
+                fps_counter.update(wall_time if isinstance(wall_time, (int, float)) else time.time())
 
                 data = getattr(frame, "data", frame)
                 if color_format.startswith("rgb") and isinstance(data, np.ndarray):
@@ -183,8 +186,11 @@ class RecordPipeline:
         if not state:
             return {}
         csv_logger: CSVLogger = state["csv"]
+        fps_counter: FPSCounter = state.get("fps_counter", FPSCounter())
+        snapshot = fps_counter.update()
         return {
-            "record_fps_avg": round(self._fps.update().average, 2),
+            "record_fps_avg": round(snapshot.average, 2),
+            "record_fps_inst": round(snapshot.instant, 2),
             "record_dropped": state.get("drops", 0),
             "record_csv_pending": len(csv_logger._rows),  # type: ignore[attr-defined]
         }
