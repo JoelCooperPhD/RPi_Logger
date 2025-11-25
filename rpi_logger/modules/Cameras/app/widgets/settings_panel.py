@@ -14,7 +14,7 @@ except Exception:  # pragma: no cover
 
 DEFAULT_SETTINGS = {
     "preview_resolution": "",
-    "preview_fps": "25%",
+    "preview_fps": "2",
     "record_resolution": "",
     "record_fps": "15",
     "overlay": "true",
@@ -131,7 +131,7 @@ class SettingsPanel:
         self._preview_fps_combo = ttk.Combobox(
             self.frame,
             textvariable=self._preview_fps_var,
-            values=("100%", "50%", "25%", "10%"),
+            values=("1", "2", "5", "15", "Full"),
             state="readonly",
         )
         self._preview_fps_combo.grid(row=1, column=1, sticky="ew", pady=(0, 4))

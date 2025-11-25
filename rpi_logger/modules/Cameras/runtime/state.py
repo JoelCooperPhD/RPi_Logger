@@ -535,18 +535,16 @@ def _extract_flags(request: Optional[ModeRequest | CapabilityMode]) -> Dict[str,
 def parse_preview_fps(value: Any, default_fps: float) -> tuple[Optional[float], Optional[int]]:
     """Return (fps, keep_every) parsed from user selection.
 
-    - Numeric returns (fps, None)
-    - Percentage returns (None, keep_every)
+    - "Full" returns (None, None) for no limiting
+    - Numeric returns (fps, None) for time-based limiting
     """
 
     if value is None:
         return default_fps, None
-    if isinstance(value, str) and value.strip().endswith("%"):
-        pct = float(value.strip().rstrip("%"))
-        if pct <= 0 or pct > 100:
-            raise ValueError(f"Invalid preview fps percentage: {value}")
-        keep_every = max(1, int(round(100.0 / pct)))
-        return None, keep_every
+    if isinstance(value, str):
+        val = value.strip()
+        if val.lower() == "full":
+            return None, None
     try:
         return float(value), None
     except Exception as exc:

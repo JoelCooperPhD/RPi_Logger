@@ -29,7 +29,7 @@ from rpi_logger.modules.Cameras.runtime.record.csv_logger import CSVLogger
 from rpi_logger.modules.Cameras.storage import resolve_session_paths
 from rpi_logger.modules.Cameras.storage.metadata import build_metadata
 
-DEFAULT_PREVIEW_KEEP_EVERY = 4  # Show 25% of preview frames by default to reduce load.
+DEFAULT_PREVIEW_FPS = 2.0  # Limit preview to 2 FPS by default to reduce load.
 
 
 @dataclass(slots=True)
@@ -110,7 +110,7 @@ class LifecycleController:
 
         selected, _ = select_modes(caps, caps.default_preview_mode, record_request)
         if selected.preview.keep_every is None and selected.preview.target_fps is None:
-            selected.preview.keep_every = DEFAULT_PREVIEW_KEEP_EVERY
+            selected.preview.target_fps = DEFAULT_PREVIEW_FPS
         handle = await self._open_backend(descriptor, selected.record.mode)
         if not handle:
             return
@@ -383,14 +383,22 @@ class PreviewController:
             asyncio.run_coroutine_threadsafe(coro, loop)
 
     async def _switch_active_preview(self, active_camera: Optional[str]) -> None:
+        stops = []
         for key, runtime in list(self._runtime._camera_runtime.items()):
             cam_id = runtime.descriptor.camera_id
             if active_camera is None or key != active_camera:
-                await self.stop(cam_id)
-                continue
-            self._runtime.router.set_preview_enabled(cam_id, True)
-            if key not in self._running:
-                self.start(cam_id, runtime.selected.preview, runtime.preview_queue)
+                stops.append(self.stop(cam_id))
+        if stops:
+            await asyncio.gather(*stops)
+
+        if active_camera:
+            runtime = self._runtime._camera_runtime.get(active_camera)
+            if runtime:
+                cam_id = runtime.descriptor.camera_id
+                self._runtime.router.drain_preview_queue(cam_id)
+                self._runtime.router.set_preview_enabled(cam_id, True)
+                if active_camera not in self._running:
+                    self.start(cam_id, runtime.selected.preview, runtime.preview_queue)
 
 
 class RecordingController:

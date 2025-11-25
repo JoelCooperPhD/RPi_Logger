@@ -451,8 +451,8 @@ class CamerasView:
 
         preview_res = [f"{w}x{h}" for w, h in preview_sizes]
         record_res = [f"{w}x{h}" for w, h in record_sizes]
-        preview_fps_values = ["100%", "50%", "25%", "10%"]
-        default_preview_fps = DEFAULT_SETTINGS.get("preview_fps", "25%")
+        preview_fps_values = ["1", "2", "5", "15", "Full"]
+        default_preview_fps = DEFAULT_SETTINGS.get("preview_fps", "2")
         record_fps_values = _fps_list()
         self._camera_options[camera_id] = {
             "preview_resolutions": preview_res,
