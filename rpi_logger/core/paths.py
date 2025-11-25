@@ -29,7 +29,6 @@ USER_STATE_DIR = Path(_USER_STATE_ENV).expanduser() if _USER_STATE_ENV else (Pat
 USER_CONFIG_OVERRIDES_DIR = USER_STATE_DIR / "config_overrides"
 USER_MODULE_CONFIG_DIR = USER_STATE_DIR / "module_configs"
 USER_MODULE_LOGS_DIR = USER_STATE_DIR / "module_logs"
-SESSION_STAGING_DIR = USER_STATE_DIR / "staging"
 
 # UI assets
 UI_DIR = Path(__file__).parent / "ui"
@@ -44,7 +43,6 @@ def ensure_directories() -> None:
     USER_CONFIG_OVERRIDES_DIR.mkdir(parents=True, exist_ok=True)
     USER_MODULE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     USER_MODULE_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    SESSION_STAGING_DIR.mkdir(parents=True, exist_ok=True)
 
 
 __all__ = [
@@ -59,7 +57,6 @@ __all__ = [
     'USER_CONFIG_OVERRIDES_DIR',
     'USER_MODULE_CONFIG_DIR',
     'USER_MODULE_LOGS_DIR',
-    'SESSION_STAGING_DIR',
     'UI_DIR',
     'LOGO_PATH',
     'ensure_directories',

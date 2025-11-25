@@ -18,7 +18,7 @@ from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
 from rpi_logger.modules.base import gui_utils
 from .config_manager import get_config_manager
-from .paths import STATE_FILE, SESSION_STAGING_DIR
+from .paths import STATE_FILE
 from .module_manager import ModuleManager
 from .session_manager import SessionManager
 
@@ -93,14 +93,9 @@ class LoggerSystem:
         if not self.session_manager.recording:
             self.set_session_dir(self.idle_session_dir)
 
-    def reset_session_dir(self, *, use_staging: bool = False) -> None:
-        """Return to the idle directory (or staging) after a session finishes."""
-        if use_staging:
-            self.idle_session_dir = SESSION_STAGING_DIR
-            target = SESSION_STAGING_DIR
-        else:
-            target = self.idle_session_dir
-        self.set_session_dir(target)
+    def reset_session_dir(self) -> None:
+        """Return to the idle directory after a session finishes."""
+        self.set_session_dir(self.idle_session_dir)
 
     async def async_init(self) -> None:
         """Complete async initialization. Must be called after construction."""

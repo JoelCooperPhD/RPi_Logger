@@ -332,23 +332,30 @@ def install_exception_handlers(
         loop.set_exception_handler(handle_asyncio_exception)
 
 
-def install_signal_handlers(
-    supervisor: Any,
-    loop: asyncio.AbstractEventLoop,
-    track_shutdown_state: bool = False
-) -> None:
+def install_signal_handlers(supervisor: Any, loop: asyncio.AbstractEventLoop, track_shutdown_state: bool = False) -> None:
+    """Register SIGINT/SIGTERM handlers that ask the supervisor to shut down."""
+
+    shutdown_event = getattr(supervisor, "shutdown_event", None)
+    if shutdown_event is None and hasattr(supervisor, "model"):
+        shutdown_event = getattr(supervisor.model, "shutdown_event", None)
+
     if track_shutdown_state:
-        # Track shutdown state to prevent race conditions (used by Audio module)
         shutdown_in_progress = False
 
         def signal_handler():
             nonlocal shutdown_in_progress
-            if not supervisor.shutdown_event.is_set() and not shutdown_in_progress:
+            if shutdown_event is None:
+                asyncio.create_task(supervisor.shutdown())
+                return
+            if not shutdown_event.is_set() and not shutdown_in_progress:
                 shutdown_in_progress = True
                 asyncio.create_task(supervisor.shutdown())
     else:
         def signal_handler():
-            if not supervisor.shutdown_event.is_set():
+            if shutdown_event is None:
+                asyncio.create_task(supervisor.shutdown())
+                return
+            if not shutdown_event.is_set():
                 asyncio.create_task(supervisor.shutdown())
 
     for sig in (signal.SIGINT, signal.SIGTERM):

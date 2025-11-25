@@ -216,9 +216,8 @@ class MainController:
 
             self.logger.info("Session stopped")
 
-            # Return modules to the staging directory so they don't keep
-            # writing into the completed session folder.
-            self.logger_system.reset_session_dir(use_staging=True)
+            # Return modules to the idle directory to avoid writing after stop.
+            self.logger_system.reset_session_dir()
 
         except Exception as e:
             self.logger.error("Error stopping session: %s", e, exc_info=True)

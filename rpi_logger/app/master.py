@@ -17,7 +17,7 @@ if _venv_path.exists() and str(_venv_path) not in sys.path:
 from rpi_logger.core import LoggerSystem, get_shutdown_coordinator
 from rpi_logger.core.ui import MainWindow
 from rpi_logger.core.cli import HeadlessController, InteractiveShell
-from rpi_logger.core.paths import CONFIG_PATH, MASTER_LOG_FILE, SESSION_STAGING_DIR, ensure_directories
+from rpi_logger.core.paths import CONFIG_PATH, MASTER_LOG_FILE, ensure_directories
 from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.core.logging_config import configure_logging
 from rpi_logger.core.logging_utils import get_module_logger
@@ -254,7 +254,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
     logger.info("Session will be created when user starts recording")
     logger.info("=" * 60)
 
-    initial_session_dir = args.data_dir if args.mode in ('cli', 'interactive') else SESSION_STAGING_DIR
+    initial_session_dir = args.data_dir
 
     logger_system = LoggerSystem(
         session_dir=initial_session_dir,
