@@ -2,136 +2,78 @@
 
 from __future__ import annotations
 
-import json
-import platform
-from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Optional
+import csv
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
-from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.runtime import (
-    CapabilityMode,
-    CameraRuntimeState,
-    ModeSelection,
-    SelectedConfigs,
-    serialize_camera_id,
-)
-
-METADATA_SCHEMA_VERSION = 1
+from rpi_logger.modules.Cameras.runtime import CameraId, ModeSelection
 
 
 @dataclass(slots=True)
 class RecordingMetadata:
-    """Structured metadata persisted alongside recordings."""
-
-    schema: int
-    session_id: str
-    camera: Dict[str, Any]
-    modes: Dict[str, Any]
-    overlays: Dict[str, Any]
-    timestamp_source: Optional[str] = None
-    fps_targets: Dict[str, Any] = field(default_factory=dict)
-    timing_stats: Dict[str, Any] = field(default_factory=dict)
-    disk_guard: Dict[str, Any] = field(default_factory=dict)
-    software: Dict[str, Any] = field(default_factory=dict)
-    extras: Dict[str, Any] = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# Builders and serializers
+    camera_id: CameraId
+    start_time_unix: float
+    end_time_unix: Optional[float] = None
+    selection_preview: Optional[ModeSelection] = None
+    selection_record: Optional[ModeSelection] = None
+    target_fps: Optional[float] = None
+    video_path: Optional[str] = None
+    timing_path: Optional[str] = None
 
 
 def build_metadata(
-    session_id: str,
-    camera_state: CameraRuntimeState,
-    configs: SelectedConfigs,
+    camera_id: CameraId,
     *,
-    timestamp_source: Optional[str] = None,
-    timing_stats: Optional[Dict[str, Any]] = None,
-    disk_guard_status: Optional[Dict[str, Any]] = None,
-    extras: Optional[Dict[str, Any]] = None,
-    logger: LoggerLike = None,
+    selection_preview: Optional[ModeSelection] = None,
+    selection_record: Optional[ModeSelection] = None,
+    target_fps: Optional[float] = None,
+    video_path: Optional[Path] = None,
+    timing_path: Optional[Path] = None,
 ) -> RecordingMetadata:
-    """Assemble structured metadata from runtime state + configs."""
-
-    log = ensure_structured_logger(logger, fallback_name=__name__)
-
-    metadata = RecordingMetadata(
-        schema=METADATA_SCHEMA_VERSION,
-        session_id=session_id,
-        camera=serialize_camera_id(camera_state.descriptor.camera_id),
-        modes={
-            "preview": _serialize_mode(configs.preview.mode),
-            "record": _serialize_mode(configs.record.mode),
-        },
-        overlays={
-            "preview": configs.preview.overlay,
-            "record": configs.record.overlay,
-        },
-        timestamp_source=timestamp_source,
-        fps_targets={
-            "preview": configs.preview.target_fps,
-            "record": configs.record.target_fps,
-        },
-        timing_stats=timing_stats or {},
-        disk_guard=disk_guard_status or {},
-        software=_software_info(),
-        extras=extras or {},
+    return RecordingMetadata(
+        camera_id=camera_id,
+        start_time_unix=time.time(),
+        selection_preview=selection_preview,
+        selection_record=selection_record,
+        target_fps=target_fps,
+        video_path=str(video_path) if video_path else None,
+        timing_path=str(timing_path) if timing_path else None,
     )
-    log.debug("Built metadata for session %s camera %s", session_id, camera_state.descriptor.camera_id.key)
-    return metadata
 
 
-def to_json(metadata: RecordingMetadata) -> str:
-    """Serialize metadata to JSON string."""
+def write_metadata(path: Path, metadata: RecordingMetadata) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    return json.dumps(asdict(metadata), indent=2, sort_keys=True)
+    mode_record = metadata.selection_record
+    width = mode_record.mode.width if mode_record and mode_record.mode else None
+    height = mode_record.mode.height if mode_record and mode_record.mode else None
 
-
-def from_json(text: str) -> Optional[RecordingMetadata]:
-    """Parse metadata JSON into a RecordingMetadata object."""
-
-    try:
-        data = json.loads(text)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    try:
-        return RecordingMetadata(
-            schema=int(data.get("schema", METADATA_SCHEMA_VERSION)),
-            session_id=str(data["session_id"]),
-            camera=dict(data.get("camera") or {}),
-            modes=dict(data.get("modes") or {}),
-            overlays=dict(data.get("overlays") or {}),
-            timestamp_source=data.get("timestamp_source"),
-            fps_targets=dict(data.get("fps_targets") or {}),
-            timing_stats=dict(data.get("timing_stats") or {}),
-            disk_guard=dict(data.get("disk_guard") or {}),
-            software=dict(data.get("software") or {}),
-            extras=dict(data.get("extras") or {}),
-        )
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "camera_id",
+            "backend",
+            "start_time_unix",
+            "end_time_unix",
+            "target_fps",
+            "resolution_width",
+            "resolution_height",
+            "video_path",
+            "timing_path",
+        ])
+        writer.writerow([
+            metadata.camera_id.stable_id,
+            metadata.camera_id.backend,
+            metadata.start_time_unix,
+            metadata.end_time_unix or "",
+            metadata.target_fps or "",
+            width or "",
+            height or "",
+            metadata.video_path or "",
+            metadata.timing_path or "",
+        ])
 
 
-def _serialize_mode(mode: CapabilityMode) -> Dict[str, Any]:
-    return {
-        "size": list(mode.size),
-        "fps": mode.fps,
-        "pixel_format": mode.pixel_format,
-        "controls": dict(mode.controls),
-    }
-
-
-def _software_info() -> Dict[str, Any]:
-    return {
-        "python_version": platform.python_version(),
-        "platform": platform.platform(),
-    }
-
-
-__all__ = ["RecordingMetadata", "METADATA_SCHEMA_VERSION", "build_metadata", "to_json", "from_json"]
+__all__ = ["RecordingMetadata", "build_metadata", "write_metadata"]

@@ -14,9 +14,9 @@ except Exception:  # pragma: no cover
 
 DEFAULT_SETTINGS = {
     "preview_resolution": "",
-    "preview_fps": "100%",
+    "preview_fps": "25%",
     "record_resolution": "",
-    "record_fps": "30",
+    "record_fps": "15",
     "overlay": "true",
 }
 

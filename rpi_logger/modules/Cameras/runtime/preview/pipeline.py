@@ -85,8 +85,31 @@ class PreviewPipeline:
         try:
             while True:
                 frame = await queue.get()
-                if frame is None:
+                dropped = 0
+                sentinel_found = frame is None
+                latest = frame
+
+                # If backlog >1, discard older frames and keep newest for preview.
+                while not sentinel_found:
+                    try:
+                        nxt = queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    dropped += 1
+                    if nxt is None:
+                        sentinel_found = True
+                        latest = None
+                    else:
+                        latest = nxt
+                    queue.task_done()
+
+                if latest is None or sentinel_found:
+                    queue.task_done()
                     break
+                if dropped:
+                    self._drops[key] = self._drops.get(key, 0) + dropped
+
+                frame = latest
                 keep_every = self._keep_every.get(key, selection.keep_every)
                 if keep_every and keep_every > 1:
                     emit_count = self._emit_counts.get(key, emit_count) + 1
@@ -104,12 +127,13 @@ class PreviewPipeline:
                     continue
                 last_emit = now
                 fps_counter = self._fps_metrics.get(key, self._fps)
-                snapshot = fps_counter.update()
+                frame_ts = getattr(frame, "timestamp", None)
+                snapshot = fps_counter.update(frame_ts)
                 self._last_snapshot[key] = {
                     "preview_fps_instant": round(snapshot.instant, 2),
                     "preview_fps_avg": round(snapshot.average, 2),
                 }
-                self._timing.record(now)
+                self._timing.record(frame_ts if frame_ts is not None else now, end_ts=now)
                 try:
                     consumer(frame)
                 except Exception:  # pragma: no cover - defensive logging

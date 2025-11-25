@@ -63,7 +63,9 @@ class CameraTab:
             return
 
         try:
-            rgb_frame = to_rgb(ensure_uint8(frame))
+            color_format = str(getattr(frame, "color_format", "") or "").lower()
+            assume_rgb = color_format == "rgb" or bool(getattr(frame, "_is_rgb", False))
+            rgb_frame = to_rgb(ensure_uint8(frame), assume_rgb=assume_rgb)
             if rgb_frame is None:
                 return
             image = Image.fromarray(rgb_frame)
@@ -71,16 +73,30 @@ class CameraTab:
             self._logger.debug("Unable to convert frame for %s", self.camera_id, exc_info=True)
             return
         if not self._logged_first_frame:
-            self._logger.info("CameraTab %s received first frame shape=%s mode=%s", self.camera_id, getattr(image, "size", None), image.mode)
+            self._logger.info(
+                "CameraTab %s received first frame shape=%s mode=%s canvas_size=%dx%d",
+                self.camera_id,
+                getattr(image, "size", None),
+                image.mode,
+                self._canvas.winfo_width(),
+                self._canvas.winfo_height(),
+            )
             self._logged_first_frame = True
 
-        target_w = max(self._canvas.winfo_width(), 1)
-        target_h = max(self._canvas.winfo_height(), 1)
-        try:
-            # Always scale to the canvas size so lower-res cameras still fill the tab.
-            image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
-        except Exception:
-            image = image.resize((target_w, target_h))
+        canvas_w = self._canvas.winfo_width()
+        canvas_h = self._canvas.winfo_height()
+
+        if canvas_w > 1 and canvas_h > 1:
+            target_w = canvas_w
+            target_h = canvas_h
+            try:
+                image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            except Exception:
+                image = image.resize((target_w, target_h))
+        else:
+            # Canvas not yet laid out by Tk, use native image size
+            target_w = image.width
+            target_h = image.height
 
         self._photo_ref = ImageTk.PhotoImage(image)
         center_x = target_w // 2

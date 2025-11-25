@@ -452,6 +452,7 @@ class CamerasView:
         preview_res = [f"{w}x{h}" for w, h in preview_sizes]
         record_res = [f"{w}x{h}" for w, h in record_sizes]
         preview_fps_values = ["100%", "50%", "25%", "10%"]
+        default_preview_fps = DEFAULT_SETTINGS.get("preview_fps", "25%")
         record_fps_values = _fps_list()
         self._camera_options[camera_id] = {
             "preview_resolutions": preview_res,
@@ -472,7 +473,7 @@ class CamerasView:
                     latest["record_resolution"] = record_res[0]
             if preview_fps_values:
                 if latest.get("preview_fps") not in preview_fps_values:
-                    latest["preview_fps"] = preview_fps_values[0]
+                    latest["preview_fps"] = default_preview_fps if default_preview_fps in preview_fps_values else preview_fps_values[0]
             if record_fps_values:
                 if latest.get("record_fps") not in record_fps_values:
                     latest["record_fps"] = record_fps_values[0]

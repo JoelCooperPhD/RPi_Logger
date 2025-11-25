@@ -1,65 +1,68 @@
-"""Timestamp-aware recorder for Cameras."""
+"""Video recorder that supports PyAV (libx264) with OpenCV fallback."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from fractions import Fraction
+from pathlib import Path
 from typing import Any, Optional
 
-import cv2
+import os
 import numpy as np
+import cv2
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.runtime import CameraId, ModeSelection
-from rpi_logger.modules.Cameras.storage import RecordingMetadata, build_metadata, ensure_dirs
+from rpi_logger.modules.Cameras.storage.metadata import RecordingMetadata, write_metadata
 
-try:  # pragma: no cover - import guarded for fallback
+try:  # pragma: no cover - optional dependency
     import av  # type: ignore
 
     _HAS_PYAV = True
-except Exception:  # pragma: no cover - fallback to OpenCV writer
+except Exception:  # pragma: no cover - optional dependency
     av = None  # type: ignore
     _HAS_PYAV = False
 
 
 @dataclass(slots=True)
 class RecorderHandle:
+    kind: str  # "pyav" | "opencv"
     camera_id: CameraId
-    csv_logger: Any
+    selection: ModeSelection
     queue: asyncio.Queue
-    metadata_path: Path
-    session_paths: Any
-    metadata: RecordingMetadata
-    kind: str  # "pyav" or "opencv"
-    record_start_ns: int = 0
-    # PyAV fields
-    container: Any | None = None
-    stream: Any | None = None
-    time_base: Optional[Fraction] = None
-    start_pts_ns: Optional[int] = None
-    last_pts: Optional[int] = None
-    # OpenCV fallback
-    video_writer: cv2.VideoWriter | None = None
+    video_path: Optional[Path] = None
+    container: Any = None
+    stream: Any = None
+    writer: Any = None
+    metadata: Optional[RecordingMetadata] = None
+    base_pts_ns: Optional[int] = None
+    last_pts: int = 0
+    record_start_ns: Optional[int] = None
+    task: Optional[asyncio.Task] = None
+    frames_since_flush: int = 0
 
 
 class Recorder:
-    """Async writer that prefers PyAV (timestamp-aware) with OpenCV fallback."""
+    """Encoder wrapper with PyAV preferred when available."""
 
     def __init__(
         self,
         *,
-        queue_size: int = 8,
-        use_pyav: bool = True,
+        queue_size: int = 16,
+        use_pyav: Optional[bool] = None,
         logger: LoggerLike = None,
     ) -> None:
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
-        self._queue_size = queue_size
-        self._use_pyav = use_pyav and _HAS_PYAV
+        self._queue_size = max(1, queue_size)
+        self._use_pyav = use_pyav if use_pyav is not None else _HAS_PYAV
+        # Periodically fsync so long-running recordings surface promptly on disk.
+        self._flush_interval_frames = 600
+        self._handles: dict[str, RecorderHandle] = {}
+
+    # ------------------------------------------------------------------ lifecycle
 
     async def start(
         self,
@@ -67,210 +70,221 @@ class Recorder:
         session_paths,
         selection: ModeSelection,
         metadata_builder,
-        csv_logger,
+        csv_logger=None,
     ) -> RecorderHandle:
-        await ensure_dirs(session_paths)
-        metadata = metadata_builder()
-        await asyncio.to_thread(session_paths.metadata_path.write_text, json.dumps(metadata, default=str, indent=2))
+        """Initialize encoder and return handle."""
 
-        queue: asyncio.Queue = asyncio.Queue(maxsize=self._queue_size)
+        target_fps = selection.target_fps or selection.mode.fps
+        queue = asyncio.Queue(maxsize=self._queue_size)
         handle: RecorderHandle
 
-        if self._use_pyav:
-            handle = await self._start_pyav(camera_id, selection, session_paths, metadata, csv_logger, queue)
+        if self._use_pyav and _HAS_PYAV:
+            handle = await asyncio.to_thread(
+                self._start_pyav, camera_id, session_paths.video_path, selection, target_fps, queue
+            )
+            handle.kind = "pyav"
         else:
-            handle = await self._start_opencv(camera_id, selection, session_paths, metadata, csv_logger, queue)
+            handle = await asyncio.to_thread(
+                self._start_opencv, camera_id, session_paths.video_path, selection, target_fps, queue
+            )
+            handle.kind = "opencv"
 
-        asyncio.create_task(self._writer_loop(handle), name=f"recorder:{camera_id.key}")
+        metadata = metadata_builder() if callable(metadata_builder) else None
+        if isinstance(metadata, RecordingMetadata):
+            handle.metadata = metadata
+            handle.metadata.video_path = str(session_paths.video_path)
+            handle.metadata.timing_path = str(session_paths.timing_path)
+        handle.record_start_ns = time.monotonic_ns()
+
+        task = asyncio.create_task(self._writer_loop(handle), name=f"recorder:{camera_id.key}")
+        handle.task = task
+
+        self._handles[camera_id.key] = handle
         return handle
 
-    async def enqueue(self, handle: RecorderHandle, frame, *, timestamp: float, pts_time_ns: Optional[int] = None) -> None:
+    async def enqueue(self, handle: RecorderHandle, frame: np.ndarray, *, timestamp: float, pts_time_ns=None, color_format: str = "bgr") -> None:
+        """Add frame to encoding queue with timestamp metadata."""
         try:
-            handle.queue.put_nowait((frame, timestamp, pts_time_ns))
+            await handle.queue.put((frame, timestamp, pts_time_ns, color_format))
         except asyncio.QueueFull:
-            try:
-                await handle.queue.put((frame, timestamp, pts_time_ns))
-            except asyncio.CancelledError:
-                return
+            self._logger.warning("Recorder queue full for %s", handle.camera_id.key)
 
-    async def stop(self, handle: RecorderHandle) -> None:
+    async def stop(self, handle: RecorderHandle, *, metadata_csv_path=None) -> None:
+        """Signal writer to stop and wait for completion."""
         await handle.queue.put(None)
-        # Ensure writer loop drains before returning so containers flush cleanly.
-        with contextlib.suppress(Exception):
-            await handle.queue.join()
+        if handle.task:
+            with contextlib.suppress(asyncio.CancelledError):
+                await handle.task
 
-    # ------------------------------------------------------------------ Internal helpers
-
-    async def _start_pyav(
-        self,
-        camera_id: CameraId,
-        selection: ModeSelection,
-        session_paths,
-        metadata: RecordingMetadata,
-        csv_logger,
-        queue: asyncio.Queue,
-    ) -> RecorderHandle:
-        """Start a PyAV container with per-frame PTS support."""
-
-        codec_candidates = ["h264", "libx264", "mpeg4"]
-        container = None
-        stream = None
-        last_error: Optional[str] = None
-        time_base = Fraction(1, 1_000_000)  # microsecond resolution
-        for codec in codec_candidates:
+        if handle.metadata:
+            handle.metadata.end_time_unix = time.time()
             try:
-                container = av.open(str(session_paths.video_path), mode="w")
-                stream = container.add_stream(codec)
-                stream.width = selection.mode.width
-                stream.height = selection.mode.height
-                stream.pix_fmt = "yuv420p"
-                stream.time_base = time_base
-                try:
-                    stream.average_rate = None  # allow VFR; avoid locking to a nominal rate
-                except Exception:
-                    pass
-                try:
-                    stream.codec_context.time_base = time_base  # type: ignore[attr-defined]
-                except Exception:
-                    pass
-                break
-            except Exception as exc:  # pragma: no cover - defensive
-                last_error = str(exc)
-                if container:
-                    with contextlib.suppress(Exception):
-                        container.close()
-                container = None
-                stream = None
-                continue
+                if metadata_csv_path:
+                    write_metadata(Path(metadata_csv_path), handle.metadata)
+            except Exception:
+                self._logger.debug("Failed to write metadata", exc_info=True)
 
-        if not container or not stream:
-            self._logger.warning("PyAV unavailable (%s); falling back to OpenCV writer", last_error or "unknown error")
-            return await self._start_opencv(camera_id, selection, session_paths, metadata, csv_logger, queue)
-
-        self._logger.info("Recording with PyAV for %s (time_base=%s)", camera_id.key, time_base)
-        return RecorderHandle(
-            camera_id=camera_id,
-            csv_logger=csv_logger,
-            queue=queue,
-            metadata_path=session_paths.metadata_path,
-            session_paths=session_paths,
-            metadata=metadata,
-            kind="pyav",
-            container=container,
-            stream=stream,
-            time_base=time_base,
-            record_start_ns=time.monotonic_ns(),
-        )
-
-    async def _start_opencv(
-        self,
-        camera_id: CameraId,
-        selection: ModeSelection,
-        session_paths,
-        metadata: RecordingMetadata,
-        csv_logger,
-        queue: asyncio.Queue,
-    ) -> RecorderHandle:
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        fps_for_writer = selection.target_fps or selection.mode.fps or 1.0
-        fps_for_writer = max(1.0, float(fps_for_writer))
-        writer = cv2.VideoWriter(str(session_paths.video_path), fourcc, fps_for_writer, selection.mode.size)
-        self._logger.info("Recording with OpenCV fallback for %s (fps=%s)", camera_id.key, fps_for_writer)
-        return RecorderHandle(
-            camera_id=camera_id,
-            video_writer=writer,
-            csv_logger=csv_logger,
-            queue=queue,
-            metadata_path=session_paths.metadata_path,
-            session_paths=session_paths,
-            metadata=metadata,
-            kind="opencv",
-            record_start_ns=time.monotonic_ns(),
-        )
+    # ------------------------------------------------------------------ Writer loop
 
     async def _writer_loop(self, handle: RecorderHandle) -> None:
-        if handle.kind == "pyav":
-            await self._writer_loop_pyav(handle)
-        else:
-            await self._writer_loop_opencv(handle)
-
-    async def _writer_loop_opencv(self, handle: RecorderHandle) -> None:
-        writer = handle.video_writer
-        if writer is None:
-            return
+        """Dedicated async task that consumes frames and encodes them."""
         try:
-            while True:
-                item = await handle.queue.get()
-                if item is None:
-                    handle.queue.task_done()
-                    break
-                frame, _ts, _pts_ns = item
-                await asyncio.to_thread(writer.write, frame.data if hasattr(frame, "data") else frame)
-                handle.queue.task_done()
+            if handle.kind == "pyav":
+                await self._writer_loop_pyav(handle)
+            elif handle.kind == "opencv":
+                await self._writer_loop_opencv(handle)
         except asyncio.CancelledError:
+            self._logger.debug("Writer loop cancelled for %s", handle.camera_id.key)
             raise
+        except Exception:
+            self._logger.error("Writer loop failed for %s", handle.camera_id.key, exc_info=True)
         finally:
-            with contextlib.suppress(Exception):
-                writer.release()
+            if handle.kind == "pyav":
+                await asyncio.to_thread(self._finalize_pyav, handle)
+            elif handle.kind == "opencv":
+                await asyncio.to_thread(self._finalize_opencv, handle)
 
     async def _writer_loop_pyav(self, handle: RecorderHandle) -> None:
-        if not handle.container or not handle.stream or not handle.time_base:
-            return
-        queue = handle.queue
+        """PyAV encoding loop."""
+        while True:
+            item = await handle.queue.get()
+            if item is None:
+                break
+            frame, timestamp, pts_time_ns, color_format = item
+            await asyncio.to_thread(self._encode_pyav, handle, frame, pts_time_ns, timestamp, color_format)
+
+    async def _writer_loop_opencv(self, handle: RecorderHandle) -> None:
+        """OpenCV encoding loop."""
+        while True:
+            item = await handle.queue.get()
+            if item is None:
+                break
+            frame, _timestamp, _pts, _color_format = item
+            await asyncio.to_thread(handle.writer.write, frame)
+            handle.frames_since_flush += 1
+            if handle.frames_since_flush >= self._flush_interval_frames:
+                handle.frames_since_flush = 0
+                self._fsync_path(handle.video_path)
+
+    # ------------------------------------------------------------------ PyAV path
+
+    def _start_pyav(
+        self, camera_id: CameraId, video_path: Path, selection: ModeSelection, fps: float, queue: asyncio.Queue
+    ) -> RecorderHandle:
+        container = av.open(str(video_path), "w")
+        fps_fraction = Fraction(fps).limit_denominator(1000)
+        stream = container.add_stream("libx264", rate=fps_fraction)
+        stream.width = selection.mode.width
+        stream.height = selection.mode.height
+        stream.pix_fmt = "yuv420p"
+        stream.time_base = Fraction(1, 1_000_000)
+        stream.codec_context.time_base = stream.time_base
+        stream.codec_context.framerate = fps_fraction
+        return RecorderHandle(
+            kind="pyav",
+            camera_id=camera_id,
+            selection=selection,
+            queue=queue,
+            container=container,
+            stream=stream,
+            base_pts_ns=None,
+            video_path=video_path,
+        )
+
+    def _encode_pyav(self, handle: RecorderHandle, frame: np.ndarray, pts_time_ns: Optional[int], timestamp: float, color_format: str = "bgr") -> None:
         try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    queue.task_done()
-                    break
-                frame, wall_ts, pts_ns = item
-                try:
-                    await asyncio.to_thread(self._encode_with_pyav, handle, frame, wall_ts, pts_ns)
-                except Exception:  # pragma: no cover - defensive logging
-                    self._logger.exception("PyAV encode failed for %s", handle.camera_id.key)
-                queue.task_done()
-        except asyncio.CancelledError:
-            raise
-        finally:
-            await asyncio.to_thread(self._finalize_pyav, handle)
-
-    def _encode_with_pyav(self, handle: RecorderHandle, frame_obj, wall_ts: float, pts_ns: Optional[int]) -> None:
-        if not handle.container or not handle.stream or not handle.time_base:
+            av_frame = av.VideoFrame.from_ndarray(frame, format="bgr24")
+        except Exception:
+            self._logger.debug("PyAV frame conversion failed", exc_info=True)
             return
 
-        # Resolve timestamps to nanoseconds then convert to the stream time_base.
-        pts_ns_resolved = pts_ns if pts_ns is not None else int(wall_ts * 1_000_000_000)
-        if handle.start_pts_ns is None:
-            handle.start_pts_ns = pts_ns_resolved
-        base_ns = handle.start_pts_ns
+        base = handle.base_pts_ns
+        if base is None:
+            base = pts_time_ns if pts_time_ns is not None else int(timestamp * 1_000_000_000)
+            handle.base_pts_ns = base
 
-        # Keep PTS aligned to the actual recording start to avoid huge leading gaps.
-        elapsed_ns = max(0, time.monotonic_ns() - handle.record_start_ns)
-        delta_ns = max(0, pts_ns_resolved - base_ns)
-        # If timestamps jump far ahead of real elapsed time (e.g., stale clocks), clamp to elapsed.
-        if delta_ns > elapsed_ns + 100_000_000:  # allow 100ms slack
+        pts_source = pts_time_ns if pts_time_ns is not None else int(timestamp * 1_000_000_000)
+        delta_ns = max(0, pts_source - base)
+
+        elapsed_ns = max(0, time.monotonic_ns() - handle.record_start_ns) if handle.record_start_ns else delta_ns
+        if delta_ns > elapsed_ns + 100_000_000:
             delta_ns = elapsed_ns
 
-        pts = int(delta_ns // 1000)  # microsecond ticks
-        if handle.last_pts is not None and pts <= handle.last_pts:
-            pts = handle.last_pts + 1  # enforce monotonic PTS even if timestamps repeat
+        pts = int(delta_ns / 1000)
+
+        if pts <= handle.last_pts:
+            pts = handle.last_pts + 1
         handle.last_pts = pts
 
-        np_frame = frame_obj.data if hasattr(frame_obj, "data") else frame_obj
-        np_frame = np.asarray(np_frame)
-        av_frame = av.VideoFrame.from_ndarray(np_frame, format="bgr24")
         av_frame.pts = pts
-        av_frame.time_base = handle.time_base
+        av_frame.time_base = handle.stream.time_base
+
         packets = handle.stream.encode(av_frame)
-        for packet in packets:
-            handle.container.mux(packet)
+        for pkt in packets:
+            handle.container.mux(pkt)
+
+        handle.frames_since_flush += 1
+        if handle.frames_since_flush >= self._flush_interval_frames:
+            handle.frames_since_flush = 0
+            self._flush_pyav(handle)
 
     def _finalize_pyav(self, handle: RecorderHandle) -> None:
-        if handle.stream and handle.container:
-            with contextlib.suppress(Exception):
-                packets = handle.stream.encode(None)
-                for packet in packets:
-                    handle.container.mux(packet)
-        if handle.container:
-            with contextlib.suppress(Exception):
-                handle.container.close()
+        try:
+            packets = handle.stream.encode(None)
+            for pkt in packets:
+                handle.container.mux(pkt)
+        except Exception:
+            self._logger.warning("PyAV flush failed", exc_info=True)
+        try:
+            handle.container.close()
+        except Exception:
+            self._logger.warning("PyAV close failed", exc_info=True)
+
+    def _flush_pyav(self, handle: RecorderHandle) -> None:
+        """Best-effort flush of PyAV buffers and underlying file to disk."""
+        try:
+            flush_fn = getattr(handle.container, "flush", None)
+            if callable(flush_fn):
+                flush_fn()
+        except Exception:
+            self._logger.debug("PyAV container flush failed", exc_info=True)
+        self._fsync_path(handle.video_path)
+
+    # ------------------------------------------------------------------ OpenCV path
+
+    def _start_opencv(
+        self, camera_id: CameraId, video_path: Path, selection: ModeSelection, fps: float, queue: asyncio.Queue
+    ) -> RecorderHandle:
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        writer = cv2.VideoWriter(str(video_path), fourcc, fps, (selection.mode.width, selection.mode.height))
+        return RecorderHandle(
+            kind="opencv",
+            camera_id=camera_id,
+            selection=selection,
+            queue=queue,
+            writer=writer,
+            video_path=video_path,
+        )
+
+    def _finalize_opencv(self, handle: RecorderHandle) -> None:
+        try:
+            if handle.writer:
+                handle.writer.release()
+        except Exception:
+            self._logger.warning("OpenCV release failed", exc_info=True)
+
+    def _fsync_path(self, path: Optional[Path]) -> None:
+        """Best-effort fsync to surface partially written files on disk."""
+        if not path:
+            return
+        try:
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except Exception:
+            self._logger.debug("fsync failed for %s", path, exc_info=True)
+
+
+__all__ = ["Recorder", "RecorderHandle"]

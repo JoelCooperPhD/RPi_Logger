@@ -180,9 +180,8 @@ class CamerasRuntime(ModuleRuntime):
         if record_sel:
             record_target = record_sel.target_fps if record_sel.target_fps is not None else getattr(getattr(record_sel, "mode", None), "fps", None)
         metrics: Dict[str, Any] = {
-            "frames": self.preview._frame_counts.get(camera_key, 0),
-            "preview_queue": runtime.preview_queue.qsize(),
-            "record_queue": runtime.record_queue.qsize(),
+            "preview_queue": runtime.preview_queue.qsize() if runtime.preview_queue else 0,
+            "record_queue": runtime.record_queue.qsize() if runtime.record_queue else 0,
             "target_preview_fps": preview_target,
             "target_record_fps": record_target,
         }
@@ -192,6 +191,7 @@ class CamerasRuntime(ModuleRuntime):
                 {
                     "preview_dropped": router_metrics.preview_dropped,
                     "record_backpressure": router_metrics.record_backpressure,
+                    "record_dropped": router_metrics.record_dropped,
                     "preview_enqueued": router_metrics.preview_enqueued,
                     "record_enqueued": router_metrics.record_enqueued,
                     "ingress_fps_avg": router_metrics.ingress_fps_avg,
@@ -212,14 +212,19 @@ class CamerasRuntime(ModuleRuntime):
         try:
             while True:
                 await asyncio.sleep(interval)
-                if not self.config.telemetry.include_metrics:
-                    continue
                 snapshot: Dict[str, Any] = {}
                 for key in list(self._camera_runtime.keys()):
                     payload = self.collect_metrics(key)
                     if payload:
                         snapshot[key] = payload
-                if snapshot:
+                        # Always push the latest metrics into the view so the Capture Stats
+                        # frame stays current, even when telemetry logging is disabled.
+                        if self.view:
+                            try:
+                                self.view.update_metrics(key, payload)
+                            except Exception:
+                                self.logger.debug("Failed to update view metrics for %s", key, exc_info=True)
+                if snapshot and self.config.telemetry.include_metrics:
                     self.logger.debug("Telemetry snapshot: %s", build_snapshot(snapshot))
         except asyncio.CancelledError:
             return

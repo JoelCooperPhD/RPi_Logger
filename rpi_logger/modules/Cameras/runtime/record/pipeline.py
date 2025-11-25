@@ -1,25 +1,28 @@
-"""Record pipeline for Cameras."""
+"""Recording pipeline: timing, overlay, CSV, and recorder enqueue."""
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Optional
+
+import numpy as np
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.runtime import CameraId, ModeSelection
-from rpi_logger.modules.Cameras.runtime.metrics import FPSCounter, TimingTracker
-from rpi_logger.modules.Cameras.runtime.record.fps_tracker import RecordFPSTracker
-from rpi_logger.modules.Cameras.runtime.record.recorder import Recorder
-from rpi_logger.modules.Cameras.runtime.record.overlay import apply_overlay
+from rpi_logger.modules.Cameras.runtime.metrics import FPSCounter
 from rpi_logger.modules.Cameras.runtime.record.csv_logger import CSVLogger, CSVRecord
+from rpi_logger.modules.Cameras.runtime.record.overlay import apply_overlay
+from rpi_logger.modules.Cameras.runtime.record.recorder import Recorder
 from rpi_logger.modules.Cameras.runtime.record.timing import FrameTimingTracker
-from rpi_logger.modules.Cameras.storage import DiskGuard
+from rpi_logger.modules.Cameras.storage import DiskGuard, resolve_session_paths
+from rpi_logger.modules.Cameras.storage.metadata import build_metadata
+from rpi_logger.modules.Cameras.storage.session_paths import SessionPaths
+from rpi_logger.modules.Cameras.runtime.tasks import TaskManager
 
 
 class RecordPipeline:
-    """Consumes frames from record queue, applies overlay, and queues to recorder."""
+    """Consumes frames from record queue and forwards to recorder with logging."""
 
     def __init__(
         self,
@@ -27,185 +30,164 @@ class RecordPipeline:
         disk_guard: DiskGuard,
         *,
         logger: LoggerLike = None,
-        clock: Callable[[], float] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
         self._recorder = recorder
         self._disk_guard = disk_guard
-        self._tasks: dict[str, asyncio.Task] = {}
-        self._metrics: dict[str, dict[str, float | int]] = {}
-        self._csv_loggers: dict[str, CSVLogger] = {}
-        self._timers: dict[str, FrameTimingTracker] = {}
-        self._frame_counters: dict[str, int] = {}
-        self._clock = clock or time.monotonic
+        self._clock = clock
+        self._task_manager = TaskManager(logger=self._logger)
+        self._states: dict[str, dict[str, Any]] = {}
+        self._fps = FPSCounter()
 
+    # ------------------------------------------------------------------
     def start(
         self,
         camera_id: CameraId,
         queue: asyncio.Queue,
         selection: ModeSelection,
         *,
-        session_paths,
-        metadata_builder,
-        csv_logger=None,
-        trial_number: int | None = None,
+        session_paths: SessionPaths,
+        metadata_builder: Optional[Callable[[], Any]] = None,
+        csv_logger: Optional[CSVLogger] = None,
+        trial_number: Optional[int] = None,
     ) -> None:
         key = camera_id.key
-        if key in self._tasks:
-            return
-        if key not in self._timers:
-            self._timers[key] = FrameTimingTracker()
-        if key not in self._frame_counters:
-            self._frame_counters[key] = 0
         if csv_logger is None:
-            csv_logger = CSVLogger(trial_number=trial_number, camera_label=key, logger=self._logger)
-        self._csv_loggers[key] = csv_logger
+            csv_logger = CSVLogger(trial_number=trial_number, camera_label=key, flush_every=16)
 
-        task_init = asyncio.create_task(self._start_logger(csv_logger, session_paths), name=f"csv:{key}")
-
-        task = asyncio.create_task(
-            self._loop(camera_id, queue, selection, session_paths, metadata_builder, csv_logger, task_init),
-            name=f"record:{key}",
-        )
-        self._tasks[key] = task
-        task.add_done_callback(lambda _: self._tasks.pop(key, None))
-        self._logger.info("Record pipeline started for %s", key)
-        self._metrics[key] = {
-            "frames_written": 0,
-            "skipped_fps_cap": 0,
-            "record_fps_instant": 0.0,
-            "record_fps_avg": 0.0,
-            "record_ingest_fps_avg": 0.0,
+        state = {
+            "queue": queue,
+            "selection": selection,
+            "paths": session_paths,
+            "csv": csv_logger,
+            "trial": trial_number,
+            "timing": FrameTimingTracker(),
+            "last_emit": 0.0,
+            "drops": 0,
+            "handle": None,
+            "metadata_builder": metadata_builder or (lambda: build_metadata(camera_id)),
         }
+        self._states[key] = state
+        self._task_manager.create(f"record:{key}", self._loop(camera_id))
+        self._logger.info("Record pipeline started for %s", key)
 
     async def stop(self, camera_id: CameraId) -> None:
-        task = self._tasks.pop(camera_id.key, None)
-        self._metrics.pop(camera_id.key, None)
-        csv_logger = self._csv_loggers.pop(camera_id.key, None)
-        self._timers.pop(camera_id.key, None)
-        self._frame_counters.pop(camera_id.key, None)
-        if not task:
+        key = camera_id.key
+        await self._task_manager.cancel(f"record:{key}")
+        state = self._states.pop(key, None)
+        if not state:
+            return
+        handle = state.get("handle")
+        try:
+            if handle:
+                await self._recorder.stop(handle)
+        finally:
+            csv_logger: CSVLogger = state.get("csv")
             if csv_logger:
                 await csv_logger.stop()
-            return
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        if csv_logger:
-            await csv_logger.stop()
-        self._logger.info("Record pipeline stopped for %s", camera_id.key)
 
-    async def _start_logger(self, csv_logger: CSVLogger, session_paths) -> None:
-        try:
-            await csv_logger.start(session_paths.csv_path)
-        except Exception:  # pragma: no cover - defensive logging
-            self._logger.exception("Failed to start CSV logger for %s", session_paths.csv_path)
-
-    async def _loop(
-        self,
-        camera_id: CameraId,
-        queue: asyncio.Queue,
-        selection: ModeSelection,
-        session_paths,
-        metadata_builder,
-        csv_logger,
-        csv_task: asyncio.Task,
-    ) -> None:
+    # ------------------------------------------------------------------
+    async def _loop(self, camera_id: CameraId) -> None:
         key = camera_id.key
-        fps_counter = FPSCounter()
-        ingest_counter = FPSCounter()
-        timing = TimingTracker()
-        fps_tracker = RecordFPSTracker()
-        frame_timing = self._timers.get(key) or FrameTimingTracker()
-        capture_index = self._frame_counters.get(key, 0)
+        state = self._states[key]
+        queue: asyncio.Queue = state["queue"]
+        selection: ModeSelection = state["selection"]
+        csv_logger: CSVLogger = state["csv"]
+        timing: FrameTimingTracker = state["timing"]
+        paths: SessionPaths = state["paths"]
 
-        preflight = await self._disk_guard.check_before_start(session_paths.root)
-        if not preflight.ok:
-            self._logger.warning("Record start blocked by disk guard for %s", key)
-            return
+        await csv_logger.start(paths.timing_path)
 
-        # Ensure CSV logger is ready before recording.
-        with contextlib.suppress(Exception):
-            await csv_task
+        metadata_builder = state["metadata_builder"]
+        handle = await self._recorder.start(
+            camera_id,
+            paths,
+            selection,
+            metadata_builder=lambda: metadata_builder(),
+            csv_logger=csv_logger,
+        )
+        state["handle"] = handle
 
-        recorder_handle = await self._recorder.start(camera_id, session_paths, selection, metadata_builder, None)
-        target_rate = float(selection.target_fps or 0.0)
-        bucket_capacity = max(1.0, target_rate)
-        last_tick = self._clock()
-        allowance = 1.0  # allow the first frame through immediately
         try:
             while True:
                 frame = await queue.get()
                 if frame is None:
+                    queue.task_done()
                     break
-                tick_now = self._clock()
-                elapsed = max(0.0, tick_now - last_tick)
-                last_tick = tick_now
+                now = self._clock()
 
-                ingest_snapshot = ingest_counter.update()
-                self._metrics[key]["record_ingest_fps_avg"] = round(ingest_snapshot.average, 2)
+                frame_number = getattr(frame, "frame_number", 0)
+                monotonic_ns = getattr(frame, "monotonic_ns", int(now * 1_000_000_000))
+                sensor_ts = getattr(frame, "sensor_timestamp_ns", None)
+                wall_time = getattr(frame, "timestamp", time.time())
+                storage_q_drops = getattr(frame, "storage_queue_drops", 0)
+                hardware_frame_number = getattr(frame, "hardware_frame_number", None)
+                color_format = str(getattr(frame, "color_format", "bgr") or "bgr").lower()
 
-                if target_rate > 0.0:
-                    allowance = min(bucket_capacity, allowance + elapsed * target_rate)
-                    if allowance < 1.0:
-                        self._metrics[key]["skipped_fps_cap"] = self._metrics[key].get("skipped_fps_cap", 0) + 1
-                        queue.task_done()
-                        continue
-                    allowance -= 1.0
-
-                wall_now = time.time()
-                snap = fps_counter.update(wall_now)
-                timing.record(wall_now)
-                fps_tracker.record_frame(wall_now)
-                self._metrics[key]["record_fps_instant"] = round(snap.instant, 2)
-                self._metrics[key]["record_fps_avg"] = round(snap.average, 2)
-
-                timing_update = frame_timing.update(
-                    frame_number=getattr(frame, "frame_number", None),
-                    sensor_timestamp=getattr(frame, "timestamp", None),
-                    monotonic_time=tick_now,
+                update = timing.update(
+                    frame_number=frame_number or 0,
+                    sensor_timestamp_ns=sensor_ts,
+                    monotonic_time_ns=monotonic_ns,
+                    write_time_unix=wall_time if isinstance(wall_time, (int, float)) else time.time(),
+                    hardware_frame_number=hardware_frame_number,
+                    storage_queue_drops=storage_q_drops,
                 )
-                storage_queue_drops = csv_logger.queue_overflow_drops if csv_logger else 0
-                if csv_logger:
-                    csv_logger.log_frame(
-                        CSVRecord(
-                            trial=csv_logger.trial_number,
-                            frame_number=capture_index,
-                            write_time_unix=wall_now,
-                            monotonic_time=tick_now,
-                            sensor_timestamp_ns=timing_update.sensor_timestamp_ns,
-                            hardware_frame_number=timing_update.hardware_frame_number,
-                            dropped_since_last=timing_update.dropped_since_last,
-                            total_hardware_drops=timing_update.total_hardware_drops,
-                            storage_queue_drops=storage_queue_drops,
-                        )
-                    )
-                capture_index += 1
 
-                # Apply lightweight overlay if requested
+                data = getattr(frame, "data", frame)
+                if color_format.startswith("rgb") and isinstance(data, np.ndarray):
+                    try:
+                        data = data[..., :3][:, :, ::-1]
+                    except Exception:
+                        data = data[..., ::-1]
+                    color_format = "bgr"
                 if selection.overlay:
-                    frame = apply_overlay(frame)
+                    data = apply_overlay(data, timestamp=wall_time, frame_number=frame_number)
+
+                csv_logger.log_frame(
+                    CSVRecord(
+                        trial=state["trial"],
+                        frame_number=update.frame_number,
+                        write_time_unix=update.write_time_unix,
+                        monotonic_time=update.monotonic_time_ns / 1_000_000_000,
+                        sensor_timestamp_ns=update.sensor_timestamp_ns,
+                        hardware_frame_number=update.hardware_frame_number,
+                        dropped_since_last=update.dropped_since_last,
+                        total_hardware_drops=update.total_hardware_drops,
+                        storage_queue_drops=update.storage_queue_drops,
+                    )
+                )
+                if len(csv_logger._rows) >= csv_logger._flush_every:  # type: ignore[attr-defined]
+                    await csv_logger.flush()
 
                 await self._recorder.enqueue(
-                    recorder_handle,
-                    frame,
-                    timestamp=wall_now,
-                    pts_time_ns=timing_update.sensor_timestamp_ns,
+                    handle,
+                    data,
+                    timestamp=wall_time if isinstance(wall_time, (int, float)) else time.time(),
+                    pts_time_ns=sensor_ts or monotonic_ns,
+                    color_format=color_format,
                 )
-                self._metrics[key]["frames_written"] = self._metrics[key].get("frames_written", 0) + 1
                 queue.task_done()
         except asyncio.CancelledError:
             raise
-        except Exception:  # pragma: no cover - defensive logging
-            self._logger.exception("Record pipeline error for %s", key)
         finally:
-            self._frame_counters[key] = capture_index
-            await self._recorder.stop(recorder_handle)
-            if not queue.empty():
-                with contextlib.suppress(Exception):
-                    queue.task_done()
+            try:
+                await csv_logger.flush()
+            finally:
+                if handle:
+                    await self._recorder.stop(handle, metadata_csv_path=paths.metadata_csv_path)
+            queue.put_nowait(None)
 
-    def metrics(self, camera_id: CameraId) -> dict[str, float | int]:
-        return dict(self._metrics.get(camera_id.key, {}))
+    def metrics(self, camera_id: CameraId) -> dict[str, Any]:
+        state = self._states.get(camera_id.key)
+        if not state:
+            return {}
+        csv_logger: CSVLogger = state["csv"]
+        return {
+            "record_fps_avg": round(self._fps.update().average, 2),
+            "record_dropped": state.get("drops", 0),
+            "record_csv_pending": len(csv_logger._rows),  # type: ignore[attr-defined]
+        }
+
+
+__all__ = ["RecordPipeline"]

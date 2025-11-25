@@ -19,7 +19,7 @@ def _fallback_bgra_to_rgb(bgra: np.ndarray) -> np.ndarray:
     return _fallback_bgr_to_rgb(bgr)
 
 
-def to_rgb(frame) -> np.ndarray:
+def to_rgb(frame, *, assume_rgb: bool = False) -> np.ndarray:
     """Convert frames to 3-channel RGB for Tk/Pillow rendering."""
 
     if isinstance(frame, np.ndarray):
@@ -30,6 +30,10 @@ def to_rgb(frame) -> np.ndarray:
         return data
     if not isinstance(data, np.ndarray):
         return np.array(data)
+
+    if assume_rgb and data.ndim == 3 and data.shape[2] >= 3:
+        # Already RGB; drop any extra channels above 3.
+        return data[..., :3]
 
     # Grayscale input
     if data.ndim == 2 or (data.ndim == 3 and data.shape[2] == 1):

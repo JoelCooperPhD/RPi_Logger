@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import glob
 import os
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -16,9 +17,24 @@ from .capabilities import build_capabilities
 
 
 def discover_usb_devices(logger: LoggerLike = None, max_devices: int = 16) -> List[CameraDescriptor]:
-    """List available /dev/video* devices, preferring real USB nodes."""
+    """List available USB cameras using platform-specific discovery."""
 
     log = ensure_structured_logger(logger, fallback_name=__name__)
+
+    if sys.platform == "linux":
+        return _discover_linux(log, max_devices)
+    elif sys.platform == "win32":
+        return _discover_windows(log, max_devices)
+    elif sys.platform == "darwin":
+        return _discover_macos(log, max_devices)
+    else:
+        log.warning("Unsupported platform for USB camera discovery: %s", sys.platform)
+        return []
+
+
+def _discover_linux(log, max_devices: int) -> List[CameraDescriptor]:
+    """Discover USB cameras on Linux using /dev/video* and sysfs."""
+
     descriptors: list[CameraDescriptor] = []
     indices = _detect_from_dev_nodes()
     ordered = _prioritize_usb(indices)
@@ -61,6 +77,54 @@ def discover_usb_devices(logger: LoggerLike = None, max_devices: int = 16) -> Li
     return descriptors
 
 
+def _discover_windows(log, max_devices: int) -> List[CameraDescriptor]:
+    """Discover USB cameras on Windows using OpenCV enumeration."""
+
+    descriptors: list[CameraDescriptor] = []
+    for index in range(max_devices):
+        cap = cv2.VideoCapture(index)
+        if cap and cap.isOpened():
+            cap.release()
+            camera_id = CameraId(
+                backend="usb",
+                stable_id=str(index),
+                dev_path=str(index),
+                friendly_name=f"USB Camera {index}",
+            )
+            descriptors.append(CameraDescriptor(camera_id=camera_id, hw_model="USB Camera", location_hint=None))
+            log.debug("Discovered Windows USB camera at index %d", index)
+        else:
+            if cap:
+                cap.release()
+            break
+    log.debug("Discovered %d USB cameras on Windows", len(descriptors))
+    return descriptors
+
+
+def _discover_macos(log, max_devices: int) -> List[CameraDescriptor]:
+    """Discover USB cameras on macOS using OpenCV enumeration."""
+
+    descriptors: list[CameraDescriptor] = []
+    for index in range(max_devices):
+        cap = cv2.VideoCapture(index)
+        if cap and cap.isOpened():
+            cap.release()
+            camera_id = CameraId(
+                backend="usb",
+                stable_id=str(index),
+                dev_path=str(index),
+                friendly_name=f"USB Camera {index}",
+            )
+            descriptors.append(CameraDescriptor(camera_id=camera_id, hw_model="USB Camera", location_hint=None))
+            log.debug("Discovered macOS USB camera at index %d", index)
+        else:
+            if cap:
+                cap.release()
+            break
+    log.debug("Discovered %d USB cameras on macOS", len(descriptors))
+    return descriptors
+
+
 async def probe_usb_capabilities(dev_path: str, *, logger: LoggerLike = None):
     """Probe capabilities for a USB camera using OpenCV in a thread."""
 
@@ -69,13 +133,13 @@ async def probe_usb_capabilities(dev_path: str, *, logger: LoggerLike = None):
 
 
 def _probe_usb_sync(dev_path: str, log) -> Optional[object]:
-    cap = cv2.VideoCapture(dev_path)
+    device_id = int(dev_path) if dev_path.isdigit() else dev_path
+    cap = cv2.VideoCapture(device_id)
     if not cap.isOpened():
         log.warning("Unable to open USB device %s", dev_path)
         return None
 
     modes = []
-    # Minimal probing; deeper mode enumeration would use v4l2 controls.
     try:
         widths = [320, 640, 800, 1280, 1920]
         heights = [240, 480, 600, 720, 1080]

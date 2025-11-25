@@ -475,32 +475,46 @@ def _resolve_requested_mode(
     def _matches_format(mode: CapabilityMode) -> bool:
         return not request.pixel_format or (mode.pixel_format.lower() == request.pixel_format.lower())
 
-    def _matches_fps(mode: CapabilityMode) -> bool:
-        return not request.fps or mode.fps >= request.fps
+    def _fps_distance(mode_fps: float, requested_fps: float) -> tuple[float, int]:
+        """Return (diff, overshoot_flag) preferring at/below requested fps when close."""
+
+        diff = abs(mode_fps - requested_fps)
+        overshoot = 1 if mode_fps > requested_fps else 0
+        return diff, overshoot
 
     warning: Optional[str] = None
 
-    # Prefer modes that fit within the requested size (largest area under the cap).
+    # Prefer modes that fit within the requested size (largest area under the cap), and
+    # pick fps closest to the requested value (favoring at/below when possible).
     if request.size:
         req_w, req_h = request.size
         candidates = [
             m
             for m in capabilities.modes
-            if _matches_format(m) and _matches_fps(m) and m.width <= req_w and m.height <= req_h
+            if _matches_format(m) and m.width <= req_w and m.height <= req_h
         ]
         if candidates:
-            best = sorted(candidates, key=lambda m: (m.width * m.height, m.fps), reverse=True)[0]
+            if request.fps:
+                best = sorted(
+                    candidates,
+                    key=lambda m: (_fps_distance(m.fps, request.fps), -(m.width * m.height)),
+                )[0]
+            else:
+                best = sorted(candidates, key=lambda m: (m.width * m.height, m.fps), reverse=True)[0]
             if best.size != request.size:
                 warning = f"Requested size {request.size} unavailable; using best fit {best.size}"
             return best, warning
 
     # Exact or format/fps match fallback (may exceed requested size).
-    for mode in capabilities.modes:
-        if not _matches_format(mode) or not _matches_fps(mode):
-            continue
-        if request.size and mode.size != request.size and warning is None:
-            warning = f"Requested size {request.size} unavailable; using {mode.size}"
-        return mode, warning
+    formatted = [m for m in capabilities.modes if _matches_format(m)]
+    if formatted:
+        if request.fps:
+            best = sorted(formatted, key=lambda m: (_fps_distance(m.fps, request.fps), m.width * m.height))[0]
+        else:
+            best = formatted[0]
+        if request.size and best.size != request.size and warning is None:
+            warning = f"Requested size {request.size} unavailable; using {best.size}"
+        return best, warning
 
     # Last resort: first available mode.
     return (capabilities.modes[0] if capabilities.modes else None), "No matching mode found; using first available"

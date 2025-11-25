@@ -1,21 +1,20 @@
-"""Recording helpers for Cameras."""
+"""Recording helpers (pipeline, recorder, CSV, timing, overlays)."""
 
-from .csv_logger import CSVLogger, CSVRecord
-from .fps_tracker import RecordFPSSnapshot, RecordFPSTracker
-from .overlay import apply_overlay
 from .pipeline import RecordPipeline
 from .recorder import Recorder, RecorderHandle
-from .timing import FrameTimingTracker, TimingUpdate
+from .csv_logger import CSVLogger, CSVRecord, CSV_HEADER
+from .timing import FrameTimingTracker, FrameTimingUpdate, normalize_timestamp_ns
+from .overlay import apply_overlay
 
 __all__ = [
-    "CSVLogger",
-    "CSVRecord",
-    "RecordFPSSnapshot",
-    "RecordFPSTracker",
-    "apply_overlay",
     "RecordPipeline",
     "Recorder",
     "RecorderHandle",
+    "CSVLogger",
+    "CSVRecord",
+    "CSV_HEADER",
     "FrameTimingTracker",
-    "TimingUpdate",
+    "FrameTimingUpdate",
+    "normalize_timestamp_ns",
+    "apply_overlay",
 ]
