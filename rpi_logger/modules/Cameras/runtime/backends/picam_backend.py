@@ -95,13 +95,14 @@ class PicamHandle:
                     self._logger.info("Picam frame stream started (%s)", self.mode.size)
                     first_logged = True
                 yield PicamFrame(
-                    data=frame,  # Picamera2 RGB888 is actually already in correct format
+                    data=frame,
                     timestamp=capture_ts_ns / 1_000_000_000,
                     frame_number=self._frame_number,
                     monotonic_ns=monotonic_ns,
                     sensor_timestamp_ns=sensor_ts_ns,
                     wall_time=wall_ts,
                     wait_ms=capture_wait_ms,
+                    color_format="rgb",  # Picamera2 RGB888 yields RGB order
                 )
         except asyncio.CancelledError:
             self._logger.debug("Picam frames cancelled")

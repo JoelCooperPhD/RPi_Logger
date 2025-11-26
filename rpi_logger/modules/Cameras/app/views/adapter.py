@@ -37,8 +37,16 @@ class ViewAdapter:
         refresh_cb: Optional[Callable[[], None]] = None,
         apply_config_cb: Optional[Callable[[str, Dict[str, str]], None]] = None,
     ) -> Optional[CameraTab]:
-        if camera_id in self.tabs or not self._notebook:
+        self._logger.info("[ADAPTER] add_camera called: camera_id=%s title=%s", camera_id, title)
+
+        if camera_id in self.tabs:
+            self._logger.warning("[ADAPTER] Camera %s already has a tab!", camera_id)
             return None
+        if not self._notebook:
+            self._logger.error("[ADAPTER] No notebook attached - cannot create tab!")
+            return None
+
+        self._logger.debug("[ADAPTER] Creating CameraTab for %s...", camera_id)
         tab = CameraTab(
             camera_id,
             parent=self._notebook,
@@ -48,19 +56,26 @@ class ViewAdapter:
             on_apply_config=apply_config_cb,
         )
         if tab.frame is None:
-            self._logger.warning("Cannot build tab for %s (Tk unavailable)", camera_id)
+            self._logger.warning("[ADAPTER] Cannot build tab for %s (Tk unavailable)", camera_id)
             return None
+
         self.tabs[camera_id] = tab
         self._tab_lookup[str(tab.frame)] = camera_id
         label = title or camera_id
         try:
             self._notebook.add(tab.frame, text=label)
+            # Force Tk to compute layout for the new tab
+            if self._root:
+                self._root.update_idletasks()
+            self._logger.info("[ADAPTER] Tab added to notebook: camera_id=%s label=%s", camera_id, label)
         except Exception:
-            self._logger.warning("Unable to add tab for %s", camera_id, exc_info=True)
+            self._logger.warning("[ADAPTER] Unable to add tab for %s", camera_id, exc_info=True)
             self.tabs.pop(camera_id, None)
             self._tab_lookup.pop(str(tab.frame), None)
             return None
-        self._logger.info("Added camera tab %s", camera_id)
+
+        self._logger.info("[ADAPTER] Camera tab created successfully: %s (total tabs: %d)",
+                         camera_id, len(self.tabs))
         return tab
 
     def remove_camera(self, camera_id: str) -> None:
@@ -78,7 +93,25 @@ class ViewAdapter:
     def push_frame(self, camera_id: str, frame: Any) -> None:
         tab = self.tabs.get(camera_id)
         if not tab:
+            # Only log first drop per camera
+            if not hasattr(self, '_frame_drop_logged'):
+                self._frame_drop_logged = set()
+            if camera_id not in self._frame_drop_logged:
+                self._logger.warning("[ADAPTER] push_frame: no tab for %s - frame dropped", camera_id)
+                self._frame_drop_logged.add(camera_id)
             return
+
+        # Track frame counts for debugging
+        if not hasattr(self, '_frame_counts'):
+            self._frame_counts = {}
+        self._frame_counts[camera_id] = self._frame_counts.get(camera_id, 0) + 1
+        count = self._frame_counts[camera_id]
+        if count == 1:
+            self._logger.info("[ADAPTER] push_frame: First frame for %s! shape=%s",
+                            camera_id, frame.shape if hasattr(frame, 'shape') else 'unknown')
+        elif count % 60 == 0:
+            self._logger.debug("[ADAPTER] push_frame: %s frame #%d", camera_id, count)
+
         self._dispatch(tab.update_frame, frame)
 
     def update_metrics(self, camera_id: str, metrics: Dict[str, Any]) -> None:

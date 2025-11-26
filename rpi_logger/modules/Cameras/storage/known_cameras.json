@@ -35,7 +35,7 @@
             }
           ],
           "source": "probe",
-          "timestamp_ms": 1764033133076.1245
+          "timestamp_ms": 1764085318551.606
         },
         "descriptor": {
           "camera_id": {
@@ -52,7 +52,7 @@
         "selected_configs": {
           "preview": {
             "color_convert": true,
-            "keep_every": 4,
+            "keep_every": null,
             "mode": {
               "controls": {},
               "fps": 60.38,
@@ -63,7 +63,7 @@
               ]
             },
             "overlay": true,
-            "target_fps": null
+            "target_fps": 2.0
           },
           "record": {
             "color_convert": true,
@@ -84,7 +84,7 @@
         },
         "status": "selected"
       },
-      "updated_at": 1764033133.1336725
+      "updated_at": 1764085318.607742
     },
     "picam:1": {
       "state": {
@@ -121,7 +121,7 @@
             }
           ],
           "source": "probe",
-          "timestamp_ms": 1764033133703.5715
+          "timestamp_ms": 1764085319194.9834
         },
         "descriptor": {
           "camera_id": {
@@ -138,7 +138,7 @@
         "selected_configs": {
           "preview": {
             "color_convert": true,
-            "keep_every": 4,
+            "keep_every": null,
             "mode": {
               "controls": {},
               "fps": 60.38,
@@ -149,7 +149,7 @@
               ]
             },
             "overlay": true,
-            "target_fps": null
+            "target_fps": 2.0
           },
           "record": {
             "color_convert": true,
@@ -170,7 +170,7 @@
         },
         "status": "selected"
       },
-      "updated_at": 1764033133.7284584
+      "updated_at": 1764085319.2119079
     },
     "picam:imx296": {
       "state": {
@@ -603,7 +603,7 @@
             }
           ],
           "source": "probe",
-          "timestamp_ms": 1764033134216.3645
+          "timestamp_ms": 1764085319697.8313
         },
         "descriptor": {
           "camera_id": {
@@ -620,7 +620,7 @@
         "selected_configs": {
           "preview": {
             "color_convert": true,
-            "keep_every": 4,
+            "keep_every": null,
             "mode": {
               "controls": {},
               "fps": 30.0,
@@ -631,7 +631,7 @@
               ]
             },
             "overlay": true,
-            "target_fps": null
+            "target_fps": 2.0
           },
           "record": {
             "color_convert": true,
@@ -652,7 +652,7 @@
         },
         "status": "selected"
       },
-      "updated_at": 1764033134.5865624
+      "updated_at": 1764085320.020503
     },
     "usb:usb1-1-2": {
       "state": {
@@ -725,7 +725,7 @@
             }
           ],
           "source": "probe",
-          "timestamp_ms": 1764033134962.3567
+          "timestamp_ms": 1764085320385.133
         },
         "descriptor": {
           "camera_id": {
@@ -742,7 +742,7 @@
         "selected_configs": {
           "preview": {
             "color_convert": true,
-            "keep_every": 4,
+            "keep_every": null,
             "mode": {
               "controls": {},
               "fps": 30.0,
@@ -753,7 +753,7 @@
               ]
             },
             "overlay": true,
-            "target_fps": null
+            "target_fps": 2.0
           },
           "record": {
             "color_convert": true,
@@ -774,7 +774,7 @@
         },
         "status": "selected"
       },
-      "updated_at": 1764033135.3225443
+      "updated_at": 1764085320.65983
     }
   },
   "schema": 1

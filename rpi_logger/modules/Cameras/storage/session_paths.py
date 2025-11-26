@@ -38,7 +38,7 @@ def resolve_session_paths(
     prefix = module_filename_prefix(session_root, module_name, trial_number)
     camera_suffix = camera_id.stable_id
 
-    video_path = camera_dir / f"{prefix}_{camera_suffix}.mp4"
+    video_path = camera_dir / f"{prefix}_{camera_suffix}.avi"
     timing_path = camera_dir / f"{prefix}_{camera_suffix}_timing.csv"
     metadata_csv_path = camera_dir / f"{prefix}_{camera_suffix}_metadata.csv"
 

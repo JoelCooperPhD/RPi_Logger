@@ -60,21 +60,32 @@ class CameraTab:
         """Render the latest preview frame onto the canvas."""
 
         if self._canvas is None or tk is None:
+            if not hasattr(self, '_no_canvas_warned'):
+                self._logger.warning("[CAMERA_TAB] %s: update_frame called but no canvas!", self.camera_id)
+                self._no_canvas_warned = True
             return
+
+        # Track frame count
+        if not hasattr(self, '_frame_count'):
+            self._frame_count = 0
+        self._frame_count += 1
 
         try:
             color_format = str(getattr(frame, "color_format", "") or "").lower()
             assume_rgb = color_format == "rgb" or bool(getattr(frame, "_is_rgb", False))
             rgb_frame = to_rgb(ensure_uint8(frame), assume_rgb=assume_rgb)
             if rgb_frame is None:
+                if self._frame_count <= 3:
+                    self._logger.warning("[CAMERA_TAB] %s: to_rgb returned None!", self.camera_id)
                 return
             image = Image.fromarray(rgb_frame)
         except Exception:
-            self._logger.debug("Unable to convert frame for %s", self.camera_id, exc_info=True)
+            self._logger.debug("[CAMERA_TAB] %s: Unable to convert frame", self.camera_id, exc_info=True)
             return
+
         if not self._logged_first_frame:
             self._logger.info(
-                "CameraTab %s received first frame shape=%s mode=%s canvas_size=%dx%d",
+                "[CAMERA_TAB] %s: FIRST FRAME RECEIVED! shape=%s mode=%s canvas=%dx%d",
                 self.camera_id,
                 getattr(image, "size", None),
                 image.mode,
@@ -82,6 +93,8 @@ class CameraTab:
                 self._canvas.winfo_height(),
             )
             self._logged_first_frame = True
+        elif self._frame_count % 60 == 0:
+            self._logger.debug("[CAMERA_TAB] %s: frame #%d rendered", self.camera_id, self._frame_count)
 
         canvas_w = self._canvas.winfo_width()
         canvas_h = self._canvas.winfo_height()
@@ -90,23 +103,31 @@ class CameraTab:
             target_w = canvas_w
             target_h = canvas_h
             try:
-                image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                image = image.resize((target_w, target_h), Image.Resampling.BILINEAR)
             except Exception:
                 image = image.resize((target_w, target_h))
+            center_x = target_w // 2
+            center_y = target_h // 2
         else:
-            # Canvas not yet laid out by Tk, use native image size
+            # Canvas not yet laid out by Tk - use anchor=nw at (0,0) with native size
+            # so image is visible even before layout completes
             target_w = image.width
             target_h = image.height
+            center_x = 0
+            center_y = 0
 
         self._photo_ref = ImageTk.PhotoImage(image)
-        center_x = target_w // 2
-        center_y = target_h // 2
 
         if self._image_id is None:
-            self._image_id = self._canvas.create_image(center_x, center_y, image=self._photo_ref)
+            # Use anchor=nw when canvas not laid out, anchor=center when it is
+            anchor = "center" if canvas_w > 1 and canvas_h > 1 else "nw"
+            self._image_id = self._canvas.create_image(center_x, center_y, image=self._photo_ref, anchor=anchor)
         else:
             self._canvas.itemconfig(self._image_id, image=self._photo_ref)
             self._canvas.coords(self._image_id, center_x, center_y)
+            # Update anchor if canvas size changed
+            if canvas_w > 1 and canvas_h > 1:
+                self._canvas.itemconfig(self._image_id, anchor="center")
 
         # No info label; canvas fills the tab area
 

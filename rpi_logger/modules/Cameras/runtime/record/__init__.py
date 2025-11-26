@@ -1,15 +1,13 @@
-"""Recording helpers (pipeline, recorder, CSV, timing, overlays)."""
+"""Recording helpers (CSV, timing, overlays).
 
-from .pipeline import RecordPipeline
-from .recorder import Recorder, RecorderHandle
+Note: The main recording logic is now in worker/encoder.py.
+These utilities are kept for compatibility and may be used by workers.
+"""
 from .csv_logger import CSVLogger, CSVRecord, CSV_HEADER
 from .timing import FrameTimingTracker, FrameTimingUpdate, normalize_timestamp_ns
 from .overlay import apply_overlay
 
 __all__ = [
-    "RecordPipeline",
-    "Recorder",
-    "RecorderHandle",
     "CSVLogger",
     "CSVRecord",
     "CSV_HEADER",

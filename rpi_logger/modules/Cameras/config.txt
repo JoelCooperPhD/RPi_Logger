@@ -1,5 +1,5 @@
-window_geometry = 532x421+1424+608
-enabled = true
+window_geometry = 613x487+365+736
+enabled = false
 view.show_io_panel = true
 view.show_logger = false
 display_name = Cameras

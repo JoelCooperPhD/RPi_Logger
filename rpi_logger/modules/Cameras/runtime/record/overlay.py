@@ -43,7 +43,7 @@ def apply_overlay(
             0.5,
             (255, 255, 255),
             1,
-            cv2.LINE_AA,
+            cv2.LINE_8,
         )
         return img
     except Exception:
