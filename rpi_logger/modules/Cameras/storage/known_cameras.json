@@ -1,6 +1,13 @@
 {
   "entries": {
     "picam:0": {
+      "settings": {
+        "overlay": "true",
+        "preview_fps": "1",
+        "preview_resolution": "320x180",
+        "record_fps": "5",
+        "record_resolution": "1456x1088"
+      },
       "state": {
         "capabilities": {
           "color_formats": [],
@@ -84,9 +91,16 @@
         },
         "status": "selected"
       },
-      "updated_at": 1764085318.607742
+      "updated_at": 1764191367.1128466
     },
     "picam:1": {
+      "settings": {
+        "overlay": "true",
+        "preview_fps": "1",
+        "preview_resolution": "320x180",
+        "record_fps": "5",
+        "record_resolution": "1456x1088"
+      },
       "state": {
         "capabilities": {
           "color_formats": [],
@@ -170,7 +184,7 @@
         },
         "status": "selected"
       },
-      "updated_at": 1764085319.2119079
+      "updated_at": 1764191361.2333767
     },
     "picam:imx296": {
       "state": {
@@ -560,6 +574,13 @@
       "updated_at": 1763945303.8260055
     },
     "usb:usb1-1-1": {
+      "settings": {
+        "overlay": "true",
+        "preview_fps": "1",
+        "preview_resolution": "320x240",
+        "record_fps": "5",
+        "record_resolution": "1280x720"
+      },
       "state": {
         "capabilities": {
           "color_formats": [],
@@ -652,7 +673,7 @@
         },
         "status": "selected"
       },
-      "updated_at": 1764085320.020503
+      "updated_at": 1764191381.2651064
     },
     "usb:usb1-1-2": {
       "state": {
@@ -775,7 +796,17 @@
         "status": "selected"
       },
       "updated_at": 1764085320.65983
+    },
+    "usb:usb3-3-1": {
+      "settings": {
+        "overlay": "true",
+        "preview_fps": "10",
+        "preview_resolution": "320x240",
+        "record_fps": "5",
+        "record_resolution": "640x480"
+      },
+      "updated_at": 1764191376.1359217
     }
   },
-  "schema": 1
+  "schema": 2
 }

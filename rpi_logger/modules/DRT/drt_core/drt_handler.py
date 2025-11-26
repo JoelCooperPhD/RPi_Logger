@@ -329,6 +329,7 @@ class DRTHandler:
 
     async def _log_trial_data(self, data: Dict[str, Any]):
         try:
+            self.logger.info("_log_trial_data called, output_dir=%s", self.output_dir)
             await asyncio.to_thread(self.output_dir.mkdir, parents=True, exist_ok=True)
 
             trial_number = self._determine_trial_number(data)

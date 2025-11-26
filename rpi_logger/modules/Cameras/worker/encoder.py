@@ -72,6 +72,11 @@ class Encoder:
             return 0.0
         return (time.monotonic_ns() - self._start_time_ns) / 1_000_000_000
 
+    @property
+    def frame_count(self) -> int:
+        """Number of frames successfully written to video (matches CSV row count)."""
+        return self._frame_count
+
     def start(self) -> None:
         """Initialize encoder (blocking, call from thread)."""
         self._start_time_ns = time.monotonic_ns()
@@ -119,11 +124,11 @@ class Encoder:
         self._csv_writer = csv.writer(self._csv_file)
         self._csv_writer.writerow([
             "trial",
-            "frame_number",
-            "write_time_unix",
-            "monotonic_time",
-            "sensor_timestamp_ns",
-            "pts_us",
+            "frame_index",  # 1-indexed frame number in video file
+            "capture_time_unix",  # wall clock time when frame was captured
+            "encode_time_mono",  # monotonic time when frame was encoded
+            "sensor_timestamp_ns",  # hardware sensor timestamp (if available)
+            "video_pts",  # presentation timestamp in video stream
         ])
 
     def write_frame(
@@ -133,20 +138,32 @@ class Encoder:
         timestamp: float,
         pts_time_ns: Optional[int] = None,
         color_format: str = "bgr",
-    ) -> None:
-        """Encode a single frame (blocking)."""
-        self._frame_count += 1
+    ) -> bool:
+        """Encode a single frame (blocking).
+
+        Returns True if frame was successfully encoded, False otherwise.
+        CSV timing is only written for successfully encoded frames.
+        """
+        # Tentatively increment frame count (will be used for PTS)
+        next_frame_num = self._frame_count + 1
 
         # Apply overlay if enabled
         if self._overlay_enabled:
-            frame = self._apply_overlay(frame, timestamp, self._frame_count)
+            frame = self._apply_overlay(frame, timestamp, next_frame_num)
 
+        # Encode the frame - returns True only if actually written to video
         if self._kind == "pyav":
-            self._encode_pyav(frame, pts_time_ns, timestamp)
+            success = self._encode_pyav(frame, pts_time_ns, timestamp, next_frame_num)
         else:
-            self._encode_opencv(frame)
+            success = self._encode_opencv(frame)
 
-        # CSV logging
+        if not success:
+            return False
+
+        # Frame was successfully encoded - commit the frame count
+        self._frame_count = next_frame_num
+
+        # CSV logging - only for successfully encoded frames
         if self._csv_writer:
             monotonic = time.monotonic()
             pts_us = self._last_pts if self._kind == "pyav" else None
@@ -159,34 +176,51 @@ class Encoder:
                 pts_us,
             ])
 
-    def _encode_pyav(self, frame: np.ndarray, pts_time_ns: Optional[int], timestamp: float) -> None:
+        return True
+
+    def _encode_pyav(self, frame: np.ndarray, pts_time_ns: Optional[int], timestamp: float, frame_num: int) -> bool:
+        """Encode frame with PyAV. Returns True if frame was successfully muxed."""
         try:
             av_frame = av.VideoFrame.from_ndarray(frame, format="bgr24")
         except Exception:
-            return
+            return False
 
-        # Use simple frame index for PTS (time_base is 1/fps from stream rate)
+        # Use frame index for PTS (time_base is 1/fps from stream rate)
         # This ensures consistent playback timing at the specified fps
-        pts = self._frame_count  # Already incremented in write_frame()
+        pts = frame_num
         self._last_pts = pts
-
         av_frame.pts = pts
 
-        packets = self._stream.encode(av_frame)
-        for pkt in packets:
-            self._container.mux(pkt)
+        try:
+            packets = self._stream.encode(av_frame)
+            for pkt in packets:
+                self._container.mux(pkt)
+        except Exception:
+            return False
 
         self._frames_since_flush += 1
         if self._frames_since_flush >= self._flush_interval:
             self._frames_since_flush = 0
             self._flush_pyav()
 
-    def _encode_opencv(self, frame: np.ndarray) -> None:
-        self._writer.write(frame)
+        return True
+
+    def _encode_opencv(self, frame: np.ndarray) -> bool:
+        """Encode frame with OpenCV. Returns True if frame was successfully written."""
+        if not self._writer or not self._writer.isOpened():
+            return False
+
+        try:
+            self._writer.write(frame)
+        except Exception:
+            return False
+
         self._frames_since_flush += 1
         if self._frames_since_flush >= self._flush_interval:
             self._frames_since_flush = 0
             self._fsync()
+
+        return True
 
     def _flush_pyav(self) -> None:
         try:

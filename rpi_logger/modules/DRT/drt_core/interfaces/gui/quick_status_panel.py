@@ -72,14 +72,20 @@ class QuickStatusPanel:
 
     def update_logged_trial(self, port: str, log_entry: Dict[str, Any]) -> None:
         file_path_str = log_entry.get('file_path')
+        line = log_entry.get('line') or log_entry.get('raw')
+
         if file_path_str:
             file_path = Path(file_path_str)
+            old_file = self.device_files.get(port)
             self.device_files[port] = file_path
             self.current_file = file_path
-            self._load_file_contents(file_path)
+            if old_file != file_path:
+                self._load_file_contents(file_path)
+                return
+            if line is not None:
+                self._append_line(line)
             return
 
-        line = log_entry.get('line') or log_entry.get('raw')
         if line is not None:
             self._append_line(line)
 

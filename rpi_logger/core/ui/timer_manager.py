@@ -143,21 +143,22 @@ class TimerManager:
     async def _update_system_monitor(self) -> None:
         try:
             while self.running:
-                cpu_percent = await asyncio.to_thread(self.system_monitor.get_cpu_percent)
-                ram_percent = await asyncio.to_thread(self.system_monitor.get_memory_percent)
-                total_gb, used_gb, free_gb = await asyncio.to_thread(self.system_monitor.get_disk_space)
+                try:
+                    cpu_percent = await asyncio.to_thread(self.system_monitor.get_cpu_percent)
+                    ram_percent = await asyncio.to_thread(self.system_monitor.get_memory_percent)
+                    total_gb, used_gb, free_gb = await asyncio.to_thread(self.system_monitor.get_disk_space)
 
-                if self.cpu_label:
-                    self.cpu_label.config(text=f"{cpu_percent:.1f}%")
+                    if self.cpu_label:
+                        self.cpu_label.config(text=f"{cpu_percent:.1f}%")
 
-                if self.ram_label:
-                    self.ram_label.config(text=f"{ram_percent:.1f}%")
+                    if self.ram_label:
+                        self.ram_label.config(text=f"{ram_percent:.1f}%")
 
-                if self.disk_label:
-                    self.disk_label.config(text=f"{free_gb:.1f} GB")
+                    if self.disk_label:
+                        self.disk_label.config(text=f"{free_gb:.1f} GB")
+                except Exception as e:
+                    self.logger.warning("System monitor update failed: %s", e)
 
                 await asyncio.sleep(2.0)
         except asyncio.CancelledError:
             pass
-        except Exception as e:
-            self.logger.error("System monitor error: %s", e)

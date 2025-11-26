@@ -5,10 +5,11 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.animation import FuncAnimation
 from rpi_logger.core.logging_utils import get_module_logger
-import time
 
 
 class DRTPlotter:
+    BUFFER_SIZE = 600
+
     def __init__(self, parent_frame):
         self._parent = parent_frame
         self.logger = get_module_logger("DRTPlotter")
@@ -29,19 +30,18 @@ class DRTPlotter:
         self._rt_now = {}
         self._rt_array = {}
         self._rt_xy = {}
+        self._rt_index = {}
 
         self._state_now = {}
         self._state_array = {}
         self._state_xy = {}
+        self._state_index = {}
 
         self._unit_ids = set()
-        self._plot_lines = set()
+        self._plot_lines = []
 
         self._rt_y_min = 0
         self._rt_y_max = 1
-
-        self._next_update = time.time()
-        self._interval = 0.1
 
         self._ani = None
         self.run = False
@@ -72,10 +72,11 @@ class DRTPlotter:
             return
 
         self._rt_now[port] = None
+        self._rt_index[port] = 0
 
         self._rt_array[port] = {
-            'hit': np.full(600, np.nan),
-            'miss': np.full(600, np.nan)
+            'hit': np.full(self.BUFFER_SIZE, np.nan),
+            'miss': np.full(self.BUFFER_SIZE, np.nan)
         }
 
         self._rt_xy[port] = {}
@@ -91,34 +92,42 @@ class DRTPlotter:
         )
 
         self._state_now[port] = 0
-        self._state_array[port] = np.full(600, np.nan)
+        self._state_index[port] = 0
+        self._state_array[port] = np.full(self.BUFFER_SIZE, np.nan)
         self._state_xy[port] = self._ax_state.plot(
             self._time_array, self._state_array[port],
             linewidth=1.5
         )
 
         self._unit_ids.add(port)
+        self._rebuild_plot_lines()
 
         if self._ani is None:
             self._ani = FuncAnimation(
                 self._fig,
                 self._animate,
                 init_func=lambda: self._init_animation(port),
-                interval=10,
+                interval=100,
                 blit=True,
                 cache_frame_data=False
             )
 
+    def _rebuild_plot_lines(self):
+        self._plot_lines = []
+        for port in self._unit_ids:
+            if port in self._state_xy:
+                self._plot_lines.extend(self._state_xy[port])
+            if port in self._rt_xy:
+                self._plot_lines.extend(self._rt_xy[port]['hit'])
+                self._plot_lines.extend(self._rt_xy[port]['miss'])
+
     def _init_animation(self, port):
         if port in self._state_xy:
             self._state_xy[port][0].set_data(self._time_array, self._state_array[port])
-            self._plot_lines.update(self._state_xy[port])
 
         if port in self._rt_xy:
             self._rt_xy[port]['hit'][0].set_data(self._time_array, self._rt_array[port]['hit'])
             self._rt_xy[port]['miss'][0].set_data(self._time_array, self._rt_array[port]['miss'])
-            self._plot_lines.update(self._rt_xy[port]['hit'])
-            self._plot_lines.update(self._rt_xy[port]['miss'])
 
         return self._plot_lines
 
@@ -126,56 +135,46 @@ class DRTPlotter:
         if not self.run:
             return self._plot_lines
 
-        if not self._ready_to_update():
-            return self._plot_lines
-
         for unit_id in list(self._unit_ids):
             try:
                 self._rescale_rt_y(self._rt_now.get(unit_id))
 
-                self._rt_array[unit_id]['hit'] = np.roll(self._rt_array[unit_id]['hit'], -1)
-                self._rt_array[unit_id]['miss'] = np.roll(self._rt_array[unit_id]['miss'], -1)
-
+                idx = self._rt_index[unit_id]
                 rt_val = self._rt_now.get(unit_id)
                 if rt_val is not None:
                     if rt_val > 0:
-                        self._rt_array[unit_id]['hit'][-1] = rt_val
-                        self._rt_array[unit_id]['miss'][-1] = np.nan
+                        self._rt_array[unit_id]['hit'][idx] = rt_val
+                        self._rt_array[unit_id]['miss'][idx] = np.nan
                     else:
-                        self._rt_array[unit_id]['hit'][-1] = np.nan
-                        self._rt_array[unit_id]['miss'][-1] = abs(rt_val)
+                        self._rt_array[unit_id]['hit'][idx] = np.nan
+                        self._rt_array[unit_id]['miss'][idx] = abs(rt_val)
                 else:
-                    self._rt_array[unit_id]['hit'][-1] = np.nan
-                    self._rt_array[unit_id]['miss'][-1] = np.nan
+                    self._rt_array[unit_id]['hit'][idx] = np.nan
+                    self._rt_array[unit_id]['miss'][idx] = np.nan
 
-                self._rt_xy[unit_id]['hit'][0].set_data(self._time_array, self._rt_array[unit_id]['hit'])
-                self._rt_xy[unit_id]['miss'][0].set_data(self._time_array, self._rt_array[unit_id]['miss'])
-
+                self._rt_index[unit_id] = (idx + 1) % self.BUFFER_SIZE
                 self._rt_now[unit_id] = None
 
-                self._plot_lines.update(self._rt_xy[unit_id]['hit'])
-                self._plot_lines.update(self._rt_xy[unit_id]['miss'])
+                rt_view_hit = self._get_circular_view(self._rt_array[unit_id]['hit'], self._rt_index[unit_id])
+                rt_view_miss = self._get_circular_view(self._rt_array[unit_id]['miss'], self._rt_index[unit_id])
+                self._rt_xy[unit_id]['hit'][0].set_ydata(rt_view_hit)
+                self._rt_xy[unit_id]['miss'][0].set_ydata(rt_view_miss)
 
-                self._state_array[unit_id] = np.roll(self._state_array[unit_id], -1)
-                self._state_array[unit_id][-1] = self._state_now.get(unit_id, 0)
-                self._state_xy[unit_id][0].set_data(self._time_array, self._state_array[unit_id])
+                state_idx = self._state_index[unit_id]
+                self._state_array[unit_id][state_idx] = self._state_now.get(unit_id, 0)
+                self._state_index[unit_id] = (state_idx + 1) % self.BUFFER_SIZE
 
-                self._plot_lines.update(self._state_xy[unit_id])
+                state_view = self._get_circular_view(self._state_array[unit_id], self._state_index[unit_id])
+                self._state_xy[unit_id][0].set_ydata(state_view)
 
             except (KeyError, IndexError) as e:
                 self.logger.debug("Animation error for %s: %s", unit_id, e)
 
         return self._plot_lines
 
-    def _ready_to_update(self):
-        t = time.time()
-        if t >= self._next_update:
-            if (t - self._next_update) > 0.25:
-                self._next_update = t
-            else:
-                self._next_update += self._interval
-            return True
-        return False
+    def _get_circular_view(self, arr, head_idx):
+        return np.concatenate((arr[head_idx:], arr[:head_idx]))
+
 
     def _rescale_rt_y(self, val=None):
         if val is not None:
@@ -218,9 +217,11 @@ class DRTPlotter:
     def stop(self):
         self.logger.info("STOP: Freezing animation completely")
         for port in list(self._state_now.keys()):
-            self._state_array[port] = np.roll(self._state_array[port], -1)
-            self._state_array[port][-1] = np.nan
-            self._state_xy[port][0].set_data(self._time_array, self._state_array[port])
+            idx = self._state_index.get(port, 0)
+            self._state_array[port][idx] = np.nan
+            self._state_index[port] = (idx + 1) % self.BUFFER_SIZE
+            state_view = self._get_circular_view(self._state_array[port], self._state_index[port])
+            self._state_xy[port][0].set_ydata(state_view)
         self.run = False
         self._session_active = False
         self._recording = False
@@ -268,12 +269,15 @@ class DRTPlotter:
         if port in self._rt_array:
             del self._rt_array[port]
             del self._rt_now[port]
+            del self._rt_index[port]
 
         if port in self._state_array:
             del self._state_array[port]
             del self._state_now[port]
+            del self._state_index[port]
 
         self._unit_ids.discard(port)
+        self._rebuild_plot_lines()
 
         self.logger.info("Removed device %s from plotter", port)
 
@@ -281,12 +285,14 @@ class DRTPlotter:
         for unit_id in self._state_array.keys():
             self._state_now[unit_id] = np.nan
             self._state_array[unit_id][:] = np.nan
-            self._state_xy[unit_id][0].set_data(self._time_array, self._state_array[unit_id])
+            self._state_index[unit_id] = 0
+            self._state_xy[unit_id][0].set_ydata(self._state_array[unit_id])
 
         for unit_id in self._rt_array.keys():
             self._rt_array[unit_id]['hit'][:] = np.nan
             self._rt_array[unit_id]['miss'][:] = np.nan
-            self._rt_xy[unit_id]['hit'][0].set_data(self._time_array, self._rt_array[unit_id]['hit'])
-            self._rt_xy[unit_id]['miss'][0].set_data(self._time_array, self._rt_array[unit_id]['miss'])
+            self._rt_index[unit_id] = 0
+            self._rt_xy[unit_id]['hit'][0].set_ydata(self._rt_array[unit_id]['hit'])
+            self._rt_xy[unit_id]['miss'][0].set_ydata(self._rt_array[unit_id]['miss'])
 
         self._ax_rt.figure.canvas.draw_idle()

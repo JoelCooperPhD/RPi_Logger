@@ -85,6 +85,8 @@ class MainWindow:
         self.logger_visible_var: Optional[tk.BooleanVar] = None
         self.log_handler: Optional[logging.Handler] = None
 
+        self._pending_tasks: list[asyncio.Task] = []
+
 
     def build_ui(self) -> None:
         self.root = tk.Tk()
@@ -156,7 +158,9 @@ class MainWindow:
             modules_menu.add_checkbutton(
                 label=module_info.display_name,
                 variable=var,
-                command=lambda name=module_info.name: asyncio.create_task(self.controller.on_module_menu_toggle(name))
+                command=lambda name=module_info.name: self._schedule_task(
+                    self.controller.on_module_menu_toggle(name)
+                )
             )
 
         config_manager = get_config_manager()
@@ -508,18 +512,25 @@ class MainWindow:
             root_logger.removeHandler(self.log_handler)
             self.log_handler = None
 
+    def _schedule_task(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._pending_tasks.append(task)
+        task.add_done_callback(lambda t: self._pending_tasks.remove(t) if t in self._pending_tasks else None)
+
     def save_window_geometry(self) -> None:
         if not self.root:
             return
 
         try:
-            from rpi_logger.modules.base import gui_utils
-
+            import re
             geometry_str = self.root.geometry()
-            parsed = gui_utils.parse_geometry_string(geometry_str)
+            match = re.match(r'(\d+)x(\d+)([\+\-]\d+)([\+\-]\d+)', geometry_str)
 
-            if parsed:
-                width, height, x, y = parsed
+            if match:
+                width = int(match.group(1))
+                height = int(match.group(2))
+                x = int(match.group(3))
+                y = int(match.group(4))
 
                 config_manager = get_config_manager()
                 updates = {
@@ -545,7 +556,7 @@ class MainWindow:
 
         await self.timer_manager.start_clock()
 
-        asyncio.create_task(self.controller.auto_start_modules())
+        self._schedule_task(self.controller.auto_start_modules())
 
         try:
             await main_loop(self.root)

@@ -213,14 +213,15 @@ class CameraWorker:
 
             # Recording: encode frame
             if self._recording and encoder:
-                encoder.write_frame(
+                frame_written = encoder.write_frame(
                     frame_data.data,
                     timestamp=frame_data.wall_time,
                     pts_time_ns=frame_data.sensor_timestamp_ns or frame_data.monotonic_ns,
                     color_format=frame_data.color_format,
                 )
-                encode_times.append(now)
-                self._frames_recorded += 1
+                if frame_written:
+                    encode_times.append(now)
+                    self._frames_recorded += 1
 
             # Update FPS metrics periodically
             if now - self._last_state_update >= 1.0:
@@ -262,9 +263,17 @@ class CameraWorker:
             self._recording = True
             self._record_output_dir = cmd.output_dir
             self._record_filename = cmd.filename
-            self._record_target_fps = cmd.fps
             self._frames_recorded = 0
             self._state = WorkerState.RECORDING
+
+            # Use the actual capture FPS for the encoder, not the requested FPS.
+            # USB cameras may not honor FPS requests, so we use what the camera reports.
+            # This ensures video playback duration matches recording duration.
+            actual_fps = self._capabilities.get("actual_fps", cmd.fps)
+            if abs(actual_fps - cmd.fps) > 0.5:
+                logger.warning("Recording FPS mismatch: requested %.1f but capture running at %.1f - using actual",
+                              cmd.fps, actual_fps)
+            self._record_target_fps = actual_fps
 
             video_path = f"{cmd.output_dir}/{cmd.filename}"
             csv_path = f"{cmd.output_dir}/{cmd.filename.rsplit('.', 1)[0]}_timing.csv" if cmd.csv_enabled else None
@@ -272,15 +281,15 @@ class CameraWorker:
             new_encoder = Encoder(
                 video_path=video_path,
                 resolution=cmd.resolution,
-                fps=cmd.fps,
+                fps=actual_fps,
                 overlay_enabled=cmd.overlay_enabled,
                 csv_path=csv_path,
                 trial_number=cmd.trial_number,
             )
             await asyncio.to_thread(new_encoder.start)
-            logger.info("Recording started: %s", video_path)
+            logger.info("Recording started: %s @ %.1f fps", video_path, actual_fps)
 
-            self._send(RespRecordingStarted(video_path=video_path, csv_path=csv_path))
+            self._send(RespRecordingStarted(video_path=video_path, csv_path=csv_path, actual_fps=actual_fps))
             return new_encoder
 
         elif isinstance(cmd, CmdStopRecord):

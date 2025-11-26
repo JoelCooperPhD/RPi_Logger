@@ -117,6 +117,7 @@ class RespRecordingStarted:
     """Confirmation that recording has started."""
     video_path: str
     csv_path: Optional[str]
+    actual_fps: float = 0.0  # The actual FPS being used for encoding
 
 
 @dataclass(slots=True)

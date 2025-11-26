@@ -1,4 +1,4 @@
-window_geometry = 613x487+365+736
+window_geometry = 294x296+1931+1094
 enabled = false
 view.show_io_panel = true
 view.show_logger = false

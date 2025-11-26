@@ -1,8 +1,8 @@
-
 import argparse
 import asyncio
 import signal
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -10,7 +10,8 @@ from typing import Optional
 # scripts launched directly from source can still import installed wheels.
 _PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 _PROJECT_ROOT = _PACKAGE_ROOT.parent
-_venv_path = _PROJECT_ROOT / ".venv" / "lib" / "python3.13" / "site-packages"
+_py_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+_venv_path = _PROJECT_ROOT / ".venv" / "lib" / _py_version / "site-packages"
 if _venv_path.exists() and str(_venv_path) not in sys.path:
     sys.path.insert(0, str(_venv_path))
 
@@ -26,7 +27,7 @@ from rpi_logger.core.logging_utils import get_module_logger
 logger = get_module_logger(__name__)
 
 
-def parse_args(argv: Optional[list[str]] = None):
+def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments with config file defaults."""
     config_manager = get_config_manager()
     config = config_manager.read_config(CONFIG_PATH)
@@ -86,33 +87,32 @@ def parse_args(argv: Optional[list[str]] = None):
     args = parser.parse_args(argv)
     return args
 
+
+async def _cleanup_logger_system(logger_system: LoggerSystem, request_geometry: bool) -> None:
+    """Shared cleanup logic for logger system shutdown."""
+    logger.info("Starting logger system cleanup...")
+    state_start = time.time()
+    await logger_system.save_running_modules_state()
+    logger.info("⏱️  Saved state in %.3fs", time.time() - state_start)
+
+    cleanup_start = time.time()
+    await logger_system.cleanup(request_geometry=request_geometry)
+    logger.info("⏱️  Logger cleanup in %.3fs", time.time() - cleanup_start)
+
+    update_start = time.time()
+    await logger_system.update_running_modules_state_after_cleanup()
+    logger.info("⏱️  Finalized restart state in %.3fs", time.time() - update_start)
+
+
 async def run_gui(args, logger_system: LoggerSystem) -> None:
     """Run in GUI mode with Tkinter interface."""
     logger.info("Starting in GUI mode")
 
     ui = MainWindow(logger_system)
-
-    # Setup shutdown coordinator
     shutdown_coordinator = get_shutdown_coordinator()
-
-    # Register cleanup callbacks in order
-    async def cleanup_logger_system():
-        import time
-        logger.info("Starting logger system cleanup...")
-        state_start = time.time()
-        await logger_system.save_running_modules_state()
-        logger.info("⏱️  Saved state in %.3fs", time.time() - state_start)
-
-        cleanup_start = time.time()
-        await logger_system.cleanup(request_geometry=False)
-        logger.info("⏱️  Logger cleanup in %.3fs", time.time() - cleanup_start)
-
-        update_start = time.time()
-        await logger_system.update_running_modules_state_after_cleanup()
-        logger.info("⏱️  Finalized restart state in %.3fs", time.time() - update_start)
+    shutdown_task: Optional[asyncio.Task] = None
 
     async def cleanup_ui():
-        import time
         logger.info("Starting UI cleanup...")
 
         geom_start = time.time()
@@ -132,21 +132,25 @@ async def run_gui(args, logger_system: LoggerSystem) -> None:
             ui.root.destroy()
             logger.info("⏱️  Destroyed window in %.3fs", time.time() - destroy_start)
 
-    shutdown_coordinator.register_cleanup(cleanup_logger_system)
+    shutdown_coordinator.register_cleanup(
+        lambda: _cleanup_logger_system(logger_system, request_geometry=False)
+    )
     shutdown_coordinator.register_cleanup(cleanup_ui)
 
-    # Setup signal handlers
     loop = asyncio.get_running_loop()
 
     def signal_handler():
-        asyncio.create_task(shutdown_coordinator.initiate_shutdown("signal"))
+        nonlocal shutdown_task
+        if shutdown_task is None or shutdown_task.done():
+            shutdown_task = asyncio.create_task(
+                shutdown_coordinator.initiate_shutdown("signal")
+            )
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, signal_handler)
         except NotImplementedError:
-            # Windows doesn't support add_signal_handler
-            pass
+            pass  # Windows doesn't support add_signal_handler
 
     try:
         await ui.run()
@@ -156,7 +160,6 @@ async def run_gui(args, logger_system: LoggerSystem) -> None:
         logger.error("Unexpected error: %s", e, exc_info=True)
         await shutdown_coordinator.initiate_shutdown("exception")
     finally:
-        # Ensure shutdown completes if not already initiated
         if not shutdown_coordinator.is_complete:
             await shutdown_coordinator.initiate_shutdown("finally block")
 
@@ -167,51 +170,38 @@ async def run_cli(args, logger_system: LoggerSystem) -> None:
 
     controller = HeadlessController(logger_system)
     shell = InteractiveShell(controller)
-
-    # Setup shutdown coordinator
     shutdown_coordinator = get_shutdown_coordinator()
+    shutdown_task: Optional[asyncio.Task] = None
 
-    # Register cleanup callback
-    async def cleanup_logger_system():
-        import time
-        logger.info("Starting logger system cleanup...")
-        state_start = time.time()
-        await logger_system.save_running_modules_state()
-        logger.info("⏱️  Saved state in %.3fs", time.time() - state_start)
+    shutdown_coordinator.register_cleanup(
+        lambda: _cleanup_logger_system(logger_system, request_geometry=True)
+    )
 
-        cleanup_start = time.time()
-        await logger_system.cleanup(request_geometry=True)
-        logger.info("⏱️  Logger cleanup in %.3fs", time.time() - cleanup_start)
-
-        update_start = time.time()
-        await logger_system.update_running_modules_state_after_cleanup()
-        logger.info("⏱️  Finalized restart state in %.3fs", time.time() - update_start)
-
-    shutdown_coordinator.register_cleanup(cleanup_logger_system)
-
-    # Setup signal handlers
     loop = asyncio.get_running_loop()
 
     def signal_handler():
-        asyncio.create_task(shutdown_coordinator.initiate_shutdown("signal"))
+        nonlocal shutdown_task
+        if shutdown_task is None or shutdown_task.done():
+            shutdown_task = asyncio.create_task(
+                shutdown_coordinator.initiate_shutdown("signal")
+            )
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             loop.add_signal_handler(sig, signal_handler)
         except NotImplementedError:
-            pass
+            pass  # Windows doesn't support add_signal_handler
 
-    # Auto-start configured modules
     await controller.auto_start_modules()
 
     try:
         await shell.run()
     except KeyboardInterrupt:
-        logger.info("Interrupted")
+        await shutdown_coordinator.initiate_shutdown("keyboard interrupt")
     except Exception as e:
         logger.error("Unexpected error: %s", e, exc_info=True)
+        await shutdown_coordinator.initiate_shutdown("exception")
     finally:
-        # Ensure shutdown completes if not already initiated
         if not shutdown_coordinator.is_complete:
             await shutdown_coordinator.initiate_shutdown("finally block")
 
@@ -254,7 +244,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
     logger.info("Session will be created when user starts recording")
     logger.info("=" * 60)
 
-    initial_session_dir = args.data_dir
+    initial_session_dir = args.data_dir.resolve()
 
     logger_system = LoggerSystem(
         session_dir=initial_session_dir,

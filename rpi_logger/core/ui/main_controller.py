@@ -40,10 +40,11 @@ class MainController:
 
         self.trial_label_var: Optional[tk.StringVar] = None
 
-
         self.trial_counter: int = 0
         self.session_active = False
         self.trial_active = False
+
+        self._pending_tasks: list[asyncio.Task] = []
 
     def set_widgets(
         self,
@@ -67,6 +68,10 @@ class MainController:
         self.session_path_label = session_path_label
         self.trial_label_var = trial_label_var
 
+    def _schedule_task(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._pending_tasks.append(task)
+        task.add_done_callback(lambda t: self._pending_tasks.remove(t) if t in self._pending_tasks else None)
 
     async def on_module_menu_toggle(self, module_name: str) -> None:
         desired_state = self.module_vars[module_name].get()
@@ -78,7 +83,7 @@ class MainController:
         await self.logger_system.toggle_module_enabled(module_name, desired_state)
 
         self.logger.info("%s module: %s", "Starting" if desired_state else "Stopping", module_name)
-        asyncio.create_task(self._handle_module_toggle(module_name, desired_state))
+        self._schedule_task(self._handle_module_toggle(module_name, desired_state))
 
     async def _handle_module_toggle(self, module_name: str, desired_state: bool) -> None:
         try:
@@ -107,7 +112,7 @@ class MainController:
     def on_toggle_session(self) -> None:
         if self.session_active:
             self.logger.info("Stopping session...")
-            asyncio.create_task(self._stop_session_async())
+            self._schedule_task(self._stop_session_async())
         else:
             config_manager = get_config_manager()
             config = config_manager.read_config(CONFIG_PATH)
@@ -141,7 +146,7 @@ class MainController:
                         return
                     self.logger.warning("User chose to start session with no modules running")
 
-                asyncio.create_task(self._start_session_async(Path(session_dir)))
+                self._schedule_task(self._start_session_async(Path(session_dir)))
             else:
                 self.logger.info("Session start cancelled - no directory selected")
 
@@ -152,10 +157,10 @@ class MainController:
 
         if self.trial_active:
             self.logger.info("Stopping trial...")
-            asyncio.create_task(self._stop_trial_async())
+            self._schedule_task(self._stop_trial_async())
         else:
             self.logger.info("Starting trial...")
-            asyncio.create_task(self._start_trial_async())
+            self._schedule_task(self._start_trial_async())
 
     async def _start_session_async(self, session_dir: Path) -> None:
         try:
@@ -291,7 +296,7 @@ class MainController:
     def on_shutdown(self) -> None:
         """Handle shutdown button click."""
         if self.logger_system.event_logger:
-            asyncio.create_task(self.logger_system.event_logger.log_button_press("shutdown"))
+            self._schedule_task(self.logger_system.event_logger.log_button_press("shutdown"))
 
         if self.session_active:
             response = messagebox.askyesno(
@@ -307,7 +312,7 @@ class MainController:
 
         shutdown_coordinator = get_shutdown_coordinator()
 
-        asyncio.create_task(shutdown_coordinator.initiate_shutdown("UI button"))
+        self._schedule_task(shutdown_coordinator.initiate_shutdown("UI button"))
 
     async def _status_callback(self, module_name: str, state: ModuleState, status) -> None:
         if module_name in self.module_vars:

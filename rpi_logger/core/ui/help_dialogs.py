@@ -1,11 +1,10 @@
-
 import platform
-import subprocess
 import sys
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
-from pathlib import Path
 from typing import Optional
+
+from ..paths import LOGO_PATH
 
 try:
     from PIL import Image, ImageTk
@@ -30,9 +29,8 @@ class AboutDialog:
 
         if Image and ImageTk:
             try:
-                logo_path = Path(__file__).parent / "logo_100.png"
-                if logo_path.exists():
-                    logo_image = Image.open(logo_path)
+                if LOGO_PATH.exists():
+                    logo_image = Image.open(LOGO_PATH)
                     logo_photo = ImageTk.PhotoImage(logo_image)
                     logo_label = ttk.Label(main_frame, image=logo_photo)
                     logo_label.image = logo_photo
@@ -424,14 +422,6 @@ Need more help?
   • Logs: Help > Open Logs Directory
 
 
-═══════════════════════════════════════════════════════════════════
-                        KEYBOARD SHORTCUTS
-═══════════════════════════════════════════════════════════════════
-
-Ctrl+Q              Quit application
-Ctrl+O              Open data directory
-Ctrl+L              Open logs directory
-F1                  Open this help dialog
 """
 
         self.text_widget.config(state='normal')

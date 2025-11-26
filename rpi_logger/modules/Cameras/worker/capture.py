@@ -53,6 +53,11 @@ class PicamCapture(CaptureHandle):
         self._running = False
         self._frame_number = 0
 
+    @property
+    def actual_fps(self) -> float:
+        """Return the actual FPS - for Picam this equals requested since it's hardware-enforced."""
+        return self._fps
+
     async def start(self) -> None:
         import logging
         log = logging.getLogger(__name__)
@@ -161,10 +166,16 @@ class USBCapture(CaptureHandle):
     def __init__(self, dev_path: str, resolution: tuple[int, int], fps: float) -> None:
         self._dev_path = dev_path
         self._resolution = resolution
-        self._fps = fps
+        self._requested_fps = fps
+        self._actual_fps = fps  # Updated after camera opens to reflect what camera reports
         self._cap = None
         self._running = False
         self._frame_number = 0
+
+    @property
+    def actual_fps(self) -> float:
+        """Return the actual FPS the camera is configured to deliver."""
+        return self._actual_fps
 
     async def start(self) -> None:
         import logging
@@ -194,7 +205,7 @@ class USBCapture(CaptureHandle):
 
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._resolution[0])
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._resolution[1])
-        self._cap.set(cv2.CAP_PROP_FPS, self._fps)
+        self._cap.set(cv2.CAP_PROP_FPS, self._requested_fps)
 
         # Disable dynamic framerate (some cameras lower FPS in low light otherwise)
         # This is controlled via v4l2-ctl as OpenCV doesn't expose this property
@@ -222,10 +233,23 @@ class USBCapture(CaptureHandle):
             self._cap.release()
             raise RuntimeError(f"USB camera {self._dev_path} opened but cannot read frames")
 
-        log.info("USB camera opened successfully: %dx%d @ %.1f fps",
-                int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                self._cap.get(cv2.CAP_PROP_FPS))
+        # Query the actual FPS the camera reports - this may differ from requested
+        actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        reported_fps = self._cap.get(cv2.CAP_PROP_FPS)
+
+        # Use reported FPS if valid, otherwise fall back to requested
+        if reported_fps and reported_fps > 0:
+            self._actual_fps = float(reported_fps)
+        else:
+            self._actual_fps = self._requested_fps
+
+        if abs(self._actual_fps - self._requested_fps) > 0.5:
+            log.warning("USB camera %s: requested %.1f fps but camera reports %.1f fps",
+                       self._dev_path, self._requested_fps, self._actual_fps)
+
+        log.info("USB camera opened successfully: %dx%d @ %.1f fps (requested %.1f)",
+                actual_w, actual_h, self._actual_fps, self._requested_fps)
         self._running = True
 
     async def frames(self) -> AsyncIterator[CaptureFrame]:
@@ -300,13 +324,6 @@ async def open_capture(
     Returns:
         Tuple of (CaptureHandle, capabilities dict)
     """
-    capabilities: dict = {
-        "camera_type": camera_type,
-        "camera_id": camera_id,
-        "resolution": resolution,
-        "fps": fps,
-    }
-
     if camera_type == "picam":
         capture = PicamCapture(camera_id, resolution, fps)
     elif camera_type == "usb":
@@ -315,6 +332,16 @@ async def open_capture(
         raise ValueError(f"Unknown camera type: {camera_type}")
 
     await capture.start()
+
+    # Return actual FPS after camera opened - may differ from requested for USB cameras
+    capabilities: dict = {
+        "camera_type": camera_type,
+        "camera_id": camera_id,
+        "resolution": resolution,
+        "requested_fps": fps,
+        "actual_fps": capture.actual_fps,
+    }
+
     return capture, capabilities
 
 

@@ -251,7 +251,7 @@ class WorkerManager:
         elif isinstance(msg, RespRecordingStarted):
             handle.video_path = msg.video_path
             handle.csv_path = msg.csv_path
-            logger.info("[HANDLER] Recording started for %s: %s", key, msg.video_path)
+            logger.info("[HANDLER] Recording started for %s: %s @ %.1f fps", key, msg.video_path, msg.actual_fps)
             if self._on_recording_started:
                 self._on_recording_started(key, msg)
 
