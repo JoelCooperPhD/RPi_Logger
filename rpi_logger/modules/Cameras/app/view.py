@@ -96,7 +96,7 @@ class CamerasView:
         if not callable(builder):
             return
         if not self._io_stub_fields:
-            for key in ("cam", "in", "rec", "tgt", "prv", "drop", "q", "wait"):
+            for key in ("cam", "in", "rec", "tgt", "prv", "q", "wait"):
                 self._io_stub_fields[key] = tk.StringVar(master=self._root, value="-")
         if not self._io_stub_history:
             self._io_stub_history = {}
@@ -104,7 +104,7 @@ class CamerasView:
         def _builder(frame) -> None:
             container = ttk.Frame(frame)
             container.grid(row=0, column=0, sticky="ew")
-            for idx in range(7):
+            for idx in range(6):
                 container.columnconfigure(idx, weight=1, uniform="iofields")
 
             fields = [
@@ -113,7 +113,6 @@ class CamerasView:
                 ("rec", "Rec (out)"),
                 ("tgt", "Tgt (rec)"),
                 ("prv", "Prv (out)"),
-                ("drop", "Drop (rec)"),
                 ("q", "Q (p/r)"),
                 ("wait", "Wait (ms)"),
             ]
@@ -340,7 +339,6 @@ class CamerasView:
             "rec": _fmt_num(payload.get("record_fps_avg")),
             "tgt": _fmt_num(payload.get("target_record_fps")),
             "prv": _fmt_num(payload.get("preview_fps_avg")),
-            "drop": _fmt_int(payload.get("skipped_fps_cap")),
             "q": f"{_fmt_int(payload.get('preview_queue'))}/{_fmt_int(payload.get('record_queue'))}",
             "wait": _fmt_num(payload.get("ingress_wait_ms")),
         }
