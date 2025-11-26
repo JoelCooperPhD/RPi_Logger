@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.runtime import (
@@ -16,7 +16,7 @@ from rpi_logger.modules.Cameras.runtime import (
     serialize_camera_state,
 )
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_VERSION = 2
 
 
 class KnownCamerasCache:
@@ -83,6 +83,37 @@ class KnownCamerasCache:
         return dict(self._entries)
 
     # ------------------------------------------------------------------
+    # Per-camera settings
+
+    async def get_settings(self, camera_key: str) -> Optional[Dict[str, Any]]:
+        """Get stored settings for a camera."""
+        await self.load()
+        entry = self._entries.get(camera_key)
+        if not entry:
+            return None
+        return entry.get("settings")
+
+    async def set_settings(self, camera_key: str, settings: Dict[str, Any]) -> None:
+        """Store settings for a camera."""
+        await self.load()
+        async with self._lock:
+            if camera_key not in self._entries:
+                self._entries[camera_key] = {"updated_at": time.time()}
+            self._entries[camera_key]["settings"] = dict(settings)
+            self._entries[camera_key]["updated_at"] = time.time()
+            await self._write_file(self._entries)
+            self._logger.debug("Saved settings for %s: %s", camera_key, settings)
+
+    async def get_all_settings(self) -> Dict[str, Dict[str, Any]]:
+        """Get settings for all cameras."""
+        await self.load()
+        result = {}
+        for key, entry in self._entries.items():
+            if "settings" in entry:
+                result[key] = entry["settings"]
+        return result
+
+    # ------------------------------------------------------------------
     # IO helpers
 
     async def _read_file(self) -> Dict[str, dict]:
@@ -97,19 +128,21 @@ class KnownCamerasCache:
 
         if not isinstance(parsed, dict):
             return {}
-        if int(parsed.get("schema", 0) or 0) != CACHE_SCHEMA_VERSION:
+        schema_version = int(parsed.get("schema", 0) or 0)
+        if schema_version not in (1, 2):
             self._logger.info("Known cameras cache schema mismatch; ignoring old data")
             return {}
 
         entries = parsed.get("entries") or {}
         if not isinstance(entries, dict):
             return {}
-        # Validate each entry structure
+        # Validate each entry structure - allow entries with state and/or settings
         valid: Dict[str, dict] = {}
         for key, payload in entries.items():
             if not isinstance(payload, dict):
                 continue
-            if "state" not in payload:
+            # Accept entries that have state or settings (or both)
+            if "state" not in payload and "settings" not in payload:
                 continue
             valid[key] = payload
         return valid

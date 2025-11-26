@@ -301,6 +301,11 @@ class CamerasView:
 
     def _sync_settings_active_camera(self) -> None:
         if self._settings_window:
+            # Apply stored settings for the active camera before switching
+            if self._active_camera_id and self._active_camera_id in self._camera_settings:
+                self._settings_window.set_camera_settings(
+                    self._active_camera_id, self._camera_settings[self._active_camera_id]
+                )
             self._settings_window.set_active_camera(self._active_camera_id)
             if self._active_camera_id:
                 opts = self._camera_options.get(self._active_camera_id)
@@ -443,14 +448,26 @@ class CamerasView:
             seen.add(size)
             unique_sizes.append(size)
 
-        # Use only the actual reported sizes; no fallbacks or synthesized entries.
-        preview_sizes = list(unique_sizes)
+        # Record uses all available sizes (largest first)
         record_sizes = list(unique_sizes)
+
+        # Preview uses only smaller resolutions suitable for UI display (max 640x480)
+        # Sorted smallest first since preview should default to small
+        MAX_PREVIEW_WIDTH, MAX_PREVIEW_HEIGHT = 640, 480
+        preview_sizes = [
+            s for s in unique_sizes
+            if s[0] <= MAX_PREVIEW_WIDTH and s[1] <= MAX_PREVIEW_HEIGHT
+        ]
+        # Sort preview sizes smallest first (better default)
+        preview_sizes = sorted(preview_sizes, key=lambda s: (s[0] * s[1], s[0], s[1]))
+        # If no small sizes available, offer a few standard preview sizes
+        if not preview_sizes:
+            preview_sizes = [(320, 180), (320, 240), (640, 480)]
 
         preview_res = [f"{w}x{h}" for w, h in preview_sizes]
         record_res = [f"{w}x{h}" for w, h in record_sizes]
-        preview_fps_values = ["1", "2", "5", "15", "Full"]
-        default_preview_fps = DEFAULT_SETTINGS.get("preview_fps", "2")
+        preview_fps_values = ["1", "2", "5", "10", "15"]
+        default_preview_fps = DEFAULT_SETTINGS.get("preview_fps", "5")
         record_fps_values = _fps_list()
         self._camera_options[camera_id] = {
             "preview_resolutions": preview_res,

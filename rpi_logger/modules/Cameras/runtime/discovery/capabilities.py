@@ -119,13 +119,6 @@ def _normalize_format(fmt: Any) -> str:
     return aliases.get(text, text)
 
 
-def _find_size(modes: Iterable[CapabilityMode], size: Tuple[int, int], min_fps: float) -> Optional[CapabilityMode]:
-    for mode in modes:
-        if mode.size == size and mode.fps >= min_fps:
-            return mode
-    return None
-
-
 def _is_16_9(size: Tuple[int, int]) -> bool:
     w, h = size
     return abs((w / h) - (16 / 9)) < 0.05

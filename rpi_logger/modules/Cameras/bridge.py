@@ -85,6 +85,7 @@ class CamerasRuntime(ModuleRuntime):
         self.recording = RecordingController(self, logger=self.logger)
 
         self._telemetry_task: Optional[asyncio.Task] = None
+        self._preview_frame_counts: Dict[str, int] = {}
 
     # ------------------------------------------------------------------ Lifecycle
 
@@ -226,14 +227,14 @@ class CamerasRuntime(ModuleRuntime):
             self.logger.warning("[WORKER READY] No state found for %s - creating tab anyway", key)
             self.view.add_camera(key, title=key)
 
+        # Populate settings window with actual config values
+        self._push_config_to_settings(key)
+
         # Start preview automatically
         self.logger.info("[WORKER READY] Starting preview for %s...", key)
         asyncio.create_task(self._start_preview(key))
 
     def _on_preview_frame(self, key: str, msg: RespPreviewFrame) -> None:
-        # Log every 30th frame to avoid spam
-        if not hasattr(self, '_preview_frame_counts'):
-            self._preview_frame_counts: Dict[str, int] = {}
         self._preview_frame_counts[key] = self._preview_frame_counts.get(key, 0) + 1
         count = self._preview_frame_counts[key]
         if count == 1 or count % 30 == 0:
@@ -301,28 +302,110 @@ class CamerasRuntime(ModuleRuntime):
         self._preview_receiver.set_consumer(key, consumer)
         self.logger.debug("[PREVIEW START] Consumer registered for %s", key)
 
-        preview_cfg = self.config.preview if hasattr(self.config, 'preview') else None
-        target_fps = getattr(preview_cfg, 'fps_cap', 10.0) if preview_cfg else 10.0
+        # Get per-camera settings (or defaults)
+        preview_size, target_fps = await self._get_preview_settings(key)
 
-        self.logger.info("[PREVIEW START] Sending start_preview command to worker %s (size=320x180, fps=%.1f)",
-                        key, target_fps)
+        self.logger.info("[PREVIEW START] Sending start_preview command to worker %s (size=%s, fps=%.1f)",
+                        key, preview_size, target_fps)
         await self.worker_manager.start_preview(
             key,
-            preview_size=(320, 180),
+            preview_size=preview_size,
             target_fps=target_fps,
             jpeg_quality=80,
         )
         self.logger.info("[PREVIEW START] Preview started for %s", key)
+
+    async def _get_preview_settings(self, key: str) -> tuple[tuple[int, int], float]:
+        """Get preview size and fps for a camera from saved settings or defaults."""
+        saved = await self.cache.get_settings(key)
+
+        # Default values
+        default_size = (320, 180)
+        default_fps = 5.0
+
+        if not saved:
+            return default_size, default_fps
+
+        # Parse resolution
+        res_str = saved.get("preview_resolution", "")
+        preview_size = default_size
+        if res_str and "x" in res_str.lower():
+            try:
+                w, h = res_str.lower().split("x")
+                preview_size = (int(w.strip()), int(h.strip()))
+            except (ValueError, AttributeError):
+                pass
+
+        # Parse FPS
+        fps_str = saved.get("preview_fps", "")
+        target_fps = default_fps
+        if fps_str:
+            try:
+                target_fps = float(fps_str)
+            except (ValueError, TypeError):
+                pass
+
+        return preview_size, target_fps
 
     def _handle_active_camera_changed(self, camera_id: Optional[str]) -> None:
         """Handle UI tab switch - all workers preview simultaneously."""
         self.logger.debug("Active camera: %s", camera_id)
 
     def _handle_apply_config(self, camera_id: str, settings: Dict[str, Any]) -> None:
-        """Handle configuration changes from UI."""
-        self.logger.debug("Config change for %s: %s", camera_id, settings)
-        # Workers manage their own config internally
-        # Future: send CmdReconfigure to worker
+        """Handle configuration changes from UI - persist and apply settings."""
+        self.logger.info("[CONFIG] Applying settings for %s: %s", camera_id, settings)
+        # Persist and restart preview with new settings
+        asyncio.create_task(self._apply_camera_settings(camera_id, settings))
+
+    async def _apply_camera_settings(self, camera_id: str, settings: Dict[str, Any]) -> None:
+        """Persist per-camera settings and restart preview to apply them."""
+        try:
+            # Save to cache
+            await self.cache.set_settings(camera_id, settings)
+            self.logger.debug("[CONFIG] Settings saved for %s", camera_id)
+
+            # Restart preview with new settings
+            handle = self.worker_manager.get_worker(camera_id)
+            if handle and handle.is_previewing:
+                self.logger.info("[CONFIG] Restarting preview for %s with new settings", camera_id)
+                await self.worker_manager.stop_preview(camera_id)
+                await self._start_preview(camera_id)
+        except Exception as e:
+            self.logger.warning("[CONFIG] Failed to apply settings for %s: %s", camera_id, e)
+
+    def _push_config_to_settings(self, camera_id: str) -> None:
+        """Push config values to settings window for a camera (loads from cache if available)."""
+        # Schedule async load from cache
+        asyncio.create_task(self._load_and_push_settings(camera_id))
+
+    async def _load_and_push_settings(self, camera_id: str) -> None:
+        """Load per-camera settings from cache, falling back to global config."""
+        # Try to load saved per-camera settings first
+        saved_settings = await self.cache.get_settings(camera_id)
+
+        if saved_settings:
+            self.logger.debug("[CONFIG] Loaded saved settings for %s: %s", camera_id, saved_settings)
+            settings = dict(saved_settings)
+        else:
+            # Fall back to global config defaults
+            preview_cfg = self.config.preview
+            record_cfg = self.config.record
+
+            preview_res = preview_cfg.resolution
+            record_res = record_cfg.resolution
+            preview_fps = preview_cfg.fps_cap
+            record_fps = record_cfg.fps_cap
+
+            settings = {
+                "preview_resolution": f"{preview_res[0]}x{preview_res[1]}" if preview_res else "",
+                "preview_fps": str(int(preview_fps)) if preview_fps and float(preview_fps).is_integer() else str(preview_fps) if preview_fps else "5",
+                "record_resolution": f"{record_res[0]}x{record_res[1]}" if record_res else "",
+                "record_fps": str(int(record_fps)) if record_fps and float(record_fps).is_integer() else str(record_fps) if record_fps else "15",
+                "overlay": "true" if record_cfg.overlay else "false",
+            }
+            self.logger.debug("[CONFIG] Using global config for %s: %s", camera_id, settings)
+
+        self.view.update_camera_settings(camera_id, settings)
 
     # ------------------------------------------------------------------ Metrics
 

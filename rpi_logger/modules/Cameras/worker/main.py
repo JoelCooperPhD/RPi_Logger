@@ -330,12 +330,18 @@ class CameraWorker:
             duration = frame_times[-1] - frame_times[0]
             if duration > 0:
                 self._fps_capture = (len(frame_times) - 1) / duration
+        elif len(frame_times) == 1:
+            # Single frame in window - estimate from configured fps
+            self._fps_capture = self._capture_fps
 
         if len(encode_times) >= 2:
             duration = encode_times[-1] - encode_times[0]
             if duration > 0:
                 self._fps_encode = (len(encode_times) - 1) / duration
-        elif not encode_times:
+        elif len(encode_times) == 1:
+            # Single frame in window - estimate from target fps
+            self._fps_encode = self._record_target_fps if self._recording else 0.0
+        else:
             self._fps_encode = 0.0
 
         if len(preview_times) >= 2:

@@ -127,11 +127,9 @@ class DiscoveryController:
 
             self._logger.info("[SPAWN] Camera type=%s, id=%s", camera_type, camera_id)
 
-            # Get resolution/fps from config
-            record_cfg = runtime.config.record
-            resolution = record_cfg.resolution or DEFAULT_CAPTURE_RESOLUTION
-            fps = record_cfg.fps_cap or DEFAULT_CAPTURE_FPS
-            self._logger.info("[SPAWN] Config: resolution=%s, fps=%.1f", resolution, fps)
+            # Get per-camera capture resolution/fps (uses record settings as capture settings)
+            resolution, fps = await self._get_capture_settings(key)
+            self._logger.info("[SPAWN] Capture config: resolution=%s, fps=%.1f", resolution, fps)
 
             # Spawn the worker using the stable camera key
             self._logger.info("[SPAWN] Calling worker_manager.spawn_worker()...")
@@ -170,6 +168,40 @@ class DiscoveryController:
         except Exception:
             self._logger.debug("Capability probe failed for %s", desc.camera_id.key, exc_info=True)
         return None
+
+    async def _get_capture_settings(self, key: str) -> tuple[tuple[int, int], float]:
+        """Get capture resolution and fps for a camera from saved settings."""
+        # Try per-camera settings first
+        saved = await self._runtime.cache.get_settings(key)
+
+        # Fall back to global config
+        record_cfg = self._runtime.config.record
+        default_resolution = record_cfg.resolution or DEFAULT_CAPTURE_RESOLUTION
+        default_fps = record_cfg.fps_cap or DEFAULT_CAPTURE_FPS
+
+        if not saved:
+            return default_resolution, default_fps
+
+        # Parse resolution from record_resolution (capture uses same as record)
+        res_str = saved.get("record_resolution", "")
+        resolution = default_resolution
+        if res_str and "x" in res_str.lower():
+            try:
+                w, h = res_str.lower().split("x")
+                resolution = (int(w.strip()), int(h.strip()))
+            except (ValueError, AttributeError):
+                pass
+
+        # Parse FPS from record_fps
+        fps_str = saved.get("record_fps", "")
+        fps = default_fps
+        if fps_str:
+            try:
+                fps = float(fps_str)
+            except (ValueError, TypeError):
+                pass
+
+        return resolution, fps
 
     async def shutdown(self) -> None:
         """Shutdown discovery (no background tasks to cancel in this design)."""
@@ -241,12 +273,15 @@ class RecordingController:
         # Check disk space
         guard_status = await self._runtime.disk_guard.ensure_ok(session_paths.camera_dir)
         if not guard_status.ok:
-            self._logger.warning("Disk guard failed for %s: %s", key, guard_status.reason)
+            self._logger.warning("Disk guard failed for %s: free=%.2f GB threshold=%.2f GB",
+                               key, guard_status.free_gb, guard_status.threshold_gb)
             return
 
-        record_cfg = self._runtime.config.record
-        resolution = record_cfg.resolution or DEFAULT_CAPTURE_RESOLUTION
-        fps = record_cfg.fps_cap or DEFAULT_CAPTURE_FPS
+        # Get per-camera record settings (or fall back to global config)
+        resolution, fps, overlay_enabled = await self._get_record_settings(key)
+
+        self._logger.info("[RECORDING] Starting %s with resolution=%s fps=%.1f overlay=%s",
+                         key, resolution, fps, overlay_enabled)
 
         # Send start command to worker using worker_key (not state key)
         await self._runtime.worker_manager.start_recording(
@@ -255,7 +290,7 @@ class RecordingController:
             filename=session_paths.video_path.name,
             resolution=resolution,
             fps=fps,
-            overlay_enabled=record_cfg.overlay,
+            overlay_enabled=overlay_enabled,
             trial_number=self._trial_number,
             csv_enabled=True,
         )
@@ -263,6 +298,47 @@ class RecordingController:
         state.is_recording = True
         state.video_path = str(session_paths.video_path)
         state.csv_path = str(session_paths.timing_path)
+
+    async def _get_record_settings(self, key: str) -> tuple[tuple[int, int], float, bool]:
+        """Get record resolution, fps, and overlay setting for a camera."""
+        # Try per-camera settings first
+        saved = await self._runtime.cache.get_settings(key)
+
+        # Fall back to global config
+        record_cfg = self._runtime.config.record
+        default_resolution = record_cfg.resolution or DEFAULT_CAPTURE_RESOLUTION
+        default_fps = record_cfg.fps_cap or DEFAULT_CAPTURE_FPS
+        default_overlay = record_cfg.overlay
+
+        if not saved:
+            return default_resolution, default_fps, default_overlay
+
+        # Parse resolution
+        res_str = saved.get("record_resolution", "")
+        resolution = default_resolution
+        if res_str and "x" in res_str.lower():
+            try:
+                w, h = res_str.lower().split("x")
+                resolution = (int(w.strip()), int(h.strip()))
+            except (ValueError, AttributeError):
+                pass
+
+        # Parse FPS
+        fps_str = saved.get("record_fps", "")
+        fps = default_fps
+        if fps_str:
+            try:
+                fps = float(fps_str)
+            except (ValueError, TypeError):
+                pass
+
+        # Parse overlay
+        overlay_str = saved.get("overlay", "")
+        overlay = default_overlay
+        if overlay_str:
+            overlay = overlay_str.lower() in ("true", "1", "yes", "on")
+
+        return resolution, fps, overlay
 
     async def stop_recording(self) -> None:
         """Stop recording on all camera workers."""

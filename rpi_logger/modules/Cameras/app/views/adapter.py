@@ -19,6 +19,8 @@ class ViewAdapter:
         self._root = None
         self._ui_thread = threading.current_thread()
         self._tab_lookup: Dict[str, str] = {}
+        self._frame_drop_logged: set[str] = set()
+        self._frame_counts: Dict[str, int] = {}
 
     def set_root(self, root) -> None:
         self._root = root
@@ -93,17 +95,11 @@ class ViewAdapter:
     def push_frame(self, camera_id: str, frame: Any) -> None:
         tab = self.tabs.get(camera_id)
         if not tab:
-            # Only log first drop per camera
-            if not hasattr(self, '_frame_drop_logged'):
-                self._frame_drop_logged = set()
             if camera_id not in self._frame_drop_logged:
                 self._logger.warning("[ADAPTER] push_frame: no tab for %s - frame dropped", camera_id)
                 self._frame_drop_logged.add(camera_id)
             return
 
-        # Track frame counts for debugging
-        if not hasattr(self, '_frame_counts'):
-            self._frame_counts = {}
         self._frame_counts[camera_id] = self._frame_counts.get(camera_id, 0) + 1
         count = self._frame_counts[camera_id]
         if count == 1:
