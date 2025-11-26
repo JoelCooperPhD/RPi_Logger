@@ -86,12 +86,78 @@ class KnownCamerasCache:
     # Per-camera settings
 
     async def get_settings(self, camera_key: str) -> Optional[Dict[str, Any]]:
-        """Get stored settings for a camera."""
+        """Get stored settings for a camera.
+
+        If no settings exist but legacy selected_configs do, migrates them
+        to the new settings format automatically.
+        """
         await self.load()
         entry = self._entries.get(camera_key)
         if not entry:
             return None
-        return entry.get("settings")
+
+        # Return existing settings if present
+        if "settings" in entry:
+            return entry.get("settings")
+
+        # Migrate from legacy selected_configs if present
+        state = entry.get("state")
+        if state and isinstance(state, dict):
+            selected_configs = state.get("selected_configs")
+            if selected_configs:
+                migrated = self._migrate_selected_configs(selected_configs)
+                if migrated:
+                    self._logger.info(
+                        "Migrated selected_configs to settings for %s", camera_key
+                    )
+                    # Store migrated settings (don't await inside get, schedule write)
+                    entry["settings"] = migrated
+                    asyncio.create_task(self._save_migration(camera_key, migrated))
+                    return migrated
+
+        return None
+
+    def _migrate_selected_configs(self, selected_configs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Convert legacy selected_configs format to settings format."""
+        try:
+            settings: Dict[str, Any] = {}
+
+            # Extract preview settings
+            preview = selected_configs.get("preview", {})
+            if preview:
+                mode = preview.get("mode", {})
+                size = mode.get("size")
+                if size and len(size) == 2:
+                    settings["preview_resolution"] = f"{size[0]}x{size[1]}"
+                target_fps = preview.get("target_fps")
+                if target_fps is not None:
+                    settings["preview_fps"] = str(target_fps)
+
+            # Extract record settings
+            record = selected_configs.get("record", {})
+            if record:
+                mode = record.get("mode", {})
+                size = mode.get("size")
+                if size and len(size) == 2:
+                    settings["record_resolution"] = f"{size[0]}x{size[1]}"
+                target_fps = record.get("target_fps")
+                if target_fps is not None:
+                    settings["record_fps"] = str(target_fps)
+                overlay = record.get("overlay")
+                if overlay is not None:
+                    settings["overlay"] = "true" if overlay else "false"
+
+            return settings if settings else None
+        except Exception:
+            return None
+
+    async def _save_migration(self, camera_key: str, settings: Dict[str, Any]) -> None:
+        """Persist migrated settings to disk."""
+        async with self._lock:
+            if camera_key in self._entries:
+                self._entries[camera_key]["settings"] = settings
+                self._entries[camera_key]["updated_at"] = time.time()
+                await self._write_file(self._entries)
 
     async def set_settings(self, camera_key: str, settings: Dict[str, Any]) -> None:
         """Store settings for a camera."""

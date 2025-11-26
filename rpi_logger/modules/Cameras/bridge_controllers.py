@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.defaults import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
 from rpi_logger.modules.Cameras.runtime import (
+    CameraCapabilities,
     CameraDescriptor,
     CameraId,
     CapabilityMode,
@@ -128,7 +129,7 @@ class DiscoveryController:
             self._logger.info("[SPAWN] Camera type=%s, id=%s", camera_type, camera_id)
 
             # Get per-camera capture resolution/fps (uses record settings as capture settings)
-            resolution, fps = await self._get_capture_settings(key)
+            resolution, fps = await self._get_capture_settings(key, caps)
             self._logger.info("[SPAWN] Capture config: resolution=%s, fps=%.1f", resolution, fps)
 
             # Spawn the worker using the stable camera key
@@ -169,8 +170,14 @@ class DiscoveryController:
             self._logger.debug("Capability probe failed for %s", desc.camera_id.key, exc_info=True)
         return None
 
-    async def _get_capture_settings(self, key: str) -> tuple[tuple[int, int], float]:
-        """Get capture resolution and fps for a camera from saved settings."""
+    async def _get_capture_settings(
+        self, key: str, capabilities: Optional[CameraCapabilities] = None
+    ) -> tuple[tuple[int, int], float]:
+        """Get capture resolution and fps for a camera from saved settings.
+
+        If capabilities are provided, validates and adjusts resolution to match
+        a supported mode.
+        """
         # Try per-camera settings first
         saved = await self._runtime.cache.get_settings(key)
 
@@ -180,28 +187,89 @@ class DiscoveryController:
         default_fps = record_cfg.fps_cap or DEFAULT_CAPTURE_FPS
 
         if not saved:
-            return default_resolution, default_fps
+            resolution, fps = default_resolution, default_fps
+        else:
+            # Parse resolution from record_resolution (capture uses same as record)
+            res_str = saved.get("record_resolution", "")
+            resolution = default_resolution
+            if res_str and "x" in res_str.lower():
+                try:
+                    w, h = res_str.lower().split("x")
+                    resolution = (int(w.strip()), int(h.strip()))
+                except (ValueError, AttributeError):
+                    pass
 
-        # Parse resolution from record_resolution (capture uses same as record)
-        res_str = saved.get("record_resolution", "")
-        resolution = default_resolution
-        if res_str and "x" in res_str.lower():
-            try:
-                w, h = res_str.lower().split("x")
-                resolution = (int(w.strip()), int(h.strip()))
-            except (ValueError, AttributeError):
-                pass
+            # Parse FPS from record_fps
+            fps_str = saved.get("record_fps", "")
+            fps = default_fps
+            if fps_str:
+                try:
+                    fps = float(fps_str)
+                except (ValueError, TypeError):
+                    pass
 
-        # Parse FPS from record_fps
-        fps_str = saved.get("record_fps", "")
-        fps = default_fps
-        if fps_str:
-            try:
-                fps = float(fps_str)
-            except (ValueError, TypeError):
-                pass
+        # Validate against capabilities if available
+        if capabilities and capabilities.modes:
+            resolution, fps = self._validate_against_capabilities(
+                resolution, fps, capabilities, key
+            )
 
         return resolution, fps
+
+    def _validate_against_capabilities(
+        self,
+        resolution: tuple[int, int],
+        fps: float,
+        capabilities: CameraCapabilities,
+        key: str,
+    ) -> tuple[tuple[int, int], float]:
+        """Validate and adjust resolution/fps against camera capabilities."""
+        # Check for exact match first
+        for mode in capabilities.modes:
+            if mode.size == resolution and mode.fps >= fps:
+                return resolution, fps
+
+        # Check if resolution exists at any fps
+        matching_res = [m for m in capabilities.modes if m.size == resolution]
+        if matching_res:
+            # Use best fps available for this resolution
+            best = max(matching_res, key=lambda m: m.fps)
+            if best.fps < fps:
+                self._logger.warning(
+                    "[VALIDATE] %s: Requested fps %.1f not available at %s, using %.1f",
+                    key, fps, resolution, best.fps
+                )
+                return resolution, best.fps
+            return resolution, fps
+
+        # Resolution not supported - find best alternative
+        self._logger.warning(
+            "[VALIDATE] %s: Resolution %s not supported by camera", key, resolution
+        )
+
+        # Prefer modes with same or higher resolution, then fallback to default record mode
+        larger_modes = [
+            m for m in capabilities.modes
+            if m.width >= resolution[0] and m.height >= resolution[1]
+        ]
+        if larger_modes:
+            # Pick smallest mode that fits the request
+            best = min(larger_modes, key=lambda m: (m.width * m.height, -m.fps))
+            self._logger.info(
+                "[VALIDATE] %s: Using %s @ %.1f fps instead", key, best.size, best.fps
+            )
+            return best.size, min(fps, best.fps)
+
+        # No larger mode, use default record mode or largest available
+        if capabilities.default_record_mode:
+            best = capabilities.default_record_mode
+        else:
+            best = max(capabilities.modes, key=lambda m: (m.width * m.height, m.fps))
+
+        self._logger.info(
+            "[VALIDATE] %s: Using fallback %s @ %.1f fps", key, best.size, best.fps
+        )
+        return best.size, min(fps, best.fps)
 
     async def shutdown(self) -> None:
         """Shutdown discovery (no background tasks to cancel in this design)."""

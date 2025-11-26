@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.Cameras.app.view import CamerasView
+from rpi_logger.modules.Cameras.defaults import DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_FPS
 from rpi_logger.modules.Cameras.bridge_controllers import (
     CameraWorkerState,
     DiscoveryController,
@@ -319,16 +320,12 @@ class CamerasRuntime(ModuleRuntime):
         """Get preview size and fps for a camera from saved settings or defaults."""
         saved = await self.cache.get_settings(key)
 
-        # Default values
-        default_size = (320, 180)
-        default_fps = 5.0
-
         if not saved:
-            return default_size, default_fps
+            return DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_FPS
 
         # Parse resolution
         res_str = saved.get("preview_resolution", "")
-        preview_size = default_size
+        preview_size = DEFAULT_PREVIEW_SIZE
         if res_str and "x" in res_str.lower():
             try:
                 w, h = res_str.lower().split("x")
@@ -338,7 +335,7 @@ class CamerasRuntime(ModuleRuntime):
 
         # Parse FPS
         fps_str = saved.get("preview_fps", "")
-        target_fps = default_fps
+        target_fps = DEFAULT_PREVIEW_FPS
         if fps_str:
             try:
                 target_fps = float(fps_str)
@@ -358,20 +355,53 @@ class CamerasRuntime(ModuleRuntime):
         asyncio.create_task(self._apply_camera_settings(camera_id, settings))
 
     async def _apply_camera_settings(self, camera_id: str, settings: Dict[str, Any]) -> None:
-        """Persist per-camera settings and restart preview to apply them."""
+        """Persist per-camera settings and restart preview/worker as needed."""
         try:
+            # Get old settings to detect record setting changes
+            old_settings = await self.cache.get_settings(camera_id) or {}
+
             # Save to cache
             await self.cache.set_settings(camera_id, settings)
             self.logger.debug("[CONFIG] Settings saved for %s", camera_id)
 
-            # Restart preview with new settings
-            handle = self.worker_manager.get_worker(camera_id)
-            if handle and handle.is_previewing:
-                self.logger.info("[CONFIG] Restarting preview for %s with new settings", camera_id)
-                await self.worker_manager.stop_preview(camera_id)
-                await self._start_preview(camera_id)
+            # Check if record settings changed (requires worker respawn)
+            record_settings_changed = (
+                old_settings.get("record_resolution") != settings.get("record_resolution") or
+                old_settings.get("record_fps") != settings.get("record_fps")
+            )
+
+            if record_settings_changed:
+                self.logger.info("[CONFIG] Record settings changed for %s - respawning worker", camera_id)
+                await self._respawn_worker(camera_id)
+            else:
+                # Only preview settings changed - just restart preview
+                handle = self.worker_manager.get_worker(camera_id)
+                if handle and handle.is_previewing:
+                    self.logger.info("[CONFIG] Restarting preview for %s with new settings", camera_id)
+                    await self.worker_manager.stop_preview(camera_id)
+                    await self._start_preview(camera_id)
         except Exception as e:
             self.logger.warning("[CONFIG] Failed to apply settings for %s: %s", camera_id, e)
+
+    async def _respawn_worker(self, camera_id: str) -> None:
+        """Shutdown and respawn a worker to apply new capture settings."""
+        state = self.camera_states.get(camera_id)
+        if not state:
+            self.logger.warning("[CONFIG] No state found for %s, cannot respawn", camera_id)
+            return
+
+        # Remember the descriptor for respawning
+        descriptor = state.descriptor
+
+        # Shutdown existing worker
+        self.logger.info("[CONFIG] Shutting down worker for %s", camera_id)
+        await self.worker_manager.shutdown_worker(camera_id)
+        self.camera_states.pop(camera_id, None)
+        self.view.remove_camera(camera_id)
+
+        # Respawn with new settings
+        self.logger.info("[CONFIG] Respawning worker for %s", camera_id)
+        await self.discovery._spawn_worker_for(descriptor)
 
     def _push_config_to_settings(self, camera_id: str) -> None:
         """Push config values to settings window for a camera (loads from cache if available)."""
