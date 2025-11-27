@@ -1,25 +1,16 @@
 [project]
 name = "rpi-logger"
 version = "0.1.0"
-description = "Master logger system for Raspberry Pi with multi-module support"
+description = "Cross-platform logger system with Raspberry Pi camera support"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    # Core data science packages
     "numpy>=1.24.0",
-    # Computer vision
     "opencv-python>=4.8.0",
-    # Audio recording
     "sounddevice>=0.4.6",
-    # Picamera2 for Raspberry Pi cameras
-    "picamera2>=0.3.0",
-    # Pupil Labs eye tracker API
     "pupil-labs-realtime-api>=1.0.0",
-    # Async file operations
     "aiofiles>=23.0.0",
-    # System metrics
     "psutil>=5.9.0",
-    # Optional but commonly needed
     "pandas>=2.0.0",
     "pillow>=10.0.0",
     "pyserial-asyncio>=0.6",
@@ -31,9 +22,6 @@ dependencies = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[dependency-groups]
-dev = []
 
 [project.scripts]
 rpi-logger = "rpi_logger.app.master:run"

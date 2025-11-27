@@ -14,11 +14,12 @@ except Exception:  # pragma: no cover - defensive import
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
+import io
+
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image
 except Exception:  # pragma: no cover - optional dependency
     Image = None  # type: ignore
-    ImageTk = None  # type: ignore
 
 
 FrameProvider = Callable[[], Optional[np.ndarray]]
@@ -118,7 +119,7 @@ class EyeTrackerViewAdapter:
         frame = self.frame_provider() if self.frame_provider else None
         if self._canvas is None:
             return
-        if frame is None or Image is None or ImageTk is None:
+        if frame is None or Image is None:
             self._canvas.delete("all")
             self._canvas.create_text(
                 self._canvas.winfo_width() // 2,
@@ -130,7 +131,10 @@ class EyeTrackerViewAdapter:
             try:
                 rgb = frame[:, :, ::-1]
                 image = Image.fromarray(rgb)
-                photo = ImageTk.PhotoImage(image)
+                # Use native Tk PhotoImage with PPM to avoid PIL ImageTk issues
+                ppm_data = io.BytesIO()
+                image.save(ppm_data, format="PPM")
+                photo = tk.PhotoImage(data=ppm_data.getvalue())
                 self._canvas.delete("all")
                 self._canvas.create_image(
                     self._canvas.winfo_width() // 2,

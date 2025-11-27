@@ -7,7 +7,8 @@ from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from pathlib import Path
 from typing import Dict, Optional
-from PIL import Image, ImageTk
+from PIL import Image
+import io
 
 from ..logger_system import LoggerSystem
 from ..config_manager import get_config_manager
@@ -231,10 +232,13 @@ class MainWindow:
         header_frame.grid_propagate(False)
 
         try:
-            logo_image = Image.open(LOGO_PATH)
+            logo_image = Image.open(LOGO_PATH).convert("RGB")
             new_size = (int(logo_image.width * 0.6), int(logo_image.height * 0.6))
             logo_image = logo_image.resize(new_size, Image.Resampling.LANCZOS)
-            logo_photo = ImageTk.PhotoImage(logo_image)
+            # Use native Tk PhotoImage with PPM to avoid PIL ImageTk issues on Python 3.13
+            ppm_data = io.BytesIO()
+            logo_image.save(ppm_data, format="PPM")
+            logo_photo = tk.PhotoImage(data=ppm_data.getvalue())
 
             logo_label = ttk.Label(header_frame, image=logo_photo)
             logo_label.image = logo_photo

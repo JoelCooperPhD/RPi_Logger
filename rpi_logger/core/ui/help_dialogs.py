@@ -1,3 +1,4 @@
+import io
 import platform
 import sys
 import tkinter as tk
@@ -7,10 +8,9 @@ from typing import Optional
 from ..paths import LOGO_PATH
 
 try:
-    from PIL import Image, ImageTk
+    from PIL import Image
 except ImportError:
     Image = None
-    ImageTk = None
 
 
 class AboutDialog:
@@ -27,11 +27,14 @@ class AboutDialog:
         main_frame = ttk.Frame(self.dialog, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        if Image and ImageTk:
+        if Image:
             try:
                 if LOGO_PATH.exists():
-                    logo_image = Image.open(LOGO_PATH)
-                    logo_photo = ImageTk.PhotoImage(logo_image)
+                    logo_image = Image.open(LOGO_PATH).convert("RGB")
+                    # Use native Tk PhotoImage with PPM to avoid PIL ImageTk issues
+                    ppm_data = io.BytesIO()
+                    logo_image.save(ppm_data, format="PPM")
+                    logo_photo = tk.PhotoImage(data=ppm_data.getvalue())
                     logo_label = ttk.Label(main_frame, image=logo_photo)
                     logo_label.image = logo_photo
                     logo_label.pack(pady=(0, 20))

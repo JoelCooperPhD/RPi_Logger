@@ -148,12 +148,16 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             return
 
         if frame is not None:
-            from PIL import Image, ImageTk
+            from PIL import Image
             import cv2
+            import io
 
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             image = Image.fromarray(frame_rgb)
-            photo = ImageTk.PhotoImage(image)
+            # Use native Tk PhotoImage with PPM to avoid PIL ImageTk issues
+            ppm_data = io.BytesIO()
+            image.save(ppm_data, format="PPM")
+            photo = tk.PhotoImage(data=ppm_data.getvalue())
 
             canvas_width = self.preview_canvas.winfo_width() or self.preview_width
             canvas_height = self.preview_canvas.winfo_height() or self.preview_height

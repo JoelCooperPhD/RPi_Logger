@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Optional, Callable, Dict, Any
 
-from PIL import Image, ImageTk
+from PIL import Image
+import io
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.app.media.color_convert import to_rgb
@@ -37,7 +38,7 @@ class CameraTab:
         self.frame: Optional[tk.Widget] = None
         self._canvas: Optional[tk.Canvas] = None
         self._image_id: Optional[int] = None
-        self._photo_ref: Optional[ImageTk.PhotoImage] = None
+        self._photo_ref: Optional[tk.PhotoImage] = None
         self._on_refresh = on_refresh
         self._on_apply_config = on_apply_config
         self._logged_first_frame = False
@@ -116,7 +117,10 @@ class CameraTab:
             center_x = 0
             center_y = 0
 
-        self._photo_ref = ImageTk.PhotoImage(image)
+        # Use native Tk PhotoImage with PPM to avoid PIL ImageTk issues on Python 3.13
+        ppm_data = io.BytesIO()
+        image.save(ppm_data, format="PPM")
+        self._photo_ref = tk.PhotoImage(data=ppm_data.getvalue())
 
         if self._image_id is None:
             # Use anchor=nw when canvas not laid out, anchor=center when it is

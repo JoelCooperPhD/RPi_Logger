@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Deque, Optional, TextIO
 
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module_filename_prefix
 
 try:  # pragma: no cover - optional dependency on headless hosts
@@ -993,7 +993,10 @@ class GPSPreviewRuntime(ModuleRuntime):
             label.image = None
             return "mosaic unavailable"
 
-        tk_image = ImageTk.PhotoImage(mosaic_image)
+        # Use native Tk PhotoImage with PPM to avoid PIL ImageTk issues on Python 3.13
+        ppm_data = io.BytesIO()
+        mosaic_image.save(ppm_data, format="PPM")
+        tk_image = tk.PhotoImage(data=ppm_data.getvalue())
         label.configure(image=tk_image, text="")
         label.image = tk_image
         return tile_info

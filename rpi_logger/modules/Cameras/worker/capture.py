@@ -15,6 +15,12 @@ import numpy as np
 from rpi_logger.modules.Cameras.defaults import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
 from rpi_logger.modules.Cameras.runtime.backends.picam_color import get_picam_color_format
 
+# Try to import Picamera2 - may not be available on non-Pi platforms
+try:
+    from picamera2 import Picamera2  # type: ignore
+except Exception:  # pragma: no cover - picamera2 may be absent on non-Pi platforms
+    Picamera2 = None  # type: ignore
+
 
 @dataclass(slots=True)
 class CaptureFrame:
@@ -46,6 +52,11 @@ class PicamCapture(CaptureHandle):
     """Picamera2-based capture for Raspberry Pi cameras."""
 
     def __init__(self, sensor_id: str, resolution: tuple[int, int], fps: float) -> None:
+        if Picamera2 is None:
+            raise RuntimeError(
+                "Picamera2 is not available. "
+                "Install with: pip install picamera2"
+            )
         self._sensor_id = sensor_id
         self._resolution = resolution
         self._fps = fps
@@ -70,8 +81,6 @@ class PicamCapture(CaptureHandle):
         self._running = True
 
     def _start_sync(self, cam_num: int, log) -> None:
-        from picamera2 import Picamera2
-
         try:
             Picamera2.close_camera(cam_num)
         except Exception:
