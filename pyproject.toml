@@ -17,6 +17,7 @@ dependencies = [
     "tkintermapview>=1.29",
     "soundfile>=0.13.1",
     "async-tkinter-loop>=0.10.2",
+    "matplotlib>=3.7.0",
 ]
 
 [build-system]

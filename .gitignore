@@ -18,6 +18,7 @@ wheels/
 *.jpg
 *.jpeg
 *.png
+!rpi_logger/core/ui/logo_100.png
 *.gif
 *.avif
 
