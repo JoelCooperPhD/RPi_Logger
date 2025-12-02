@@ -137,7 +137,24 @@ class VOGModuleRuntime(ModuleRuntime):
         if action == "peek_close":
             await self._peek_close_all()
             return True
+        if action == "get_config":
+            port = kwargs.get("port")
+            await self._get_config(port)
+            return True
         return False
+
+    async def _get_config(self, port: Optional[str] = None) -> None:
+        """Request config from device(s).
+
+        If port is specified, request config from that device only.
+        Otherwise, request from the first connected device.
+        """
+        if port and port in self.handlers:
+            await self.handlers[port].get_device_config()
+        elif self.handlers:
+            # Default to first connected device
+            handler = next(iter(self.handlers.values()))
+            await handler.get_device_config()
 
     # ------------------------------------------------------------------
     # Model observation

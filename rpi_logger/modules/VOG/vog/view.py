@@ -36,7 +36,7 @@ try:
 except ImportError:
     VOGConfigDialog = None
 
-ActionCallback = Optional[Callable[[str], Awaitable[None]]]
+ActionCallback = Optional[Callable[..., Awaitable[None]]]
 
 
 class _SystemPlaceholder:
@@ -315,9 +315,19 @@ class VOGTkinterGUI:
         # Handle config responses
         elif data_type == 'config' or data.get('event') == 'config':
             if self._config_dialog:
-                for key, val in data.items():
-                    if key not in ('event', 'port', 'raw'):
-                        self._config_dialog.update_fields(key, str(val))
+                # sVOG sends keyword|value responses, pass keyword as key
+                keyword = data.get('keyword')
+                value = data.get('value')
+                if keyword and value is not None:
+                    self._config_dialog.update_fields(keyword, str(value))
+
+        # Handle version responses (also populate config dialog)
+        elif data_type == 'version' or data.get('event') == 'version':
+            if self._config_dialog:
+                keyword = data.get('keyword')
+                value = data.get('value')
+                if keyword and value is not None:
+                    self._config_dialog.update_fields(keyword, str(value))
 
     # ------------------------------------------------------------------
     # Recording state management
@@ -420,9 +430,9 @@ class VOGTkinterGUI:
         root = getattr(self._notebook, 'winfo_toplevel', lambda: None)()
         self._config_dialog.show(port, parent=root)
 
-        # Request current config from device
+        # Request current config from device (pass port to get config for specific device)
         if self._action_callback and self.async_bridge:
-            self.async_bridge.run_coroutine(self._action_callback("get_config"))
+            self.async_bridge.run_coroutine(self._action_callback("get_config", port=port))
 
     async def _dispatch_config_action(self, action: str, data: Dict):
         """Handle config dialog actions."""
@@ -590,10 +600,10 @@ class VOGView:
     # ------------------------------------------------------------------
     # Internal helpers
 
-    async def _dispatch_action(self, action: str) -> None:
+    async def _dispatch_action(self, action: str, **kwargs) -> None:
         if not self.action_callback:
             return
-        await self.action_callback(action)
+        await self.action_callback(action, **kwargs)
 
     def _on_model_change(self, prop: str, value) -> None:
         if prop == "recording":
