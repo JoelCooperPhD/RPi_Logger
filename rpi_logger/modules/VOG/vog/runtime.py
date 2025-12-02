@@ -1,4 +1,342 @@
-"""VOG module runtime for VMC integration.
+"""VOG module runtime for VMC integration."""
 
-TODO: Implement in Task 15.
-"""
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from vmc.runtime import ModuleRuntime, RuntimeContext
+from vmc.runtime_helpers import BackgroundTaskManager
+from rpi_logger.modules.base.usb_serial_manager import (
+    USBDeviceConfig,
+    USBDeviceMonitor,
+    USBSerialDevice,
+)
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
+from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_file
+from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler
+
+
+# Default device identifiers for sVOG
+VOG_VID = 0x16C0
+VOG_PID = 0x0483
+
+
+class VOGModuleRuntime(ModuleRuntime):
+    """Owns USB device management and orchestrates the GUI updates."""
+
+    def __init__(self, context: RuntimeContext) -> None:
+        self.args = context.args
+        self.module_dir = context.module_dir
+        self.logger = context.logger.getChild("Runtime")
+        self.model = context.model
+        self.controller = context.controller
+        self.view = context.view
+        self.display_name = context.display_name
+
+        self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
+        self.config_file_path = self.config_path
+        self.config: Dict[str, Any] = load_config_file(self.config_path)
+
+        self.device_vid = self._coerce_int(
+            getattr(self.args, "device_vid", None) or self.config.get("device_vid"),
+            VOG_VID,
+        )
+        self.device_pid = self._coerce_int(
+            getattr(self.args, "device_pid", None) or self.config.get("device_pid"),
+            VOG_PID,
+        )
+        self.baudrate = self._coerce_int(
+            getattr(self.args, "baudrate", None) or self.config.get("baudrate"),
+            9600,
+        )
+        self.session_prefix = str(getattr(self.args, "session_prefix", self.config.get("session_prefix", "vog")))
+        self.enable_gui_commands = bool(getattr(self.args, "enable_commands", False))
+
+        self.output_root: Path = Path(getattr(self.args, "output_dir", Path("vog_data")))
+        self.session_dir: Path = self.output_root
+        self.module_subdir: str = "VOG"
+        self.module_data_dir: Path = self.session_dir
+        self.handlers: Dict[str, VOGHandler] = {}
+        self.usb_monitor: Optional[USBDeviceMonitor] = None
+        self.task_manager = BackgroundTaskManager(name="VOGRuntimeTasks", logger=self.logger)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._suppress_recording_event = False
+        self._suppress_session_event = False
+        self._recording_active = False
+        self.trial_label: str = ""
+        self.active_trial_number: int = 1
+
+    # ------------------------------------------------------------------
+    # Lifecycle hooks
+
+    async def start(self) -> None:
+        self.logger.info(
+            "Starting VOG runtime (VID=0x%04X PID=0x%04X baud=%d)",
+            self.device_vid,
+            self.device_pid,
+            self.baudrate,
+        )
+        self._loop = asyncio.get_running_loop()
+
+        if self.view:
+            self.view.bind_runtime(self)
+
+        await self._ensure_session_dir(self.model.session_dir)
+
+        self.model.subscribe(self._on_model_change)
+
+        await self._start_usb_monitor()
+        self.logger.info("VOG runtime ready; waiting for devices")
+
+    async def shutdown(self) -> None:
+        self.logger.info("Shutting down VOG runtime")
+        await self._stop_recording()
+        await self._stop_usb_monitor()
+
+    async def cleanup(self) -> None:
+        await self.task_manager.shutdown()
+        self.logger.info("VOG runtime cleanup complete")
+
+    # ------------------------------------------------------------------
+    # Command and action handling
+
+    async def handle_command(self, command: Dict[str, Any]) -> bool:
+        action = (command.get("command") or "").lower()
+        if action == "start_recording":
+            self.active_trial_number = self._coerce_trial_number(command.get("trial_number"))
+            self.trial_label = str(command.get("trial_label", "") or "")
+            session_dir = command.get("session_dir")
+            if session_dir:
+                await self._ensure_session_dir(Path(session_dir), update_model=False)
+            return True
+        if action == "stop_recording":
+            self.trial_label = ""
+            return True
+        if action == "peek_open":
+            await self._peek_open_all()
+            return True
+        if action == "peek_close":
+            await self._peek_close_all()
+            return True
+        return False
+
+    async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
+        if action == "peek_open":
+            await self._peek_open_all()
+            return True
+        if action == "peek_close":
+            await self._peek_close_all()
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Model observation
+
+    def _on_model_change(self, prop: str, value: Any) -> None:
+        if prop == "recording":
+            if self._suppress_recording_event:
+                return
+            if self._loop:
+                self._loop.create_task(self._apply_recording_state(bool(value)))
+        elif prop == "session_dir":
+            if self._suppress_session_event:
+                return
+            if value:
+                path = Path(value)
+            else:
+                path = None
+            if self._loop:
+                self._loop.create_task(self._ensure_session_dir(path, update_model=False))
+
+    async def _apply_recording_state(self, active: bool) -> None:
+        if active:
+            success = await self._start_recording()
+            if not success:
+                self._suppress_recording_event = True
+                self.model.recording = False
+                self._suppress_recording_event = False
+        else:
+            await self._stop_recording()
+
+    # ------------------------------------------------------------------
+    # USB monitor management
+
+    async def _start_usb_monitor(self) -> None:
+        config = USBDeviceConfig(
+            vid=self.device_vid,
+            pid=self.device_pid,
+            baudrate=self.baudrate,
+            device_name="sVOG",
+        )
+        self.usb_monitor = USBDeviceMonitor(
+            config=config,
+            on_connect=self._on_device_connected,
+            on_disconnect=self._on_device_disconnected,
+        )
+        await self.usb_monitor.start()
+
+    async def _stop_usb_monitor(self) -> None:
+        monitor = self.usb_monitor
+        self.usb_monitor = None
+        if monitor:
+            await monitor.stop()
+
+    # ------------------------------------------------------------------
+    # Device events
+
+    async def _on_device_connected(self, device: USBSerialDevice) -> None:
+        port = device.port
+        self.logger.info("sVOG connected on %s", port)
+        handler = VOGHandler(device, port, self.module_data_dir, system=self)
+        handler.set_data_callback(self._on_device_data)
+
+        await handler.initialize_device()
+        await handler.start()
+
+        self.handlers[port] = handler
+
+        if self.view:
+            self.view.on_device_connected(port)
+
+        if self._recording_active:
+            try:
+                await handler.start_experiment()
+            except Exception as exc:
+                self.logger.error("Failed to start experiment on new device %s: %s", port, exc)
+
+    async def _on_device_disconnected(self, port: str) -> None:
+        self.logger.info("sVOG disconnected from %s", port)
+        handler = self.handlers.pop(port, None)
+        if handler:
+            await handler.stop()
+        if self.view:
+            self.view.on_device_disconnected(port)
+
+    async def _on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
+        if self.view:
+            self.view.on_device_data(port, data_type, payload)
+
+    # ------------------------------------------------------------------
+    # Recording control
+
+    async def _start_recording(self) -> bool:
+        if not self.handlers:
+            self.logger.error("Cannot start recording - no devices connected")
+            return False
+
+        successes = []
+        failures = []
+        for port, handler in self.handlers.items():
+            try:
+                started = await handler.start_experiment()
+            except Exception as exc:
+                self.logger.error("start_experiment failed on %s: %s", port, exc)
+                started = False
+            if started:
+                successes.append((port, handler))
+            else:
+                failures.append(port)
+
+        if failures:
+            self.logger.error("Failed to start recording on: %s", ", ".join(failures))
+            for port, handler in successes:
+                try:
+                    await handler.stop_experiment()
+                except Exception as exc:
+                    self.logger.warning("Rollback stop_experiment failed on %s: %s", port, exc)
+            return False
+
+        self._recording_active = True
+        if self.view:
+            self.view.update_recording_state()
+        return True
+
+    async def _stop_recording(self) -> None:
+        if not self._recording_active:
+            return
+
+        failures = []
+        for port, handler in self.handlers.items():
+            try:
+                stopped = await handler.stop_experiment()
+            except Exception as exc:
+                self.logger.error("stop_experiment failed on %s: %s", port, exc)
+                stopped = False
+            if not stopped:
+                failures.append(port)
+
+        if failures:
+            self.logger.error("Failed to stop recording on: %s", ", ".join(failures))
+        self._recording_active = False
+        self.trial_label = ""
+        if self.view:
+            self.view.update_recording_state()
+
+    # ------------------------------------------------------------------
+    # Peek control
+
+    async def _peek_open_all(self) -> None:
+        for handler in self.handlers.values():
+            await handler.peek_open()
+
+    async def _peek_close_all(self) -> None:
+        for handler in self.handlers.values():
+            await handler.peek_close()
+
+    # ------------------------------------------------------------------
+    # Session helpers
+
+    async def _ensure_session_dir(self, new_dir: Optional[Path], update_model: bool = True) -> None:
+        if new_dir is None:
+            self.output_root.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.session_dir = self.output_root / f"{self.session_prefix}_{timestamp}"
+        else:
+            self.session_dir = Path(new_dir)
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.module_data_dir = ensure_module_data_dir(self.session_dir, self.module_subdir)
+
+        for handler in self.handlers.values():
+            handler.output_dir = self.module_data_dir
+
+        if update_model:
+            self._suppress_session_event = True
+            self.model.session_dir = self.session_dir
+            self._suppress_session_event = False
+
+    # ------------------------------------------------------------------
+    # GUI-facing helpers
+
+    def get_device_handler(self, port: str) -> Optional[VOGHandler]:
+        return self.handlers.get(port)
+
+    @property
+    def recording(self) -> bool:
+        return self._recording_active
+
+    @staticmethod
+    def _coerce_int(value: Any, default: int) -> int:
+        if isinstance(value, int):
+            return value
+        if value is None:
+            return default
+        try:
+            return int(str(value), 0)
+        except (TypeError, ValueError):
+            return default
+
+    def _coerce_trial_number(self, value: Any) -> int:
+        try:
+            candidate = int(value)
+        except (TypeError, ValueError):
+            candidate = getattr(self.model, "trial_number", None)
+            try:
+                candidate = int(candidate) if candidate is not None else 0
+            except (TypeError, ValueError):
+                candidate = 0
+        if candidate <= 0:
+            candidate = 1
+        return candidate

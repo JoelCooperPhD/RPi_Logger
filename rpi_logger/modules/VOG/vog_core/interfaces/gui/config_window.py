@@ -1,4 +1,206 @@
-"""VOG configuration dialog.
+"""VOG configuration dialog for device settings."""
 
-TODO: Implement in Task 13.
-"""
+import tkinter as tk
+from tkinter import ttk, messagebox
+from typing import TYPE_CHECKING, Optional
+import asyncio
+
+from rpi_logger.core.logging_utils import get_module_logger
+
+if TYPE_CHECKING:
+    from ...vog_system import VOGSystem
+
+
+class VOGConfigWindow:
+    """Modal dialog for configuring sVOG device settings."""
+
+    def __init__(self, parent: tk.Tk, port: str, system: 'VOGSystem'):
+        self.port = port
+        self.system = system
+        self.logger = get_module_logger("VOGConfigWindow")
+
+        # Create modal dialog
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title(f"Configure sVOG - {port}")
+        self.dialog.geometry("350x320")
+        self.dialog.resizable(False, False)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        # Config values
+        self.config_vars = {}
+
+        self._build_ui()
+        self._load_config()
+
+        # Center dialog
+        self.dialog.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - self.dialog.winfo_width()) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - self.dialog.winfo_height()) // 2
+        self.dialog.geometry(f"+{x}+{y}")
+
+    def _build_ui(self):
+        """Build the configuration dialog UI."""
+        main_frame = ttk.Frame(self.dialog, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Config name
+        row = 0
+        ttk.Label(main_frame, text="Config Name:").grid(row=row, column=0, sticky="w", pady=5)
+        self.config_vars['config_name'] = tk.StringVar()
+        ttk.Entry(main_frame, textvariable=self.config_vars['config_name'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+
+        # Max Open Time
+        row += 1
+        ttk.Label(main_frame, text="Max Open (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        self.config_vars['max_open'] = tk.StringVar()
+        ttk.Entry(main_frame, textvariable=self.config_vars['max_open'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+
+        # Max Close Time
+        row += 1
+        ttk.Label(main_frame, text="Max Close (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        self.config_vars['max_close'] = tk.StringVar()
+        ttk.Entry(main_frame, textvariable=self.config_vars['max_close'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+
+        # Debounce Time
+        row += 1
+        ttk.Label(main_frame, text="Debounce (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        self.config_vars['debounce'] = tk.StringVar()
+        ttk.Entry(main_frame, textvariable=self.config_vars['debounce'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+
+        # Click Mode
+        row += 1
+        ttk.Label(main_frame, text="Click Mode:").grid(row=row, column=0, sticky="w", pady=5)
+        self.config_vars['click_mode'] = tk.StringVar()
+        click_combo = ttk.Combobox(
+            main_frame,
+            textvariable=self.config_vars['click_mode'],
+            values=["0 - Single", "1 - Double", "2 - Hold"],
+            width=17,
+            state="readonly"
+        )
+        click_combo.grid(row=row, column=1, sticky="ew", pady=5)
+
+        # Button Control
+        row += 1
+        ttk.Label(main_frame, text="Button Control:").grid(row=row, column=0, sticky="w", pady=5)
+        self.config_vars['button_control'] = tk.StringVar()
+        btn_combo = ttk.Combobox(
+            main_frame,
+            textvariable=self.config_vars['button_control'],
+            values=["0 - Disabled", "1 - Enabled"],
+            width=17,
+            state="readonly"
+        )
+        btn_combo.grid(row=row, column=1, sticky="ew", pady=5)
+
+        # Device Version (read-only)
+        row += 1
+        ttk.Label(main_frame, text="Device Version:").grid(row=row, column=0, sticky="w", pady=5)
+        self.version_label = ttk.Label(main_frame, text="-")
+        self.version_label.grid(row=row, column=1, sticky="w", pady=5)
+
+        # Separator
+        row += 1
+        ttk.Separator(main_frame, orient=tk.HORIZONTAL).grid(row=row, column=0, columnspan=2, sticky="ew", pady=10)
+
+        # Buttons
+        row += 1
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.grid(row=row, column=0, columnspan=2, pady=10)
+
+        ttk.Button(btn_frame, text="Refresh", command=self._load_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Apply", command=self._apply_config).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="Close", command=self.dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+        main_frame.columnconfigure(1, weight=1)
+
+    def _load_config(self):
+        """Load current configuration from device."""
+        handler = self.system.get_device_handler(self.port)
+        if not handler:
+            messagebox.showerror("Error", "Device not connected", parent=self.dialog)
+            return
+
+        # Request config values
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._load_config_async(handler))
+        except RuntimeError:
+            # No event loop running, try to get values from cached config
+            self._update_ui_from_config(handler._config)
+
+    async def _load_config_async(self, handler):
+        """Async config loading."""
+        await handler.get_device_config()
+        # Give device time to respond
+        await asyncio.sleep(0.5)
+        self.dialog.after(0, lambda: self._update_ui_from_config(handler._config))
+
+    def _update_ui_from_config(self, config: dict):
+        """Update UI with config values."""
+        self.config_vars['config_name'].set(config.get('configName', ''))
+        self.config_vars['max_open'].set(config.get('configMaxOpen', ''))
+        self.config_vars['max_close'].set(config.get('configMaxClose', ''))
+        self.config_vars['debounce'].set(config.get('configDebounce', ''))
+
+        click_mode = config.get('configClickMode', '0')
+        click_labels = {"0": "0 - Single", "1": "1 - Double", "2": "2 - Hold"}
+        self.config_vars['click_mode'].set(click_labels.get(str(click_mode), f"{click_mode}"))
+
+        btn_ctrl = config.get('configButtonControl', '0')
+        btn_labels = {"0": "0 - Disabled", "1": "1 - Enabled"}
+        self.config_vars['button_control'].set(btn_labels.get(str(btn_ctrl), f"{btn_ctrl}"))
+
+        version = config.get('deviceVer', '-')
+        self.version_label.config(text=version)
+
+    def _apply_config(self):
+        """Apply configuration changes to device."""
+        handler = self.system.get_device_handler(self.port)
+        if not handler:
+            messagebox.showerror("Error", "Device not connected", parent=self.dialog)
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self._apply_config_async(handler))
+        except RuntimeError:
+            messagebox.showerror("Error", "Cannot apply config - no event loop", parent=self.dialog)
+
+    async def _apply_config_async(self, handler):
+        """Async config application."""
+        try:
+            # Apply each setting
+            config_name = self.config_vars['config_name'].get()
+            if config_name:
+                await handler.set_config_value('config_name', config_name)
+
+            max_open = self.config_vars['max_open'].get()
+            if max_open:
+                await handler.set_config_value('max_open', max_open)
+
+            max_close = self.config_vars['max_close'].get()
+            if max_close:
+                await handler.set_config_value('max_close', max_close)
+
+            debounce = self.config_vars['debounce'].get()
+            if debounce:
+                await handler.set_config_value('debounce', debounce)
+
+            click_mode = self.config_vars['click_mode'].get()
+            if click_mode:
+                # Extract numeric value from combo display
+                mode_val = click_mode.split(' - ')[0] if ' - ' in click_mode else click_mode
+                await handler.set_config_value('click_mode', mode_val)
+
+            btn_ctrl = self.config_vars['button_control'].get()
+            if btn_ctrl:
+                ctrl_val = btn_ctrl.split(' - ')[0] if ' - ' in btn_ctrl else btn_ctrl
+                await handler.set_config_value('button_control', ctrl_val)
+
+            self.dialog.after(0, lambda: messagebox.showinfo("Success", "Configuration applied", parent=self.dialog))
+
+        except Exception as e:
+            self.logger.error("Failed to apply config: %s", e)
+            self.dialog.after(0, lambda: messagebox.showerror("Error", f"Failed to apply: {e}", parent=self.dialog))

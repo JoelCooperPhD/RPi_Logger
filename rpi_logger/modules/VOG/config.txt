@@ -7,3 +7,4 @@ baudrate = 9600
 window_geometry = 400x300
 output_dir = vog_data
 log_level = info
+preview_resolution = auto
