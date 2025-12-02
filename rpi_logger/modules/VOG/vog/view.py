@@ -315,11 +315,31 @@ class VOGTkinterGUI:
         # Handle config responses
         elif data_type == 'config' or data.get('event') == 'config':
             if self._config_dialog:
-                # sVOG sends keyword|value responses, pass keyword as key
-                keyword = data.get('keyword')
-                value = data.get('value')
-                if keyword and value is not None:
-                    self._config_dialog.update_fields(keyword, str(value))
+                # wVOG sends config dict with parsed values
+                config_dict = data.get('config')
+                if config_dict and isinstance(config_dict, dict):
+                    # Map wVOG keys to config dialog keys
+                    key_map = {
+                        'open_time': 'configMaxOpen',
+                        'opn': 'configMaxOpen',
+                        'close_time': 'configMaxClose',
+                        'cls': 'configMaxClose',
+                        'debounce': 'configDebounce',
+                        'dbc': 'configDebounce',
+                        'experiment_type': 'configName',
+                        'typ': 'configName',
+                    }
+                    for wvog_key, dialog_key in key_map.items():
+                        if wvog_key in config_dict:
+                            self._config_dialog.update_fields(dialog_key, str(config_dict[wvog_key]))
+                    # wVOG doesn't report firmware version, use device type
+                    self._config_dialog.update_fields('deviceVer', 'wVOG')
+                else:
+                    # sVOG sends keyword|value responses
+                    keyword = data.get('keyword')
+                    value = data.get('value')
+                    if keyword and value is not None:
+                        self._config_dialog.update_fields(keyword, str(value))
 
         # Handle version responses (also populate config dialog)
         elif data_type == 'version' or data.get('event') == 'version':
