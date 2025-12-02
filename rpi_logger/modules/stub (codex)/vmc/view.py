@@ -129,7 +129,7 @@ class StubCodexView:
         self._geometry_save_delay = 0.25
         self.io_view_frame: Optional[ttk.LabelFrame] = None
         self.io_view_visible_var: Optional[tk.BooleanVar] = None
-        self.stub_frame: Optional[ttk.LabelFrame] = None
+        self.stub_frame: Optional[ttk.Frame] = None
         self._resize_active = False
         self._resize_reset_handle: Optional[str] = None
         self._resize_idle_delay = 0.15
@@ -218,8 +218,7 @@ class StubCodexView:
         main_frame.rowconfigure(2, weight=0)
         self._main_frame = main_frame
 
-        preview_label = f"{self.display_name} Preview" if self.display_name else "Module Preview"
-        self.stub_frame = ttk.LabelFrame(main_frame, text=preview_label, padding="10")
+        self.stub_frame = ttk.Frame(main_frame, padding="0")
         self.stub_frame.grid(row=0, column=0, sticky="nsew")
         self.logger.info("Stub frame added to main layout")
 
@@ -267,12 +266,8 @@ class StubCodexView:
             pass
 
     def set_preview_title(self, title: str) -> None:
-        if self.stub_frame is None:
-            return
-        try:
-            self.stub_frame.config(text=title)
-        except tk.TclError:
-            pass
+        """No-op since stub_frame is now a plain Frame without a label."""
+        pass
 
     def _create_menu_bar(self) -> None:
         menubar = tk.Menu(self.root)
