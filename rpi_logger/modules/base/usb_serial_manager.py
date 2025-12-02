@@ -271,7 +271,7 @@ class USBDeviceMonitor:
             ports = await asyncio.to_thread(serial.tools.list_ports.comports)
             current_ports = set()
 
-            logger.info(f"Scanning {len(ports)} serial ports for {self.config.device_name}")
+            logger.debug(f"Scanning {len(ports)} serial ports for {self.config.device_name}")
 
             for port_info in ports:
                 vid_str = f"0x{port_info.vid:04X}" if port_info.vid else "None"
@@ -280,7 +280,7 @@ class USBDeviceMonitor:
                 if self.config.matches_port(port_info):
                     port_name = port_info.device
                     current_ports.add(port_name)
-                    logger.info(f"Found matching {self.config.device_name}: {port_name} (VID={vid_str}, PID={pid_str})")
+                    logger.debug(f"Found matching {self.config.device_name}: {port_name} (VID={vid_str}, PID={pid_str})")
 
                     if port_name not in self._known_ports:
                         await self._handle_new_device(port_name)
@@ -289,7 +289,7 @@ class USBDeviceMonitor:
                         logger.debug(f"Port {port_info.device} does not match (VID={vid_str}, PID={pid_str})")
 
             if not current_ports:
-                logger.info(f"No matching {self.config.device_name} devices found in scan")
+                logger.debug(f"No matching {self.config.device_name} devices found in scan")
 
             disconnected_ports = self._known_ports - current_ports
             for port_name in disconnected_ports:

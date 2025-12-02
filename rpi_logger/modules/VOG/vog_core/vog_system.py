@@ -1,4 +1,4 @@
-"""VOG system coordinator with USB device management."""
+"""VOG system coordinator with USB device management for sVOG and wVOG devices."""
 
 import asyncio
 from pathlib import Path
@@ -15,18 +15,32 @@ from rpi_logger.core.commands import StatusMessage
 
 from . import VOGInitializationError
 from .vog_handler import VOGHandler
+from .protocols import SVOGProtocol, WVOGProtocol
 
 
 class VOGSystem(BaseSystem, RecordingStateMixin):
-    """Main system coordinator for VOG module."""
+    """Main system coordinator for VOG module.
+
+    Supports both sVOG (wired) and wVOG (wireless) devices with automatic
+    protocol detection based on USB VID/PID.
+    """
 
     DEFER_DEVICE_INIT_IN_GUI = True
+
+    # Device identification constants
+    SVOG_VID = 0x16C0
+    SVOG_PID = 0x0483
+    SVOG_BAUD = 115200  # Firmware uses 115200
+
+    WVOG_VID = 0xf057
+    WVOG_PID = 0x08AE
+    WVOG_BAUD = 57600
 
     def __init__(self, args):
         super().__init__(args)
         RecordingStateMixin.__init__(self)
 
-        self.usb_monitor: Optional[USBDeviceMonitor] = None
+        self.usb_monitors: Dict[str, USBDeviceMonitor] = {}
         self.device_handlers: Dict[str, VOGHandler] = {}
         self.output_dir: Optional[Path] = None
 
@@ -34,7 +48,7 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         self.active_trial_number: int = 0
 
     async def _initialize_devices(self) -> None:
-        """Initialize USB device monitoring."""
+        """Initialize USB device monitoring for sVOG and wVOG devices."""
         try:
             self.logger.info("Initializing VOG module...")
             self.lifecycle_timer.mark_phase("device_discovery_start")
@@ -48,24 +62,19 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             self.session_dir.mkdir(parents=True, exist_ok=True)
             self.output_dir = self.session_dir
 
-            # Get VID/PID from args
-            vid = int(self.args.device_vid) if isinstance(self.args.device_vid, str) else self.args.device_vid
-            pid = int(self.args.device_pid) if isinstance(self.args.device_pid, str) else self.args.device_pid
+            # Configure device monitors for both device types
+            device_configs = self._get_device_configs()
 
-            device_config = USBDeviceConfig(
-                vid=vid,
-                pid=pid,
-                baudrate=self.args.baudrate,
-                device_name="sVOG"
-            )
-
-            self.usb_monitor = USBDeviceMonitor(
-                config=device_config,
-                on_connect=self._on_device_connected,
-                on_disconnect=self._on_device_disconnected
-            )
-
-            await self.usb_monitor.start()
+            for device_type, config in device_configs.items():
+                monitor = USBDeviceMonitor(
+                    config=config,
+                    on_connect=self._on_device_connected,
+                    on_disconnect=self._on_device_disconnected
+                )
+                await monitor.start()
+                self.usb_monitors[device_type] = monitor
+                self.logger.info("Started USB monitor for %s (VID=%s, PID=%s)",
+                                 device_type, hex(config.vid), hex(config.pid))
 
             self.initialized = True
             self.lifecycle_timer.mark_phase("device_discovery_complete")
@@ -79,9 +88,8 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
                 )
                 StatusMessage.send_with_timing("initialized", init_duration, {
                     "device_type": "usb_vog",
-                    "usb_monitor_active": True,
-                    "vid": hex(vid),
-                    "pid": hex(pid)
+                    "usb_monitors_active": len(self.usb_monitors),
+                    "devices": list(device_configs.keys())
                 })
 
         except VOGInitializationError:
@@ -91,25 +99,120 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             self.logger.error(error_msg, exc_info=True)
             raise VOGInitializationError(error_msg) from e
 
+    def _get_device_configs(self) -> Dict[str, USBDeviceConfig]:
+        """Get USB device configurations for monitored devices.
+
+        Returns configuration for both sVOG and wVOG devices. If VID/PID
+        are specified in args, those are used for the primary device.
+        """
+        configs = {}
+
+        # Get primary device from args (maintains backwards compatibility)
+        primary_vid = self._parse_hex_value(self.args.device_vid)
+        primary_pid = self._parse_hex_value(self.args.device_pid)
+        primary_baud = self.args.baudrate
+
+        # Determine which device type args specify
+        if primary_vid == self.WVOG_VID and primary_pid == self.WVOG_PID:
+            # Args specify wVOG
+            configs['wvog'] = USBDeviceConfig(
+                vid=primary_vid,
+                pid=primary_pid,
+                baudrate=primary_baud or self.WVOG_BAUD,
+                device_name="wVOG"
+            )
+            # Also monitor sVOG
+            configs['svog'] = USBDeviceConfig(
+                vid=self.SVOG_VID,
+                pid=self.SVOG_PID,
+                baudrate=self.SVOG_BAUD,
+                device_name="sVOG"
+            )
+        elif primary_vid == self.SVOG_VID and primary_pid == self.SVOG_PID:
+            # Args specify sVOG
+            configs['svog'] = USBDeviceConfig(
+                vid=primary_vid,
+                pid=primary_pid,
+                baudrate=primary_baud or self.SVOG_BAUD,
+                device_name="sVOG"
+            )
+            # Also monitor wVOG
+            configs['wvog'] = USBDeviceConfig(
+                vid=self.WVOG_VID,
+                pid=self.WVOG_PID,
+                baudrate=self.WVOG_BAUD,
+                device_name="wVOG"
+            )
+        else:
+            # Unknown or no VID/PID specified - monitor both
+            configs['svog'] = USBDeviceConfig(
+                vid=self.SVOG_VID,
+                pid=self.SVOG_PID,
+                baudrate=self.SVOG_BAUD,
+                device_name="sVOG"
+            )
+            configs['wvog'] = USBDeviceConfig(
+                vid=self.WVOG_VID,
+                pid=self.WVOG_PID,
+                baudrate=self.WVOG_BAUD,
+                device_name="wVOG"
+            )
+
+        return configs
+
+    def _parse_hex_value(self, value) -> int:
+        """Parse a hex value from string or int."""
+        if isinstance(value, str):
+            return int(value, 0)  # Auto-detect base
+        return value
+
+    def _determine_device_type(self, device: USBSerialDevice) -> str:
+        """Determine device type from VID/PID."""
+        # USBSerialDevice stores VID/PID in its config
+        config = getattr(device, 'config', None)
+        if config:
+            vid = getattr(config, 'vid', None)
+            pid = getattr(config, 'pid', None)
+        else:
+            vid = getattr(device, 'vid', None)
+            pid = getattr(device, 'pid', None)
+
+        if vid == self.WVOG_VID and pid == self.WVOG_PID:
+            return 'wvog'
+        return 'svog'
+
     async def _on_device_connected(self, device: USBSerialDevice):
         """Handle new device connection."""
-        self.logger.info("VOGSystem: sVOG device connected on %s", device.port)
+        device_type = self._determine_device_type(device)
+        self.logger.info("VOGSystem: %s device connected on %s", device_type.upper(), device.port)
 
-        handler = VOGHandler(device, device.port, self.output_dir, system=self)
+        # Create appropriate protocol
+        if device_type == 'wvog':
+            protocol = WVOGProtocol()
+        else:
+            protocol = SVOGProtocol()
+
+        handler = VOGHandler(
+            device, device.port, self.output_dir,
+            system=self, protocol=protocol
+        )
         handler.set_data_callback(self._on_device_data)
 
         await handler.initialize_device()
         await handler.start()
 
         self.device_handlers[device.port] = handler
-        self.logger.info("VOGSystem: Handler registered for %s", device.port)
+        self.logger.info("VOGSystem: Handler registered for %s (%s)", device.port, device_type)
 
         if self.mode_instance and hasattr(self.mode_instance, 'on_device_connected'):
             await self.mode_instance.on_device_connected(device.port)
 
     async def _on_device_disconnected(self, port: str):
         """Handle device disconnection."""
-        self.logger.info("sVOG device disconnected from %s", port)
+        handler = self.device_handlers.get(port)
+        device_type = handler.device_type if handler else 'unknown'
+
+        self.logger.info("%s device disconnected from %s", device_type.upper(), port)
 
         if port in self.device_handlers:
             handler = self.device_handlers.pop(port)
@@ -212,16 +315,24 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         self.logger.info("VOG recording stopped for all devices")
         return True
 
-    async def peek_open_all(self) -> bool:
-        """Send peek open command to all devices."""
+    async def peek_open_all(self, lens: str = 'x') -> bool:
+        """Send peek/lens open command to all devices.
+
+        Args:
+            lens: 'a', 'b', or 'x' (both) - only affects wVOG devices
+        """
         for handler in self.device_handlers.values():
-            await handler.peek_open()
+            await handler.peek_open(lens)
         return True
 
-    async def peek_close_all(self) -> bool:
-        """Send peek close command to all devices."""
+    async def peek_close_all(self, lens: str = 'x') -> bool:
+        """Send peek/lens close command to all devices.
+
+        Args:
+            lens: 'a', 'b', or 'x' (both) - only affects wVOG devices
+        """
         for handler in self.device_handlers.values():
-            await handler.peek_close()
+            await handler.peek_close(lens)
         return True
 
     async def cleanup(self):
@@ -237,9 +348,13 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             if not stopped:
                 self.logger.warning("Recording did not stop cleanly during cleanup")
 
-        if self.usb_monitor:
-            await self.usb_monitor.stop()
+        # Stop all USB monitors
+        for device_type, monitor in self.usb_monitors.items():
+            self.logger.debug("Stopping USB monitor for %s", device_type)
+            await monitor.stop()
+        self.usb_monitors.clear()
 
+        # Stop all handlers
         for handler in list(self.device_handlers.values()):
             try:
                 await handler.stop()
@@ -256,11 +371,23 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         self.logger.info("VOG cleanup completed")
 
     def get_connected_devices(self) -> Dict[str, USBSerialDevice]:
-        """Get all connected USB devices."""
-        if self.usb_monitor:
-            return self.usb_monitor.get_devices()
-        return {}
+        """Get all connected USB devices from all monitors."""
+        devices = {}
+        for monitor in self.usb_monitors.values():
+            devices.update(monitor.get_devices())
+        return devices
 
     def get_device_handler(self, port: str) -> Optional[VOGHandler]:
         """Get handler for a specific port."""
         return self.device_handlers.get(port)
+
+    def get_handlers_by_type(self, device_type: str) -> List[VOGHandler]:
+        """Get all handlers of a specific device type.
+
+        Args:
+            device_type: 'svog' or 'wvog'
+
+        Returns:
+            List of handlers matching the device type
+        """
+        return [h for h in self.device_handlers.values() if h.device_type == device_type]

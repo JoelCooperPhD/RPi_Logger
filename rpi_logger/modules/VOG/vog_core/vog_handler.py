@@ -1,4 +1,4 @@
-"""VOG device handler for serial communication."""
+"""VOG device handler for serial communication with protocol abstraction."""
 
 import asyncio
 from pathlib import Path
@@ -10,18 +10,30 @@ from rpi_logger.modules.base import USBSerialDevice
 from rpi_logger.modules.base.storage_utils import module_filename_prefix
 from rpi_logger.core.commands import StatusMessage
 
-from .constants import SVOG_COMMANDS, SVOG_RESPONSE_KEYWORDS, SVOG_RESPONSE_TYPES, CSV_HEADER
+from .protocols import BaseVOGProtocol, SVOGProtocol, WVOGProtocol, VOGDataPacket, VOGResponse
+from .protocols.base_protocol import ResponseType
 
 
 class VOGHandler:
-    """Per-device handler for sVOG serial communication."""
+    """Per-device handler for VOG serial communication.
+
+    Uses protocol abstraction to support both sVOG (wired) and wVOG (wireless) devices.
+    The protocol is automatically detected based on device VID/PID.
+    """
+
+    # Device identification
+    SVOG_VID = 0x16C0
+    SVOG_PID = 0x0483
+    WVOG_VID = 0xf057
+    WVOG_PID = 0x08AE
 
     def __init__(
         self,
         device: USBSerialDevice,
         port: str,
         output_dir: Path,
-        system: Optional[Any] = None
+        system: Optional[Any] = None,
+        protocol: Optional[BaseVOGProtocol] = None
     ):
         self.device = device
         self.port = port
@@ -32,12 +44,51 @@ class VOGHandler:
         self._running = False
         self._data_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
 
+        # Auto-detect protocol if not provided
+        if protocol is None:
+            self.protocol = self._detect_protocol()
+        else:
+            self.protocol = protocol
+
         # Device state
         self._config: Dict[str, Any] = {}
         self._trial_number = 0
         self._recording_start_time: Optional[float] = None
+        self._battery_percent: int = 0
 
-        self.logger = get_module_logger("VOGHandler")
+        self.logger = get_module_logger(f"VOGHandler[{self.protocol.device_type}]")
+
+    def _detect_protocol(self) -> BaseVOGProtocol:
+        """Detect protocol based on device VID/PID."""
+        # Check device config for VID/PID (USBSerialDevice stores these in config)
+        config = getattr(self.device, 'config', None)
+        if config:
+            vid = getattr(config, 'vid', None)
+            pid = getattr(config, 'pid', None)
+        else:
+            vid = getattr(self.device, 'vid', None)
+            pid = getattr(self.device, 'pid', None)
+
+        if vid == self.WVOG_VID and pid == self.WVOG_PID:
+            return WVOGProtocol()
+
+        # Default to sVOG
+        return SVOGProtocol()
+
+    @property
+    def device_type(self) -> str:
+        """Return device type identifier."""
+        return self.protocol.device_type
+
+    @property
+    def supports_dual_lens(self) -> bool:
+        """Return True if device supports dual lens control."""
+        return self.protocol.supports_dual_lens
+
+    @property
+    def supports_battery(self) -> bool:
+        """Return True if device reports battery status."""
+        return self.protocol.supports_battery
 
     def set_data_callback(self, callback: Callable[[str, str, Dict[str, Any]], None]):
         """Set callback for data events."""
@@ -52,7 +103,7 @@ class VOGHandler:
         loop = asyncio.get_running_loop()
         self._loop = loop
         self._read_task = loop.create_task(self._read_loop())
-        self.logger.info("Started VOG handler for %s", self.port)
+        self.logger.info("Started VOG handler (%s) for %s", self.device_type, self.port)
 
     async def stop(self):
         """Stop the async read loop."""
@@ -100,29 +151,26 @@ class VOGHandler:
             pass
 
     async def send_command(self, command: str, value: Optional[str] = None) -> bool:
-        """Send a command to the sVOG device.
+        """Send a command to the VOG device.
 
         Args:
-            command: Command key from SVOG_COMMANDS
+            command: Command key (e.g., 'exp_start', 'get_config')
             value: Optional value for set commands
 
         Returns:
             True if command was sent successfully
         """
-        if command not in SVOG_COMMANDS:
-            self.logger.warning("Unknown VOG command: %s", command)
+        if not self.protocol.has_command(command):
+            self.logger.warning("Unknown %s command: %s", self.device_type, command)
             return False
 
-        cmd_string = SVOG_COMMANDS[command]
+        data = self.protocol.format_command(command, value)
 
-        # Substitute value if needed
-        if value is not None and '{val}' in cmd_string:
-            cmd_string = cmd_string.format(val=value)
+        if not data:
+            self.logger.warning("Failed to format command: %s", command)
+            return False
 
-        message = f"{cmd_string}\n"
-        data = message.encode('utf-8')
-
-        self.logger.debug("Sending to %s: %s", self.port, cmd_string)
+        self.logger.debug("Sending to %s: %s", self.port, data.decode('utf-8').strip())
         success = await self.device.write(data)
 
         if success:
@@ -133,13 +181,13 @@ class VOGHandler:
         return success
 
     async def initialize_device(self) -> bool:
-        """Initialize the sVOG device."""
-        self.logger.info("Initializing sVOG device on %s", self.port)
+        """Initialize the VOG device."""
+        self.logger.info("Initializing %s device on %s", self.device_type.upper(), self.port)
         return True
 
     async def close_device(self) -> bool:
-        """Close the sVOG device."""
-        self.logger.info("Closing sVOG device on %s", self.port)
+        """Close the VOG device."""
+        self.logger.info("Closing %s device on %s", self.device_type.upper(), self.port)
         return True
 
     async def start_experiment(self) -> bool:
@@ -166,31 +214,53 @@ class VOGHandler:
         self.logger.info("Stopping trial on %s", self.port)
         return await self.send_command('trial_stop')
 
-    async def peek_open(self) -> bool:
-        """Send peek open command."""
+    async def peek_open(self, lens: str = 'x') -> bool:
+        """Send peek/lens open command.
+
+        Args:
+            lens: 'a', 'b', or 'x' (both) - only used for wVOG
+        """
+        if self.supports_dual_lens:
+            return await self.send_command(f'lens_open_{lens.lower()}')
         return await self.send_command('peek_open')
 
-    async def peek_close(self) -> bool:
-        """Send peek close command."""
+    async def peek_close(self, lens: str = 'x') -> bool:
+        """Send peek/lens close command.
+
+        Args:
+            lens: 'a', 'b', or 'x' (both) - only used for wVOG
+        """
+        if self.supports_dual_lens:
+            return await self.send_command(f'lens_close_{lens.lower()}')
         return await self.send_command('peek_close')
 
     async def get_device_config(self) -> Dict[str, Any]:
-        """Request all configuration values from device."""
+        """Request configuration from device.
+
+        For sVOG: Sends individual get commands rapidly (no delay between commands,
+        matching RS_Logger behavior).
+        For wVOG: Sends single get_config command which returns all values.
+        """
         self.logger.debug("Requesting configuration from %s", self.port)
 
-        commands = [
-            'get_device_ver',
-            'get_config_name',
-            'get_max_open',
-            'get_max_close',
-            'get_debounce',
-            'get_click_mode',
-            'get_button_control',
-        ]
-
-        for cmd in commands:
-            await self.send_command(cmd)
-            await asyncio.sleep(0.05)  # Small delay between commands
+        if self.device_type == 'wvog':
+            # wVOG returns all config in one command
+            await self.send_command('get_config')
+        else:
+            # sVOG: send individual get commands rapidly (no delay)
+            # RS_Logger sends these without any delay between commands
+            commands = [
+                'get_device_ver',
+                'get_config_name',
+                'get_max_open',
+                'get_max_close',
+                'get_debounce',
+                'get_click_mode',
+                'get_button_control',
+            ]
+            for cmd in commands:
+                await self.send_command(cmd)
+                # No delay - RS_Logger sends commands in rapid succession
 
         return self._config
 
@@ -198,18 +268,29 @@ class VOGHandler:
         """Set a configuration value on the device.
 
         Args:
-            param: Parameter name (e.g., 'config_name', 'max_open')
+            param: Parameter name
             value: Value to set
 
         Returns:
             True if command was sent successfully
         """
-        command = f'set_{param}'
-        if command not in SVOG_COMMANDS:
-            self.logger.warning("Unknown config parameter: %s", param)
-            return False
+        if self.device_type == 'wvog':
+            # wVOG uses set>{key},{value} format
+            return await self.send_command('set_config', f'{param},{value}')
+        else:
+            # sVOG uses separate commands for each parameter
+            command = f'set_{param}'
+            if not self.protocol.has_command(command):
+                self.logger.warning("Unknown config parameter: %s", param)
+                return False
+            return await self.send_command(command, value)
 
-        return await self.send_command(command, value)
+    async def get_battery(self) -> int:
+        """Request battery status (wVOG only)."""
+        if not self.supports_battery:
+            return -1
+        await self.send_command('get_battery')
+        return self._battery_percent
 
     async def _read_loop(self):
         """Main async read loop for incoming data."""
@@ -232,61 +313,48 @@ class VOGHandler:
         self.logger.debug("Response from %s: %s", self.port, repr(response))
 
         try:
-            # sVOG responses are in format: keyword|value
-            if '|' not in response:
-                self.logger.debug("Non-standard response (no pipe): %s", response)
-                return
+            parsed = self.protocol.parse_response(response)
 
-            parts = response.split('|', 1)
-            keyword = parts[0]
-            value = parts[1] if len(parts) > 1 else ''
-
-            # Find matching response keyword
-            response_type = None
-            matched_keyword = None
-
-            for kw in SVOG_RESPONSE_KEYWORDS:
-                if kw in keyword:
-                    matched_keyword = kw
-                    response_type = SVOG_RESPONSE_TYPES.get(kw)
-                    break
-
-            if not response_type:
-                self.logger.debug("Unrecognized response keyword: %s", keyword)
+            if parsed is None:
+                self.logger.debug("Unrecognized response: %s", response)
                 return
 
             data = {
-                'keyword': matched_keyword,
-                'value': value,
-                'raw': response,
+                'keyword': parsed.keyword,
+                'value': parsed.value,
+                'raw': parsed.raw,
+                'event': parsed.response_type.value,
             }
+            data.update(parsed.data)
 
-            if response_type == 'version':
-                self._config['deviceVer'] = value
-                data['event'] = 'version'
+            # Process by response type
+            if parsed.response_type == ResponseType.VERSION:
+                self._config['deviceVer'] = parsed.value
 
-            elif response_type == 'config':
-                self._config[matched_keyword] = value
-                data['event'] = 'config'
+            elif parsed.response_type == ResponseType.CONFIG:
+                if self.device_type == 'wvog':
+                    # wVOG returns all config at once
+                    self._config.update(parsed.data.get('config', {}))
+                else:
+                    # sVOG returns one config value at a time
+                    self._config[parsed.keyword] = parsed.value
 
-            elif response_type == 'stimulus':
-                data['event'] = 'stimulus'
-                # Parse stimulus state (typically 0 or 1)
-                try:
-                    data['state'] = int(value)
-                except ValueError:
-                    data['state'] = value
+            elif parsed.response_type == ResponseType.BATTERY:
+                self._battery_percent = parsed.data.get('percent', 0)
+                self._config['battery'] = self._battery_percent
 
-            elif response_type == 'data':
-                data['event'] = 'data'
-                await self._process_data_response(value, data)
+            elif parsed.response_type == ResponseType.STIMULUS:
+                data['state'] = parsed.data.get('state', 0)
+
+            elif parsed.response_type == ResponseType.DATA:
+                await self._process_data_response(parsed.value, data)
 
             # Dispatch event
-            await self._dispatch_data_event(response_type, data)
+            await self._dispatch_data_event(parsed.response_type.value, data)
 
             # Send status message if GUI commands enabled
             if self.system and getattr(self.system, 'enable_gui_commands', False):
-                payload = {'port': self.port}
+                payload = {'port': self.port, 'device_type': self.device_type}
                 payload.update(data)
                 StatusMessage.send('vog_event', payload)
 
@@ -294,22 +362,33 @@ class VOGHandler:
             self.logger.error("Error processing response from %s: %s", self.port, e)
 
     async def _process_data_response(self, value: str, data: Dict[str, Any]):
-        """Process a data response and log to CSV.
+        """Process a data response and log to CSV."""
+        # Skip empty values (e.g., from 'end' marker)
+        if not value or not value.strip():
+            return
 
-        Data format from device: trial_number,shutter_open,shutter_closed
-        """
-        try:
-            parts = value.split(',')
-            if len(parts) >= 3:
-                data['trial_number'] = int(parts[0]) if parts[0] else self._trial_number
-                data['shutter_open'] = int(parts[1]) if parts[1] else 0
-                data['shutter_closed'] = int(parts[2]) if parts[2] else 0
+        port_clean = self.port.lstrip('/').replace('/', '_').replace('\\', '_')
+        device_id = f"{self.device_type.upper()}_{port_clean}"
 
-                # Log to CSV
-                await self._log_trial_data(data)
+        packet = self.protocol.parse_data_response(value, device_id)
 
-        except (ValueError, IndexError) as e:
-            self.logger.warning("Could not parse data response: %s - %s", value, e)
+        if packet is None:
+            self.logger.warning("Could not parse data response: %s", value)
+            return
+
+        # Update data dict with parsed values
+        data['trial_number'] = packet.trial_number
+        data['shutter_open'] = packet.shutter_open
+        data['shutter_closed'] = packet.shutter_closed
+
+        if self.device_type == 'wvog':
+            data['shutter_total'] = packet.shutter_total
+            data['lens'] = packet.lens
+            data['battery_percent'] = packet.battery_percent
+            data['device_unix_time'] = packet.device_unix_time
+
+        # Log to CSV
+        await self._log_trial_data(packet)
 
     async def _dispatch_data_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """Dispatch data event to callback."""
@@ -324,12 +403,12 @@ class VOGHandler:
         except Exception as exc:
             self.logger.error("Error in data callback for %s: %s", self.port, exc)
 
-    async def _log_trial_data(self, data: Dict[str, Any]):
+    async def _log_trial_data(self, packet: VOGDataPacket):
         """Log trial data to CSV file."""
         try:
             await asyncio.to_thread(self.output_dir.mkdir, parents=True, exist_ok=True)
 
-            trial_number = data.get('trial_number', self._trial_number or 1)
+            trial_number = packet.trial_number or self._trial_number or 1
             prefix = module_filename_prefix(self.output_dir, "VOG", trial_number, code="VOG")
             port_name = self.port.lstrip('/').replace('/', '_').replace('\\', '_').lower()
             data_file = self.output_dir / f"{prefix}_{port_name}.csv"
@@ -337,16 +416,14 @@ class VOGHandler:
             file_exists = await asyncio.to_thread(data_file.exists)
 
             if not file_exists:
+                header = self.protocol.csv_header
+
                 def write_header():
                     with open(data_file, 'w', encoding='utf-8') as f:
-                        f.write(CSV_HEADER + '\n')
+                        f.write(header + '\n')
 
                 await asyncio.to_thread(write_header)
                 self.logger.info("Created VOG data file: %s", data_file.name)
-
-            # Build CSV line
-            port_clean = self.port.lstrip('/').replace('/', '_').replace('\\', '_')
-            device_id = f"sVOG_{port_clean}"
 
             # Get label from system or use trial number
             if self.system and hasattr(self.system, 'trial_label') and self.system.trial_label:
@@ -362,29 +439,40 @@ class VOGHandler:
             else:
                 ms_since_record = 0
 
-            shutter_open = data.get('shutter_open', '')
-            shutter_closed = data.get('shutter_closed', '')
-
-            line = f"{device_id}, {label}, {unix_time}, {ms_since_record}, {trial_number}, {shutter_open}, {shutter_closed}\n"
+            # Format CSV line based on device type
+            if self.device_type == 'wvog' and hasattr(self.protocol, 'to_extended_csv_row'):
+                line = self.protocol.to_extended_csv_row(packet, label, unix_time, ms_since_record)
+            else:
+                line = packet.to_csv_row(label, unix_time, ms_since_record)
 
             def append_line():
                 with open(data_file, 'a', encoding='utf-8') as f:
-                    f.write(line)
+                    f.write(line + '\n')
 
             await asyncio.to_thread(append_line)
-            self.logger.debug("Logged trial: T=%s, Open=%s, Closed=%s", trial_number, shutter_open, shutter_closed)
+            self.logger.debug(
+                "Logged trial: T=%s, Open=%s, Closed=%s",
+                trial_number, packet.shutter_open, packet.shutter_closed
+            )
 
             # Dispatch logged event
             log_payload = {
-                'device_id': device_id,
+                'device_id': packet.device_id,
+                'device_type': self.device_type,
                 'label': label,
                 'unix_time': unix_time,
                 'ms_since_record': ms_since_record,
                 'trial_number': trial_number,
-                'shutter_open': shutter_open,
-                'shutter_closed': shutter_closed,
+                'shutter_open': packet.shutter_open,
+                'shutter_closed': packet.shutter_closed,
                 'file_path': str(data_file),
             }
+
+            if self.device_type == 'wvog':
+                log_payload['shutter_total'] = packet.shutter_total
+                log_payload['lens'] = packet.lens
+                log_payload['battery_percent'] = packet.battery_percent
+
             await self._dispatch_data_event('trial_logged', log_payload)
 
         except Exception as e:
