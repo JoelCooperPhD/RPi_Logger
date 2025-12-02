@@ -1,0 +1,9 @@
+display_name = VOG
+visible = true
+enabled = true
+device_vid = 0x16C0
+device_pid = 0x0483
+baudrate = 9600
+window_geometry = 400x300
+output_dir = vog_data
+log_level = info

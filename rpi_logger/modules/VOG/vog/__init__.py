@@ -1,0 +1,1 @@
+"""VOG VMC integration module."""
