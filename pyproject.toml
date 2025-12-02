@@ -20,6 +20,12 @@ dependencies = [
     "matplotlib>=3.7.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pyinstaller>=6.0.0",
+    "appimage-builder>=1.0.0; sys_platform == 'linux'",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

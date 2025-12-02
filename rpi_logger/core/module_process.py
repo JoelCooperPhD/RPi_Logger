@@ -10,7 +10,7 @@ from .commands import CommandMessage, StatusMessage, StatusType
 from .module_discovery import ModuleInfo
 from .config_manager import get_config_manager
 from .window_manager import WindowGeometry
-from .paths import PROJECT_ROOT
+from .paths import PROJECT_ROOT, _is_frozen
 from rpi_logger.modules.base import gui_utils
 
 
@@ -70,7 +70,6 @@ class ModuleProcess:
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
-            venv_python = self._find_venv_python()
             mode = await self._determine_start_mode()
 
             base_args = [
@@ -93,10 +92,20 @@ class ModuleProcess:
                     "--window-geometry", geometry_str
                 ])
 
-            if venv_python:
-                cmd = [venv_python, str(self.module_info.entry_point)] + base_args
+            # Determine how to run the module
+            if _is_frozen():
+                # In PyInstaller bundle, use the frozen executable with --run-module
+                # This routes through __main__.py which dispatches to the correct module
+                module_id = self.module_info.module_id
+                self.logger.info("Running in frozen mode, launching module: %s", module_id)
+                cmd = [sys.executable, "--run-module", module_id] + base_args
             else:
-                cmd = [sys.executable, str(self.module_info.entry_point)] + base_args
+                # Normal development mode - use venv python if available
+                venv_python = self._find_venv_python()
+                if venv_python:
+                    cmd = [venv_python, str(self.module_info.entry_point)] + base_args
+                else:
+                    cmd = [sys.executable, str(self.module_info.entry_point)] + base_args
 
             self.logger.debug("Command: %s", ' '.join(cmd))
 

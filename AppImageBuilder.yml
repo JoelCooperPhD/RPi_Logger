@@ -1,0 +1,72 @@
+# AppImageBuilder configuration for RPi Logger
+#
+# To build locally:
+#   1. First build with PyInstaller: pyinstaller rpi_logger.spec
+#   2. Then build AppImage: appimage-builder --recipe AppImageBuilder.yml
+#
+# Install appimage-builder: pip install appimage-builder
+
+version: 1
+script:
+  # Remove any previous build artifacts
+  - rm -rf AppDir || true
+  - mkdir -p AppDir/usr/bin
+  - mkdir -p AppDir/usr/share/applications
+  - mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+  - mkdir -p AppDir/usr/share/metainfo
+
+  # Copy PyInstaller output
+  - cp -r dist/rpi-logger/* AppDir/usr/bin/
+
+  # Copy icon
+  - cp rpi_logger/core/ui/logo_100.png AppDir/usr/share/icons/hicolor/256x256/apps/rpi-logger.png
+
+AppDir:
+  path: ./AppDir
+
+  app_info:
+    id: com.rpilogger.app
+    name: RPi Logger
+    icon: rpi-logger
+    version: 0.1.0
+    exec: usr/bin/rpi-logger
+    exec_args: $@
+
+  apt:
+    arch: amd64
+    sources:
+      - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse'
+        key_url: 'http://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3B4FE6ACC0B21F32'
+    include:
+      - libasound2
+      - libportaudio2
+      - libsndfile1
+      - libgl1-mesa-glx
+      - libglib2.0-0
+      - libfontconfig1
+      - libfreetype6
+      - libx11-6
+      - libxcb1
+      - libxext6
+      - libxrender1
+
+  runtime:
+    env:
+      # Ensure libraries are found
+      LD_LIBRARY_PATH: '${APPDIR}/usr/lib/x86_64-linux-gnu:${APPDIR}/usr/bin'
+
+  test:
+    fedora-30:
+      image: appimagecrafters/tests-env:fedora-30
+      command: ./AppRun --help
+    debian-stable:
+      image: appimagecrafters/tests-env:debian-stable
+      command: ./AppRun --help
+    ubuntu-xenial:
+      image: appimagecrafters/tests-env:ubuntu-xenial
+      command: ./AppRun --help
+
+AppImage:
+  arch: x86_64
+  update-information: guess
+  sign-key: None

@@ -7,6 +7,12 @@ wheels/
 *.egg-info
 .pytest_cache/
 
+# PyInstaller / AppImage build artifacts
+*.spec.bak
+AppDir/
+*.AppImage
+appimage-builder-cache/
+
 # Virtual environments
 .venv
 

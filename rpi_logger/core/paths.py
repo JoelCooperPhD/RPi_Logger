@@ -3,12 +3,35 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
+def _get_base_path() -> Path:
+    """Get the base path, handling both normal and PyInstaller frozen environments."""
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running as PyInstaller bundle
+        return Path(sys._MEIPASS)
+    else:
+        # Running as normal Python script
+        return Path(__file__).resolve().parents[2]
+
+
+def _is_frozen() -> bool:
+    """Check if running as a PyInstaller bundle."""
+    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+
+# Base path (handles frozen vs normal)
+_BASE_PATH = _get_base_path()
+
 # Project/package roots
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_ROOT = PROJECT_ROOT / "rpi_logger"
+if _is_frozen():
+    PROJECT_ROOT = _BASE_PATH
+    PACKAGE_ROOT = _BASE_PATH / "rpi_logger"
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parents[2]
+    PACKAGE_ROOT = PROJECT_ROOT / "rpi_logger"
 
 # Configuration
 CONFIG_PATH = PROJECT_ROOT / "config.txt"
@@ -60,4 +83,5 @@ __all__ = [
     'UI_DIR',
     'LOGO_PATH',
     'ensure_directories',
+    '_is_frozen',
 ]
