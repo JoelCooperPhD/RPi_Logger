@@ -32,7 +32,6 @@ class MainController:
 
         self.session_button: Optional[ttk.Button] = None
         self.trial_button: Optional[ttk.Button] = None
-        self.shutdown_button: Optional[ttk.Button] = None
 
         self.session_status_label: Optional[ttk.Label] = None
         self.trial_counter_label: Optional[ttk.Label] = None
@@ -52,7 +51,6 @@ class MainController:
         module_vars: Dict[str, tk.BooleanVar],
         session_button: ttk.Button,
         trial_button: ttk.Button,
-        shutdown_button: ttk.Button,
         session_status_label: ttk.Label,
         trial_counter_label: ttk.Label,
         session_path_label: ttk.Label,
@@ -62,7 +60,6 @@ class MainController:
         self.module_vars = module_vars
         self.session_button = session_button
         self.trial_button = trial_button
-        self.shutdown_button = shutdown_button
         self.session_status_label = session_status_label
         self.trial_counter_label = trial_counter_label
         self.session_path_label = session_path_label
@@ -307,8 +304,6 @@ class MainController:
                 return
 
         self.logger.info("Shutdown requested from UI")
-
-        self.shutdown_button.config(state='disabled', text="Shutting Down...")
 
         shutdown_coordinator = get_shutdown_coordinator()
 

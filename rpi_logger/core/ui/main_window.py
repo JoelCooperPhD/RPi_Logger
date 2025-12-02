@@ -66,7 +66,6 @@ class MainWindow:
 
         self.session_button: Optional[ttk.Button] = None
         self.trial_button: Optional[ttk.Button] = None
-        self.shutdown_button: Optional[ttk.Button] = None
 
         self.current_time_label: Optional[ttk.Label] = None
         self.session_status_label: Optional[ttk.Label] = None
@@ -128,7 +127,6 @@ class MainWindow:
             self.module_vars,
             self.session_button,
             self.trial_button,
-            self.shutdown_button,
             self.session_status_label,
             self.trial_counter_label,
             self.session_path_label,
@@ -267,8 +265,6 @@ class MainWindow:
 
         self._build_info_panel(control_frame)
 
-        self._build_shutdown_button(main_frame)
-
     def _configure_styles(self) -> None:
         style = ttk.Style()
         style.theme_use('clam')
@@ -299,18 +295,6 @@ class MainWindow:
                   background=[('pressed', '#D1D1D6'), ('active', '#D1D1D6')],
                   foreground=[('pressed', '#8E8E93'), ('active', '#8E8E93')])
 
-        style.configure(
-            'Shutdown.TButton',
-            background='#FF3B30',
-            foreground='white',
-            borderwidth=1,
-            bordercolor='#FF3B30',
-            relief='flat',
-            padding=(3, 3)
-        )
-        style.map('Shutdown.TButton',
-                  background=[('pressed', '#CC0000'), ('active', '#E60000')],
-                  foreground=[('pressed', 'white'), ('active', 'white')])
 
     def _build_session_trial_controls(self, parent: ttk.Frame) -> None:
         session_control_frame = ttk.LabelFrame(parent, text="Session", padding=(8, 8))
@@ -454,15 +438,6 @@ class MainWindow:
             anchor='e'
         )
         self.disk_label.grid(row=9, column=1, sticky='e', pady=0)
-
-    def _build_shutdown_button(self, parent: ttk.Frame) -> None:
-        self.shutdown_button = ttk.Button(
-            parent,
-            text="Shutdown Logger",
-            style='Shutdown.TButton',
-            command=self.controller.on_shutdown
-        )
-        self.shutdown_button.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 0))
 
     def _build_logger_frame(self) -> None:
         self.logger_frame = ttk.LabelFrame(self.root, text="System Log", padding="3")
