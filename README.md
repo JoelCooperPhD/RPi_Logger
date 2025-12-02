@@ -160,6 +160,22 @@ Multi-device sDRT (Simple Detection Response Task) support with USB serial commu
 python3 rpi_logger/modules/DRT/main_drt.py --mode gui
 ```
 
+### VOG (Visual Occlusion Glasses)
+Multi-device sVOG support for visual occlusion experiments with USB serial communication.
+
+**Key Features:**
+- Automatic USB device detection (VID 0x16C0, PID 0x0483)
+- Multi-device support with hot-plug
+- Real-time shutter state timeline plot
+- Peek open/close manual control
+- Device configuration dialog (max open/close, debounce, click mode)
+- CSV logging of shutter timing data
+
+**Standalone Usage:**
+```bash
+python3 rpi_logger/modules/VOG/main_vog.py --mode gui --enable-commands
+```
+
 ## Architecture
 
 ### System Layers
@@ -268,9 +284,12 @@ data/
     ├── Notes/
     │   ├── session.log
     │   └── session_notes.csv
-    └── DRT/
+    ├── DRT/
+    │   ├── session.log
+    │   └── sDRT_dev_ttyACM0_20251024_120000.csv
+    └── VOG/
         ├── session.log
-        └── sDRT_dev_ttyACM0_20251024_120000.csv
+        └── 20251024_120000_VOG_trial001_dev_ttyacm1.csv
 ```
 
 ## Audio-Video Synchronization
@@ -432,7 +451,8 @@ RPi_Logger/
 │   │   ├── Cameras/        # Camera module
 │   │   ├── EyeTracker/     # Eye tracking module
 │   │   ├── Notes/          # Stub Codex-based notes module
-│   │   └── DRT/            # Detection response task
+│   │   ├── DRT/            # Detection response task
+│   │   └── VOG/            # Visual occlusion glasses
 │   └── tools/              # Post-processing + diagnostics
 ├── config.txt              # Main configuration
 ├── logs/                   # Master log output

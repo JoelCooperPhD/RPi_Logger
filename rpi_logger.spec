@@ -60,7 +60,7 @@ datas = [
 
 # Add all Python files from each module directory
 # (modules use local imports like "from runtime import ..." so we need all .py files)
-for module_name in ['Audio', 'Cameras', 'DRT', 'EyeTracker', 'GPS', 'Notes', 'stub (codex)']:
+for module_name in ['Audio', 'Cameras', 'DRT', 'EyeTracker', 'GPS', 'Notes', 'VOG', 'stub (codex)']:
     datas.extend(collect_module_files(module_name))
 
 # Include entire vmc package from stub (codex) - needed by multiple modules as top-level import
@@ -145,7 +145,7 @@ hiddenimports = [
 ]
 
 # Dynamically add all submodule imports for each module
-for module_name in ['Audio', 'Cameras', 'DRT', 'EyeTracker', 'GPS', 'Notes', 'stub (codex)']:
+for module_name in ['Audio', 'Cameras', 'DRT', 'EyeTracker', 'GPS', 'Notes', 'VOG', 'stub (codex)']:
     hiddenimports.extend(collect_module_imports(module_name))
 
 # Exclude unnecessary modules to reduce size
