@@ -111,8 +111,12 @@ class VOGTkinterGUI:
         # Each entry contains: frame, device_type, plot, stm_on, stm_off, configure, trl_n, tsot, tsct
         self.devices: Dict[str, Dict[str, Any]] = {}
 
-        # Recording state
+        # Session and recording state (separate as in RS_Logger)
+        # _session_active: True when Start pressed, False when Stop pressed
+        # _running: True when Record is active, False when Paused
+        self._session_active = False
         self._running = False
+        self._plot_recording_state: Optional[bool] = None  # Track plotter sync state
 
         # Configuration dialog
         self._config_dialog: Optional[VOGConfigDialog] = None
@@ -281,7 +285,10 @@ class VOGTkinterGUI:
 
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         """Handle data from device - update plots and displays."""
+        self.logger.debug("on_device_data: port=%s type=%s data=%s", port, data_type, data)
+
         if port not in self.devices:
+            self.logger.warning("on_device_data: port %s not in devices", port)
             return
 
         dev = self.devices[port]
@@ -289,11 +296,14 @@ class VOGTkinterGUI:
         # Handle stimulus state updates
         if data_type == 'stimulus' or data.get('event') == 'stimulus':
             state = data.get('state', data.get('value'))
+            self.logger.debug("Stimulus update: state=%s, plot=%s, running=%s", state, dev.get('plot'), self._running)
             if state is not None and dev.get('plot'):
                 try:
-                    dev['plot'].state_update(port, int(state))
-                except (ValueError, TypeError):
-                    pass
+                    plot = dev['plot']
+                    self.logger.debug("Calling state_update: recording=%s, run=%s", plot.recording, plot.run)
+                    plot.state_update(port, int(state))
+                except (ValueError, TypeError) as e:
+                    self.logger.error("state_update failed: %s", e)
 
         # Handle trial data updates
         elif data_type == 'data' or data.get('event') == 'data':
@@ -350,60 +360,73 @@ class VOGTkinterGUI:
                     self._config_dialog.update_fields(keyword, str(value))
 
     # ------------------------------------------------------------------
-    # Recording state management
+    # Recording state management (matches DRT pattern)
 
     def sync_recording_state(self):
         """Sync recording state with system - enable/disable controls."""
         recording = getattr(self.system, 'recording', False)
+        self._running = recording
+        self._sync_plotter_recording_state()
+        self._sync_control_states()
 
-        if recording and not self._running:
-            self._log_init()
-        elif not recording and self._running:
-            self._log_close()
-
-    def _log_init(self):
-        """Handle recording start - disable controls, start plotting."""
-        self._running = True
+    def _sync_plotter_recording_state(self) -> None:
+        """Sync plotter recording state with system recording state."""
+        recording = bool(getattr(self.system, 'recording', False))
+        self.logger.info("_sync_plotter_recording_state: recording=%s, prev=%s, devices=%s",
+                         recording, self._plot_recording_state, list(self.devices.keys()))
+        if self._plot_recording_state == recording:
+            self.logger.debug("  Recording state unchanged, skipping")
+            return
+        self._plot_recording_state = recording
 
         for port, dev in self.devices.items():
-            # Disable controls during recording
+            plotter = dev.get('plot')
+            self.logger.info("  Port %s: plotter=%s", port, plotter)
+            if not plotter:
+                continue
+            if recording:
+                self.logger.info("  Calling plotter.start_recording() for %s", port)
+                plotter.start_recording()
+                self.logger.info("  After start_recording: run=%s, recording=%s, session_active=%s",
+                                 plotter.run, plotter.recording, plotter._session_active)
+            else:
+                self.logger.info("  Calling plotter.stop_recording() for %s", port)
+                plotter.stop_recording()
+
+    def _sync_control_states(self):
+        """Enable/disable controls based on recording state."""
+        recording = getattr(self.system, 'recording', False)
+        state = 'disabled' if recording else 'normal'
+
+        for port, dev in self.devices.items():
             if dev.get('stm_on'):
-                dev['stm_on'].configure(state='disabled')
+                dev['stm_on'].configure(state=state)
             if dev.get('stm_off'):
-                dev['stm_off'].configure(state='disabled')
+                dev['stm_off'].configure(state=state)
             if dev.get('configure'):
-                dev['configure'].configure(state='disabled')
+                dev['configure'].configure(state=state)
 
-            # Clear and start plotter
-            if dev.get('plot'):
-                dev['plot'].clear_all()
-                dev['plot'].run = True
-                dev['plot'].recording = True
-
+    def handle_session_started(self) -> None:
+        """Handle session start (Start button) - clear and start plotters."""
+        self._plot_recording_state = None
+        self._session_active = True
+        for port, dev in self.devices.items():
+            plotter = dev.get('plot')
+            if plotter:
+                plotter.start_session()
             # Reset results
             dev['trl_n'].set('0')
             dev['tsot'].set('0')
             dev['tsct'].set('0')
 
-    def _log_close(self):
-        """Handle recording stop - enable controls, stop plotting."""
-        self._running = False
-
+    def handle_session_stopped(self) -> None:
+        """Handle session stop (Stop button) - freeze plotters completely."""
+        self._plot_recording_state = None
+        self._session_active = False
         for port, dev in self.devices.items():
-            # Re-enable controls
-            if dev.get('stm_on'):
-                dev['stm_on'].configure(state='normal')
-            if dev.get('stm_off'):
-                dev['stm_off'].configure(state='normal')
-            if dev.get('configure'):
-                dev['configure'].configure(state='normal')
-
-            # Stop plotter
-            if dev.get('plot'):
-                dev['plot'].run = False
-                dev['plot'].recording = False
-                # Mark end with NaN
-                dev['plot'].state_update(port, np.nan)
+            plotter = dev.get('plot')
+            if plotter:
+                plotter.stop()
 
     # ------------------------------------------------------------------
     # Button callbacks
@@ -466,10 +489,15 @@ class VOGTkinterGUI:
 
     def handle_window_close(self):
         """Handle window close event."""
+        # Stop recording and session
+        self._running = False
+        self._session_active = False
+        self._plot_recording_state = None
         # Stop all plotters
         for dev in self.devices.values():
-            if dev.get('plot'):
-                dev['plot'].run = False
+            plotter = dev.get('plot')
+            if plotter:
+                plotter.stop()
 
     def show(self):
         """Show the VOG frame."""
@@ -647,8 +675,12 @@ class VOGView:
 
             self._active_session_dir = path
             self._session_visual_active = True
+            if self.gui:
+                self.call_in_gui(self.gui.handle_session_started)
         else:
             self._active_session_dir = None
             if not self._session_visual_active:
                 return
             self._session_visual_active = False
+            if self.gui:
+                self.call_in_gui(self.gui.handle_session_stopped)

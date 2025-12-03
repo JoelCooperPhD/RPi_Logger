@@ -88,6 +88,7 @@ class VOGPlotter:
         # Control flags
         self.run = False
         self.recording = False
+        self._session_active = False
 
     def _add_tsot_plot(self):
         """Add bottom subplot for TSOT/TSCT timing data."""
@@ -278,9 +279,62 @@ class VOGPlotter:
         self._tsct_now[unit_id] = val
 
     def state_update(self, unit_id: str, val: float):
-        """Update stimulus state for a device (only if recording)."""
-        if self.recording:
+        """Update stimulus state for a device.
+
+        Always accepts updates if the device is registered. The animation
+        function checks self.run before displaying data, so updates received
+        before the plotter is fully started will be stored and shown once
+        animation begins. This ensures we don't miss the first state change
+        that arrives immediately after sending trial start command.
+        """
+        if unit_id in self._state_now:
             self._state_now[unit_id] = val
+
+    # ------------------------------------------------------------------
+    # Session and recording control (matches DRT plotter pattern)
+
+    def start_session(self):
+        """Start a new session - clear plot and start animation (blank)."""
+        self.clear_all()
+        self.run = True
+        self._session_active = True
+        self.recording = False
+
+    def start_recording(self):
+        """Start recording - data will start appearing on plot."""
+        if not self._session_active:
+            # First recording - start session first
+            self.start_session()
+        else:
+            # Resuming from pause - ensure animation running
+            self.run = True
+
+        # Only initialize state to 0 if it's NaN (no data received yet).
+        # Don't overwrite if a state update already arrived before this
+        # method was called (due to async timing with Tk event loop).
+        for port in list(self._state_now.keys()):
+            current = self._state_now.get(port)
+            # Check if current is NaN (np.isnan returns True for np.nan)
+            if current is None or (isinstance(current, float) and np.isnan(current)):
+                self._state_now[port] = 0
+
+        self.recording = True
+
+    def stop_recording(self):
+        """Pause recording - creates gap in data, animation keeps marching."""
+        # Set state to NaN to create visible gap in line
+        for port in list(self._state_now.keys()):
+            self._state_now[port] = np.nan
+        self.recording = False
+        # Note: self.run stays True so animation keeps advancing time
+
+    def stop(self):
+        """Stop session completely - freeze animation."""
+        for port in list(self._state_now.keys()):
+            self._state_now[port] = np.nan
+        self.run = False
+        self._session_active = False
+        self.recording = False
 
     def clear_all(self):
         """Clear all data from all devices."""
