@@ -10,7 +10,6 @@ from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase
 from .drt_plotter import DRTPlotter
 from .sdrt_config_window import SDRTConfigWindow
 from .wdrt_config_window import WDRTConfigWindow
-from .battery_widget import CompactBatteryWidget
 from .quick_status_panel import QuickStatusPanel
 from ...device_types import DRTDeviceType
 
@@ -33,7 +32,6 @@ class DeviceTab:
         self.stim_on_button: Optional[ttk.Button] = None
         self.stim_off_button: Optional[ttk.Button] = None
         self.configure_button: Optional[ttk.Button] = None
-        self.battery_widget: Optional[CompactBatteryWidget] = None
 
 
 class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
@@ -187,14 +185,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         ttk.Label(results_frame, text="Response Count:", anchor='w').grid(row=2, column=0, sticky='w', pady=2)
         ttk.Label(results_frame, textvariable=tab.click_count_var, anchor='e').grid(row=2, column=1, sticky='e', pady=2)
-
-        # Add battery display for wDRT devices
-        if device_type in (DRTDeviceType.WDRT_USB, DRTDeviceType.WDRT_WIRELESS):
-            battery_frame = ttk.Frame(results_frame)
-            battery_frame.grid(row=3, column=0, columnspan=2, sticky='ew', pady=(5, 0))
-            ttk.Label(battery_frame, text="Battery:", anchor='w').pack(side=tk.LEFT)
-            tab.battery_widget = CompactBatteryWidget(battery_frame)
-            tab.battery_widget.pack(side=tk.LEFT, padx=(5, 0))
 
         configure_frame = ttk.Frame(tab_frame)
         configure_frame.grid(row=5, column=1, sticky='nsew', padx=5, pady=5)
@@ -385,11 +375,8 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         tab = self.device_tabs.get(port)
 
         if data_type == 'battery' and tab:
-            # Update battery display for wDRT devices
+            # Update battery in wDRT config window if open
             percent = data.get('percent')
-            if percent is not None and tab.battery_widget:
-                tab.battery_widget.set_percent(int(percent))
-            # Also update wDRT config window if open
             if self.wdrt_config_window and percent is not None:
                 try:
                     self.wdrt_config_window.update_battery(int(percent))
