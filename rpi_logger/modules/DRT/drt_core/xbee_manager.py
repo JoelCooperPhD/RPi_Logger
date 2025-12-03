@@ -414,7 +414,7 @@ class XBeeManager:
             transport = self._transports.get(node_id)
             if transport:
                 data = message.data.decode('utf-8')
-                logger.info(f"XBee received from {node_id}: '{data.strip()}'")
+                logger.debug(f"XBee manager received from {node_id}: '{data.strip()}'")
                 transport.handle_received_data(data)
             else:
                 logger.debug(f"Message from untracked device: {node_id}")

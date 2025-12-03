@@ -392,11 +392,12 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                     pass  # Window may have been closed
 
         elif data_type == 'click' and tab:
-            value = data.get('value', '')
+            # Handle both 'value' (legacy) and 'count' (new format) keys
+            value = data.get('count', data.get('value', ''))
             try:
-                click_count = int(value) if value else 0
+                click_count = int(value) if value != '' else 0
                 tab.click_count_var.set(str(click_count))
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
 
         elif data_type == 'trial' and tab:
@@ -416,18 +417,68 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                     tab.plotter.update_trial(port, abs(rt), is_hit=False)
 
         elif data_type == 'stimulus' and tab:
-            value = data.get('value', '')
+            # Handle both 'value' (legacy) and 'state' (new format) keys
+            state_val = data.get('state', data.get('value', ''))
             try:
-                state = int(value)
+                # Handle boolean or int
+                if isinstance(state_val, bool):
+                    state = 1 if state_val else 0
+                elif isinstance(state_val, int):
+                    state = state_val
+                else:
+                    state = int(state_val)
                 self.stimulus_state[port] = state
             except (ValueError, TypeError):
-                if 'on' in value.lower():
-                    self.stimulus_state[port] = 1
-                elif 'off' in value.lower():
-                    self.stimulus_state[port] = 0
+                if isinstance(state_val, str):
+                    if 'on' in state_val.lower():
+                        self.stimulus_state[port] = 1
+                    elif 'off' in state_val.lower():
+                        self.stimulus_state[port] = 0
 
             if tab and tab.plotter:
                 tab.plotter.update_stimulus_state(port, self.stimulus_state.get(port, 0))
+
+        elif data_type == 'data' and tab:
+            # Full trial data packet from wDRT (contains trial_number, clicks, reaction_time, battery)
+            trial_num = data.get('trial_number')
+            rt = data.get('reaction_time')
+            clicks = data.get('clicks')
+            battery = data.get('battery')
+
+            if trial_num is not None:
+                tab.trial_number_var.set(str(trial_num))
+            if clicks is not None:
+                tab.click_count_var.set(str(clicks))
+            if rt is not None:
+                # RT of -1 means timeout/miss
+                if rt >= 0:
+                    tab.reaction_time_var.set(f"{rt}")
+                else:
+                    tab.reaction_time_var.set("Miss")
+
+            # Update plotter with trial data
+            if rt is not None and tab.plotter:
+                is_hit = rt >= 0
+                if is_hit:
+                    tab.plotter.update_trial(port, rt, is_hit=True)
+                else:
+                    tab.plotter.update_trial(port, 0, is_hit=False)
+
+            # Update battery in config window if open
+            if battery is not None and self.wdrt_config_window:
+                try:
+                    self.wdrt_config_window.update_battery(int(battery))
+                except Exception:
+                    pass
+
+        elif data_type == 'reaction_time' and tab:
+            # Standalone RT event
+            rt = data.get('reaction_time')
+            if rt is not None:
+                if rt >= 0:
+                    tab.reaction_time_var.set(f"{rt}")
+                else:
+                    tab.reaction_time_var.set("Miss")
 
         elif data_type == 'experiment_end':
             pass

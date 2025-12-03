@@ -226,16 +226,26 @@ class BaseDRTHandler(ABC):
 
         while self._running and self.is_connected:
             try:
-                line = await self.transport.read_line()
-                if line:
-                    self._process_response(line.strip())
+                # Process all available data in the buffer
+                lines_processed = 0
+                while lines_processed < 50:  # Limit to prevent infinite loop
+                    line = await self.transport.read_line()
+                    if line:
+                        logger.debug(f"Processing line from {self.device_id}: {line.strip()}")
+                        self._process_response(line.strip())
+                        lines_processed += 1
+                    else:
+                        break
+
+                # Yield to other tasks
+                await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in read loop for {self.device_id}: {e}")
                 await asyncio.sleep(0.1)
 
-        logger.debug(f"Read loop ended for {self.device_id}")
+        logger.debug(f"Read loop ended for {self.device_id} (running={self._running}, connected={self.is_connected})")
 
     async def _dispatch_data_event(
         self,

@@ -105,10 +105,10 @@ class WDRTWirelessHandler(BaseDRTHandler):
         else:
             full_cmd = cmd_string
 
+        logger.debug(f"Sending command to {self.device_id}: '{full_cmd}'")
         # Send with wDRT line ending
-        logger.info(f"send_command: '{full_cmd}' to {self.device_id} via transport")
         result = await self.transport.write_line(full_cmd, WDRT_LINE_ENDING)
-        logger.info(f"send_command result: {result}")
+        logger.debug(f"Command send result for {self.device_id}: {result}")
         return result
 
     async def start_experiment(self) -> bool:
@@ -118,10 +118,13 @@ class WDRTWirelessHandler(BaseDRTHandler):
         Returns:
             True if experiment started successfully
         """
+        logger.debug(f"Starting experiment on {self.device_id}")
         self._click_count = 0
         self._buffered_trial_data = None
         self._recording = True
-        return await self.send_command('start')
+        result = await self.send_command('start')
+        logger.debug(f"Start experiment result for {self.device_id}: {result}")
+        return result
 
     async def stop_experiment(self) -> bool:
         """
@@ -144,10 +147,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
             True if command was sent successfully
         """
         command = 'stim_on' if on else 'stim_off'
-        logger.info(f"set_stimulus({on}) called for {self.device_id}, sending command '{command}'")
-        result = await self.send_command(command)
-        logger.info(f"set_stimulus({on}) result: {result}")
-        return result
+        return await self.send_command(command)
 
     async def get_config(self) -> Optional[Dict[str, Any]]:
         """
@@ -231,7 +231,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         if not line:
             return
 
-        logger.info(f"Processing response from {self.device_id}: '{line}'")
+        logger.debug(f"Processing response from {self.device_id}: '{line}'")
 
         if RESPONSE_DELIMITER not in line:
             logger.debug(f"Unrecognized wDRT response format: {line}")
@@ -249,7 +249,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
                 logger.debug(f"Unknown wDRT response: {key}")
                 return
 
-            logger.info(f"Handling {response_type} response: {value}")
+            logger.debug(f"Handling {response_type} response: {value}")
 
             if response_type == 'click':
                 self._handle_click(value)

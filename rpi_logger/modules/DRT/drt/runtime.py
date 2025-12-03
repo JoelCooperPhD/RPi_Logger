@@ -191,6 +191,7 @@ class DRTModuleRuntime(ModuleRuntime):
     # Recording control
 
     async def _start_recording(self) -> bool:
+        self.logger.debug(f"_start_recording called, handlers: {list(self.handlers.keys())}")
         if not self.handlers:
             self.logger.error("Cannot start recording - no devices connected")
             return False
@@ -198,8 +199,10 @@ class DRTModuleRuntime(ModuleRuntime):
         successes = []
         failures = []
         for port, handler in self.handlers.items():
+            self.logger.debug(f"Calling start_experiment on handler for {port}")
             try:
                 started = await handler.start_experiment()
+                self.logger.debug(f"start_experiment returned {started} for {port}")
             except Exception as exc:  # pragma: no cover - defensive
                 self.logger.error("start_experiment failed on %s: %s", port, exc)
                 started = False

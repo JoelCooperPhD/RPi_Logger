@@ -6,6 +6,7 @@ Wraps digi-xbee library with an interface compatible with BaseTransport.
 """
 
 import asyncio
+import queue
 from typing import Optional, TYPE_CHECKING
 import logging
 
@@ -46,8 +47,9 @@ class XBeeTransport(BaseTransport):
         self._coordinator = coordinator
         self.node_id = node_id
 
-        # Buffer for received data
-        self._receive_buffer: asyncio.Queue[str] = asyncio.Queue()
+        # Buffer for received data - use thread-safe queue since XBee callbacks
+        # come from a different thread than the asyncio event loop
+        self._receive_buffer: queue.Queue[str] = queue.Queue()
 
         # Track connection state
         self._connected = False
@@ -105,20 +107,20 @@ class XBeeTransport(BaseTransport):
             True if send was successful
         """
         if not self.is_connected:
-            logger.error(f"Cannot write to {self.node_id}: not connected")
+            logger.error(f"Cannot write to {self.node_id}: not connected (connected={self._connected}, coordinator={self._coordinator is not None}, open={self._coordinator.is_open() if self._coordinator else False}, remote={self._remote_device is not None})")
             return False
 
         try:
             # Send as string (strip newline - XBee doesn't need it)
             # Use send_data (blocking with ACK) instead of send_data_async
             cmd_str = data.decode('utf-8', errors='replace').strip()
-            logger.info(f"XBee sending to {self.node_id}: '{cmd_str}'")
+            logger.debug(f"XBee sending to {self.node_id}: '{cmd_str}'")
             await asyncio.to_thread(
                 self._coordinator.send_data,
                 self._remote_device,
                 cmd_str  # Send as string without newline, matching RS_Logger
             )
-            logger.info(f"XBee sent to {self.node_id}: '{cmd_str}'")
+            logger.debug(f"XBee sent to {self.node_id}: '{cmd_str}'")
             return True
 
         except Exception as e:
@@ -136,13 +138,9 @@ class XBeeTransport(BaseTransport):
             The line read, or None if no data available
         """
         try:
-            # Non-blocking get with small timeout
-            line = await asyncio.wait_for(
-                self._receive_buffer.get(),
-                timeout=0.01
-            )
-            return line
-        except asyncio.TimeoutError:
+            # Try to get immediately without blocking
+            return self._receive_buffer.get_nowait()
+        except queue.Empty:
             return None
         except Exception as e:
             logger.error(f"XBee read error for {self.node_id}: {e}")
@@ -153,15 +151,17 @@ class XBeeTransport(BaseTransport):
         Handle data received from the remote device.
 
         Called by XBeeManager when a message arrives for this device.
+        This is called from the XBee library's thread, so we use a thread-safe queue.
 
         Args:
             data: Received data string
         """
         try:
             # Put data in buffer for read_line() to retrieve
+            # Using thread-safe queue.Queue - put_nowait won't block
             self._receive_buffer.put_nowait(data.strip())
-            logger.debug(f"Received from {self.node_id}: {data.strip()}")
-        except asyncio.QueueFull:
+            logger.debug(f"XBee buffered from {self.node_id}: {data.strip()} (queue size: {self._receive_buffer.qsize()})")
+        except queue.Full:
             logger.warning(f"Receive buffer full for {self.node_id}")
 
     def clear_buffer(self) -> None:
@@ -169,5 +169,5 @@ class XBeeTransport(BaseTransport):
         while not self._receive_buffer.empty():
             try:
                 self._receive_buffer.get_nowait()
-            except asyncio.QueueEmpty:
+            except queue.Empty:
                 break
