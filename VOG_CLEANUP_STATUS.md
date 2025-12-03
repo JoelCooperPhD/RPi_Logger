@@ -5,6 +5,24 @@
 
 ---
 
+## Quick Start for Future Sessions
+
+```bash
+# Navigate to project
+cd /home/joel/Development/RPi_Logger
+
+# Test imports work
+python3 -c "from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler; from rpi_logger.modules.VOG.vog_core.data_logger import VOGDataLogger; from rpi_logger.modules.VOG.vog_core.constants import determine_device_type_from_vid_pid; print('OK')"
+
+# Run VOG standalone (requires device)
+python3 -m rpi_logger.modules.VOG.main_vog --mode gui
+
+# Check git status
+git status
+```
+
+---
+
 ## Project Location
 `/home/joel/Development/RPi_Logger/rpi_logger/modules/VOG/`
 
@@ -28,27 +46,140 @@ rpi_logger/modules/VOG/
 │   ├── vog_system.py              # Main orchestrator (600 lines, added session control)
 │   ├── vog_handler.py             # Device handler (464 lines)
 │   ├── protocols/
-│   │   ├── base_protocol.py       # Abstract protocol interface
-│   │   ├── svog_protocol.py       # sVOG implementation
-│   │   ├── wvog_protocol.py       # wVOG implementation
+│   │   ├── __init__.py            # Exports SVOGProtocol, WVOGProtocol, BaseVOGProtocol
+│   │   ├── base_protocol.py       # Abstract protocol interface + VOGDataPacket
+│   │   ├── svog_protocol.py       # sVOG implementation (>cmd|val<< format)
+│   │   ├── wvog_protocol.py       # wVOG implementation (cmd>val format)
 │   │   └── __init__.py
 │   ├── config/
 │   │   └── config_loader.py       # Config file loading
 │   ├── commands/
 │   │   └── handler.py             # Command handling
 │   ├── modes/
-│   │   ├── gui_mode.py
-│   │   └── simple_mode.py
+│   │   ├── gui_mode.py            # GUI mode launcher
+│   │   └── simple_mode.py         # Headless/simple mode
 │   └── interfaces/gui/
-│       ├── tkinter_gui.py         # Main GUI (412 lines)
+│       ├── tkinter_gui.py         # Main GUI + VOGDeviceTab (412 lines)
 │       ├── config_window.py       # Config dialog - CANONICAL (379 lines)
 │       └── vog_plotter.py         # Real-time plotting
 └── vog/                           # VMC integration layer
-    ├── runtime.py                 # ✅ REFACTORED - VMC wrapper (570 lines, was 496)
+    ├── __init__.py
+    ├── runtime.py                 # ✅ REFACTORED - VMC wrapper (570 lines)
     ├── view.py                    # View factory (686 lines)
-    ├── config_dialog.py           # Config dialog - DUPLICATE, sVOG only (216 lines)
-    └── __init__.py
+    ├── plotter.py                 # VMC plotter wrapper
+    └── config_dialog.py           # Config dialog - DUPLICATE, sVOG only (216 lines) - TO DELETE
 ```
+
+---
+
+## Key Import Paths
+
+### Core Classes
+```python
+# VOGSystem - main orchestrator
+from rpi_logger.modules.VOG.vog_core.vog_system import VOGSystem
+
+# VOGHandler - per-device serial handler
+from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler
+
+# VOGDataLogger - CSV logging
+from rpi_logger.modules.VOG.vog_core.data_logger import VOGDataLogger
+
+# Protocols
+from rpi_logger.modules.VOG.vog_core.protocols import SVOGProtocol, WVOGProtocol, BaseVOGProtocol
+from rpi_logger.modules.VOG.vog_core.protocols.base_protocol import VOGDataPacket, VOGResponse
+
+# Constants
+from rpi_logger.modules.VOG.vog_core.constants import (
+    SVOG_VID, SVOG_PID, SVOG_BAUD,
+    WVOG_VID, WVOG_PID, WVOG_BAUD,
+    WVOG_DONGLE_VID, WVOG_DONGLE_PID,
+    COMMAND_DELAY, CONFIG_RESPONSE_WAIT,
+    determine_device_type_from_vid_pid,
+)
+
+# Config loading
+from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_file
+```
+
+### GUI Classes
+```python
+# Main GUI
+from rpi_logger.modules.VOG.vog_core.interfaces.gui.tkinter_gui import VOGTkinterGUI, VOGDeviceTab
+
+# Config dialog (canonical version supporting both sVOG and wVOG)
+from rpi_logger.modules.VOG.vog_core.interfaces.gui.config_window import VOGConfigWindow
+
+# Plotter
+from rpi_logger.modules.VOG.vog_core.interfaces.gui.vog_plotter import VOGPlotter
+```
+
+### VMC Integration (requires vmc module)
+```python
+# VMC runtime
+from rpi_logger.modules.VOG.vog.runtime import VOGModuleRuntime
+
+# VMC view
+from rpi_logger.modules.VOG.vog.view import VOGView, VOGTkinterGUI as VMCVOGTkinterGUI
+```
+
+### Base Classes (from rpi_logger.modules.base)
+```python
+from rpi_logger.modules.base import (
+    BaseSystem,
+    RecordingStateMixin,
+    USBDeviceConfig,
+    USBDeviceMonitor,
+    USBSerialDevice,
+)
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
+```
+
+---
+
+## Class Responsibilities
+
+### VOGSystem (vog_core/vog_system.py)
+- Inherits from `BaseSystem`, `RecordingStateMixin`
+- Manages USB monitors for sVOG and wVOG devices
+- Creates `VOGHandler` instances on device connection
+- Coordinates recording across all devices
+- **New methods (Phase 2):**
+  - `start_session()` / `stop_session()` - experiment control (exp>1/exp>0)
+  - `start_trial()` / `stop_trial()` - trial control (trl>1/trl>0)
+  - `get_config(port)` - request device config
+  - `set_output_dir(path)` - update handler output directories
+  - `session_active` property - check if session is running
+
+### VOGHandler (vog_core/vog_handler.py)
+- Per-device serial communication
+- Uses protocol abstraction for command formatting
+- Manages data callback for events
+- Creates `VOGDataLogger` for CSV output
+- **Key methods:**
+  - `start_experiment()` / `stop_experiment()`
+  - `start_trial()` / `stop_trial()`
+  - `peek_open(lens)` / `peek_close(lens)`
+  - `get_device_config()`
+  - `get_config()` - returns copy of config dict
+
+### VOGDataLogger (vog_core/data_logger.py)
+- Extracted from VOGHandler (Phase 6)
+- Handles CSV file creation and logging
+- Uses protocol's `format_csv_row()` for device-specific output
+- **Key methods:**
+  - `start_recording()` / `stop_recording()`
+  - `log_trial_data(packet, trial_number, label)`
+
+### VOGModuleRuntime (vog/runtime.py)
+- VMC-compatible runtime
+- Manages USB monitors (parallel to VOGSystem)
+- Handles model observation and view binding
+- Dispatches commands from VMC
+- **Key differences from VOGSystem:**
+  - Observes VMC model changes (`model.subscribe()`)
+  - Notifies VMC view of events
+  - Separate session/recording state tracking
 
 ---
 
@@ -57,15 +188,9 @@ rpi_logger/modules/VOG/
 ### ✅ Phase 1: Extract Shared Constants (COMPLETE)
 **Files Modified:**
 - `vog_core/constants.py` - Added device VID/PID/baud constants, timing constants
-- `vog_core/config/config_loader.py` - Now imports from constants
-- `vog_core/vog_handler.py` - Now imports from constants
-- `vog_core/vog_system.py` - Now imports from constants
-- `vog_core/protocols/svog_protocol.py` - Now imports SVOG_BAUD
-- `vog_core/protocols/wvog_protocol.py` - Now imports WVOG_BAUD
-- `vog/runtime.py` - Now imports from constants
-- `main_vog.py` - Now imports from constants
+- All files updated to import from constants
 
-**Constants now centralized in `vog_core/constants.py`:**
+**Constants centralized:**
 ```python
 SVOG_VID = 0x16C0
 SVOG_PID = 0x0483
@@ -89,7 +214,7 @@ def determine_device_type_from_vid_pid(vid, pid) -> str:
 
 **Solution:**
 - Added `get_config()` public method to VOGHandler (returns copy of config dict)
-- Updated `config_window.py` lines 232, 239 to use `handler.get_config()`
+- Updated `config_window.py` to use `handler.get_config()`
 - Replaced magic number `0.5` with `CONFIG_RESPONSE_WAIT` constant
 
 ---
@@ -99,18 +224,9 @@ def determine_device_type_from_vid_pid(vid, pid) -> str:
 
 **Solution:**
 - Created `vog_core/data_logger.py` with `VOGDataLogger` class (170 lines)
-- VOGHandler now creates `self._data_logger` instance
+- VOGHandler creates `self._data_logger` instance
 - VOGHandler calls `self._data_logger.log_trial_data(packet, trial_number, label)`
 - VOGHandler reduced from 519 to 464 lines
-
-**New file structure:**
-```python
-class VOGDataLogger:
-    def __init__(self, output_dir, port, protocol, event_callback)
-    def start_recording() -> None
-    def stop_recording() -> None
-    async def log_trial_data(packet, trial_number, label) -> Optional[Path]
-```
 
 ---
 
@@ -119,37 +235,26 @@ class VOGDataLogger:
 - `VOGSystem` in `vog_core/vog_system.py` (415 lines)
 - `VOGModuleRuntime` in `vog/runtime.py` (496 lines)
 
-Both managed: USB monitoring, device handlers, recording state, trial numbers.
-
 **Solution Implemented:**
-Rather than full delegation (which would require significant BaseSystem changes), we:
-
-1. **Added session control to VOGSystem** - Now has `start_session()`, `stop_session()`, `start_trial()`, `stop_trial()` methods matching VOGModuleRuntime's granular control
-2. **Added shared utility function** - `determine_device_type_from_vid_pid()` in constants.py used by both
-3. **Added `get_config()` method to VOGSystem** - Matches runtime's config retrieval
-4. **Added `set_output_dir()` method to VOGSystem** - For handler directory updates
-5. **Added `session_active` property to VOGSystem** - Exposes session state
-6. **Cleaned up VOGModuleRuntime** - Better organization, clear sections, improved docstrings
-7. **Both classes now use shared `determine_device_type_from_vid_pid()`**
+1. **Added session control to VOGSystem** - `start_session()`, `stop_session()`, `start_trial()`, `stop_trial()`
+2. **Added shared utility function** - `determine_device_type_from_vid_pid()` in constants.py
+3. **Added `get_config()` method to VOGSystem**
+4. **Added `set_output_dir()` method to VOGSystem**
+5. **Added `session_active` property to VOGSystem**
+6. **Cleaned up VOGModuleRuntime** - Better organization, uses shared utility
 
 **Key Insight:** Full delegation wasn't practical because:
-- VOGSystem inherits from BaseSystem (standalone lifecycle)
+- VOGSystem inherits from BaseSystem (standalone lifecycle with `run()`)
 - VOGModuleRuntime implements VMC ModuleRuntime (VMC lifecycle)
 - USB monitoring callbacks differ (view notifications vs mode callbacks)
 
 **Remaining Duplication (acceptable):**
 - USB monitor setup (~30 lines each) - different callbacks needed
 - Session/trial control (~60 lines each) - nearly identical but different state variables
-- These could be further unified with an intermediate helper class if desired
-
-**Files Modified:**
-- `vog_core/constants.py` - Added `determine_device_type_from_vid_pid()` function
-- `vog_core/vog_system.py` - Added session control, get_config, set_output_dir, session_active
-- `vog/runtime.py` - Refactored with better organization, uses shared utility
 
 ---
 
-### 🔲 Phase 3: Consolidate Config Dialogs (PENDING)
+### 🔲 Phase 3: Consolidate Config Dialogs (PENDING - NEXT)
 **Problem:** Two config dialog implementations:
 - `vog_core/interfaces/gui/config_window.py` (379 lines) - supports sVOG AND wVOG
 - `vog/config_dialog.py` (216 lines) - sVOG only, uses callback pattern
@@ -161,7 +266,7 @@ Rather than full delegation (which would require significant BaseSystem changes)
 2. Delete `vog/config_dialog.py`
 
 **Files to Modify:**
-- `vog/view.py` - change import and usage
+- `vog/view.py` - change import and usage at lines 35-37, 466-478
 - `vog/config_dialog.py` - DELETE
 
 ---
@@ -181,8 +286,8 @@ The `_determine_trial_number()` method in vog_handler.py has complex fallback lo
 4. If system not available (standalone mode), use packet.trial_number
 
 **Files to Modify:**
-- `vog_core/vog_handler.py` - simplify trial number logic
-- `vog_core/vog_system.py` - ensure trial number is always set
+- `vog_core/vog_handler.py:446-464` - simplify `_determine_trial_number()`
+- `vog_core/vog_system.py:43` - ensure trial number is always set
 
 ---
 
@@ -260,6 +365,10 @@ Handler._dispatch_data_event()
 - `vog_core/interfaces/gui/tkinter_gui.py:227-228` - uses VOGConfigWindow
 - `vog/view.py:466-478` - uses VOGConfigDialog (to be changed in Phase 3)
 
+### Data Logging
+- `vog_core/data_logger.py:1-170` - VOGDataLogger class
+- `vog_handler.py:390-420` - uses VOGDataLogger
+
 ---
 
 ## Recommended Execution Order
@@ -284,9 +393,21 @@ Handler._dispatch_data_event()
 ---
 
 ## Testing Notes
-Import test command:
+
+### Import Test
 ```bash
 python3 -c "from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler; from rpi_logger.modules.VOG.vog_core.data_logger import VOGDataLogger; from rpi_logger.modules.VOG.vog_core.constants import determine_device_type_from_vid_pid; print('OK')"
+```
+
+### Full Module Test (requires hardware)
+```bash
+python3 -m rpi_logger.modules.VOG.main_vog --mode gui
+```
+
+### VMC Runtime Test (requires vmc module)
+```bash
+cd /home/joel/Development/RPi_Logger/rpi_logger/modules/VOG
+python3 -m py_compile vog/runtime.py && echo "Syntax OK"
 ```
 
 ---
@@ -301,3 +422,21 @@ python3 -c "from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler; 
 6. **Trial Number Logic Messy** - Pending Phase 5
 7. **GUI Encapsulation Violations** - ✅ FIXED
 8. **7-Level Callback Chain** - Pending Phase 8 (optional)
+
+---
+
+## Related Documentation
+
+- `VOG_PORT_PLAN.md` - Original port plan from RS_Logger, includes protocol details
+- `rpi_logger/modules/DRT/` - Reference implementation for similar module patterns
+- `rpi_logger/modules/base/` - Base classes (BaseSystem, USBDeviceMonitor, etc.)
+
+---
+
+## Git History (Recent Relevant Commits)
+
+```bash
+git log --oneline -10 -- rpi_logger/modules/VOG/
+```
+
+Latest commit: `3da3c19` - refactor(VOG): consolidate constants and add session control (Phase 1, 2, 4, 6)
