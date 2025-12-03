@@ -56,6 +56,7 @@ class VOGConfigDialog:
         self._win.title(f"VOG Configuration - {port}")
         self._win.focus_force()
         self._win.resizable(False, False)
+        self._win.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Initialize StringVars
         self._settings = {
@@ -123,9 +124,6 @@ class VOGConfigDialog:
         ttk.Button(pf, text="NHTSA", command=self._on_nhtsa).grid(row=0, column=0, sticky="EW", padx=2, pady=2)
         ttk.Button(pf, text="eBlindfold", command=self._on_eblindfold).grid(row=0, column=1, sticky="EW", padx=2, pady=2)
         ttk.Button(pf, text="Direct", command=self._on_direct).grid(row=0, column=2, sticky="EW", padx=2, pady=2)
-
-        # Close button
-        ttk.Button(win, text="Close", command=self._on_close).grid(row=2, column=0, sticky="EW", padx=5, pady=5)
 
     def update_fields(self, key: str, val: str):
         """Update a configuration field from device response."""
