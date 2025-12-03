@@ -370,7 +370,8 @@ class SDRTHandler(BaseDRTHandler):
             reaction_time = data.get('reaction_time', RT_TIMEOUT_VALUE)
 
             device_id = f"sDRT_{port_clean}"
-            label = str(trial_number)  # Use trial number as label
+            # Use trial_label if set, otherwise fall back to trial number
+            label = self._trial_label if self._trial_label else str(trial_number)
 
             # CSV line: Device ID, Label, Unix time, MSecs, Trial#, Responses, RT
             csv_line = f"{device_id},{label},{unix_time},{device_timestamp},{trial_number},{clicks},{reaction_time}"

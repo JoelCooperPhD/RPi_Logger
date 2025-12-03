@@ -61,6 +61,7 @@ class BaseDRTHandler(ABC):
         self._click_count = 0
         self._trial_number = 0
         self._buffered_trial_data: Optional[Dict[str, Any]] = None
+        self._trial_label: str = ""  # Condition/experiment label for CSV output
 
     @property
     @abstractmethod
@@ -304,14 +305,16 @@ class BaseDRTHandler(ABC):
             except Exception as e:
                 logger.error(f"Error in data callback: {e}")
 
-    def set_recording_state(self, recording: bool) -> None:
+    def set_recording_state(self, recording: bool, trial_label: str = "") -> None:
         """
         Set the recording state.
 
         Args:
             recording: True if recording is active
+            trial_label: Condition/experiment label for CSV output
         """
         self._recording = recording
+        self._trial_label = trial_label if recording else ""
         if recording:
             self._click_count = 0
             self._trial_number = 0

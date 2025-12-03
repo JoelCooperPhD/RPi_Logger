@@ -193,14 +193,6 @@ class WDRTConfigWindow(tk.Toplevel):
         )
         sync_btn.pack(anchor=tk.W, pady=(5, 0))
 
-        # Close button
-        close_btn = ttk.Button(
-            main_frame,
-            text="Close",
-            command=self.destroy
-        )
-        close_btn.pack(side=tk.BOTTOM, pady=(10, 0))
-
     def _validate_inputs(self) -> Optional[Dict[str, int]]:
         """
         Validate input values.

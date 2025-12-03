@@ -486,7 +486,8 @@ class WDRTUSBHandler(BaseDRTHandler):
             device_utc = data.get('device_utc', 0)
 
             device_id = f"wDRT_{port_clean}"
-            label = str(trial_number)
+            # Use trial_label if set, otherwise fall back to trial number
+            label = self._trial_label if self._trial_label else str(trial_number)
 
             # CSV line: Device ID, Label, Unix time, MSecs, Trial#, Responses, RT, Battery%, Device UTC
             csv_line = (

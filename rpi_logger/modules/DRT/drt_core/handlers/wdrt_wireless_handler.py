@@ -428,7 +428,8 @@ class WDRTWirelessHandler(BaseDRTHandler):
 
             # Use node ID as device ID
             device_id = self.device_id
-            label = str(trial_number)
+            # Use trial_label if set, otherwise fall back to trial number
+            label = self._trial_label if self._trial_label else str(trial_number)
 
             csv_line = (
                 f"{device_id},{label},{unix_time},{device_timestamp},"

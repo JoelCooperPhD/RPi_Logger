@@ -171,6 +171,8 @@ class DRTModuleRuntime(ModuleRuntime):
             self.view.on_device_connected(device_id, device_type)
 
         if self._recording_active:
+            # Set trial label for device joining mid-recording
+            handler._trial_label = self.trial_label
             try:
                 await handler.start_experiment()
             except Exception as exc:  # pragma: no cover - defensive
@@ -200,6 +202,8 @@ class DRTModuleRuntime(ModuleRuntime):
         failures = []
         for port, handler in self.handlers.items():
             self.logger.debug(f"Calling start_experiment on handler for {port}")
+            # Set trial label before starting experiment
+            handler._trial_label = self.trial_label
             try:
                 started = await handler.start_experiment()
                 self.logger.debug(f"start_experiment returned {started} for {port}")
@@ -231,6 +235,8 @@ class DRTModuleRuntime(ModuleRuntime):
 
         failures = []
         for port, handler in self.handlers.items():
+            # Clear trial label when stopping
+            handler._trial_label = ""
             try:
                 stopped = await handler.stop_experiment()
             except Exception as exc:  # pragma: no cover - defensive
