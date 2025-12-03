@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING, Dict
 
 from rpi_logger.modules.base.modes import BaseGUIMode
 from ..commands import CommandHandler
+from ..device_types import DRTDeviceType
 
 if TYPE_CHECKING:
     from ..drt_system import DRTSystem
@@ -41,27 +42,27 @@ class GUIMode(BaseGUIMode):
         if self.gui:
             self.gui.sync_recording_state()
 
-    async def on_device_connected(self, port: str):
-        self.logger.info("GUIMode: on_device_connected called for %s", port)
+    async def on_device_connected(self, device_id: str, device_type: DRTDeviceType):
+        self.logger.info("GUIMode: on_device_connected called for %s (%s)", device_id, device_type.value)
         if self.gui and hasattr(self.gui, 'on_device_connected'):
             self.logger.info("GUIMode: GUI instance has on_device_connected method")
 
             window = self.get_gui_window()
             if window:
-                self.logger.info("GUIMode: Scheduling GUI update via window.after() for %s", port)
-                window.after(0, lambda: self.gui.on_device_connected(port))
-                self.logger.info("GUIMode: Scheduled GUI update for %s", port)
+                self.logger.info("GUIMode: Scheduling GUI update via window.after() for %s", device_id)
+                window.after(0, lambda: self.gui.on_device_connected(device_id, device_type))
+                self.logger.info("GUIMode: Scheduled GUI update for %s", device_id)
             else:
-                self.logger.warning("GUIMode: No window available for %s", port)
+                self.logger.warning("GUIMode: No window available for %s", device_id)
         else:
             self.logger.warning("GUIMode: GUI or on_device_connected method not available")
 
-    async def on_device_disconnected(self, port: str):
+    async def on_device_disconnected(self, device_id: str, device_type: DRTDeviceType):
         if self.gui and hasattr(self.gui, 'on_device_disconnected'):
             if self.async_bridge:
-                self.async_bridge.call_in_gui(self.gui.on_device_disconnected, port)
+                self.async_bridge.call_in_gui(self.gui.on_device_disconnected, device_id, device_type)
             else:
-                self.gui.on_device_disconnected(port)
+                self.gui.on_device_disconnected(device_id, device_type)
 
     async def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         if self.gui and hasattr(self.gui, 'on_device_data'):

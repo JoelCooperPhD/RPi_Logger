@@ -10,15 +10,11 @@ from typing import Any, Dict, Optional
 
 from vmc.runtime import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
-from rpi_logger.modules.base.usb_serial_manager import (
-    USBDeviceConfig,
-    USBDeviceMonitor,
-    USBSerialDevice,
-)
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from rpi_logger.modules.DRT.drt_core.config import load_config_file
-from rpi_logger.modules.DRT.drt_core.constants import DRT_VID, DRT_PID
-from rpi_logger.modules.DRT.drt_core.drt_handler import DRTHandler
+from rpi_logger.modules.DRT.drt_core.connection_manager import ConnectionManager
+from rpi_logger.modules.DRT.drt_core.device_types import DRTDeviceType
+from rpi_logger.modules.DRT.drt_core.handlers import BaseDRTHandler
 
 
 class DRTModuleRuntime(ModuleRuntime):
@@ -40,18 +36,6 @@ class DRTModuleRuntime(ModuleRuntime):
         self.config_file_path = self.config_path
         self.config: Dict[str, Any] = load_config_file(self.config_path)
 
-        self.device_vid = self._coerce_int(
-            getattr(self.args, "device_vid", None) or self.config.get("device_vid"),
-            DRT_VID,
-        )
-        self.device_pid = self._coerce_int(
-            getattr(self.args, "device_pid", None) or self.config.get("device_pid"),
-            DRT_PID,
-        )
-        self.baudrate = self._coerce_int(
-            getattr(self.args, "baudrate", None) or self.config.get("baudrate"),
-            9600,
-        )
         self.session_prefix = str(getattr(self.args, "session_prefix", self.config.get("session_prefix", "drt")))
         self.enable_gui_commands = bool(getattr(self.args, "enable_commands", False))
 
@@ -59,8 +43,9 @@ class DRTModuleRuntime(ModuleRuntime):
         self.session_dir: Path = self.output_root
         self.module_subdir: str = "DRT"
         self.module_data_dir: Path = self.session_dir
-        self.handlers: Dict[str, DRTHandler] = {}
-        self.usb_monitor: Optional[USBDeviceMonitor] = None
+        self.handlers: Dict[str, BaseDRTHandler] = {}
+        self.device_types: Dict[str, DRTDeviceType] = {}
+        self.connection_manager: Optional[ConnectionManager] = None
         self.task_manager = BackgroundTaskManager(name="DRTRuntimeTasks", logger=self.logger)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._suppress_recording_event = False
@@ -73,12 +58,7 @@ class DRTModuleRuntime(ModuleRuntime):
     # Lifecycle hooks
 
     async def start(self) -> None:
-        self.logger.info(
-            "Starting DRT runtime (VID=0x%04X PID=0x%04X baud=%d)",
-            self.device_vid,
-            self.device_pid,
-            self.baudrate,
-        )
+        self.logger.info("Starting DRT runtime (all device types: sDRT, wDRT USB, wDRT wireless)")
         self._loop = asyncio.get_running_loop()
 
         if self.view:
@@ -88,13 +68,13 @@ class DRTModuleRuntime(ModuleRuntime):
 
         self.model.subscribe(self._on_model_change)
 
-        await self._start_usb_monitor()
-        self.logger.info("DRT runtime ready; waiting for devices")
+        await self._start_connection_manager()
+        self.logger.info("DRT runtime ready; scanning for devices")
 
     async def shutdown(self) -> None:
         self.logger.info("Shutting down DRT runtime")
         await self._stop_recording()
-        await self._stop_usb_monitor()
+        await self._stop_connection_manager()
 
     async def cleanup(self) -> None:
         await self.task_manager.shutdown()
@@ -151,58 +131,57 @@ class DRTModuleRuntime(ModuleRuntime):
             await self._stop_recording()
 
     # ------------------------------------------------------------------
-    # USB monitor management
+    # Connection manager
 
-    async def _start_usb_monitor(self) -> None:
-        config = USBDeviceConfig(
-            vid=self.device_vid,
-            pid=self.device_pid,
-            baudrate=self.baudrate,
-            device_name="sDRT",
+    async def _start_connection_manager(self) -> None:
+        self.connection_manager = ConnectionManager(
+            output_dir=self.module_data_dir,
+            scan_interval=1.0,
+            enable_xbee=True
         )
-        self.usb_monitor = USBDeviceMonitor(
-            config=config,
-            on_connect=self._on_device_connected,
-            on_disconnect=self._on_device_disconnected,
-        )
-        await self.usb_monitor.start()
+        self.connection_manager.on_device_connected = self._on_device_connected
+        self.connection_manager.on_device_disconnected = self._on_device_disconnected
+        await self.connection_manager.start()
 
-    async def _stop_usb_monitor(self) -> None:
-        monitor = self.usb_monitor
-        self.usb_monitor = None
-        if monitor:
-            await monitor.stop()
+    async def _stop_connection_manager(self) -> None:
+        manager = self.connection_manager
+        self.connection_manager = None
+        if manager:
+            await manager.stop()
 
     # ------------------------------------------------------------------
     # Device events
 
-    async def _on_device_connected(self, device: USBSerialDevice) -> None:
-        port = device.port
-        self.logger.info("sDRT connected on %s", port)
-        handler = DRTHandler(device, port, self.module_data_dir, system=self)
-        handler.set_data_callback(self._on_device_data)
+    async def _on_device_connected(
+        self,
+        device_id: str,
+        device_type: DRTDeviceType,
+        handler: BaseDRTHandler
+    ) -> None:
+        self.logger.info("%s connected: %s", device_type.value, device_id)
 
-        await handler.initialize_device()
-        await handler.start()
+        # Set up data callback
+        handler.data_callback = self._on_device_data
 
-        self.handlers[port] = handler
+        # Store handler and type
+        self.handlers[device_id] = handler
+        self.device_types[device_id] = device_type
 
         if self.view:
-            self.view.on_device_connected(port)
+            self.view.on_device_connected(device_id, device_type)
 
         if self._recording_active:
             try:
                 await handler.start_experiment()
             except Exception as exc:  # pragma: no cover - defensive
-                self.logger.error("Failed to start experiment on new device %s: %s", port, exc)
+                self.logger.error("Failed to start experiment on new device %s: %s", device_id, exc)
 
-    async def _on_device_disconnected(self, port: str) -> None:
-        self.logger.info("sDRT disconnected from %s", port)
-        handler = self.handlers.pop(port, None)
-        if handler:
-            await handler.stop()
+    async def _on_device_disconnected(self, device_id: str, device_type: DRTDeviceType) -> None:
+        self.logger.info("%s disconnected: %s", device_type.value, device_id)
+        self.handlers.pop(device_id, None)
+        self.device_types.pop(device_id, None)
         if self.view:
-            self.view.on_device_disconnected(port)
+            self.view.on_device_disconnected(device_id, device_type)
 
     async def _on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if self.view:
@@ -278,7 +257,11 @@ class DRTModuleRuntime(ModuleRuntime):
         self.module_data_dir = ensure_module_data_dir(self.session_dir, self.module_subdir)
 
         for handler in self.handlers.values():
-            handler.output_dir = self.module_data_dir
+            handler.update_output_dir(self.module_data_dir)
+
+        # Also update connection manager
+        if self.connection_manager:
+            self.connection_manager.update_output_dir(self.module_data_dir)
 
         if update_model:
             self._suppress_session_event = True
@@ -288,8 +271,11 @@ class DRTModuleRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
     # GUI-facing helpers
 
-    def get_device_handler(self, port: str) -> Optional[DRTHandler]:
-        return self.handlers.get(port)
+    def get_device_handler(self, device_id: str) -> Optional[BaseDRTHandler]:
+        return self.handlers.get(device_id)
+
+    def get_device_type(self, device_id: str) -> Optional[DRTDeviceType]:
+        return self.device_types.get(device_id)
 
     @property
     def recording(self) -> bool:

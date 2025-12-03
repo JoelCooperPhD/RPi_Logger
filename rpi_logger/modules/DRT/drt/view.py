@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover - tkinter unavailable in headless tests
 
 from rpi_logger.modules.DRT.drt_core.interfaces.gui.quick_status_panel import QuickStatusPanel
 from rpi_logger.modules.DRT.drt_core.interfaces.gui.tkinter_gui import TkinterGUI
+from rpi_logger.modules.DRT.drt_core.device_types import DRTDeviceType
 
 ActionCallback = Optional[Callable[[str], Awaitable[None]]]
 
@@ -48,14 +49,19 @@ class _LoopAsyncBridge:
 
     def __init__(self) -> None:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self._logger = logging.getLogger(__name__ + "._LoopAsyncBridge")
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Remember the supervising loop so Tk callbacks can reuse it."""
         self.loop = loop
+        self._logger.info(f"Async bridge bound to loop: {loop}")
 
     def run_coroutine(self, coro):
+        """Schedule a coroutine to run on the bound event loop (thread-safe)."""
         loop = self._resolve_loop()
-        return loop.create_task(coro)
+        self._logger.info(f"Scheduling coroutine on loop (loop running: {loop.is_running()})")
+        # Use call_soon_threadsafe to schedule from Tk thread to asyncio thread
+        loop.call_soon_threadsafe(lambda: loop.create_task(coro))
 
     def _resolve_loop(self) -> asyncio.AbstractEventLoop:
         if self.loop and not self.loop.is_closed():
@@ -198,6 +204,13 @@ class DRTView:
         if loop and isinstance(gui.async_bridge, _LoopAsyncBridge):
             gui.async_bridge.bind_loop(loop)
         self.gui = gui
+        # Bind the runtime if it was set before the GUI was created
+        if self._runtime:
+            gui.system = self._runtime
+            if isinstance(gui.async_bridge, _LoopAsyncBridge):
+                runtime_loop = getattr(self._runtime, "_loop", None)
+                if runtime_loop:
+                    gui.async_bridge.bind_loop(runtime_loop)
         return container
 
     def bind_runtime(self, runtime) -> None:
@@ -228,15 +241,15 @@ class DRTView:
     # ------------------------------------------------------------------
     # Runtime-to-view notifications
 
-    def on_device_connected(self, port: str) -> None:
+    def on_device_connected(self, device_id: str, device_type: DRTDeviceType = None) -> None:
         if not self.gui:
             return
-        self.call_in_gui(self.gui.on_device_connected, port)
+        self.call_in_gui(self.gui.on_device_connected, device_id, device_type)
 
-    def on_device_disconnected(self, port: str) -> None:
+    def on_device_disconnected(self, device_id: str, device_type: DRTDeviceType = None) -> None:
         if not self.gui:
             return
-        self.call_in_gui(self.gui.on_device_disconnected, port)
+        self.call_in_gui(self.gui.on_device_disconnected, device_id, device_type)
 
     def on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if not self.gui:

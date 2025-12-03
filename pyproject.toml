@@ -25,6 +25,9 @@ dev = [
     "pyinstaller>=6.0.0",
     "appimage-builder>=1.0.0; sys_platform == 'linux'",
 ]
+xbee = [
+    "digi-xbee>=1.4.1",
+]
 
 [build-system]
 requires = ["hatchling"]

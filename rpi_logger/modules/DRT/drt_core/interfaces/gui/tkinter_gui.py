@@ -9,25 +9,31 @@ from pathlib import Path
 from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase
 from .drt_plotter import DRTPlotter
 from .sdrt_config_window import SDRTConfigWindow
+from .wdrt_config_window import WDRTConfigWindow
+from .battery_widget import CompactBatteryWidget
 from .quick_status_panel import QuickStatusPanel
+from ...device_types import DRTDeviceType
 
 if TYPE_CHECKING:
     from ...drt_system import DRTSystem
 
 
 class DeviceTab:
-    def __init__(self, port: str, parent_frame: tk.Frame):
-        self.port = port
+    def __init__(self, device_id: str, device_type: DRTDeviceType, parent_frame: tk.Frame):
+        self.device_id = device_id
+        self.device_type = device_type
         self.frame = parent_frame
         self.plotter: Optional[DRTPlotter] = None
 
         self.trial_number_var = tk.StringVar(value="0")
         self.reaction_time_var = tk.StringVar(value="-1")
         self.click_count_var = tk.StringVar(value="0")
+        self.battery_var = tk.StringVar(value="---%")
 
         self.stim_on_button: Optional[ttk.Button] = None
         self.stim_off_button: Optional[ttk.Button] = None
         self.configure_button: Optional[ttk.Button] = None
+        self.battery_widget: Optional[CompactBatteryWidget] = None
 
 
 class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
@@ -51,7 +57,8 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.empty_state_label: Optional[ttk.Label] = None
 
         self.stimulus_state: Dict[str, int] = {}
-        self.config_window: Optional[SDRTConfigWindow] = None
+        self.sdrt_config_window: Optional[SDRTConfigWindow] = None
+        self.wdrt_config_window: Optional[WDRTConfigWindow] = None
         self.quick_panel: Optional[QuickStatusPanel] = quick_panel
         self.devices_panel_visible_var = None
 
@@ -62,8 +69,6 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             menu_bar_kwargs={'include_sources': False},
             master=master,
         )
-
-        self.config_window = None
 
     def set_close_handler(self, handler):
         protocol_target = getattr(self.root, "protocol", None)
@@ -137,7 +142,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.empty_state_label = ttk.Label(
             notebook_container,
-            text="⚠ No sDRT devices connected\n\nPlease connect a device to begin",
+            text="⚠ No DRT devices connected\n\nConnect sDRT, wDRT USB, or wDRT wireless to begin",
             font=('TkDefaultFont', 12),
             justify='center',
             foreground='gray'
@@ -146,15 +151,15 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.empty_state_label.lift()
 
 
-    def _create_device_tab(self, port: str) -> DeviceTab:
+    def _create_device_tab(self, device_id: str, device_type: DRTDeviceType) -> DeviceTab:
         tab_frame = ttk.Frame(self.notebook)
-        tab = DeviceTab(port, tab_frame)
+        tab = DeviceTab(device_id, device_type, tab_frame)
 
         tab_frame.columnconfigure(0, weight=1)
         tab_frame.rowconfigure(3, weight=1)
 
         tab.plotter = DRTPlotter(tab_frame)
-        tab.plotter.add_device(port)
+        tab.plotter.add_device(device_id)
 
         stimulus_frame = ttk.LabelFrame(tab_frame, text="Stimulus", padding=(10, 5))
         stimulus_frame.grid(row=1, column=1, sticky='nsew', padx=5, pady=5)
@@ -162,11 +167,11 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         stimulus_frame.columnconfigure(1, weight=1)
 
         tab.stim_on_button = ttk.Button(stimulus_frame, text="ON",
-                                        command=lambda: self._on_stimulus_on(port))
+                                        command=lambda: self._on_stimulus_on(device_id))
         tab.stim_on_button.grid(row=0, column=0, sticky='nsew', padx=2)
 
         tab.stim_off_button = ttk.Button(stimulus_frame, text="OFF",
-                                         command=lambda: self._on_stimulus_off(port))
+                                         command=lambda: self._on_stimulus_off(device_id))
         tab.stim_off_button.grid(row=0, column=1, sticky='nsew', padx=2)
 
         results_frame = ttk.LabelFrame(tab_frame, text="Results", padding=(10, 5))
@@ -183,15 +188,32 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         ttk.Label(results_frame, text="Response Count:", anchor='w').grid(row=2, column=0, sticky='w', pady=2)
         ttk.Label(results_frame, textvariable=tab.click_count_var, anchor='e').grid(row=2, column=1, sticky='e', pady=2)
 
+        # Add battery display for wDRT devices
+        if device_type in (DRTDeviceType.WDRT_USB, DRTDeviceType.WDRT_WIRELESS):
+            battery_frame = ttk.Frame(results_frame)
+            battery_frame.grid(row=3, column=0, columnspan=2, sticky='ew', pady=(5, 0))
+            ttk.Label(battery_frame, text="Battery:", anchor='w').pack(side=tk.LEFT)
+            tab.battery_widget = CompactBatteryWidget(battery_frame)
+            tab.battery_widget.pack(side=tk.LEFT, padx=(5, 0))
+
         configure_frame = ttk.Frame(tab_frame)
         configure_frame.grid(row=5, column=1, sticky='nsew', padx=5, pady=5)
         configure_frame.columnconfigure(0, weight=1)
 
         tab.configure_button = ttk.Button(configure_frame, text="Configure Unit",
-                                         command=lambda: self._on_configure(port), width=25)
+                                         command=lambda: self._on_configure(device_id), width=25)
         tab.configure_button.grid(row=0, column=0, sticky='nsew')
 
-        tab_label = f"{port}"
+        # Create tab label with device type indicator
+        type_prefix = {
+            DRTDeviceType.SDRT: "sDRT",
+            DRTDeviceType.WDRT_USB: "wDRT",
+            DRTDeviceType.WDRT_WIRELESS: "wDRT-W",
+        }.get(device_type, "DRT")
+
+        # Use short device ID for tab label
+        short_id = device_id.split('/')[-1] if '/' in device_id else device_id
+        tab_label = f"{type_prefix}: {short_id}"
         self.notebook.add(tab_frame, text=tab_label)
 
         return tab
@@ -242,6 +264,8 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             if port in self.device_tabs and self.device_tabs[port].plotter:
                 self.device_tabs[port].plotter.update_stimulus_state(port, 1)
             self.logger.info("Stimulus ON scheduled for %s", port)
+        else:
+            self.logger.error("No handler found for device %s (system=%s)", port, type(self.system).__name__)
 
     def _on_stimulus_off(self, port: str):
         handler = self.system.get_device_handler(port)
@@ -257,57 +281,130 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             if port in self.device_tabs and self.device_tabs[port].plotter:
                 self.device_tabs[port].plotter.update_stimulus_state(port, 0)
             self.logger.info("Stimulus OFF scheduled for %s", port)
+        else:
+            self.logger.error("No handler found for device %s (system=%s)", port, type(self.system).__name__)
 
-    def _on_configure(self, port: str):
-        if not self.config_window:
-            parent = getattr(self, 'root', None)
-            self.config_window = SDRTConfigWindow(self.system, self.async_bridge, parent=parent)
-        self.config_window.show_for_device(port)
+    def _on_configure(self, device_id: str):
+        tab = self.device_tabs.get(device_id)
+        if not tab:
+            return
 
-    def on_device_connected(self, port: str):
+        parent = getattr(self, 'root', None)
+
+        if tab.device_type == DRTDeviceType.SDRT:
+            # Use sDRT config window
+            if not self.sdrt_config_window:
+                self.sdrt_config_window = SDRTConfigWindow(self.system, self.async_bridge, parent=parent)
+            self.sdrt_config_window.show_for_device(device_id)
+        else:
+            # Use wDRT config window for wDRT USB and wireless
+            handler = self.system.get_device_handler(device_id)
+            if handler:
+                self.wdrt_config_window = WDRTConfigWindow(
+                    parent,
+                    device_id,
+                    on_upload=lambda params: self._on_wdrt_upload(device_id, params),
+                    on_iso_preset=lambda: self._on_wdrt_iso(device_id),
+                    on_rtc_sync=lambda: self._on_wdrt_rtc_sync(device_id),
+                    on_get_config=lambda: self._on_wdrt_get_config(device_id),
+                    on_get_battery=lambda: self._on_wdrt_get_battery(device_id),
+                )
+
+    def _on_wdrt_upload(self, device_id: str, params: Dict[str, int]):
+        handler = self.system.get_device_handler(device_id)
+        if handler and self.async_bridge:
+            self.async_bridge.run_coroutine(handler.send_command('set', params))
+
+    def _on_wdrt_iso(self, device_id: str):
+        handler = self.system.get_device_handler(device_id)
+        if handler and self.async_bridge:
+            self.async_bridge.run_coroutine(handler.send_command('iso'))
+
+    def _on_wdrt_rtc_sync(self, device_id: str):
+        handler = self.system.get_device_handler(device_id)
+        if handler and self.async_bridge:
+            self.async_bridge.run_coroutine(handler.send_command('set_rtc'))
+
+    def _on_wdrt_get_config(self, device_id: str):
+        handler = self.system.get_device_handler(device_id)
+        if handler and self.async_bridge:
+            self.async_bridge.run_coroutine(handler.send_command('get_config'))
+
+    def _on_wdrt_get_battery(self, device_id: str):
+        handler = self.system.get_device_handler(device_id)
+        if handler and self.async_bridge:
+            self.async_bridge.run_coroutine(handler.send_command('get_battery'))
+
+    def on_device_connected(self, device_id: str, device_type: DRTDeviceType = None):
         try:
-            if port not in self.device_tabs:
-                tab = self._create_device_tab(port)
-                self.device_tabs[port] = tab
+            # Handle legacy calls without device_type
+            if device_type is None:
+                device_type = self.system.get_device_type(device_id) or DRTDeviceType.SDRT
+
+            if device_id not in self.device_tabs:
+                tab = self._create_device_tab(device_id, device_type)
+                self.device_tabs[device_id] = tab
 
             if self.empty_state_label and self.device_tabs:
                 self.empty_state_label.grid_remove()
                 self.notebook.lift()
 
             if self.quick_panel:
-                self.quick_panel.device_connected(port)
+                self.quick_panel.device_connected(device_id)
                 if not self.system.recording:
                     self.quick_panel.set_module_state("Ready")
         except Exception as e:
             self.logger.error("Error in on_device_connected: %s", e, exc_info=True)
 
-    def on_device_disconnected(self, port: str):
-        self.logger.info("GUI: Device disconnected from %s", port)
+    def on_device_disconnected(self, device_id: str, device_type: DRTDeviceType = None):
+        self.logger.info("GUI: Device disconnected: %s", device_id)
 
-        if port in self.device_tabs:
-            tab = self.device_tabs[port]
+        if device_id in self.device_tabs:
+            tab = self.device_tabs[device_id]
 
+            # Find and remove the tab by matching device_id in the tab text
             for idx in range(self.notebook.index("end")):
-                if self.notebook.tab(idx, "text") == port:
+                tab_text = self.notebook.tab(idx, "text")
+                if device_id in tab_text or device_id.split('/')[-1] in tab_text:
                     self.notebook.forget(idx)
                     break
 
-            del self.device_tabs[port]
-            self.logger.info("Removed tab for device %s", port)
+            del self.device_tabs[device_id]
+            self.logger.info("Removed tab for device %s", device_id)
 
         if self.empty_state_label and not self.device_tabs:
             self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
             self.empty_state_label.lift()
 
         if self.quick_panel:
-            self.quick_panel.device_disconnected(port)
+            self.quick_panel.device_disconnected(device_id)
             if not self.device_tabs and not self.system.recording:
                 self.quick_panel.set_module_state("Idle")
 
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         tab = self.device_tabs.get(port)
 
-        if data_type == 'click' and tab:
+        if data_type == 'battery' and tab:
+            # Update battery display for wDRT devices
+            percent = data.get('percent')
+            if percent is not None and tab.battery_widget:
+                tab.battery_widget.set_percent(int(percent))
+            # Also update wDRT config window if open
+            if self.wdrt_config_window and percent is not None:
+                try:
+                    self.wdrt_config_window.update_battery(int(percent))
+                except Exception:
+                    pass  # Window may have been closed
+
+        elif data_type == 'config' and tab:
+            # Update config window if open
+            if tab.device_type != DRTDeviceType.SDRT and self.wdrt_config_window:
+                try:
+                    self.wdrt_config_window.update_config(data)
+                except Exception:
+                    pass  # Window may have been closed
+
+        elif data_type == 'click' and tab:
             value = data.get('value', '')
             try:
                 click_count = int(value) if value else 0

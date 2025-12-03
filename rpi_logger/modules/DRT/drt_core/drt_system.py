@@ -2,9 +2,11 @@ import asyncio
 from pathlib import Path
 from typing import Any, Optional, Dict, List, Tuple
 
-from rpi_logger.modules.base import BaseSystem, RecordingStateMixin, USBDeviceConfig, USBDeviceMonitor, USBSerialDevice
+from rpi_logger.modules.base import BaseSystem, RecordingStateMixin
 from . import DRTInitializationError
-from .drt_handler import DRTHandler
+from .device_types import DRTDeviceType
+from .connection_manager import ConnectionManager
+from .handlers import BaseDRTHandler
 
 class DRTSystem(BaseSystem, RecordingStateMixin):
 
@@ -14,8 +16,9 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
         super().__init__(args)
         RecordingStateMixin.__init__(self)
 
-        self.usb_monitor: Optional[USBDeviceMonitor] = None
-        self.device_handlers: Dict[str, DRTHandler] = {}
+        self.connection_manager: Optional[ConnectionManager] = None
+        self.device_handlers: Dict[str, BaseDRTHandler] = {}
+        self.device_types: Dict[str, DRTDeviceType] = {}
         self.output_dir: Optional[Path] = None
 
     async def _initialize_devices(self) -> None:
@@ -25,43 +28,37 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
 
             if self._should_send_status():
                 from rpi_logger.core.commands import StatusMessage
-                StatusMessage.send("discovering", {"device_type": "usb_drt", "timeout": self.device_timeout})
+                StatusMessage.send("discovering", {"device_type": "drt", "timeout": self.device_timeout})
 
             self.session_dir.mkdir(parents=True, exist_ok=True)
             self.output_dir = self.session_dir
 
-            vid = int(self.args.device_vid) if isinstance(self.args.device_vid, str) else self.args.device_vid
-            pid = int(self.args.device_pid) if isinstance(self.args.device_pid, str) else self.args.device_pid
-
-            device_config = USBDeviceConfig(
-                vid=vid,
-                pid=pid,
-                baudrate=self.args.baudrate,
-                device_name="sDRT"
+            # Create connection manager for all DRT device types
+            self.connection_manager = ConnectionManager(
+                output_dir=self.output_dir,
+                scan_interval=1.0,
+                enable_xbee=True
             )
 
-            self.usb_monitor = USBDeviceMonitor(
-                config=device_config,
-                on_connect=self._on_device_connected,
-                on_disconnect=self._on_device_disconnected
-            )
+            # Set up callbacks
+            self.connection_manager.on_device_connected = self._on_device_connected
+            self.connection_manager.on_device_disconnected = self._on_device_disconnected
 
-            await self.usb_monitor.start()
+            await self.connection_manager.start()
 
             self.initialized = True
             self.lifecycle_timer.mark_phase("device_discovery_complete")
             self.lifecycle_timer.mark_phase("initialized")
 
-            self.logger.info("DRT module initialized successfully, discovering devices...")
+            self.logger.info("DRT module initialized, scanning for sDRT, wDRT USB, and wDRT wireless devices...")
 
             if self._should_send_status():
                 from rpi_logger.core.commands import StatusMessage
                 init_duration = self.lifecycle_timer.get_duration("device_discovery_start", "initialized")
                 StatusMessage.send_with_timing("initialized", init_duration, {
-                    "device_type": "usb_drt",
-                    "usb_monitor_active": True,
-                    "vid": hex(vid),
-                    "pid": hex(pid)
+                    "device_type": "drt",
+                    "connection_manager_active": True,
+                    "xbee_enabled": self.connection_manager.xbee_enabled
                 })
 
         except DRTInitializationError:
@@ -71,37 +68,41 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             self.logger.error(error_msg, exc_info=True)
             raise DRTInitializationError(error_msg) from e
 
-    async def _on_device_connected(self, device: USBSerialDevice):
-        self.logger.info("DRTSystem: sDRT device connected on %s", device.port)
+    async def _on_device_connected(
+        self,
+        device_id: str,
+        device_type: DRTDeviceType,
+        handler: BaseDRTHandler
+    ):
+        """Handle device connection from ConnectionManager."""
+        self.logger.info("DRTSystem: %s device connected: %s", device_type.value, device_id)
 
-        self.logger.info("DRTSystem: Creating handler for %s", device.port)
-        handler = DRTHandler(device, device.port, self.output_dir, system=self)
-        handler.set_data_callback(self._on_device_data)
+        # Set up data callback
+        handler.data_callback = self._on_device_data
 
-        self.logger.info("DRTSystem: Initializing device %s", device.port)
-        await handler.initialize_device()
-        self.logger.info("DRTSystem: Starting handler for %s", device.port)
-        await handler.start()
-
-        self.device_handlers[device.port] = handler
-        self.logger.info("DRTSystem: Handler registered for %s", device.port)
+        # Store handler and type
+        self.device_handlers[device_id] = handler
+        self.device_types[device_id] = device_type
+        self.logger.info("DRTSystem: Handler registered for %s", device_id)
 
         if self.mode_instance and hasattr(self.mode_instance, 'on_device_connected'):
-            self.logger.info("DRTSystem: Calling mode_instance.on_device_connected for %s", device.port)
-            await self.mode_instance.on_device_connected(device.port)
-            self.logger.info("DRTSystem: mode_instance.on_device_connected completed for %s", device.port)
+            self.logger.info("DRTSystem: Calling mode_instance.on_device_connected for %s", device_id)
+            await self.mode_instance.on_device_connected(device_id, device_type)
+            self.logger.info("DRTSystem: mode_instance.on_device_connected completed for %s", device_id)
         elif self.mode_instance:
             self.logger.warning("DRTSystem: mode_instance missing on_device_connected handler")
 
-    async def _on_device_disconnected(self, port: str):
-        self.logger.info("sDRT device disconnected from %s", port)
+    async def _on_device_disconnected(self, device_id: str, device_type: DRTDeviceType):
+        """Handle device disconnection from ConnectionManager."""
+        self.logger.info("%s device disconnected: %s", device_type.value, device_id)
 
-        if port in self.device_handlers:
-            handler = self.device_handlers.pop(port)
-            await handler.stop()
+        if device_id in self.device_handlers:
+            self.device_handlers.pop(device_id)
+        if device_id in self.device_types:
+            self.device_types.pop(device_id)
 
         if self.mode_instance and hasattr(self.mode_instance, 'on_device_disconnected'):
-            await self.mode_instance.on_device_disconnected(port)
+            await self.mode_instance.on_device_disconnected(device_id, device_type)
         elif self.mode_instance:
             self.logger.warning('DRTSystem: mode_instance missing on_device_disconnected handler')
 
@@ -197,24 +198,23 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             if not stopped:
                 self.logger.warning("Recording did not stop cleanly during cleanup")
 
-        if self.usb_monitor:
-            await self.usb_monitor.stop()
-
-        for handler in list(self.device_handlers.values()):
-            try:
-                await handler.stop()
-            except Exception as exc:
-                self.logger.warning("Error stopping handler for cleanup on %s: %s", getattr(handler, 'port', 'unknown'), exc, exc_info=True)
+        if self.connection_manager:
+            await self.connection_manager.stop()
 
         self.device_handlers.clear()
+        self.device_types.clear()
 
         self.initialized = False
         self.logger.info("DRT cleanup completed")
 
-    def get_connected_devices(self) -> Dict[str, USBSerialDevice]:
-        if self.usb_monitor:
-            return self.usb_monitor.get_devices()
-        return {}
+    def get_connected_devices(self) -> Dict[str, DRTDeviceType]:
+        """Return dict of device IDs to their types."""
+        return self.device_types.copy()
 
-    def get_device_handler(self, port: str) -> Optional[DRTHandler]:
-        return self.device_handlers.get(port)
+    def get_device_handler(self, device_id: str) -> Optional[BaseDRTHandler]:
+        """Get handler for a specific device."""
+        return self.device_handlers.get(device_id)
+
+    def get_device_type(self, device_id: str) -> Optional[DRTDeviceType]:
+        """Get the device type for a specific device."""
+        return self.device_types.get(device_id)
