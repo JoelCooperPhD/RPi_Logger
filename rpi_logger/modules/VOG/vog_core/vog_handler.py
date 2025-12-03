@@ -170,11 +170,13 @@ class VOGHandler:
             self.logger.warning("Failed to format command: %s", command)
             return False
 
-        self.logger.debug("Sending to %s: %s", self.port, data.decode('utf-8').strip())
+        self.logger.info("Sending to %s: %r (len=%d)", self.port, data, len(data))
         success = await self.device.write(data)
 
         if success:
-            self.logger.debug("Command sent to %s: %s", self.port, command)
+            self.logger.info("Command sent to %s: %s", self.port, command)
+            # Small delay to let firmware process the command
+            await asyncio.sleep(0.05)
         else:
             self.logger.error("Failed to send command to %s: %s", self.port, command)
 
@@ -191,16 +193,32 @@ class VOGHandler:
         return True
 
     async def start_experiment(self) -> bool:
-        """Send experiment start command."""
+        """Send experiment start command.
+
+        For wVOG: sends exp>1 to initialize experiment.
+        For sVOG: sends do_expStart.
+
+        Note: This only initializes the experiment. To start cycling/trial,
+        call start_trial() separately.
+        """
         self._trial_number = 0
         self._recording_start_time = datetime.now().timestamp()
         self.logger.info("Starting experiment on %s", self.port)
+
         return await self.send_command('exp_start')
 
     async def stop_experiment(self) -> bool:
-        """Send experiment stop command."""
-        self._recording_start_time = None
+        """Send experiment stop command.
+
+        For wVOG: sends exp>0 to close experiment.
+        For sVOG: sends do_expStop.
+
+        Note: This only stops the experiment. To stop the trial/cycling first,
+        call stop_trial() separately before this.
+        """
         self.logger.info("Stopping experiment on %s", self.port)
+
+        self._recording_start_time = None
         return await self.send_command('exp_stop')
 
     async def start_trial(self) -> bool:
@@ -392,6 +410,7 @@ class VOGHandler:
 
     async def _dispatch_data_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """Dispatch data event to callback."""
+        self.logger.debug("Dispatch event: type=%s data=%s", event_type, data)
         if not self._data_callback:
             return
 
@@ -403,12 +422,32 @@ class VOGHandler:
         except Exception as exc:
             self.logger.error("Error in data callback for %s: %s", self.port, exc)
 
+    def _determine_trial_number(self, packet: VOGDataPacket) -> int:
+        """Determine trial number from system or packet data.
+
+        Prioritizes system's active_trial_number to match other modules,
+        falls back to packet trial number or internal counter.
+        """
+        candidate = None
+        if self.system is not None:
+            candidate = getattr(self.system, "active_trial_number", None)
+            if not candidate and hasattr(self.system, "model"):
+                model = getattr(self.system, "model")
+                candidate = getattr(model, "trial_number", None)
+        if not candidate:
+            candidate = packet.trial_number or self._trial_number
+        try:
+            numeric = int(candidate)
+        except (TypeError, ValueError):
+            numeric = 0
+        return numeric if numeric and numeric > 0 else 1
+
     async def _log_trial_data(self, packet: VOGDataPacket):
         """Log trial data to CSV file."""
         try:
             await asyncio.to_thread(self.output_dir.mkdir, parents=True, exist_ok=True)
 
-            trial_number = packet.trial_number or self._trial_number or 1
+            trial_number = self._determine_trial_number(packet)
             prefix = module_filename_prefix(self.output_dir, "VOG", trial_number, code="VOG")
             port_name = self.port.lstrip('/').replace('/', '_').replace('\\', '_').lower()
             data_file = self.output_dir / f"{prefix}_{port_name}.csv"

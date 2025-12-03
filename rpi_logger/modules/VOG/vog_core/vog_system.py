@@ -240,7 +240,12 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         raise ValueError(f"Unknown mode: {mode_name}")
 
     async def start_recording(self) -> bool:
-        """Start recording on all connected devices."""
+        """Start recording on all connected devices.
+
+        This sends both exp>1 (start experiment) and trl>1 (start trial) to
+        begin cycling. For proper separation, use start_session() followed
+        by start_trial() separately.
+        """
         can_start, error_msg = self.validate_recording_start()
         if not can_start:
             self.logger.warning("Cannot start recording: %s", error_msg)
@@ -255,10 +260,18 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
 
         for port, handler in self.device_handlers.items():
             try:
-                success = await handler.start_experiment()
+                # Start experiment first (exp>1)
+                exp_ok = await handler.start_experiment()
+                if not exp_ok:
+                    raise RuntimeError("start_experiment failed")
+                # Then start trial (trl>1)
+                trial_ok = await handler.start_trial()
+                if not trial_ok:
+                    raise RuntimeError("start_trial failed")
+                success = True
             except Exception as exc:
                 self.logger.error(
-                    "Exception starting experiment on %s: %s",
+                    "Exception starting recording on %s: %s",
                     port, exc, exc_info=True
                 )
                 success = False
@@ -273,20 +286,24 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             # Rollback successfully started handlers
             for port, handler in started_handlers:
                 try:
+                    await handler.stop_trial()
                     await handler.stop_experiment()
                 except Exception as exc:
                     self.logger.warning(
-                        "Rollback stop_experiment failed on %s: %s",
+                        "Rollback failed on %s: %s",
                         port, exc, exc_info=True
                     )
             return False
 
         self.recording = True
-        self.logger.info("VOG recording started for all devices")
+        self.logger.info("VOG recording started for all devices (exp>1, trl>1)")
         return True
 
     async def stop_recording(self) -> bool:
-        """Stop recording on all connected devices."""
+        """Stop recording on all connected devices.
+
+        This sends both trl>0 (stop trial) and exp>0 (stop experiment).
+        """
         can_stop, error_msg = self.validate_recording_stop()
         if not can_stop:
             self.logger.warning("Cannot stop recording: %s", error_msg)
@@ -296,10 +313,14 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
 
         for port, handler in self.device_handlers.items():
             try:
-                success = await handler.stop_experiment()
+                # Stop trial first (trl>0)
+                await handler.stop_trial()
+                # Then stop experiment (exp>0)
+                await handler.stop_experiment()
+                success = True
             except Exception as exc:
                 self.logger.error(
-                    "Exception stopping experiment on %s: %s",
+                    "Exception stopping recording on %s: %s",
                     port, exc, exc_info=True
                 )
                 success = False
@@ -312,7 +333,7 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             return False
 
         self.recording = False
-        self.logger.info("VOG recording stopped for all devices")
+        self.logger.info("VOG recording stopped for all devices (trl>0, exp>0)")
         return True
 
     async def peek_open_all(self, lens: str = 'x') -> bool:

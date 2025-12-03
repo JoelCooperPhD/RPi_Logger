@@ -73,6 +73,7 @@ class VOGModuleRuntime(ModuleRuntime):
         self._suppress_recording_event = False
         self._suppress_session_event = False
         self._recording_active = False
+        self._session_active = False  # True when experiment started (exp>1 sent)
         self.trial_label: str = ""
         self.active_trial_number: int = 1
 
@@ -100,7 +101,7 @@ class VOGModuleRuntime(ModuleRuntime):
 
     async def shutdown(self) -> None:
         self.logger.info("Shutting down VOG runtime")
-        await self._stop_recording()
+        await self._stop_session()  # This also stops recording if active
         await self._stop_usb_monitor()
 
     async def cleanup(self) -> None:
@@ -268,11 +269,21 @@ class VOGModuleRuntime(ModuleRuntime):
         if self.view:
             self.view.on_device_connected(port, device_type)
 
-        if self._recording_active:
+        # If session is active, start experiment on new device
+        if self._session_active:
             try:
                 await handler.start_experiment()
+                self.logger.info("Started experiment on newly connected device %s", port)
             except Exception as exc:
                 self.logger.error("Failed to start experiment on new device %s: %s", port, exc)
+
+        # If recording is active, also start trial
+        if self._recording_active:
+            try:
+                await handler.start_trial()
+                self.logger.info("Started trial on newly connected device %s", port)
+            except Exception as exc:
+                self.logger.error("Failed to start trial on new device %s: %s", port, exc)
 
     async def _on_device_disconnected(self, port: str) -> None:
         handler = self.handlers.pop(port, None)
@@ -284,16 +295,22 @@ class VOGModuleRuntime(ModuleRuntime):
             self.view.on_device_disconnected(port)
 
     async def _on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
+        self.logger.debug("Device data: port=%s type=%s payload=%s", port, data_type, payload)
         if self.view:
             self.view.on_device_data(port, data_type, payload)
 
     # ------------------------------------------------------------------
-    # Recording control
+    # Session control (experiment start/stop)
 
-    async def _start_recording(self) -> bool:
+    async def _start_session(self) -> bool:
+        """Start experiment session on all devices (sends exp>1)."""
         if not self.handlers:
-            self.logger.error("Cannot start recording - no devices connected")
+            self.logger.warning("Cannot start session - no devices connected")
             return False
+
+        if self._session_active:
+            self.logger.debug("Session already active")
+            return True
 
         successes = []
         failures = []
@@ -309,7 +326,7 @@ class VOGModuleRuntime(ModuleRuntime):
                 failures.append(port)
 
         if failures:
-            self.logger.error("Failed to start recording on: %s", ", ".join(failures))
+            self.logger.error("Failed to start session on: %s", ", ".join(failures))
             for port, handler in successes:
                 try:
                     await handler.stop_experiment()
@@ -317,14 +334,18 @@ class VOGModuleRuntime(ModuleRuntime):
                     self.logger.warning("Rollback stop_experiment failed on %s: %s", port, exc)
             return False
 
-        self._recording_active = True
-        if self.view:
-            self.view.update_recording_state()
+        self._session_active = True
+        self.logger.info("Session started on all devices (exp>1)")
         return True
 
-    async def _stop_recording(self) -> None:
-        if not self._recording_active:
+    async def _stop_session(self) -> None:
+        """Stop experiment session on all devices (sends exp>0)."""
+        if not self._session_active:
             return
+
+        # First stop any active trial
+        if self._recording_active:
+            await self._stop_recording()
 
         failures = []
         for port, handler in self.handlers.items():
@@ -337,9 +358,74 @@ class VOGModuleRuntime(ModuleRuntime):
                 failures.append(port)
 
         if failures:
+            self.logger.error("Failed to stop session on: %s", ", ".join(failures))
+
+        self._session_active = False
+        self.logger.info("Session stopped on all devices (exp>0)")
+
+    # ------------------------------------------------------------------
+    # Recording control (trial start/stop)
+
+    async def _start_recording(self) -> bool:
+        """Start trial/recording on all devices (sends trl>1)."""
+        if not self.handlers:
+            self.logger.error("Cannot start recording - no devices connected")
+            return False
+
+        # Ensure session is started first
+        if not self._session_active:
+            session_ok = await self._start_session()
+            if not session_ok:
+                return False
+
+        successes = []
+        failures = []
+        for port, handler in self.handlers.items():
+            try:
+                started = await handler.start_trial()
+            except Exception as exc:
+                self.logger.error("start_trial failed on %s: %s", port, exc)
+                started = False
+            if started:
+                successes.append((port, handler))
+            else:
+                failures.append(port)
+
+        if failures:
+            self.logger.error("Failed to start recording on: %s", ", ".join(failures))
+            for port, handler in successes:
+                try:
+                    await handler.stop_trial()
+                except Exception as exc:
+                    self.logger.warning("Rollback stop_trial failed on %s: %s", port, exc)
+            return False
+
+        self._recording_active = True
+        self.logger.info("Recording started on all devices (trl>1)")
+        if self.view:
+            self.view.update_recording_state()
+        return True
+
+    async def _stop_recording(self) -> None:
+        """Stop trial/recording on all devices (sends trl>0)."""
+        if not self._recording_active:
+            return
+
+        failures = []
+        for port, handler in self.handlers.items():
+            try:
+                stopped = await handler.stop_trial()
+            except Exception as exc:
+                self.logger.error("stop_trial failed on %s: %s", port, exc)
+                stopped = False
+            if not stopped:
+                failures.append(port)
+
+        if failures:
             self.logger.error("Failed to stop recording on: %s", ", ".join(failures))
         self._recording_active = False
         self.trial_label = ""
+        self.logger.info("Recording stopped on all devices (trl>0)")
         if self.view:
             self.view.update_recording_state()
 

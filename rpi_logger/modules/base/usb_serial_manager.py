@@ -56,6 +56,10 @@ class USBSerialDevice:
                 write_timeout=self.config.write_timeout
             )
 
+            # Clear any stale data in buffers
+            await asyncio.to_thread(self._serial.reset_input_buffer)
+            await asyncio.to_thread(self._serial.reset_output_buffer)
+
             self.state = DeviceState.CONNECTED
             logger.info(f"Connected to {self.config.device_name} on {self.port}")
             return True
