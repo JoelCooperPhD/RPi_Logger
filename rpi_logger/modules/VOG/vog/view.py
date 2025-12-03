@@ -32,9 +32,9 @@ except ImportError:
     HAS_MATPLOTLIB = False
 
 try:
-    from .config_dialog import VOGConfigDialog
+    from ..vog_core.interfaces.gui.config_window import VOGConfigWindow
 except ImportError:
-    VOGConfigDialog = None
+    VOGConfigWindow = None
 
 ActionCallback = Optional[Callable[..., Awaitable[None]]]
 
@@ -118,8 +118,8 @@ class VOGTkinterGUI:
         self._running = False
         self._plot_recording_state: Optional[bool] = None  # Track plotter sync state
 
-        # Configuration dialog
-        self._config_dialog: Optional[VOGConfigDialog] = None
+        # Configuration dialog (created on demand, not stored)
+        # VOGConfigWindow is modal and self-contained
 
         # UI references
         self.root = embedded_parent
@@ -322,42 +322,8 @@ class VOGTkinterGUI:
                 if dev.get('plot'):
                     dev['plot'].tsct_update(port, int(closed))
 
-        # Handle config responses
-        elif data_type == 'config' or data.get('event') == 'config':
-            if self._config_dialog:
-                # wVOG sends config dict with parsed values
-                config_dict = data.get('config')
-                if config_dict and isinstance(config_dict, dict):
-                    # Map wVOG keys to config dialog keys
-                    key_map = {
-                        'open_time': 'configMaxOpen',
-                        'opn': 'configMaxOpen',
-                        'close_time': 'configMaxClose',
-                        'cls': 'configMaxClose',
-                        'debounce': 'configDebounce',
-                        'dbc': 'configDebounce',
-                        'experiment_type': 'configName',
-                        'typ': 'configName',
-                    }
-                    for wvog_key, dialog_key in key_map.items():
-                        if wvog_key in config_dict:
-                            self._config_dialog.update_fields(dialog_key, str(config_dict[wvog_key]))
-                    # wVOG doesn't report firmware version, use device type
-                    self._config_dialog.update_fields('deviceVer', 'wVOG')
-                else:
-                    # sVOG sends keyword|value responses
-                    keyword = data.get('keyword')
-                    value = data.get('value')
-                    if keyword and value is not None:
-                        self._config_dialog.update_fields(keyword, str(value))
-
-        # Handle version responses (also populate config dialog)
-        elif data_type == 'version' or data.get('event') == 'version':
-            if self._config_dialog:
-                keyword = data.get('keyword')
-                value = data.get('value')
-                if keyword and value is not None:
-                    self._config_dialog.update_fields(keyword, str(value))
+        # Config and version responses are handled directly by VOGConfigWindow
+        # when it's open - it loads config from handler.get_config()
 
     # ------------------------------------------------------------------
     # Recording state management (matches DRT pattern)
@@ -463,26 +429,39 @@ class VOGTkinterGUI:
 
     def _on_configure_clicked(self, port: str):
         """Handle configure button click - show config dialog."""
-        if VOGConfigDialog is None:
-            self.logger.warning("Configuration dialog not available")
+        self.logger.info("Configure button clicked for port: %s", port)
+
+        if VOGConfigWindow is None:
+            self.logger.warning("Configuration dialog not available (import failed)")
             return
 
-        if self._config_dialog is None:
-            self._config_dialog = VOGConfigDialog(action_callback=self._dispatch_config_action)
-
-        root = getattr(self._notebook, 'winfo_toplevel', lambda: None)()
-        self._config_dialog.show(port, parent=root)
-
-        # Request current config from device (pass port to get config for specific device)
-        if self._action_callback and self.async_bridge:
-            self.async_bridge.run_coroutine(self._action_callback("get_config", port=port))
-
-    async def _dispatch_config_action(self, action: str, data: Dict):
-        """Handle config dialog actions."""
-        if not self._action_callback:
+        if not self.system or not hasattr(self.system, 'get_device_handler'):
+            self.logger.warning("System not available for configuration (system=%s)", type(self.system).__name__)
             return
-        # Forward as a combined action
-        await self._action_callback(f"config_{action}")
+
+        # Get device type from devices map
+        device_type = 'svog'
+        if port in self.devices:
+            device_type = self.devices[port].get('device_type', 'svog')
+
+        # Get root window for the dialog
+        root = None
+        if self._notebook:
+            try:
+                root = self._notebook.winfo_toplevel()
+            except Exception as e:
+                self.logger.error("Failed to get toplevel window: %s", e)
+
+        if not root:
+            self.logger.warning("No root window available for config dialog")
+            return
+
+        try:
+            # VOGConfigWindow is modal - wait for it to close
+            dialog = VOGConfigWindow(root, port, self.system, device_type)
+            dialog.dialog.wait_window()
+        except Exception as e:
+            self.logger.error("Failed to create config window: %s", e, exc_info=True)
 
     # ------------------------------------------------------------------
     # UI helpers
@@ -545,6 +524,7 @@ class VOGView:
         self._bridge.mount(self._build_embedded_gui)
         self._stub_view.set_preview_title("VOG Controls")
         self.model.subscribe(self._on_model_change)
+        self._override_help_menu()
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
         if not HAS_TK:
@@ -581,8 +561,10 @@ class VOGView:
         """Allow the runtime to expose its API to the GUI once ready."""
         self._runtime = runtime
         if not self.gui:
+            self.logger.warning("bind_runtime called but self.gui is None")
             return
         self.gui.system = runtime
+        self.logger.info("Runtime bound to GUI (system=%s)", type(runtime).__name__)
         if isinstance(self.gui.async_bridge, _LoopAsyncBridge):
             loop = getattr(runtime, "_loop", None)
             if loop:
@@ -684,3 +666,25 @@ class VOGView:
             self._session_visual_active = False
             if self.gui:
                 self.call_in_gui(self.gui.handle_session_stopped)
+
+    def _override_help_menu(self) -> None:
+        """Replace the generic help menu command with VOG-specific help."""
+        help_menu = getattr(self._stub_view, 'help_menu', None)
+        if help_menu is None:
+            return
+        try:
+            # Delete existing "Quick Start Guide" entry and add VOG-specific one
+            help_menu.delete(0)
+            help_menu.add_command(label="Quick Start Guide", command=self._show_vog_help)
+        except Exception as e:
+            self.logger.debug("Could not override help menu: %s", e)
+
+    def _show_vog_help(self) -> None:
+        """Show VOG-specific help dialog."""
+        try:
+            from rpi_logger.core.ui.help_dialogs import VOGHelpDialog
+            root = getattr(self._stub_view, 'root', None)
+            if root:
+                VOGHelpDialog(root)
+        except Exception as e:
+            self.logger.error("Failed to show VOG help dialog: %s", e)
