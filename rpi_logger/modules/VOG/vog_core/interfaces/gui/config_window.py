@@ -23,10 +23,11 @@ class VOGConfigWindow:
     - wVOG: Clear/dark opacity, open/close times, debounce, experiment type, battery status
     """
 
-    def __init__(self, parent: tk.Tk, port: str, system: 'VOGSystem', device_type: str = 'svog'):
+    def __init__(self, parent: tk.Tk, port: str, system: 'VOGSystem', device_type: str = 'svog', async_bridge=None):
         self.port = port
         self.system = system
         self.device_type = device_type
+        self.async_bridge = async_bridge
         self.logger = get_module_logger("VOGConfigWindow")
 
         # Create modal dialog
@@ -36,7 +37,7 @@ class VOGConfigWindow:
 
         # Size depends on device type
         if device_type == 'wvog':
-            self.dialog.geometry("380x400")
+            self.dialog.geometry("370x350")
         else:
             self.dialog.geometry("350x320")
 
@@ -130,78 +131,100 @@ class VOGConfigWindow:
         self._build_buttons(main_frame, row + 1)
 
     def _build_wvog_ui(self, main_frame: ttk.Frame):
-        """Build wVOG-specific configuration UI."""
+        """Build wVOG-specific configuration UI matching RS_Logger layout."""
+        # Configuration LabelFrame
+        config_lf = ttk.LabelFrame(main_frame, text="Configuration")
+        config_lf.grid(row=0, column=0, sticky="news", pady=2, padx=2)
+        config_lf.grid_columnconfigure(1, weight=1)
+
         row = 0
 
-        # Battery status (read-only)
-        ttk.Label(main_frame, text="Battery:").grid(row=row, column=0, sticky="w", pady=5)
-        self.battery_label = ttk.Label(main_frame, text="---%")
-        self.battery_label.grid(row=row, column=1, sticky="w", pady=5)
-
-        # Experiment Type
-        row += 1
-        ttk.Label(main_frame, text="Experiment Type:").grid(row=row, column=0, sticky="w", pady=5)
+        # Name (experiment type) - entry expands to fill space
+        ttk.Label(config_lf, text="Name:").grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['experiment_type'] = tk.StringVar()
-        type_combo = ttk.Combobox(
-            main_frame,
-            textvariable=self.config_vars['experiment_type'],
-            values=["cycle", "peek", "eblind", "direct"],
-            width=17,
-            state="readonly"
-        )
-        type_combo.grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Entry(config_lf, textvariable=self.config_vars['experiment_type']).grid(
+            row=row, column=1, sticky="ew", padx=5, pady=2)
 
-        # Open Time
+        # Separator
         row += 1
-        ttk.Label(main_frame, text="Open Time (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Separator(config_lf, orient=tk.HORIZONTAL).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=5)
+
+        # Open Duration - entry right-aligned
+        row += 1
+        ttk.Label(config_lf, text="Open Duration (ms):").grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['open_time'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['open_time'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Entry(config_lf, textvariable=self.config_vars['open_time'], width=10).grid(
+            row=row, column=1, sticky="e", padx=5, pady=2)
 
-        # Close Time
+        # Closed Duration - entry right-aligned
         row += 1
-        ttk.Label(main_frame, text="Close Time (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Closed Duration (ms):").grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['close_time'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['close_time'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Entry(config_lf, textvariable=self.config_vars['close_time'], width=10).grid(
+            row=row, column=1, sticky="e", padx=5, pady=2)
 
-        # Debounce
+        # Debounce Time - entry right-aligned
         row += 1
-        ttk.Label(main_frame, text="Debounce (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Debounce Time (ms):").grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['debounce'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['debounce'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Entry(config_lf, textvariable=self.config_vars['debounce'], width=10).grid(
+            row=row, column=1, sticky="e", padx=5, pady=2)
 
-        # Clear Opacity
+        # Separator
         row += 1
-        ttk.Label(main_frame, text="Clear Opacity (0-100):").grid(row=row, column=0, sticky="w", pady=5)
-        self.config_vars['clear_opacity'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['clear_opacity'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Separator(config_lf, orient=tk.HORIZONTAL).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=5)
 
-        # Dark Opacity
+        # Checkbuttons row - Start Clear and Verbose
         row += 1
-        ttk.Label(main_frame, text="Dark Opacity (0-100):").grid(row=row, column=0, sticky="w", pady=5)
-        self.config_vars['dark_opacity'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['dark_opacity'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
-
-        # Start State
-        row += 1
-        ttk.Label(main_frame, text="Start State:").grid(row=row, column=0, sticky="w", pady=5)
-        self.config_vars['start_state'] = tk.StringVar()
-        state_combo = ttk.Combobox(
-            main_frame,
-            textvariable=self.config_vars['start_state'],
-            values=["0 - Opaque", "1 - Clear"],
-            width=17,
-            state="readonly"
+        self.config_vars['start_state'] = tk.StringVar(value="0")
+        start_clear_cb = ttk.Checkbutton(
+            config_lf, text="Start Clear",
+            variable=self.config_vars['start_state'],
+            onvalue="1", offvalue="0"
         )
-        state_combo.grid(row=row, column=1, sticky="ew", pady=5)
+        start_clear_cb.grid(row=row, column=0, sticky="w", padx=5, pady=2)
 
-        # Device Version (read-only)
+        self.config_vars['verbose'] = tk.StringVar(value="0")
+        verbose_cb = ttk.Checkbutton(
+            config_lf, text="Verbose",
+            variable=self.config_vars['verbose'],
+            onvalue="1", offvalue="0"
+        )
+        verbose_cb.grid(row=row, column=1, sticky="e", padx=5, pady=2)
+
+        # Separator
         row += 1
-        ttk.Label(main_frame, text="Device Version:").grid(row=row, column=0, sticky="w", pady=5)
-        self.version_label = ttk.Label(main_frame, text="-")
-        self.version_label.grid(row=row, column=1, sticky="w", pady=5)
+        ttk.Separator(config_lf, orient=tk.HORIZONTAL).grid(
+            row=row, column=0, columnspan=2, sticky="ew", pady=5)
 
-        # Separator and buttons
-        self._build_buttons(main_frame, row + 1)
+        # Upload Settings button
+        row += 1
+        upload_btn = ttk.Button(config_lf, text="Upload Settings", command=self._apply_config)
+        upload_btn.grid(row=row, column=0, columnspan=2, sticky="ew", padx=20, pady=5)
+
+        # Preset Configurations LabelFrame
+        preset_lf = ttk.LabelFrame(main_frame, text="Preset Configurations:")
+        preset_lf.grid(row=1, column=0, sticky="ew", pady=5, padx=2)
+        for i in range(4):
+            preset_lf.grid_columnconfigure(i, weight=1)
+
+        ttk.Button(preset_lf, text="Cycle", command=self._preset_cycle).grid(row=0, column=0, sticky="ew", padx=2, pady=2)
+        ttk.Button(preset_lf, text="Peek", command=self._preset_peek).grid(row=0, column=1, sticky="ew", padx=2, pady=2)
+        ttk.Button(preset_lf, text="eBlindfold", command=self._preset_eblindfold).grid(row=0, column=2, sticky="ew", padx=2, pady=2)
+        ttk.Button(preset_lf, text="Direct", command=self._preset_direct).grid(row=0, column=3, sticky="ew", padx=2, pady=2)
+
+        # Close button at bottom - matches padding of LabelFrames above (padx=2)
+        ttk.Button(main_frame, text="Close", command=self.dialog.destroy).grid(
+            row=2, column=0, sticky="ew", pady=5, padx=2)
+
+        # Store version label reference (not displayed for wVOG, but needed for compatibility)
+        self.version_label = ttk.Label(main_frame, text="")
+
+        # Hidden fields for opacity (not in RS_Logger UI but keep for protocol compatibility)
+        self.config_vars['clear_opacity'] = tk.StringVar()
+        self.config_vars['dark_opacity'] = tk.StringVar()
 
     def _build_buttons(self, main_frame: ttk.Frame, start_row: int):
         """Build common buttons at bottom of dialog."""
@@ -224,20 +247,42 @@ class VOGConfigWindow:
             messagebox.showerror("Error", "Device not connected", parent=self.dialog)
             return
 
-        # Request config values
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._load_config_async(handler))
-        except RuntimeError:
-            # No event loop running, try to get values from cached config
-            self._update_ui_from_config(handler.get_config())
+        # First, populate from any cached config immediately
+        cached_config = handler.get_config()
+        if cached_config:
+            self._update_ui_from_config(cached_config)
+
+        # Then request fresh config from device using async_bridge
+        if self.async_bridge:
+            self.async_bridge.run_coroutine(self._load_config_async(handler))
+        else:
+            # Fallback: try to get running loop directly
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._load_config_async(handler))
+            except RuntimeError:
+                pass  # No async available, use cached config only
 
     async def _load_config_async(self, handler):
         """Async config loading."""
         await handler.get_device_config()
         # Give device time to respond
         await asyncio.sleep(CONFIG_RESPONSE_WAIT)
-        self.dialog.after(0, lambda: self._update_ui_from_config(handler.get_config()))
+        config = handler.get_config()
+        # Check if dialog still exists before updating
+        try:
+            if self.dialog.winfo_exists():
+                self.dialog.after(0, lambda: self._safe_update_ui(config))
+        except tk.TclError:
+            pass  # Dialog was destroyed
+
+    def _safe_update_ui(self, config: dict):
+        """Safely update UI, checking if dialog still exists."""
+        try:
+            if self.dialog.winfo_exists():
+                self._update_ui_from_config(config)
+        except tk.TclError:
+            pass  # Dialog was destroyed
 
     def _update_ui_from_config(self, config: dict):
         """Update UI with config values."""
@@ -266,13 +311,8 @@ class VOGConfigWindow:
 
     def _update_wvog_ui_from_config(self, config: dict):
         """Update wVOG UI with config values."""
-        # Battery
-        battery = config.get('battery', config.get('bty', 0))
-        if hasattr(self, 'battery_label'):
-            self.battery_label.config(text=f"{battery}%")
-
         # Experiment type (typ key or experiment_type)
-        exp_type = config.get('experiment_type', config.get('typ', 'cycle'))
+        exp_type = config.get('experiment_type', config.get('typ', ''))
         self.config_vars['experiment_type'].set(str(exp_type))
 
         # Open time (opn key or open_time)
@@ -287,18 +327,23 @@ class VOGConfigWindow:
         debounce = config.get('debounce', config.get('dbc', ''))
         self.config_vars['debounce'].set(str(debounce))
 
-        # Clear opacity (clr key or clear_opacity)
+        # Start state (srt key) - now just 0 or 1 for checkbutton
+        start_state = config.get('start_state', config.get('srt', '0'))
+        self.config_vars['start_state'].set(str(start_state) if str(start_state) in ('0', '1') else '0')
+
+        # Verbose / print cycle (dta key)
+        verbose = config.get('verbose', config.get('dta', '0'))
+        if 'verbose' in self.config_vars:
+            self.config_vars['verbose'].set(str(verbose) if str(verbose) in ('0', '1') else '0')
+
+        # Hidden opacity fields (for protocol compatibility)
         clear_opacity = config.get('clear_opacity', config.get('clr', ''))
-        self.config_vars['clear_opacity'].set(str(clear_opacity))
+        if 'clear_opacity' in self.config_vars:
+            self.config_vars['clear_opacity'].set(str(clear_opacity))
 
-        # Dark opacity (drk key or dark_opacity)
         dark_opacity = config.get('dark_opacity', config.get('drk', ''))
-        self.config_vars['dark_opacity'].set(str(dark_opacity))
-
-        # Start state (srt key or start_state)
-        start_state = config.get('start_state', config.get('srt', '1'))
-        state_labels = {"0": "0 - Opaque", "1": "1 - Clear"}
-        self.config_vars['start_state'].set(state_labels.get(str(start_state), f"{start_state}"))
+        if 'dark_opacity' in self.config_vars:
+            self.config_vars['dark_opacity'].set(str(dark_opacity))
 
     def _apply_config(self):
         """Apply configuration changes to device."""
@@ -307,11 +352,14 @@ class VOGConfigWindow:
             messagebox.showerror("Error", "Device not connected", parent=self.dialog)
             return
 
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._apply_config_async(handler))
-        except RuntimeError:
-            messagebox.showerror("Error", "Cannot apply config - no event loop", parent=self.dialog)
+        if self.async_bridge:
+            self.async_bridge.run_coroutine(self._apply_config_async(handler))
+        else:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._apply_config_async(handler))
+            except RuntimeError:
+                messagebox.showerror("Error", "Cannot apply config - no event loop", parent=self.dialog)
 
     async def _apply_config_async(self, handler):
         """Async config application."""
@@ -373,8 +421,45 @@ class VOGConfigWindow:
             if value:
                 await handler.set_config_value(wvog_key, value)
 
-        # Start state needs special handling
+        # Start state - now a simple 0/1 from checkbutton
         start_state = self.config_vars['start_state'].get()
         if start_state:
-            state_val = start_state.split(' - ')[0] if ' - ' in start_state else start_state
-            await handler.set_config_value('srt', state_val)
+            await handler.set_config_value('srt', start_state)
+
+        # Verbose (print cycle data)
+        verbose = self.config_vars.get('verbose', tk.StringVar()).get()
+        if verbose:
+            await handler.set_config_value('dta', verbose)
+
+    # ------------------------------------------------------------------
+    # wVOG Preset configurations (matching RS_Logger)
+    # ------------------------------------------------------------------
+
+    def _preset_cycle(self):
+        """Apply Cycle (NHTSA) preset configuration."""
+        self.config_vars['experiment_type'].set('cycle')
+        self.config_vars['open_time'].set('1500')
+        self.config_vars['close_time'].set('1500')
+        self.config_vars['start_state'].set('1')
+        self._apply_config()
+
+    def _preset_peek(self):
+        """Apply Peek preset configuration."""
+        self.config_vars['experiment_type'].set('peek')
+        self.config_vars['open_time'].set('1500')
+        self.config_vars['close_time'].set('1500')
+        self.config_vars['start_state'].set('0')
+        self._apply_config()
+
+    def _preset_eblindfold(self):
+        """Apply eBlindfold preset configuration."""
+        self.config_vars['experiment_type'].set('eblind')
+        self.config_vars['open_time'].set('2147483647')
+        self.config_vars['close_time'].set('0')
+        self.config_vars['start_state'].set('1')
+        self._apply_config()
+
+    def _preset_direct(self):
+        """Apply Direct preset configuration."""
+        self.config_vars['experiment_type'].set('direct')
+        self._apply_config()

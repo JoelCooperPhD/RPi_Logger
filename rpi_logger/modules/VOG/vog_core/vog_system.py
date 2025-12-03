@@ -344,6 +344,8 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         sends exp>1 to put devices in experiment mode, without starting
         a trial. Use start_trial() separately to begin data collection.
 
+        Resets active_trial_number to 0 at session start.
+
         Returns:
             True if session started on all devices, False otherwise.
         """
@@ -354,6 +356,9 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         if not self.device_handlers:
             self.logger.warning("Cannot start session - no devices connected")
             return False
+
+        # Reset trial counter at session start
+        self.active_trial_number = 0
 
         started_handlers: List[Tuple[str, VOGHandler]] = []
         failures: List[str] = []
@@ -423,6 +428,9 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         Requires that a session is already active. If not, this will
         start the session first.
 
+        Increments active_trial_number before starting trial on devices.
+        This is the single source of truth for trial numbers.
+
         Returns:
             True if trial started on all devices, False otherwise.
         """
@@ -435,6 +443,10 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             session_ok = await self.start_session()
             if not session_ok:
                 return False
+
+        # Increment trial number (single source of truth)
+        self.active_trial_number += 1
+        self.logger.info("Starting trial %d", self.active_trial_number)
 
         started_handlers: List[Tuple[str, VOGHandler]] = []
         failures: List[str] = []
@@ -452,7 +464,9 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
 
         if failures:
             self.logger.error("Failed to start trial on: %s", ", ".join(failures))
-            # Rollback
+            # Rollback trial number
+            self.active_trial_number -= 1
+            # Rollback handlers
             for port, handler in started_handlers:
                 try:
                     await handler.stop_trial()
@@ -461,7 +475,7 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             return False
 
         self.recording = True
-        self.logger.info("Trial started on all devices (trl>1)")
+        self.logger.info("Trial %d started on all devices (trl>1)", self.active_trial_number)
         return True
 
     async def stop_trial(self) -> bool:

@@ -23,6 +23,7 @@ class TextHandler(logging.Handler):
         super().__init__()
         self.text_widget = text_widget
         self.max_lines = 500
+        self._closed = False
         self.setFormatter(
             logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -31,6 +32,8 @@ class TextHandler(logging.Handler):
         )
 
     def emit(self, record: logging.LogRecord) -> None:
+        if self._closed:
+            return
         try:
             msg = self.format(record) + '\n'
             self.text_widget.after(0, self._append_log, msg)
@@ -38,6 +41,8 @@ class TextHandler(logging.Handler):
             pass
 
     def _append_log(self, msg: str) -> None:
+        if self._closed:
+            return
         try:
             self.text_widget.config(state='normal')
             self.text_widget.insert(tk.END, msg)
@@ -50,6 +55,10 @@ class TextHandler(logging.Handler):
             self.text_widget.config(state='disabled')
         except Exception:
             pass
+
+    def close(self) -> None:
+        self._closed = True
+        super().close()
 
 
 class MainWindow:
@@ -487,6 +496,7 @@ class MainWindow:
 
     def cleanup_log_handler(self) -> None:
         if self.log_handler:
+            self.log_handler.close()
             root_logger = logging.getLogger()
             root_logger.removeHandler(self.log_handler)
             self.log_handler = None

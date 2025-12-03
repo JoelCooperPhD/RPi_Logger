@@ -264,3 +264,41 @@ class SVOGProtocol(BaseVOGProtocol):
     def get_command_keys(self) -> Dict[str, str]:
         """Return command mapping."""
         return self.COMMANDS.copy()
+
+    # ------------------------------------------------------------------
+    # Polymorphic methods (Phase 7 cleanup)
+    # ------------------------------------------------------------------
+
+    def get_config_commands(self) -> list:
+        """Return list of commands to retrieve sVOG configuration."""
+        return [
+            'get_device_ver',
+            'get_config_name',
+            'get_max_open',
+            'get_max_close',
+            'get_debounce',
+            'get_click_mode',
+            'get_button_control',
+        ]
+
+    def format_set_config(self, param: str, value: str) -> tuple:
+        """Format a config set operation for sVOG.
+
+        sVOG uses separate commands like 'set_max_open' with value as argument.
+        """
+        command = f'set_{param}'
+        if command not in self.COMMANDS:
+            return (None, None)  # Unknown parameter
+        return (command, value)
+
+    def update_config_from_response(self, response, config: dict) -> None:
+        """Update config from sVOG response (one value at a time)."""
+        config[response.keyword] = response.value
+
+    def get_extended_packet_data(self, packet) -> dict:
+        """sVOG has no extended packet data."""
+        return {}
+
+    def format_csv_row(self, packet, label: str, unix_time: int, ms_since_record: int) -> str:
+        """Format sVOG packet as CSV row."""
+        return packet.to_csv_row(label, unix_time, ms_since_record)

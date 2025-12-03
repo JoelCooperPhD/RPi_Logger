@@ -143,3 +143,69 @@ class BaseVOGProtocol(ABC):
     def has_command(self, command: str) -> bool:
         """Check if a command is supported by this protocol."""
         return command in self.get_command_keys()
+
+    # ------------------------------------------------------------------
+    # Polymorphic methods to eliminate device_type branching
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def get_config_commands(self) -> list:
+        """Return list of commands to retrieve device configuration.
+
+        For sVOG: Returns list of individual get commands.
+        For wVOG: Returns single 'get_config' command.
+        """
+        pass
+
+    @abstractmethod
+    def format_set_config(self, param: str, value: str) -> Tuple[str, Optional[str]]:
+        """Format a config set operation for this protocol.
+
+        Args:
+            param: Parameter name (e.g., 'max_open', 'debounce')
+            value: Value to set
+
+        Returns:
+            Tuple of (command_key, command_value) for send_command()
+        """
+        pass
+
+    @abstractmethod
+    def update_config_from_response(self, response: VOGResponse, config: Dict[str, Any]) -> None:
+        """Update config dict from a parsed response.
+
+        For sVOG: Sets config[keyword] = value
+        For wVOG: Updates config with all values from response
+
+        Args:
+            response: Parsed VOGResponse with CONFIG type
+            config: Config dict to update in place
+        """
+        pass
+
+    @abstractmethod
+    def get_extended_packet_data(self, packet: VOGDataPacket) -> Dict[str, Any]:
+        """Get device-specific extended data fields from a packet.
+
+        Args:
+            packet: Data packet from device
+
+        Returns:
+            Dict of additional fields (empty for sVOG, battery/lens/etc for wVOG)
+        """
+        pass
+
+    @abstractmethod
+    def format_csv_row(self, packet: VOGDataPacket, label: str, unix_time: int, ms_since_record: int) -> str:
+        """Format packet as CSV row for this device type.
+
+        Args:
+            packet: Data packet from device
+            label: Trial label
+            unix_time: Host system unix timestamp
+            ms_since_record: Milliseconds since recording started
+
+        Returns:
+            CSV formatted string (no newline)
+        """
+        pass

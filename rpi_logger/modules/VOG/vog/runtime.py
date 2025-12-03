@@ -279,6 +279,9 @@ class VOGModuleRuntime(ModuleRuntime):
 
         self.handlers[port] = handler
 
+        # Request current config from device so it's cached for config dialog
+        await handler.get_device_config()
+
         # Notify view
         if self.view:
             self.view.on_device_connected(port, device_type)

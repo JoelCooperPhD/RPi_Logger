@@ -107,11 +107,8 @@ class VOGDataLogger:
             unix_time = int(datetime.now().timestamp())
             ms_since_record = self._calculate_ms_since_record()
 
-            # Format CSV line based on device type
-            if self.device_type == 'wvog' and hasattr(self.protocol, 'to_extended_csv_row'):
-                line = self.protocol.to_extended_csv_row(packet, label, unix_time, ms_since_record)
-            else:
-                line = packet.to_csv_row(label, unix_time, ms_since_record)
+            # Format CSV line using protocol's polymorphic method
+            line = self.protocol.format_csv_row(packet, label, unix_time, ms_since_record)
 
             # Append to file
             await asyncio.to_thread(self._append_line, data_file, line)
@@ -172,10 +169,8 @@ class VOGDataLogger:
             'file_path': str(data_file),
         }
 
-        if self.device_type == 'wvog':
-            payload['shutter_total'] = packet.shutter_total
-            payload['lens'] = packet.lens
-            payload['battery_percent'] = packet.battery_percent
+        # Add device-specific extended data (polymorphic)
+        payload.update(self.protocol.get_extended_packet_data(packet))
 
         try:
             await self._event_callback('trial_logged', payload)

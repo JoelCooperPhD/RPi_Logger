@@ -317,3 +317,36 @@ class WVOGProtocol(BaseVOGProtocol):
         return (f"{packet.device_id}, {label}, {unix_time}, {ms_since_record}, "
                 f"{packet.trial_number}, {packet.shutter_open}, {packet.shutter_closed}, "
                 f"{packet.shutter_total}, {packet.lens}, {packet.battery_percent}")
+
+    # ------------------------------------------------------------------
+    # Polymorphic methods (Phase 7 cleanup)
+    # ------------------------------------------------------------------
+
+    def get_config_commands(self) -> list:
+        """Return list of commands to retrieve wVOG configuration."""
+        # wVOG returns all config in one command
+        return ['get_config']
+
+    def format_set_config(self, param: str, value: str) -> tuple:
+        """Format a config set operation for wVOG.
+
+        wVOG uses 'set_config' command with 'param,value' as argument.
+        """
+        return ('set_config', f'{param},{value}')
+
+    def update_config_from_response(self, response, config: dict) -> None:
+        """Update config from wVOG response (all values at once)."""
+        config.update(response.data.get('config', {}))
+
+    def get_extended_packet_data(self, packet) -> dict:
+        """Return wVOG extended packet data."""
+        return {
+            'shutter_total': packet.shutter_total,
+            'lens': packet.lens,
+            'battery_percent': packet.battery_percent,
+            'device_unix_time': packet.device_unix_time,
+        }
+
+    def format_csv_row(self, packet, label: str, unix_time: int, ms_since_record: int) -> str:
+        """Format wVOG packet as CSV row (extended format)."""
+        return self.to_extended_csv_row(packet, label, unix_time, ms_since_record)

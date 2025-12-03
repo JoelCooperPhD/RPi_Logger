@@ -32,9 +32,14 @@ except ImportError:
     HAS_MATPLOTLIB = False
 
 try:
+    # Try relative import first (works when imported as rpi_logger.modules.VOG.vog.view)
     from ..vog_core.interfaces.gui.config_window import VOGConfigWindow
 except ImportError:
-    VOGConfigWindow = None
+    try:
+        # Fall back to absolute import (works when imported as vog.view from MODULE_DIR)
+        from rpi_logger.modules.VOG.vog_core.interfaces.gui.config_window import VOGConfigWindow
+    except ImportError:
+        VOGConfigWindow = None
 
 ActionCallback = Optional[Callable[..., Awaitable[None]]]
 
@@ -338,25 +343,17 @@ class VOGTkinterGUI:
     def _sync_plotter_recording_state(self) -> None:
         """Sync plotter recording state with system recording state."""
         recording = bool(getattr(self.system, 'recording', False))
-        self.logger.info("_sync_plotter_recording_state: recording=%s, prev=%s, devices=%s",
-                         recording, self._plot_recording_state, list(self.devices.keys()))
         if self._plot_recording_state == recording:
-            self.logger.debug("  Recording state unchanged, skipping")
             return
         self._plot_recording_state = recording
 
         for port, dev in self.devices.items():
             plotter = dev.get('plot')
-            self.logger.info("  Port %s: plotter=%s", port, plotter)
             if not plotter:
                 continue
             if recording:
-                self.logger.info("  Calling plotter.start_recording() for %s", port)
                 plotter.start_recording()
-                self.logger.info("  After start_recording: run=%s, recording=%s, session_active=%s",
-                                 plotter.run, plotter.recording, plotter._session_active)
             else:
-                self.logger.info("  Calling plotter.stop_recording() for %s", port)
                 plotter.stop_recording()
 
     def _sync_control_states(self):
@@ -458,7 +455,7 @@ class VOGTkinterGUI:
 
         try:
             # VOGConfigWindow is modal - wait for it to close
-            dialog = VOGConfigWindow(root, port, self.system, device_type)
+            dialog = VOGConfigWindow(root, port, self.system, device_type, async_bridge=self.async_bridge)
             dialog.dialog.wait_window()
         except Exception as e:
             self.logger.error("Failed to create config window: %s", e, exc_info=True)

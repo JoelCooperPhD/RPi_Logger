@@ -65,9 +65,8 @@ rpi_logger/modules/VOG/
 └── vog/                           # VMC integration layer
     ├── __init__.py
     ├── runtime.py                 # ✅ REFACTORED - VMC wrapper (570 lines)
-    ├── view.py                    # View factory (686 lines)
-    ├── plotter.py                 # VMC plotter wrapper
-    └── config_dialog.py           # Config dialog - DUPLICATE, sVOG only (216 lines) - TO DELETE
+    ├── view.py                    # ✅ REFACTORED - View factory (uses VOGConfigWindow)
+    └── plotter.py                 # VMC plotter wrapper
 ```
 
 ---
@@ -254,77 +253,82 @@ def determine_device_type_from_vid_pid(vid, pid) -> str:
 
 ---
 
-### 🔲 Phase 3: Consolidate Config Dialogs (PENDING - NEXT)
+### ✅ Phase 3: Consolidate Config Dialogs (COMPLETE)
 **Problem:** Two config dialog implementations:
 - `vog_core/interfaces/gui/config_window.py` (379 lines) - supports sVOG AND wVOG
 - `vog/config_dialog.py` (216 lines) - sVOG only, uses callback pattern
 
-**Decision:** Keep `VOGConfigWindow` (more complete, supports both device types)
+**Solution:**
+1. Updated `vog/view.py` to import and use `VOGConfigWindow` from `vog_core.interfaces.gui.config_window`
+2. Removed config response handling from `VOGTkinterGUI.on_device_data()` (VOGConfigWindow loads config directly)
+3. Deleted `vog/config_dialog.py`
 
-**Implementation Plan:**
-1. Update `vog/view.py` to use `VOGConfigWindow` instead of `VOGConfigDialog`
-2. Delete `vog/config_dialog.py`
-
-**Files to Modify:**
-- `vog/view.py` - change import and usage at lines 35-37, 466-478
-- `vog/config_dialog.py` - DELETE
+**Key changes to view.py:**
+- Import changed from `.config_dialog.VOGConfigDialog` to `..vog_core.interfaces.gui.config_window.VOGConfigWindow`
+- `_on_configure_clicked()` now creates `VOGConfigWindow(root, port, self.system, device_type)` directly
+- Removed `self._config_dialog` instance variable (dialog is modal, self-contained)
+- Removed `_dispatch_config_action()` callback (not needed)
+- Removed config/version response handling in `on_device_data()` (VOGConfigWindow handles internally)
 
 ---
 
-### 🔲 Phase 5: Consolidate Trial Number Logic (PENDING)
+### ✅ Phase 5: Consolidate Trial Number Logic (COMPLETE)
 **Problem:** Three sources of trial numbers with confusing fallback:
 - `VOGSystem.active_trial_number`
 - `VOGHandler._trial_number`
 - `packet.trial_number` from device
 
-The `_determine_trial_number()` method in vog_handler.py has complex fallback logic.
-
 **Solution:**
-1. System owns trial number, handler reads it
-2. Remove `VOGHandler._trial_number` internal counter
-3. Simplify `_determine_trial_number()` to just read from system
-4. If system not available (standalone mode), use packet.trial_number
+1. `VOGSystem` is now the single source of truth for trial numbers
+2. `VOGSystem.start_session()` resets `active_trial_number` to 0
+3. `VOGSystem.start_trial()` increments `active_trial_number` before calling handlers
+4. Removed `VOGHandler._trial_number` internal counter entirely
+5. Simplified `_determine_trial_number()` with clear priority:
+   - Primary: `system.active_trial_number`
+   - Fallback: `model.trial_number` (VMC context)
+   - Final: `packet.trial_number` (standalone/device-reported)
 
-**Files to Modify:**
-- `vog_core/vog_handler.py:446-464` - simplify `_determine_trial_number()`
-- `vog_core/vog_system.py:43` - ensure trial number is always set
+**Files Modified:**
+- `vog_core/vog_system.py`:
+  - `start_session()` now resets `active_trial_number = 0`
+  - `start_trial()` now increments `active_trial_number += 1` with rollback on failure
+- `vog_core/vog_handler.py`:
+  - Removed `self._trial_number` instance variable
+  - Removed trial number reset from `start_experiment()`
+  - Removed trial number increment from `start_trial()`
+  - Simplified `_determine_trial_number()` with clearer logic and documentation
 
 ---
 
-### 🔲 Phase 7: Eliminate Device Type Branching (PENDING)
-**Problem:** ~15 occurrences of:
-```python
-if self.device_type == 'wvog':
-    # wvog-specific
-else:
-    # svog-specific
-```
-
-Scattered across: vog_handler.py, tkinter_gui.py, config_window.py, data_logger.py
+### ✅ Phase 7: Eliminate Device Type Branching (COMPLETE)
+**Problem:** ~17 occurrences of device type branching scattered across handler, logger, and GUI.
 
 **Solution:**
-1. Add polymorphic methods to BaseVOGProtocol
-2. Subclasses (SVOGProtocol, WVOGProtocol) implement device-specific behavior
-3. Replace branching with protocol method calls
+Added polymorphic methods to protocol classes to eliminate branching in core logic:
 
-Example transformation:
-```python
-# Before
-if self.device_type == 'wvog':
-    data['shutter_total'] = packet.shutter_total
+1. **New abstract methods in `BaseVOGProtocol`:**
+   - `get_config_commands()` - list of commands to retrieve config
+   - `format_set_config(param, value)` - format set config operation
+   - `update_config_from_response(response, config)` - update config dict from response
+   - `get_extended_packet_data(packet)` - get device-specific packet fields
+   - `format_csv_row(packet, label, unix_time, ms_since_record)` - format CSV row
 
-# After
-data.update(self.protocol.get_extended_data(packet))
-```
+2. **Implemented in `SVOGProtocol` and `WVOGProtocol`**
 
-**Files to Modify:**
-- `vog_core/protocols/base_protocol.py` - add abstract methods
-- `vog_core/protocols/svog_protocol.py` - implement methods
-- `vog_core/protocols/wvog_protocol.py` - implement methods
-- `vog_core/vog_handler.py` - use protocol methods
-- `vog_core/data_logger.py` - use protocol methods
-- `vog_core/interfaces/gui/tkinter_gui.py` - use protocol methods
-- `vog_core/interfaces/gui/config_window.py` - use protocol methods
+3. **Replaced branching in:**
+   - `vog_handler.py:get_device_config()` - uses `protocol.get_config_commands()`
+   - `vog_handler.py:set_config_value()` - uses `protocol.format_set_config()`
+   - `vog_handler.py:_handle_response()` - uses `protocol.update_config_from_response()`
+   - `vog_handler.py:_process_data_response()` - uses `protocol.get_extended_packet_data()`
+   - `data_logger.py:log_trial_data()` - uses `protocol.format_csv_row()`
+   - `data_logger.py:_dispatch_logged_event()` - uses `protocol.get_extended_packet_data()`
+
+**Remaining branching (acceptable - 11 occurrences):**
+- Protocol instantiation (runtime.py, vog_system.py) - necessary to select correct class
+- UI differences (view.py, tkinter_gui.py, config_window.py) - legitimate UI variations
+- Handler filtering by type (vog_system.py) - utility method
+
+**Reduction:** 17 → 11 occurrences (6 eliminated from core logic)
 
 ---
 
@@ -357,13 +361,15 @@ Handler._dispatch_data_event()
 - `vog_system.py:338-493` - `start_session()`, `stop_session()`, `start_trial()`, `stop_trial()`
 - `vog/runtime.py:328-470` - `_start_session()`, `_stop_session()`, `_start_recording()`, `_stop_recording()`
 
-### Trial Number Logic (needs consolidation in Phase 5)
-- `vog_handler.py:446-464` - `_determine_trial_number()`
-- `vog_system.py:43` - `active_trial_number` property
+### Trial Number Logic (consolidated in Phase 5)
+- `vog_system.py:44` - `active_trial_number` (single source of truth)
+- `vog_system.py:340-361` - `start_session()` resets trial number
+- `vog_system.py:420-474` - `start_trial()` increments trial number
+- `vog_handler.py:447-473` - `_determine_trial_number()` reads from system
 
 ### Config Dialog Usage
 - `vog_core/interfaces/gui/tkinter_gui.py:227-228` - uses VOGConfigWindow
-- `vog/view.py:466-478` - uses VOGConfigDialog (to be changed in Phase 3)
+- `vog/view.py:464-482` - uses VOGConfigWindow (consolidated in Phase 3)
 
 ### Data Logging
 - `vog_core/data_logger.py:1-170` - VOGDataLogger class
@@ -377,18 +383,18 @@ Handler._dispatch_data_event()
 2. ~~Phase 4: Encapsulation~~ ✅
 3. ~~Phase 6: Extract Logger~~ ✅
 4. ~~Phase 2: Consolidate Systems~~ ✅
-5. **Phase 3: Config Dialogs** ← NEXT
-6. Phase 5: Trial Numbers
-7. Phase 7: Device Branching
-8. Phase 8: Callbacks (optional)
+5. ~~Phase 3: Config Dialogs~~ ✅
+6. ~~Phase 5: Trial Numbers~~ ✅
+7. ~~Phase 7: Device Branching~~ ✅
+8. Phase 8: Callbacks (optional/future)
 
 ---
 
 ## Files Created During Cleanup
 - `vog_core/data_logger.py` - NEW (Phase 6)
 
-## Files To Be Deleted
-- `vog/config_dialog.py` - After Phase 3
+## Files Deleted During Cleanup
+- `vog/config_dialog.py` - DELETED (Phase 3)
 
 ---
 
@@ -416,12 +422,12 @@ python3 -m py_compile vog/runtime.py && echo "Syntax OK"
 
 1. **CRITICAL: Duplicate Architecture** - VOGSystem vs VOGModuleRuntime - ✅ ADDRESSED (shared utilities, consistent APIs)
 2. **CRITICAL: Device Constants Duplicated 4x** - ✅ FIXED
-3. **VOGHandler God Class** - Partially addressed (extracted logging)
-4. **Device Type Branching ~15 places** - Pending Phase 7
-5. **Config Dialog Duplicated** - Pending Phase 3
-6. **Trial Number Logic Messy** - Pending Phase 5
+3. **VOGHandler God Class** - ✅ ADDRESSED (extracted logging, polymorphic protocol methods)
+4. **Device Type Branching ~15 places** - ✅ FIXED (Phase 7) - reduced to 11, core logic uses polymorphism
+5. **Config Dialog Duplicated** - ✅ FIXED (Phase 3)
+6. **Trial Number Logic Messy** - ✅ FIXED (Phase 5)
 7. **GUI Encapsulation Violations** - ✅ FIXED
-8. **7-Level Callback Chain** - Pending Phase 8 (optional)
+8. **7-Level Callback Chain** - Pending Phase 8 (optional/future)
 
 ---
 

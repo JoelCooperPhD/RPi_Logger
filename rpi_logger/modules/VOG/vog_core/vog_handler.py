@@ -46,7 +46,6 @@ class VOGHandler:
 
         # Device state
         self._config: Dict[str, Any] = {}
-        self._trial_number = 0
         self._battery_percent: int = 0
 
         self.logger = get_module_logger(f"VOGHandler[{self.protocol.device_type}]")
@@ -106,12 +105,28 @@ class VOGHandler:
     async def start(self):
         """Start the async read loop."""
         if self._running:
+            self.logger.debug("start() called but already running for %s", self.port)
             return
 
         self._running = True
-        loop = asyncio.get_running_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError as e:
+            self.logger.error("No running event loop! Cannot start read loop: %s", e)
+            self._running = False
+            return
+
         self._loop = loop
-        self._read_task = loop.create_task(self._read_loop())
+
+        try:
+            self._read_task = loop.create_task(self._read_loop())
+        except Exception as e:
+            self.logger.error("Failed to create read loop task: %s", e, exc_info=True)
+            self._running = False
+            return
+
+        # Give the task a chance to start
+        await asyncio.sleep(0)
         self.logger.info("Started VOG handler (%s) for %s", self.device_type, self.port)
 
     async def stop(self):
@@ -179,11 +194,11 @@ class VOGHandler:
             self.logger.warning("Failed to format command: %s", command)
             return False
 
-        self.logger.info("Sending to %s: %r (len=%d)", self.port, data, len(data))
+        self.logger.debug("Sending to %s: %r", self.port, data)
         success = await self.device.write(data)
 
         if success:
-            self.logger.info("Command sent to %s: %s", self.port, command)
+            self.logger.debug("Command sent to %s: %s", self.port, command)
             # Small delay to let firmware process the command
             await asyncio.sleep(COMMAND_DELAY)
         else:
@@ -193,12 +208,12 @@ class VOGHandler:
 
     async def initialize_device(self) -> bool:
         """Initialize the VOG device."""
-        self.logger.info("Initializing %s device on %s", self.device_type.upper(), self.port)
+        self.logger.debug("Initializing %s device on %s", self.device_type.upper(), self.port)
         return True
 
     async def close_device(self) -> bool:
         """Close the VOG device."""
-        self.logger.info("Closing %s device on %s", self.device_type.upper(), self.port)
+        self.logger.debug("Closing %s device on %s", self.device_type.upper(), self.port)
         return True
 
     async def start_experiment(self) -> bool:
@@ -208,9 +223,8 @@ class VOGHandler:
         For sVOG: sends do_expStart.
 
         Note: This only initializes the experiment. To start cycling/trial,
-        call start_trial() separately.
+        call start_trial() separately. Trial number is managed by VOGSystem.
         """
-        self._trial_number = 0
         self._data_logger.start_recording()
         self.logger.info("Starting experiment on %s", self.port)
 
@@ -231,9 +245,12 @@ class VOGHandler:
         return await self.send_command('exp_stop')
 
     async def start_trial(self) -> bool:
-        """Send trial start command."""
-        self._trial_number += 1
-        self.logger.info("Starting trial %d on %s", self._trial_number, self.port)
+        """Send trial start command.
+
+        Note: Trial number is managed by VOGSystem.active_trial_number,
+        not tracked in the handler.
+        """
+        self.logger.info("Starting trial on %s", self.port)
         return await self.send_command('trial_start')
 
     async def stop_trial(self) -> bool:
@@ -268,26 +285,13 @@ class VOGHandler:
         matching RS_Logger behavior).
         For wVOG: Sends single get_config command which returns all values.
         """
+        config_commands = self.protocol.get_config_commands()
         self.logger.debug("Requesting configuration from %s", self.port)
 
-        if self.device_type == 'wvog':
-            # wVOG returns all config in one command
-            await self.send_command('get_config')
-        else:
-            # sVOG: send individual get commands rapidly (no delay)
-            # RS_Logger sends these without any delay between commands
-            commands = [
-                'get_device_ver',
-                'get_config_name',
-                'get_max_open',
-                'get_max_close',
-                'get_debounce',
-                'get_click_mode',
-                'get_button_control',
-            ]
-            for cmd in commands:
-                await self.send_command(cmd)
-                # No delay - RS_Logger sends commands in rapid succession
+        # Use protocol's config commands (polymorphic - handles sVOG vs wVOG)
+        for cmd in config_commands:
+            await self.send_command(cmd)
+            # No delay - RS_Logger sends commands in rapid succession
 
         return self._config
 
@@ -301,16 +305,12 @@ class VOGHandler:
         Returns:
             True if command was sent successfully
         """
-        if self.device_type == 'wvog':
-            # wVOG uses set>{key},{value} format
-            return await self.send_command('set_config', f'{param},{value}')
-        else:
-            # sVOG uses separate commands for each parameter
-            command = f'set_{param}'
-            if not self.protocol.has_command(command):
-                self.logger.warning("Unknown config parameter: %s", param)
-                return False
-            return await self.send_command(command, value)
+        # Use protocol's set config formatting (polymorphic - handles sVOG vs wVOG)
+        command, cmd_value = self.protocol.format_set_config(param, value)
+        if command is None:
+            self.logger.warning("Unknown config parameter: %s", param)
+            return False
+        return await self.send_command(command, cmd_value)
 
     async def get_battery(self) -> int:
         """Request battery status (wVOG only)."""
@@ -326,14 +326,15 @@ class VOGHandler:
                 line = await self.device.read_line()
 
                 if line:
+                    self.logger.debug("Read line from %s: %r", self.port, line)
                     await self._process_response(line)
 
                 await asyncio.sleep(0.01)
 
         except asyncio.CancelledError:
-            pass
+            self.logger.debug("Read loop cancelled for %s", self.port)
         except Exception as e:
-            self.logger.error("Error in read loop for %s: %s", self.port, e)
+            self.logger.error("Error in read loop for %s: %s", self.port, e, exc_info=True)
 
     async def _process_response(self, response: str):
         """Process a response line from the device."""
@@ -359,12 +360,9 @@ class VOGHandler:
                 self._config['deviceVer'] = parsed.value
 
             elif parsed.response_type == ResponseType.CONFIG:
-                if self.device_type == 'wvog':
-                    # wVOG returns all config at once
-                    self._config.update(parsed.data.get('config', {}))
-                else:
-                    # sVOG returns one config value at a time
-                    self._config[parsed.keyword] = parsed.value
+                # Use protocol's config update method (polymorphic)
+                self.protocol.update_config_from_response(parsed, self._config)
+                self.logger.debug("Config updated: %s", self._config)
 
             elif parsed.response_type == ResponseType.BATTERY:
                 self._battery_percent = parsed.data.get('percent', 0)
@@ -408,11 +406,8 @@ class VOGHandler:
         data['shutter_open'] = packet.shutter_open
         data['shutter_closed'] = packet.shutter_closed
 
-        if self.device_type == 'wvog':
-            data['shutter_total'] = packet.shutter_total
-            data['lens'] = packet.lens
-            data['battery_percent'] = packet.battery_percent
-            data['device_unix_time'] = packet.device_unix_time
+        # Add device-specific extended data (polymorphic)
+        data.update(self.protocol.get_extended_packet_data(packet))
 
         # Log to CSV via data logger
         trial_number = self._determine_trial_number(packet)
@@ -446,19 +441,27 @@ class VOGHandler:
     def _determine_trial_number(self, packet: VOGDataPacket) -> int:
         """Determine trial number from system or packet data.
 
-        Prioritizes system's active_trial_number to match other modules,
-        falls back to packet trial number or internal counter.
+        Priority order:
+        1. VOGSystem.active_trial_number (primary source when running with system)
+        2. VMC model.trial_number (when running in VMC context)
+        3. packet.trial_number (device-reported, fallback for standalone)
+
+        Returns at least 1 to ensure valid trial numbers.
         """
-        candidate = None
+        candidate = 0
+
+        # Try system's active_trial_number first
         if self.system is not None:
-            candidate = getattr(self.system, "active_trial_number", None)
+            candidate = getattr(self.system, "active_trial_number", 0) or 0
+
+            # Fall back to VMC model if available
             if not candidate and hasattr(self.system, "model"):
-                model = getattr(self.system, "model")
-                candidate = getattr(model, "trial_number", None)
+                model = getattr(self.system, "model", None)
+                if model:
+                    candidate = getattr(model, "trial_number", 0) or 0
+
+        # Final fallback: use packet's trial number (device-reported)
         if not candidate:
-            candidate = packet.trial_number or self._trial_number
-        try:
-            numeric = int(candidate)
-        except (TypeError, ValueError):
-            numeric = 0
-        return numeric if numeric and numeric > 0 else 1
+            candidate = packet.trial_number or 0
+
+        return candidate if candidate > 0 else 1
