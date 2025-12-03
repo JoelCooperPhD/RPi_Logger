@@ -3,15 +3,15 @@
 import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
-from datetime import datetime
 
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.base import USBSerialDevice
-from rpi_logger.modules.base.storage_utils import module_filename_prefix
 from rpi_logger.core.commands import StatusMessage
 
 from .protocols import BaseVOGProtocol, SVOGProtocol, WVOGProtocol, VOGDataPacket, VOGResponse
 from .protocols.base_protocol import ResponseType
+from .constants import SVOG_VID, SVOG_PID, WVOG_VID, WVOG_PID, COMMAND_DELAY
+from .data_logger import VOGDataLogger
 
 
 class VOGHandler:
@@ -20,12 +20,6 @@ class VOGHandler:
     Uses protocol abstraction to support both sVOG (wired) and wVOG (wireless) devices.
     The protocol is automatically detected based on device VID/PID.
     """
-
-    # Device identification
-    SVOG_VID = 0x16C0
-    SVOG_PID = 0x0483
-    WVOG_VID = 0xf057
-    WVOG_PID = 0x08AE
 
     def __init__(
         self,
@@ -53,10 +47,17 @@ class VOGHandler:
         # Device state
         self._config: Dict[str, Any] = {}
         self._trial_number = 0
-        self._recording_start_time: Optional[float] = None
         self._battery_percent: int = 0
 
         self.logger = get_module_logger(f"VOGHandler[{self.protocol.device_type}]")
+
+        # Data logger for CSV output
+        self._data_logger = VOGDataLogger(
+            output_dir=output_dir,
+            port=port,
+            protocol=self.protocol,
+            event_callback=self._on_data_logged,
+        )
 
     def _detect_protocol(self) -> BaseVOGProtocol:
         """Detect protocol based on device VID/PID."""
@@ -69,7 +70,7 @@ class VOGHandler:
             vid = getattr(self.device, 'vid', None)
             pid = getattr(self.device, 'pid', None)
 
-        if vid == self.WVOG_VID and pid == self.WVOG_PID:
+        if vid == WVOG_VID and pid == WVOG_PID:
             return WVOGProtocol()
 
         # Default to sVOG
@@ -89,6 +90,14 @@ class VOGHandler:
     def supports_battery(self) -> bool:
         """Return True if device reports battery status."""
         return self.protocol.supports_battery
+
+    def get_config(self) -> Dict[str, Any]:
+        """Return a copy of the current device configuration.
+
+        Returns:
+            Dict containing configuration values received from device.
+        """
+        return dict(self._config)
 
     def set_data_callback(self, callback: Callable[[str, str, Dict[str, Any]], None]):
         """Set callback for data events."""
@@ -176,7 +185,7 @@ class VOGHandler:
         if success:
             self.logger.info("Command sent to %s: %s", self.port, command)
             # Small delay to let firmware process the command
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(COMMAND_DELAY)
         else:
             self.logger.error("Failed to send command to %s: %s", self.port, command)
 
@@ -202,7 +211,7 @@ class VOGHandler:
         call start_trial() separately.
         """
         self._trial_number = 0
-        self._recording_start_time = datetime.now().timestamp()
+        self._data_logger.start_recording()
         self.logger.info("Starting experiment on %s", self.port)
 
         return await self.send_command('exp_start')
@@ -218,7 +227,7 @@ class VOGHandler:
         """
         self.logger.info("Stopping experiment on %s", self.port)
 
-        self._recording_start_time = None
+        self._data_logger.stop_recording()
         return await self.send_command('exp_stop')
 
     async def start_trial(self) -> bool:
@@ -405,8 +414,20 @@ class VOGHandler:
             data['battery_percent'] = packet.battery_percent
             data['device_unix_time'] = packet.device_unix_time
 
-        # Log to CSV
-        await self._log_trial_data(packet)
+        # Log to CSV via data logger
+        trial_number = self._determine_trial_number(packet)
+        label = self._get_trial_label(trial_number)
+        await self._data_logger.log_trial_data(packet, trial_number, label)
+
+    def _get_trial_label(self, trial_number: int) -> str:
+        """Get trial label from system or use trial number."""
+        if self.system and hasattr(self.system, 'trial_label') and self.system.trial_label:
+            return self.system.trial_label
+        return str(trial_number)
+
+    async def _on_data_logged(self, event_type: str, payload: Dict[str, Any]) -> None:
+        """Callback from data logger when trial is logged."""
+        await self._dispatch_data_event(event_type, payload)
 
     async def _dispatch_data_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """Dispatch data event to callback."""
@@ -441,78 +462,3 @@ class VOGHandler:
         except (TypeError, ValueError):
             numeric = 0
         return numeric if numeric and numeric > 0 else 1
-
-    async def _log_trial_data(self, packet: VOGDataPacket):
-        """Log trial data to CSV file."""
-        try:
-            await asyncio.to_thread(self.output_dir.mkdir, parents=True, exist_ok=True)
-
-            trial_number = self._determine_trial_number(packet)
-            prefix = module_filename_prefix(self.output_dir, "VOG", trial_number, code="VOG")
-            port_name = self.port.lstrip('/').replace('/', '_').replace('\\', '_').lower()
-            data_file = self.output_dir / f"{prefix}_{port_name}.csv"
-
-            file_exists = await asyncio.to_thread(data_file.exists)
-
-            if not file_exists:
-                header = self.protocol.csv_header
-
-                def write_header():
-                    with open(data_file, 'w', encoding='utf-8') as f:
-                        f.write(header + '\n')
-
-                await asyncio.to_thread(write_header)
-                self.logger.info("Created VOG data file: %s", data_file.name)
-
-            # Get label from system or use trial number
-            if self.system and hasattr(self.system, 'trial_label') and self.system.trial_label:
-                label = self.system.trial_label
-            else:
-                label = str(trial_number)
-
-            unix_time = int(datetime.now().timestamp())
-
-            # Calculate milliseconds since recording start
-            if self._recording_start_time:
-                ms_since_record = int((datetime.now().timestamp() - self._recording_start_time) * 1000)
-            else:
-                ms_since_record = 0
-
-            # Format CSV line based on device type
-            if self.device_type == 'wvog' and hasattr(self.protocol, 'to_extended_csv_row'):
-                line = self.protocol.to_extended_csv_row(packet, label, unix_time, ms_since_record)
-            else:
-                line = packet.to_csv_row(label, unix_time, ms_since_record)
-
-            def append_line():
-                with open(data_file, 'a', encoding='utf-8') as f:
-                    f.write(line + '\n')
-
-            await asyncio.to_thread(append_line)
-            self.logger.debug(
-                "Logged trial: T=%s, Open=%s, Closed=%s",
-                trial_number, packet.shutter_open, packet.shutter_closed
-            )
-
-            # Dispatch logged event
-            log_payload = {
-                'device_id': packet.device_id,
-                'device_type': self.device_type,
-                'label': label,
-                'unix_time': unix_time,
-                'ms_since_record': ms_since_record,
-                'trial_number': trial_number,
-                'shutter_open': packet.shutter_open,
-                'shutter_closed': packet.shutter_closed,
-                'file_path': str(data_file),
-            }
-
-            if self.device_type == 'wvog':
-                log_payload['shutter_total'] = packet.shutter_total
-                log_payload['lens'] = packet.lens
-                log_payload['battery_percent'] = packet.battery_percent
-
-            await self._dispatch_data_event('trial_logged', log_payload)
-
-        except Exception as e:
-            self.logger.error("Error logging trial data: %s", e, exc_info=True)

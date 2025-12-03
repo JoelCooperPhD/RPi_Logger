@@ -16,6 +16,11 @@ from rpi_logger.core.commands import StatusMessage
 from . import VOGInitializationError
 from .vog_handler import VOGHandler
 from .protocols import SVOGProtocol, WVOGProtocol
+from .constants import (
+    SVOG_VID, SVOG_PID, SVOG_BAUD,
+    WVOG_VID, WVOG_PID, WVOG_BAUD,
+    determine_device_type_from_vid_pid,
+)
 
 
 class VOGSystem(BaseSystem, RecordingStateMixin):
@@ -27,15 +32,6 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
 
     DEFER_DEVICE_INIT_IN_GUI = True
 
-    # Device identification constants
-    SVOG_VID = 0x16C0
-    SVOG_PID = 0x0483
-    SVOG_BAUD = 115200  # Firmware uses 115200
-
-    WVOG_VID = 0xf057
-    WVOG_PID = 0x08AE
-    WVOG_BAUD = 57600
-
     def __init__(self, args):
         super().__init__(args)
         RecordingStateMixin.__init__(self)
@@ -46,6 +42,9 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
 
         # Track active trial for all handlers
         self.active_trial_number: int = 0
+
+        # Session state (experiment started but not necessarily recording)
+        self._session_active: bool = False
 
     async def _initialize_devices(self) -> None:
         """Initialize USB device monitoring for sVOG and wVOG devices."""
@@ -113,48 +112,48 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         primary_baud = self.args.baudrate
 
         # Determine which device type args specify
-        if primary_vid == self.WVOG_VID and primary_pid == self.WVOG_PID:
+        if primary_vid == WVOG_VID and primary_pid == WVOG_PID:
             # Args specify wVOG
             configs['wvog'] = USBDeviceConfig(
                 vid=primary_vid,
                 pid=primary_pid,
-                baudrate=primary_baud or self.WVOG_BAUD,
+                baudrate=primary_baud or WVOG_BAUD,
                 device_name="wVOG"
             )
             # Also monitor sVOG
             configs['svog'] = USBDeviceConfig(
-                vid=self.SVOG_VID,
-                pid=self.SVOG_PID,
-                baudrate=self.SVOG_BAUD,
+                vid=SVOG_VID,
+                pid=SVOG_PID,
+                baudrate=SVOG_BAUD,
                 device_name="sVOG"
             )
-        elif primary_vid == self.SVOG_VID and primary_pid == self.SVOG_PID:
+        elif primary_vid == SVOG_VID and primary_pid == SVOG_PID:
             # Args specify sVOG
             configs['svog'] = USBDeviceConfig(
                 vid=primary_vid,
                 pid=primary_pid,
-                baudrate=primary_baud or self.SVOG_BAUD,
+                baudrate=primary_baud or SVOG_BAUD,
                 device_name="sVOG"
             )
             # Also monitor wVOG
             configs['wvog'] = USBDeviceConfig(
-                vid=self.WVOG_VID,
-                pid=self.WVOG_PID,
-                baudrate=self.WVOG_BAUD,
+                vid=WVOG_VID,
+                pid=WVOG_PID,
+                baudrate=WVOG_BAUD,
                 device_name="wVOG"
             )
         else:
             # Unknown or no VID/PID specified - monitor both
             configs['svog'] = USBDeviceConfig(
-                vid=self.SVOG_VID,
-                pid=self.SVOG_PID,
-                baudrate=self.SVOG_BAUD,
+                vid=SVOG_VID,
+                pid=SVOG_PID,
+                baudrate=SVOG_BAUD,
                 device_name="sVOG"
             )
             configs['wvog'] = USBDeviceConfig(
-                vid=self.WVOG_VID,
-                pid=self.WVOG_PID,
-                baudrate=self.WVOG_BAUD,
+                vid=WVOG_VID,
+                pid=WVOG_PID,
+                baudrate=WVOG_BAUD,
                 device_name="wVOG"
             )
 
@@ -177,9 +176,7 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             vid = getattr(device, 'vid', None)
             pid = getattr(device, 'pid', None)
 
-        if vid == self.WVOG_VID and pid == self.WVOG_PID:
-            return 'wvog'
-        return 'svog'
+        return determine_device_type_from_vid_pid(vid, pid)
 
     async def _on_device_connected(self, device: USBSerialDevice):
         """Handle new device connection."""
@@ -336,6 +333,167 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
         self.logger.info("VOG recording stopped for all devices (trl>0, exp>0)")
         return True
 
+    # ------------------------------------------------------------------
+    # Session control (experiment only, without trial)
+    # ------------------------------------------------------------------
+
+    async def start_session(self) -> bool:
+        """Start experiment session on all devices (sends exp>1 only).
+
+        This is a lighter-weight start than start_recording() - it only
+        sends exp>1 to put devices in experiment mode, without starting
+        a trial. Use start_trial() separately to begin data collection.
+
+        Returns:
+            True if session started on all devices, False otherwise.
+        """
+        if self._session_active:
+            self.logger.debug("Session already active")
+            return True
+
+        if not self.device_handlers:
+            self.logger.warning("Cannot start session - no devices connected")
+            return False
+
+        started_handlers: List[Tuple[str, VOGHandler]] = []
+        failures: List[str] = []
+
+        for port, handler in self.device_handlers.items():
+            try:
+                started = await handler.start_experiment()
+            except Exception as exc:
+                self.logger.error("start_experiment failed on %s: %s", port, exc)
+                started = False
+            if started:
+                started_handlers.append((port, handler))
+            else:
+                failures.append(port)
+
+        if failures:
+            self.logger.error("Failed to start session on: %s", ", ".join(failures))
+            # Rollback
+            for port, handler in started_handlers:
+                try:
+                    await handler.stop_experiment()
+                except Exception as exc:
+                    self.logger.warning("Rollback stop_experiment failed on %s: %s", port, exc)
+            return False
+
+        self._session_active = True
+        self.logger.info("Session started on all devices (exp>1)")
+        return True
+
+    async def stop_session(self) -> bool:
+        """Stop experiment session on all devices (sends exp>0).
+
+        If recording is active, this will stop the trial first.
+
+        Returns:
+            True if session stopped on all devices, False otherwise.
+        """
+        if not self._session_active:
+            return True
+
+        # Stop any active trial first
+        if self.recording:
+            await self.stop_trial()
+
+        failures: List[str] = []
+
+        for port, handler in self.device_handlers.items():
+            try:
+                stopped = await handler.stop_experiment()
+            except Exception as exc:
+                self.logger.error("stop_experiment failed on %s: %s", port, exc)
+                stopped = False
+            if not stopped:
+                failures.append(port)
+
+        if failures:
+            self.logger.error("Failed to stop session on: %s", ", ".join(failures))
+            return False
+
+        self._session_active = False
+        self.logger.info("Session stopped on all devices (exp>0)")
+        return True
+
+    async def start_trial(self) -> bool:
+        """Start trial/recording on all devices (sends trl>1).
+
+        Requires that a session is already active. If not, this will
+        start the session first.
+
+        Returns:
+            True if trial started on all devices, False otherwise.
+        """
+        if not self.device_handlers:
+            self.logger.error("Cannot start trial - no devices connected")
+            return False
+
+        # Ensure session is started first
+        if not self._session_active:
+            session_ok = await self.start_session()
+            if not session_ok:
+                return False
+
+        started_handlers: List[Tuple[str, VOGHandler]] = []
+        failures: List[str] = []
+
+        for port, handler in self.device_handlers.items():
+            try:
+                started = await handler.start_trial()
+            except Exception as exc:
+                self.logger.error("start_trial failed on %s: %s", port, exc)
+                started = False
+            if started:
+                started_handlers.append((port, handler))
+            else:
+                failures.append(port)
+
+        if failures:
+            self.logger.error("Failed to start trial on: %s", ", ".join(failures))
+            # Rollback
+            for port, handler in started_handlers:
+                try:
+                    await handler.stop_trial()
+                except Exception as exc:
+                    self.logger.warning("Rollback stop_trial failed on %s: %s", port, exc)
+            return False
+
+        self.recording = True
+        self.logger.info("Trial started on all devices (trl>1)")
+        return True
+
+    async def stop_trial(self) -> bool:
+        """Stop trial/recording on all devices (sends trl>0).
+
+        This does not stop the session - devices remain in experiment mode.
+
+        Returns:
+            True if trial stopped on all devices, False otherwise.
+        """
+        if not self.recording:
+            return True
+
+        failures: List[str] = []
+
+        for port, handler in self.device_handlers.items():
+            try:
+                stopped = await handler.stop_trial()
+            except Exception as exc:
+                self.logger.error("stop_trial failed on %s: %s", port, exc)
+                stopped = False
+            if not stopped:
+                failures.append(port)
+
+        if failures:
+            self.logger.error("Failed to stop trial on: %s", ", ".join(failures))
+            return False
+
+        self.recording = False
+        self.logger.info("Trial stopped on all devices (trl>0)")
+        return True
+
     async def peek_open_all(self, lens: str = 'x') -> bool:
         """Send peek/lens open command to all devices.
 
@@ -412,3 +570,32 @@ class VOGSystem(BaseSystem, RecordingStateMixin):
             List of handlers matching the device type
         """
         return [h for h in self.device_handlers.values() if h.device_type == device_type]
+
+    async def get_config(self, port: Optional[str] = None) -> None:
+        """Request configuration from device(s).
+
+        Args:
+            port: If specified, request config from that device only.
+                  Otherwise, request from the first connected device.
+        """
+        if port and port in self.device_handlers:
+            await self.device_handlers[port].get_device_config()
+        elif self.device_handlers:
+            # Default to first connected device
+            handler = next(iter(self.device_handlers.values()))
+            await handler.get_device_config()
+
+    @property
+    def session_active(self) -> bool:
+        """Whether an experiment session is active (exp>1 sent)."""
+        return self._session_active
+
+    def set_output_dir(self, output_dir: Path) -> None:
+        """Set the output directory for all handlers.
+
+        Args:
+            output_dir: The directory where data files will be written.
+        """
+        self.output_dir = output_dir
+        for handler in self.device_handlers.values():
+            handler.output_dir = output_dir

@@ -13,6 +13,7 @@ from .base_protocol import (
     VOGResponse,
     ResponseType,
 )
+from ..constants import WVOG_BAUD
 
 
 class WVOGProtocol(BaseVOGProtocol):
@@ -70,6 +71,9 @@ class WVOGProtocol(BaseVOGProtocol):
         'bty': ResponseType.BATTERY,
         'rtc': ResponseType.RTC,
         'stm': ResponseType.STIMULUS,
+        'a': ResponseType.STIMULUS,    # Lens A state (left)
+        'b': ResponseType.STIMULUS,    # Lens B state (right)
+        'x': ResponseType.STIMULUS,    # Both lenses state
         'dta': ResponseType.DATA,
         'exp': ResponseType.EXPERIMENT,
         'trl': ResponseType.TRIAL,
@@ -100,7 +104,7 @@ class WVOGProtocol(BaseVOGProtocol):
 
     @property
     def baudrate(self) -> int:
-        return 57600
+        return WVOG_BAUD
 
     @property
     def supports_dual_lens(self) -> bool:
@@ -180,6 +184,9 @@ class WVOGProtocol(BaseVOGProtocol):
                 data['state'] = int(value)
             except ValueError:
                 data['state'] = value
+            # Track which lens for a/b/x responses
+            if keyword in ('a', 'b', 'x'):
+                data['lens'] = keyword.upper()
 
         elif response_type == ResponseType.BATTERY:
             try:

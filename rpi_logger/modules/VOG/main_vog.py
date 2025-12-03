@@ -48,6 +48,7 @@ from vog.runtime import VOGModuleRuntime
 from vog.view import VOGView
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_file
+from rpi_logger.modules.VOG.vog_core.constants import SVOG_VID, SVOG_PID, SVOG_BAUD
 from rpi_logger.modules.base.config_paths import resolve_module_config_path
 from rpi_logger.cli.common import install_signal_handlers
 
@@ -104,7 +105,7 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--window-geometry",
         type=str,
-        default=None,
+        default=config.get('window_geometry'),
         help="Window layout forwarded when running with the GUI",
     )
     parser.add_argument(
@@ -133,19 +134,19 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--device-vid",
         type=lambda value: int(value, 0),
-        default=int(config.get('device_vid', 0x16C0)),
+        default=int(config.get('device_vid', SVOG_VID)),
         help="USB vendor ID for the sVOG device",
     )
     parser.add_argument(
         "--device-pid",
         type=lambda value: int(value, 0),
-        default=int(config.get('device_pid', 0x0483)),
+        default=int(config.get('device_pid', SVOG_PID)),
         help="USB product ID for the sVOG device",
     )
     parser.add_argument(
         "--baudrate",
         type=int,
-        default=int(config.get('baudrate', 9600)),
+        default=int(config.get('baudrate', SVOG_BAUD)),
         help="Serial baudrate for the sVOG device",
     )
 

@@ -16,6 +16,7 @@ from .base_protocol import (
     VOGResponse,
     ResponseType,
 )
+from ..constants import SVOG_BAUD
 
 
 class SVOGProtocol(BaseVOGProtocol):
@@ -123,7 +124,7 @@ class SVOGProtocol(BaseVOGProtocol):
 
     @property
     def baudrate(self) -> int:
-        return 115200  # Firmware uses 115200, not 9600
+        return SVOG_BAUD
 
     @property
     def supports_dual_lens(self) -> bool:

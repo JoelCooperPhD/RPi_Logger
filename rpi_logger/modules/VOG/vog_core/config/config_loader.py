@@ -1,10 +1,20 @@
-"""VOG configuration loader."""
+"""VOG configuration loader.
+
+Supports both sVOG (wired) and wVOG (wireless) devices.
+The system monitors for both device types regardless of which is specified in config.
+"""
 
 from pathlib import Path
 from typing import Dict, Any
 
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.base import ConfigLoader
+
+from ..constants import (
+    SVOG_VID, SVOG_PID, SVOG_BAUD,
+    WVOG_VID, WVOG_PID, WVOG_BAUD,
+    WVOG_DONGLE_VID, WVOG_DONGLE_PID, WVOG_DONGLE_BAUD,
+)
 
 logger = get_module_logger("VOGConfigLoader")
 
@@ -18,9 +28,29 @@ DEFAULTS = {
     "window_height": 300,
     "window_geometry": "400x300",
 
-    "device_vid": 0x16C0,
-    "device_pid": 0x0483,
-    "baudrate": 9600,
+    # Primary device settings (system monitors both types)
+    "device_vid": SVOG_VID,
+    "device_pid": SVOG_PID,
+    "baudrate": SVOG_BAUD,
+
+    # sVOG-specific settings (Arduino-based, 115200 baud)
+    "svog_vid": SVOG_VID,
+    "svog_pid": SVOG_PID,
+    "svog_baud": SVOG_BAUD,  # 115200
+
+    # wVOG-specific settings
+    "wvog_vid": WVOG_VID,
+    "wvog_pid": WVOG_PID,
+    "wvog_baud": WVOG_BAUD,
+
+    # wVOG dongle (XBee host) settings
+    "dongle_vid": WVOG_DONGLE_VID,
+    "dongle_pid": WVOG_DONGLE_PID,
+    "dongle_baud": WVOG_DONGLE_BAUD,
+
+    # XBee settings for wVOG wireless mode
+    "xbee_discovery_timeout": 10,
+    "xbee_retry_count": 3,
 
     "output_dir": "vog_data",
     "session_prefix": "vog",
