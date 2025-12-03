@@ -46,17 +46,26 @@ class XBeeManager:
     - Mutual exclusion with USB wDRT (disabled when USB wDRT connected)
     """
 
-    def __init__(self, scan_interval: float = 1.0):
+    # Default interval for periodic network rediscovery (in seconds)
+    DEFAULT_REDISCOVERY_INTERVAL = 30.0
+
+    def __init__(
+        self,
+        scan_interval: float = 1.0,
+        rediscovery_interval: float = DEFAULT_REDISCOVERY_INTERVAL
+    ):
         """
         Initialize the XBee manager.
 
         Args:
             scan_interval: Interval between dongle scans in seconds
+            rediscovery_interval: Interval between network rediscovery scans in seconds
         """
         if not XBEE_AVAILABLE:
             raise RuntimeError("digi-xbee library not installed")
 
         self.scan_interval = scan_interval
+        self.rediscovery_interval = rediscovery_interval
 
         # Callbacks
         self.on_device_discovered: Optional[DeviceDiscoveredCallback] = None
@@ -73,8 +82,15 @@ class XBeeManager:
         self._running = False
         self._enabled = True  # Can be disabled for mutual exclusion
         self._scan_task: Optional[asyncio.Task] = None
+        self._rediscovery_task: Optional[asyncio.Task] = None
         self._known_ports: Set[str] = set()
-        self._loop: Optional[asyncio.AbstractEventLoop] = None  # Store event loop reference
+
+        # Event loop reference - set during start() and used for thread-safe callbacks
+        # We also try to get it at init time for early callbacks
+        try:
+            self._loop: Optional[asyncio.AbstractEventLoop] = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None  # No running loop yet, will be set in start()
 
     @property
     def is_connected(self) -> bool:
@@ -128,32 +144,43 @@ class XBeeManager:
                 pass
             self._scan_task = None
 
+        # Cancel rediscovery task
+        if self._rediscovery_task:
+            self._rediscovery_task.cancel()
+            try:
+                await self._rediscovery_task
+            except asyncio.CancelledError:
+                pass
+            self._rediscovery_task = None
+
         # Close coordinator
         await self._close_coordinator()
 
         logger.info("XBee manager stopped")
 
-    def disable(self) -> None:
+    async def disable(self) -> None:
         """
         Disable XBee (for mutual exclusion with USB wDRT).
 
         When a USB wDRT is connected, XBee should be disabled.
+        This properly stops the manager and cleans up state.
         """
         self._enabled = False
         logger.info("XBee disabled (USB wDRT connected)")
 
-        # Close any existing connection
+        # Properly stop if running
         if self._running:
-            asyncio.create_task(self._close_coordinator())
+            await self.stop()
 
         if self.on_status_change:
-            asyncio.create_task(
-                self.on_status_change('disabled', 'USB wDRT connected')
-            )
+            await self.on_status_change('disabled', 'USB wDRT connected')
 
     def enable(self) -> None:
         """
         Re-enable XBee (when USB wDRT disconnected).
+
+        Note: This only sets the enabled flag. Call start() separately
+        to begin scanning for the dongle.
         """
         self._enabled = True
         logger.info("XBee enabled")
@@ -228,6 +255,13 @@ class XBeeManager:
             # Start network discovery
             await self._start_network_discovery()
 
+            # Start periodic rediscovery task
+            if self._rediscovery_task is None or self._rediscovery_task.done():
+                self._rediscovery_task = asyncio.create_task(
+                    self._periodic_rediscovery_loop(),
+                    name="xbee_rediscovery"
+                )
+
         except Exception as e:
             logger.error(f"Failed to initialize XBee coordinator: {e}")
             self._coordinator = None
@@ -235,6 +269,15 @@ class XBeeManager:
 
     async def _close_coordinator(self) -> None:
         """Close the XBee coordinator and clean up."""
+        # Cancel rediscovery task
+        if self._rediscovery_task:
+            self._rediscovery_task.cancel()
+            try:
+                await self._rediscovery_task
+            except asyncio.CancelledError:
+                pass
+            self._rediscovery_task = None
+
         # Notify about lost devices
         for node_id in list(self._transports.keys()):
             await self._handle_device_lost(node_id)
@@ -280,6 +323,35 @@ class XBeeManager:
         except Exception as e:
             logger.error(f"Error starting network discovery: {e}")
 
+    async def _periodic_rediscovery_loop(self) -> None:
+        """
+        Periodically trigger network rediscovery to find new devices.
+
+        This catches devices that power on after the initial discovery,
+        or devices that temporarily went out of range and came back.
+        """
+        logger.info(
+            f"Starting periodic network rediscovery "
+            f"(interval: {self.rediscovery_interval}s)"
+        )
+
+        while self._running and self._enabled and self.is_connected:
+            try:
+                await asyncio.sleep(self.rediscovery_interval)
+
+                if not self.is_connected:
+                    break
+
+                logger.debug("Running periodic network rediscovery")
+                await self._start_network_discovery()
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Error in periodic rediscovery: {e}")
+
+        logger.debug("Periodic rediscovery loop ended")
+
     def _on_discovery_finished(self, status: Any) -> None:
         """
         Callback when network discovery completes.
@@ -301,16 +373,21 @@ class XBeeManager:
 
             # Schedule processing on the main event loop
             # This callback runs in XBee's thread, not the asyncio thread
-            if self._loop is None:
-                logger.error("No event loop available for discovery callback")
+            loop = self._loop
+            if loop is None or not loop.is_running():
+                logger.error(
+                    "No running event loop available for discovery callback. "
+                    "Devices will be discovered on next network scan."
+                )
                 return
 
             for device in devices:
-                self._loop.call_soon_threadsafe(
-                    lambda d=device: self._loop.create_task(
-                        self._handle_device_discovered(d)
-                    )
-                )
+                # Capture device in closure properly
+                def schedule_discovery(d=device):
+                    if loop.is_running():
+                        loop.create_task(self._handle_device_discovered(d))
+
+                loop.call_soon_threadsafe(schedule_discovery)
 
         except Exception as e:
             logger.error(f"Error processing discovery results: {e}")
@@ -332,15 +409,16 @@ class XBeeManager:
                 return
 
             # Parse node ID to check if it's a wDRT
-            # Expected format: "wDRT_XX" where XX is a number
-            match = re.match(r'([a-zA-Z]+)[_\s]*(\d+)', node_id)
+            # Expected format: "wDRT_XX" where XX is a number (e.g., "wDRT_01", "wDRT 02")
+            # Using anchored regex to ensure exact match
+            match = re.match(r'^([a-zA-Z]+)[_\s]*(\d+)$', node_id.strip())
             if not match:
-                logger.debug(f"Ignoring non-DRT device: {node_id}")
+                logger.debug(f"Ignoring device with unrecognized node ID format: {node_id}")
                 return
 
             device_type, device_num = match.groups()
             if device_type.lower() != 'wdrt':
-                logger.debug(f"Ignoring non-wDRT device: {node_id}")
+                logger.debug(f"Ignoring non-wDRT device: {node_id} (type: {device_type})")
                 return
 
             # Skip if already known

@@ -78,6 +78,7 @@ class ConnectionManager:
         self._known_ports: Set[str] = set()
         self._running = False
         self._scan_task: Optional[asyncio.Task] = None
+        self._xbee_start_task: Optional[asyncio.Task] = None  # Track XBee start task
 
         # XBee manager (if available and enabled)
         self._xbee_manager: Optional['XBeeManager'] = None
@@ -173,6 +174,7 @@ class ConnectionManager:
             try:
                 await asyncio.sleep(self.scan_interval)
                 await self._scan_ports()
+                await self._check_handler_health()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -212,6 +214,35 @@ class ConnectionManager:
 
         except Exception as e:
             logger.error(f"Error scanning ports: {e}")
+
+    async def _check_handler_health(self) -> None:
+        """
+        Check health of all active handlers.
+
+        Disconnects handlers that have triggered their circuit breaker
+        or are otherwise in a bad state.
+        """
+        unhealthy_devices = []
+
+        for device_id, handler in self._handlers.items():
+            # Check if circuit breaker has tripped
+            if handler.circuit_breaker_tripped:
+                logger.warning(
+                    f"Handler for {device_id} has tripped circuit breaker, "
+                    f"scheduling disconnect"
+                )
+                unhealthy_devices.append(device_id)
+            # Check if handler stopped unexpectedly
+            elif not handler.is_running and handler.is_connected:
+                logger.warning(
+                    f"Handler for {device_id} stopped unexpectedly, "
+                    f"scheduling disconnect"
+                )
+                unhealthy_devices.append(device_id)
+
+        # Disconnect unhealthy devices
+        for device_id in unhealthy_devices:
+            await self._handle_disconnect(device_id)
 
     # =========================================================================
     # Device Connection Handling
@@ -266,7 +297,7 @@ class ConnectionManager:
 
         # Check mutual exclusion if wDRT USB connected
         if device_type == DRTDeviceType.WDRT_USB:
-            self._check_mutual_exclusion()
+            await self._check_mutual_exclusion()
 
         # Notify callback
         if self.on_device_connected:
@@ -323,7 +354,7 @@ class ConnectionManager:
 
             # Check mutual exclusion if wDRT USB disconnected
             if device_type == DRTDeviceType.WDRT_USB:
-                self._check_mutual_exclusion()
+                await self._check_mutual_exclusion()
 
             # Notify callback
             if self.on_device_disconnected and device_type:
@@ -399,7 +430,7 @@ class ConnectionManager:
         if self.on_xbee_status_change:
             await self.on_xbee_status_change(status, detail)
 
-    def _check_mutual_exclusion(self) -> None:
+    async def _check_mutual_exclusion(self) -> None:
         """
         Check and enforce mutual exclusion between USB wDRT and XBee.
 
@@ -412,12 +443,33 @@ class ConnectionManager:
         if self.has_usb_wdrt:
             # Disable XBee when USB wDRT is connected
             if self._xbee_manager.is_enabled:
-                self._xbee_manager.disable()
+                # Cancel any pending start task
+                if self._xbee_start_task and not self._xbee_start_task.done():
+                    self._xbee_start_task.cancel()
+                    try:
+                        await self._xbee_start_task
+                    except asyncio.CancelledError:
+                        pass
+                    self._xbee_start_task = None
+
+                await self._xbee_manager.disable()
         else:
             # Re-enable XBee when no USB wDRT
             if not self._xbee_manager.is_enabled:
                 self._xbee_manager.enable()
-                asyncio.create_task(self._xbee_manager.start())
+
+                # Cancel any existing start task before creating new one
+                if self._xbee_start_task and not self._xbee_start_task.done():
+                    self._xbee_start_task.cancel()
+                    try:
+                        await self._xbee_start_task
+                    except asyncio.CancelledError:
+                        pass
+
+                self._xbee_start_task = asyncio.create_task(
+                    self._xbee_manager.start(),
+                    name="xbee_start"
+                )
 
     async def rescan_xbee_network(self) -> None:
         """Trigger a rescan of the XBee network for wireless devices."""

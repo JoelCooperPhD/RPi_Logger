@@ -28,6 +28,9 @@ class XBeeTransport(BaseTransport):
     Requires an XBee coordinator (dongle) to communicate with remote devices.
     """
 
+    # Maximum buffer size to prevent memory exhaustion
+    MAX_BUFFER_SIZE = 1000
+
     def __init__(
         self,
         remote_device: 'RemoteRaw802Device',
@@ -48,8 +51,10 @@ class XBeeTransport(BaseTransport):
         self.node_id = node_id
 
         # Buffer for received data - use thread-safe queue since XBee callbacks
-        # come from a different thread than the asyncio event loop
-        self._receive_buffer: queue.Queue[str] = queue.Queue()
+        # come from a different thread than the asyncio event loop.
+        # Bounded to prevent memory exhaustion if handler read loop stalls.
+        self._receive_buffer: queue.Queue[str] = queue.Queue(maxsize=self.MAX_BUFFER_SIZE)
+        self._dropped_messages = 0  # Track overflow for diagnostics
 
         # Track connection state
         self._connected = False
@@ -63,6 +68,16 @@ class XBeeTransport(BaseTransport):
             self._coordinator.is_open() and
             self._remote_device is not None
         )
+
+    @property
+    def buffer_size(self) -> int:
+        """Return current number of messages in the receive buffer."""
+        return self._receive_buffer.qsize()
+
+    @property
+    def dropped_message_count(self) -> int:
+        """Return total number of messages dropped due to buffer overflow."""
+        return self._dropped_messages
 
     @property
     def device_id(self) -> str:
@@ -153,16 +168,34 @@ class XBeeTransport(BaseTransport):
         Called by XBeeManager when a message arrives for this device.
         This is called from the XBee library's thread, so we use a thread-safe queue.
 
+        If the buffer is full, the oldest message is dropped to make room.
+
         Args:
             data: Received data string
         """
+        stripped_data = data.strip()
+
         try:
-            # Put data in buffer for read_line() to retrieve
-            # Using thread-safe queue.Queue - put_nowait won't block
-            self._receive_buffer.put_nowait(data.strip())
-            logger.debug(f"XBee buffered from {self.node_id}: {data.strip()} (queue size: {self._receive_buffer.qsize()})")
+            # Try to put data in buffer without blocking
+            self._receive_buffer.put_nowait(stripped_data)
+            logger.debug(
+                f"XBee buffered from {self.node_id}: {stripped_data} "
+                f"(queue size: {self._receive_buffer.qsize()})"
+            )
         except queue.Full:
-            logger.warning(f"Receive buffer full for {self.node_id}")
+            # Buffer full - drop oldest message to make room (ring buffer behavior)
+            try:
+                dropped = self._receive_buffer.get_nowait()
+                self._dropped_messages += 1
+                logger.warning(
+                    f"Receive buffer full for {self.node_id}, dropped oldest message: "
+                    f"'{dropped[:50]}...' (total dropped: {self._dropped_messages})"
+                )
+                # Now put the new data
+                self._receive_buffer.put_nowait(stripped_data)
+            except queue.Empty:
+                # Shouldn't happen, but handle it
+                pass
 
     def clear_buffer(self) -> None:
         """Clear the receive buffer."""

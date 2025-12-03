@@ -51,6 +51,12 @@ class BaseDRTHandler(ABC):
         self._recording = False
         self._read_task: Optional[asyncio.Task] = None
 
+        # Circuit breaker for error recovery
+        self._consecutive_errors = 0
+        self._max_consecutive_errors = 10  # Trigger disconnect after this many errors
+        self._error_backoff = 0.1  # Initial backoff in seconds
+        self._max_error_backoff = 2.0  # Maximum backoff
+
         # Trial data tracking
         self._click_count = 0
         self._trial_number = 0
@@ -76,6 +82,11 @@ class BaseDRTHandler(ABC):
     def is_recording(self) -> bool:
         """Check if recording is active."""
         return self._recording
+
+    @property
+    def circuit_breaker_tripped(self) -> bool:
+        """Check if the circuit breaker has been triggered due to errors."""
+        return self._consecutive_errors >= self._max_consecutive_errors
 
     # =========================================================================
     # Lifecycle Methods
@@ -221,8 +232,10 @@ class BaseDRTHandler(ABC):
         Main read loop for receiving device data.
 
         Continuously reads from the transport and processes responses.
+        Implements circuit breaker pattern - exits after too many consecutive errors.
         """
         logger.debug(f"Read loop started for {self.device_id}")
+        self._consecutive_errors = 0
 
         while self._running and self.is_connected:
             try:
@@ -237,15 +250,41 @@ class BaseDRTHandler(ABC):
                     else:
                         break
 
+                # Reset error counter on successful iteration
+                if lines_processed > 0:
+                    self._consecutive_errors = 0
+
                 # Yield to other tasks
                 await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in read loop for {self.device_id}: {e}")
-                await asyncio.sleep(0.1)
+                self._consecutive_errors += 1
+                backoff = min(
+                    self._error_backoff * (2 ** (self._consecutive_errors - 1)),
+                    self._max_error_backoff
+                )
+                logger.error(
+                    f"Error in read loop for {self.device_id} "
+                    f"({self._consecutive_errors}/{self._max_consecutive_errors}): {e}"
+                )
 
-        logger.debug(f"Read loop ended for {self.device_id} (running={self._running}, connected={self.is_connected})")
+                # Circuit breaker: exit if too many consecutive errors
+                if self._consecutive_errors >= self._max_consecutive_errors:
+                    logger.error(
+                        f"Circuit breaker triggered for {self.device_id}: "
+                        f"{self._consecutive_errors} consecutive errors. "
+                        f"Handler will be marked as disconnected."
+                    )
+                    break
+
+                await asyncio.sleep(backoff)
+
+        logger.debug(
+            f"Read loop ended for {self.device_id} "
+            f"(running={self._running}, connected={self.is_connected}, "
+            f"errors={self._consecutive_errors})"
+        )
 
     async def _dispatch_data_event(
         self,
