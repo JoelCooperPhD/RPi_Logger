@@ -25,7 +25,7 @@ session_prefix = session
 
 # Last used session directory (automatically updated when user selects location via UI)
 # This is where session data and recordings are actually saved
-last_session_dir = /home/rs-pi-2/Desktop/LoggerData
+last_session_dir = /home/joel
 
 
 ################################################################################
@@ -62,8 +62,8 @@ console_output = false        # Also print to console (true/false)
 ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 
 # Window position and size (saved automatically on window close)
-window_x = 221
-window_y = 603
+window_x = 162
+window_y = 809
 window_width = 810
 window_height = 370
 

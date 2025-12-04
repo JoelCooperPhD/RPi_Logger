@@ -13,36 +13,11 @@ from typing import Any, Dict, Optional
 
 from vmc.runtime import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
-from rpi_logger.modules.base.usb_serial_manager import (
-    USBDeviceConfig,
-    USBDeviceMonitor,
-    USBSerialDevice,
-)
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_file
 from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler
-from rpi_logger.modules.VOG.vog_core.protocols import SVOGProtocol, WVOGProtocol
-from rpi_logger.modules.VOG.vog_core.constants import (
-    SVOG_VID, SVOG_PID, SVOG_BAUD,
-    WVOG_VID, WVOG_PID, WVOG_BAUD,
-    determine_device_type_from_vid_pid,
-)
-
-
-def _determine_device_type(device: USBSerialDevice) -> str:
-    """Determine device type from VID/PID.
-
-    Wrapper around shared utility function that extracts VID/PID from device.
-    """
-    config = getattr(device, 'config', None)
-    if config:
-        vid = getattr(config, 'vid', None)
-        pid = getattr(config, 'pid', None)
-    else:
-        vid = getattr(device, 'vid', None)
-        pid = getattr(device, 'pid', None)
-
-    return determine_device_type_from_vid_pid(vid, pid)
+from rpi_logger.modules.VOG.vog_core.connection_manager import ConnectionManager
+from rpi_logger.modules.VOG.vog_core.device_types import VOGDeviceType
 
 
 class VOGModuleRuntime(ModuleRuntime):
@@ -84,7 +59,8 @@ class VOGModuleRuntime(ModuleRuntime):
 
         # Device management
         self.handlers: Dict[str, VOGHandler] = {}
-        self.usb_monitors: Dict[str, USBDeviceMonitor] = {}
+        self.device_types: Dict[str, VOGDeviceType] = {}
+        self.connection_manager: Optional[ConnectionManager] = None
 
         # Background tasks
         self.task_manager = BackgroundTaskManager(name="VOGRuntimeTasks", logger=self.logger)
@@ -105,8 +81,8 @@ class VOGModuleRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Start the runtime - initialize USB monitors and bind to view/model."""
-        self.logger.info("Starting VOG runtime")
+        """Start the runtime - initialize connection manager and bind to view/model."""
+        self.logger.info("Starting VOG runtime (all device types: sVOG, wVOG USB, wVOG wireless)")
         self._loop = asyncio.get_running_loop()
 
         # Bind to view if available
@@ -119,15 +95,15 @@ class VOGModuleRuntime(ModuleRuntime):
         # Subscribe to model changes
         self.model.subscribe(self._on_model_change)
 
-        # Start USB monitors for both device types
-        await self._start_usb_monitors()
-        self.logger.info("VOG runtime ready; waiting for devices")
+        # Start connection manager for all device types
+        await self._start_connection_manager()
+        self.logger.info("VOG runtime ready; scanning for devices")
 
     async def shutdown(self) -> None:
-        """Shutdown the runtime - stop session and USB monitors."""
+        """Shutdown the runtime - stop session and connection manager."""
         self.logger.info("Shutting down VOG runtime")
         await self._stop_session()  # This also stops recording if active
-        await self._stop_usb_monitors()
+        await self._stop_connection_manager()
 
     async def cleanup(self) -> None:
         """Final cleanup - shutdown background tasks."""
@@ -213,107 +189,90 @@ class VOGModuleRuntime(ModuleRuntime):
             await self._stop_recording()
 
     # ------------------------------------------------------------------
-    # USB monitor management
+    # Connection manager
     # ------------------------------------------------------------------
 
-    async def _start_usb_monitors(self) -> None:
-        """Start USB monitors for both sVOG and wVOG devices."""
-        # sVOG monitor (wired Teensy-based device)
-        svog_config = USBDeviceConfig(
-            vid=SVOG_VID,
-            pid=SVOG_PID,
-            baudrate=SVOG_BAUD,
-            device_name="sVOG",
+    async def _start_connection_manager(self) -> None:
+        """Start the connection manager for all device types."""
+        self.connection_manager = ConnectionManager(
+            output_dir=self.module_data_dir,
+            scan_interval=1.0,
+            enable_xbee=True
         )
-        svog_monitor = USBDeviceMonitor(
-            config=svog_config,
-            on_connect=self._on_device_connected,
-            on_disconnect=self._on_device_disconnected,
-        )
-        await svog_monitor.start()
-        self.usb_monitors['svog'] = svog_monitor
-        self.logger.info("Started USB monitor for sVOG (VID=0x%04X, PID=0x%04X)", SVOG_VID, SVOG_PID)
+        self.connection_manager.on_device_connected = self._on_device_connected
+        self.connection_manager.on_device_disconnected = self._on_device_disconnected
+        self.connection_manager.on_xbee_status_change = self._on_xbee_status_change
+        await self.connection_manager.start()
 
-        # wVOG monitor (wireless/USB MicroPython-based device)
-        wvog_config = USBDeviceConfig(
-            vid=WVOG_VID,
-            pid=WVOG_PID,
-            baudrate=WVOG_BAUD,
-            device_name="wVOG",
-        )
-        wvog_monitor = USBDeviceMonitor(
-            config=wvog_config,
-            on_connect=self._on_device_connected,
-            on_disconnect=self._on_device_disconnected,
-        )
-        await wvog_monitor.start()
-        self.usb_monitors['wvog'] = wvog_monitor
-        self.logger.info("Started USB monitor for wVOG (VID=0x%04X, PID=0x%04X)", WVOG_VID, WVOG_PID)
+        # Sync XBee dongle state after start (in case already connected)
+        if self.connection_manager.xbee_connected:
+            port = self.connection_manager.xbee_port or ""
+            self.logger.info("XBee dongle already connected on %s, syncing view", port)
+            await self._on_xbee_status_change('connected', port)
 
-    async def _stop_usb_monitors(self) -> None:
-        """Stop all USB monitors."""
-        for device_type, monitor in list(self.usb_monitors.items()):
-            self.logger.debug("Stopping USB monitor for %s", device_type)
-            await monitor.stop()
-        self.usb_monitors.clear()
+    async def _stop_connection_manager(self) -> None:
+        """Stop the connection manager."""
+        manager = self.connection_manager
+        self.connection_manager = None
+        if manager:
+            await manager.stop()
 
     # ------------------------------------------------------------------
     # Device events
     # ------------------------------------------------------------------
 
-    async def _on_device_connected(self, device: USBSerialDevice) -> None:
-        """Handle USB device connection."""
-        port = device.port
-        device_type = _determine_device_type(device)
-        self.logger.info("%s connected on %s", device_type.upper(), port)
+    async def _on_device_connected(
+        self,
+        device_id: str,
+        device_type: VOGDeviceType,
+        handler: VOGHandler
+    ) -> None:
+        """Handle device connection from ConnectionManager."""
+        self.logger.info("%s connected: %s", device_type.value, device_id)
 
-        # Create appropriate protocol
-        protocol = WVOGProtocol() if device_type == 'wvog' else SVOGProtocol()
-
-        # Create handler
-        handler = VOGHandler(device, port, self.module_data_dir, system=self, protocol=protocol)
+        # Set up system reference and data callback
+        handler.system = self
         handler.set_data_callback(self._on_device_data)
 
-        await handler.initialize_device()
-        await handler.start()
-
-        self.handlers[port] = handler
-
-        # Request current config from device so it's cached for config dialog
-        await handler.get_device_config()
+        # Store handler and type
+        self.handlers[device_id] = handler
+        self.device_types[device_id] = device_type
 
         # Notify view
         if self.view:
-            self.view.on_device_connected(port, device_type)
+            self.view.on_device_connected(device_id, device_type)
 
         # If session is active, start experiment on new device
         if self._session_active:
             try:
                 await handler.start_experiment()
-                self.logger.info("Started experiment on newly connected device %s", port)
+                self.logger.info("Started experiment on newly connected device %s", device_id)
             except Exception as exc:
-                self.logger.error("Failed to start experiment on new device %s: %s", port, exc)
+                self.logger.error("Failed to start experiment on new device %s: %s", device_id, exc)
 
         # If recording is active, also start trial
         if self._recording_active:
             try:
                 await handler.start_trial()
-                self.logger.info("Started trial on newly connected device %s", port)
+                self.logger.info("Started trial on newly connected device %s", device_id)
             except Exception as exc:
-                self.logger.error("Failed to start trial on new device %s: %s", port, exc)
+                self.logger.error("Failed to start trial on new device %s: %s", device_id, exc)
 
-    async def _on_device_disconnected(self, port: str) -> None:
-        """Handle USB device disconnection."""
-        handler = self.handlers.pop(port, None)
-        device_type = handler.device_type if handler else 'unknown'
-        self.logger.info("%s disconnected from %s", device_type.upper(), port)
-
-        if handler:
-            await handler.stop()
+    async def _on_device_disconnected(self, device_id: str, device_type: VOGDeviceType) -> None:
+        """Handle device disconnection from ConnectionManager."""
+        self.logger.info("%s disconnected: %s", device_type.value, device_id)
+        self.handlers.pop(device_id, None)
+        self.device_types.pop(device_id, None)
 
         # Notify view
         if self.view:
-            self.view.on_device_disconnected(port)
+            self.view.on_device_disconnected(device_id, device_type)
+
+    async def _on_xbee_status_change(self, status: str, detail: str) -> None:
+        """Handle XBee dongle status changes."""
+        self.logger.info("XBee dongle status change: %s %s", status, detail)
+        if self.view:
+            self.view.on_xbee_dongle_status_change(status, detail)
 
     async def _on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         """Handle data received from device - forward to view."""
@@ -520,6 +479,10 @@ class VOGModuleRuntime(ModuleRuntime):
         for handler in self.handlers.values():
             handler.output_dir = self.module_data_dir
 
+        # Also update connection manager
+        if self.connection_manager:
+            self.connection_manager.update_output_dir(self.module_data_dir)
+
         # Sync to model if requested
         if update_model:
             self._suppress_session_event = True
@@ -530,14 +493,36 @@ class VOGModuleRuntime(ModuleRuntime):
     # Public API for GUI/View
     # ------------------------------------------------------------------
 
-    def get_device_handler(self, port: str) -> Optional[VOGHandler]:
-        """Get handler for a specific port."""
-        return self.handlers.get(port)
+    def get_device_handler(self, device_id: str) -> Optional[VOGHandler]:
+        """Get handler for a specific device."""
+        return self.handlers.get(device_id)
+
+    def get_device_type(self, device_id: str) -> Optional[VOGDeviceType]:
+        """Get device type for a specific device."""
+        return self.device_types.get(device_id)
 
     @property
     def recording(self) -> bool:
         """Whether recording is active."""
         return self._recording_active
+
+    @property
+    def xbee_connected(self) -> bool:
+        """Check if XBee dongle is connected."""
+        return self.connection_manager is not None and self.connection_manager.xbee_connected
+
+    @property
+    def xbee_port(self) -> Optional[str]:
+        """Return the XBee dongle port if connected."""
+        if self.connection_manager:
+            return self.connection_manager.xbee_port
+        return None
+
+    async def rescan_xbee_network(self) -> None:
+        """Trigger a rescan of the XBee network."""
+        if self.connection_manager:
+            self.logger.info("Triggering XBee network rescan...")
+            await self.connection_manager.rescan_xbee_network()
 
     # ------------------------------------------------------------------
     # Utility methods

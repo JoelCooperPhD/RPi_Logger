@@ -49,6 +49,9 @@ examples_output/
 # Legacy data directory (no longer used - data goes to user-selected location)
 /data/
 
+# VOG test data
+/vog_data/
+
 # GPS map tiles
 rpi_logger/modules/GPS/offline_tiles.db
 rpi_logger/modules/GPS (stub)/offline_tiles.db

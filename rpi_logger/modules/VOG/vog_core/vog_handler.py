@@ -12,6 +12,7 @@ from .protocols import BaseVOGProtocol, SVOGProtocol, WVOGProtocol, VOGDataPacke
 from .protocols.base_protocol import ResponseType
 from .constants import SVOG_VID, SVOG_PID, WVOG_VID, WVOG_PID, COMMAND_DELAY
 from .data_logger import VOGDataLogger
+from .device_types import VOGDeviceType, device_type_from_string
 
 
 class VOGHandler:
@@ -77,8 +78,13 @@ class VOGHandler:
 
     @property
     def device_type(self) -> str:
-        """Return device type identifier."""
+        """Return device type identifier (legacy string format)."""
         return self.protocol.device_type
+
+    @property
+    def device_type_enum(self) -> VOGDeviceType:
+        """Return device type as VOGDeviceType enum."""
+        return device_type_from_string(self.protocol.device_type) or VOGDeviceType.SVOG
 
     @property
     def supports_dual_lens(self) -> bool:

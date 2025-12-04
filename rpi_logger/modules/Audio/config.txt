@@ -1,6 +1,6 @@
 display_name = Audio
 enabled = false
-window_geometry = 665x116+1431+821
+window_geometry = 320x200+116+1593
 preview_width = 640
 preview_height = 480
 preview_fps = unlimited
