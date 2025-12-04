@@ -106,6 +106,11 @@ class XBeeManager:
         return self._enabled
 
     @property
+    def coordinator_port(self) -> Optional[str]:
+        """Return the port of the connected coordinator, or None if not connected."""
+        return self._coordinator_port if self.is_connected else None
+
+    @property
     def discovered_devices(self) -> Dict[str, XBeeTransport]:
         """Return dict of discovered device node IDs to their transports."""
         return self._transports.copy()

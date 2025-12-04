@@ -256,6 +256,14 @@ class DRTView:
             return
         self.call_in_gui(self.gui.on_device_data, port, data_type, payload)
 
+    def on_xbee_dongle_status_change(self, status: str, detail: str) -> None:
+        """Handle XBee dongle status changes."""
+        self.logger.info("View: XBee dongle status change: %s %s", status, detail)
+        if not self.gui:
+            self.logger.warning("View: No GUI available for XBee status change")
+            return
+        self.call_in_gui(self.gui.on_xbee_dongle_status_change, status, detail)
+
     def update_recording_state(self) -> None:
         if not self.gui:
             return

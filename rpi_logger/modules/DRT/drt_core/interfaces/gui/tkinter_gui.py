@@ -34,6 +34,20 @@ class DeviceTab:
         self.configure_button: Optional[ttk.Button] = None
 
 
+class DongleTab:
+    """Tab for XBee dongle status and controls."""
+
+    DONGLE_ID = "__xbee_dongle__"
+
+    def __init__(self, parent_frame: tk.Frame):
+        self.frame = parent_frame
+        self.status_var = tk.StringVar(value="Connected")
+        self.port_var = tk.StringVar(value="")
+        self.devices_var = tk.StringVar(value="0")
+        self.search_button: Optional[ttk.Button] = None
+        self.status_label: Optional[ttk.Label] = None
+
+
 class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
     def __init__(
@@ -52,6 +66,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         self.notebook: Optional[ttk.Notebook] = None
         self.device_tabs: Dict[str, DeviceTab] = {}
+        self.dongle_tab: Optional[DongleTab] = None
         self.empty_state_label: Optional[ttk.Label] = None
 
         self.stimulus_state: Dict[str, int] = {}
@@ -208,6 +223,178 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         return tab
 
+    def _create_dongle_tab(self, port: str = "") -> DongleTab:
+        """Create a tab for the XBee dongle."""
+        tab_frame = ttk.Frame(self.notebook)
+        tab = DongleTab(tab_frame)
+        tab.port_var.set(port)
+
+        tab_frame.columnconfigure(0, weight=1)
+        tab_frame.rowconfigure(2, weight=1)
+
+        # Status frame
+        status_frame = ttk.LabelFrame(tab_frame, text="Dongle Status", padding=(15, 10))
+        status_frame.grid(row=0, column=0, sticky='ew', padx=10, pady=10)
+        status_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(status_frame, text="Status:", anchor='w').grid(row=0, column=0, sticky='w', pady=3)
+        tab.status_label = ttk.Label(status_frame, textvariable=tab.status_var, anchor='w', foreground='green')
+        tab.status_label.grid(row=0, column=1, sticky='w', pady=3, padx=(10, 0))
+
+        ttk.Label(status_frame, text="Port:", anchor='w').grid(row=1, column=0, sticky='w', pady=3)
+        ttk.Label(status_frame, textvariable=tab.port_var, anchor='w').grid(row=1, column=1, sticky='w', pady=3, padx=(10, 0))
+
+        ttk.Label(status_frame, text="Wireless Devices:", anchor='w').grid(row=2, column=0, sticky='w', pady=3)
+        ttk.Label(status_frame, textvariable=tab.devices_var, anchor='w').grid(row=2, column=1, sticky='w', pady=3, padx=(10, 0))
+
+        # Search controls frame
+        controls_frame = ttk.LabelFrame(tab_frame, text="Network Discovery", padding=(15, 10))
+        controls_frame.grid(row=1, column=0, sticky='ew', padx=10, pady=5)
+        controls_frame.columnconfigure(0, weight=1)
+
+        info_label = ttk.Label(
+            controls_frame,
+            text="Search for wireless wDRT devices on the XBee network.\n"
+                 "This will disconnect existing wireless devices and start a new search.",
+            wraplength=350,
+            justify='left',
+            foreground='gray'
+        )
+        info_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
+
+        tab.search_button = ttk.Button(
+            controls_frame,
+            text="Search for Devices",
+            command=self._on_rescan_xbee,
+            width=25
+        )
+        tab.search_button.grid(row=1, column=0, sticky='w', pady=5)
+
+        # Spacer frame to push content up
+        spacer = ttk.Frame(tab_frame)
+        spacer.grid(row=2, column=0, sticky='nsew')
+
+        # Add dongle tab - insert at beginning if other tabs exist, otherwise just add
+        if self.notebook.index("end") > 0:
+            self.notebook.insert(0, tab_frame, text="XBee Dongle")
+        else:
+            self.notebook.add(tab_frame, text="XBee Dongle")
+        self.notebook.select(0)  # Select the dongle tab
+
+        return tab
+
+    def _remove_dongle_tab(self) -> None:
+        """Remove the dongle tab from the notebook."""
+        if self.dongle_tab is None:
+            return
+
+        # Find and remove the dongle tab
+        for idx in range(self.notebook.index("end")):
+            tab_text = self.notebook.tab(idx, "text")
+            if tab_text == "XBee Dongle":
+                self.notebook.forget(idx)
+                break
+
+        self.dongle_tab = None
+        self.logger.info("Removed XBee dongle tab")
+
+    def _update_dongle_device_count(self) -> None:
+        """Update the device count shown in the dongle tab."""
+        if self.dongle_tab is None:
+            return
+
+        # Count wireless devices
+        wireless_count = sum(
+            1 for tab in self.device_tabs.values()
+            if tab.device_type == DRTDeviceType.WDRT_WIRELESS
+        )
+        self.dongle_tab.devices_var.set(str(wireless_count))
+
+    def _on_rescan_xbee(self) -> None:
+        """Handle the rescan button click."""
+        self.logger.info("Rescanning XBee network...")
+
+        if self.dongle_tab and self.dongle_tab.search_button:
+            self.dongle_tab.search_button.config(state='disabled', text='Searching...')
+
+        if self.async_bridge:
+            self.async_bridge.run_coroutine(self._rescan_xbee_async())
+        else:
+            self.logger.error("No async_bridge available for XBee rescan")
+
+    async def _rescan_xbee_async(self) -> None:
+        """Async implementation of XBee rescan."""
+        try:
+            await self.system.rescan_xbee_network()
+        except Exception as e:
+            self.logger.error("Error during XBee rescan: %s", e, exc_info=True)
+        finally:
+            # Re-enable button after a short delay
+            if self.dongle_tab and self.dongle_tab.search_button:
+                self.root.after(2000, self._reset_search_button)
+
+    def _reset_search_button(self) -> None:
+        """Reset the search button state."""
+        if self.dongle_tab and self.dongle_tab.search_button:
+            self.dongle_tab.search_button.config(state='normal', text='Search for Devices')
+
+    def on_xbee_dongle_status_change(self, status: str, detail: str) -> None:
+        """Handle XBee dongle status changes."""
+        self.logger.info("=== GUI ON_XBEE_DONGLE_STATUS_CHANGE ===")
+        self.logger.info("Status: %s, Detail: %s", status, detail)
+        self.logger.info("Current dongle_tab: %s", self.dongle_tab)
+        self.logger.info("Notebook: %s", self.notebook)
+
+        if status == 'connected':
+            # Create dongle tab if not exists
+            if self.dongle_tab is None:
+                self.logger.info("Creating dongle tab...")
+                try:
+                    self.dongle_tab = self._create_dongle_tab(detail)
+                    self.logger.info("SUCCESS: Created XBee dongle tab for port %s", detail)
+                except Exception as e:
+                    self.logger.error("FAILED to create dongle tab: %s", e, exc_info=True)
+            else:
+                self.logger.info("Dongle tab already exists")
+
+            # Update status
+            self.dongle_tab.status_var.set("Connected")
+            self.dongle_tab.port_var.set(detail)
+            if self.dongle_tab.status_label:
+                self.dongle_tab.status_label.config(foreground='green')
+
+            # Hide empty state if visible
+            if self.empty_state_label:
+                self.empty_state_label.grid_remove()
+                self.notebook.lift()
+
+        elif status == 'disconnected':
+            # Remove dongle tab
+            self._remove_dongle_tab()
+
+            # Show empty state if no devices remain
+            if self.empty_state_label and not self.device_tabs:
+                self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
+                self.empty_state_label.lift()
+
+        elif status == 'disabled':
+            # XBee disabled due to USB wDRT connection
+            if self.dongle_tab:
+                self.dongle_tab.status_var.set("Disabled (USB wDRT connected)")
+                if self.dongle_tab.status_label:
+                    self.dongle_tab.status_label.config(foreground='orange')
+                if self.dongle_tab.search_button:
+                    self.dongle_tab.search_button.config(state='disabled')
+
+        elif status == 'enabled':
+            # XBee re-enabled
+            if self.dongle_tab:
+                self.dongle_tab.status_var.set("Connected")
+                if self.dongle_tab.status_label:
+                    self.dongle_tab.status_label.config(foreground='green')
+                if self.dongle_tab.search_button:
+                    self.dongle_tab.search_button.config(state='normal')
+
     def _start_recording(self):
         if self.async_bridge:
             self.async_bridge.run_coroutine(self._start_recording_async())
@@ -335,9 +522,13 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 tab = self._create_device_tab(device_id, device_type)
                 self.device_tabs[device_id] = tab
 
-            if self.empty_state_label and self.device_tabs:
+            if self.empty_state_label and (self.device_tabs or self.dongle_tab):
                 self.empty_state_label.grid_remove()
                 self.notebook.lift()
+
+            # Update dongle device count for wireless devices
+            if device_type == DRTDeviceType.WDRT_WIRELESS:
+                self._update_dongle_device_count()
 
             if self.quick_panel:
                 self.quick_panel.device_connected(device_id)
@@ -349,8 +540,11 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def on_device_disconnected(self, device_id: str, device_type: DRTDeviceType = None):
         self.logger.info("GUI: Device disconnected: %s", device_id)
 
+        # Get device type before removing from tabs
+        was_wireless = False
         if device_id in self.device_tabs:
             tab = self.device_tabs[device_id]
+            was_wireless = tab.device_type == DRTDeviceType.WDRT_WIRELESS
 
             # Find and remove the tab by matching device_id in the tab text
             for idx in range(self.notebook.index("end")):
@@ -362,7 +556,12 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             del self.device_tabs[device_id]
             self.logger.info("Removed tab for device %s", device_id)
 
-        if self.empty_state_label and not self.device_tabs:
+        # Update dongle device count for wireless devices
+        if was_wireless:
+            self._update_dongle_device_count()
+
+        # Show empty state only if no devices and no dongle tab
+        if self.empty_state_label and not self.device_tabs and not self.dongle_tab:
             self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
             self.empty_state_label.lift()
 

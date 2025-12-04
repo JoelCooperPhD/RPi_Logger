@@ -19,7 +19,25 @@ class GUIMode(BaseGUIMode):
         self.logger = get_module_logger("GUIMode")
 
     async def on_async_bridge_started(self) -> None:
-        self.logger.info("Async bridge started - device detection will begin after mainloop starts")
+        self.logger.info("=== ASYNC BRIDGE STARTED ===")
+        self.logger.info("GUI exists: %s", self.gui is not None)
+        self.logger.info("async_bridge exists: %s", self.async_bridge is not None)
+        # Sync XBee dongle tab state in case dongle was connected before GUI was ready
+        await self._sync_xbee_dongle_state()
+
+    async def _sync_xbee_dongle_state(self) -> None:
+        """Sync the XBee dongle tab state with current connection status."""
+        self.logger.info("=== SYNC XBEE DONGLE STATE ===")
+        self.logger.info("system.connection_manager: %s", self.system.connection_manager)
+        self.logger.info("system.xbee_connected: %s", self.system.xbee_connected)
+        self.logger.info("system.xbee_port: %s", self.system.xbee_port)
+
+        if self.system.xbee_connected:
+            port = self.system.xbee_port or ""
+            self.logger.info("XBee dongle already connected on %s, syncing GUI state", port)
+            await self.on_xbee_status_change('connected', port)
+        else:
+            self.logger.info("XBee dongle NOT connected yet")
 
     def create_gui(self) -> Any:
         from ..interfaces.gui.tkinter_gui import TkinterGUI
@@ -70,6 +88,24 @@ class GUIMode(BaseGUIMode):
                 self.async_bridge.call_in_gui(self.gui.on_device_data, port, data_type, data)
             else:
                 self.gui.on_device_data(port, data_type, data)
+
+    async def on_xbee_status_change(self, status: str, detail: str):
+        """Handle XBee dongle status changes."""
+        self.logger.info("=== GUIMODE ON_XBEE_STATUS_CHANGE ===")
+        self.logger.info("Status: %s, Detail: %s", status, detail)
+        self.logger.info("self.gui: %s", self.gui)
+        self.logger.info("hasattr on_xbee_dongle_status_change: %s", hasattr(self.gui, 'on_xbee_dongle_status_change') if self.gui else 'N/A')
+        self.logger.info("self.async_bridge: %s", self.async_bridge)
+
+        if self.gui and hasattr(self.gui, 'on_xbee_dongle_status_change'):
+            if self.async_bridge:
+                self.logger.info("Calling via async_bridge.call_in_gui")
+                self.async_bridge.call_in_gui(self.gui.on_xbee_dongle_status_change, status, detail)
+            else:
+                self.logger.info("Calling directly (no async_bridge)")
+                self.gui.on_xbee_dongle_status_change(status, detail)
+        else:
+            self.logger.warning("Cannot call on_xbee_dongle_status_change - gui=%s", self.gui)
 
     async def cleanup(self) -> None:
         self.logger.info("Cleaning up GUI mode...")

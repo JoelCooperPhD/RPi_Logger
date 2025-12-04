@@ -114,6 +114,13 @@ class ConnectionManager:
         """Check if XBee support is enabled."""
         return self._xbee_enabled
 
+    @property
+    def xbee_port(self) -> Optional[str]:
+        """Return the XBee dongle port if connected, None otherwise."""
+        if self._xbee_manager and self._xbee_manager.is_connected:
+            return self._xbee_manager.coordinator_port
+        return None
+
     # =========================================================================
     # Lifecycle
     # =========================================================================
@@ -425,10 +432,16 @@ class ConnectionManager:
             status: Status string ('connected', 'disconnected', 'disabled', 'enabled')
             detail: Additional detail (e.g., port name)
         """
-        logger.info(f"XBee status: {status} {detail}")
+        logger.info("=== CONNECTIONMANAGER _ON_XBEE_STATUS_CHANGE ===")
+        logger.info(f"Status: {status}, Detail: {detail}")
+        logger.info(f"on_xbee_status_change callback: {self.on_xbee_status_change}")
 
         if self.on_xbee_status_change:
+            logger.info("Calling external on_xbee_status_change callback")
             await self.on_xbee_status_change(status, detail)
+            logger.info("External callback completed")
+        else:
+            logger.warning("No on_xbee_status_change callback registered!")
 
     async def _check_mutual_exclusion(self) -> None:
         """

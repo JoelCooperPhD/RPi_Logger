@@ -43,6 +43,7 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
             # Set up callbacks
             self.connection_manager.on_device_connected = self._on_device_connected
             self.connection_manager.on_device_disconnected = self._on_device_disconnected
+            self.connection_manager.on_xbee_status_change = self._on_xbee_status_change
 
             await self.connection_manager.start()
 
@@ -109,6 +110,20 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
     async def _on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         if self.mode_instance and hasattr(self.mode_instance, 'on_device_data'):
             await self.mode_instance.on_device_data(port, data_type, data)
+
+    async def _on_xbee_status_change(self, status: str, detail: str):
+        """Handle XBee dongle status changes from ConnectionManager."""
+        self.logger.info("=== DRTSYSTEM _ON_XBEE_STATUS_CHANGE ===")
+        self.logger.info("Status: %s, Detail: %s", status, detail)
+        self.logger.info("mode_instance: %s", self.mode_instance)
+        self.logger.info("has on_xbee_status_change: %s", hasattr(self.mode_instance, 'on_xbee_status_change') if self.mode_instance else 'N/A')
+
+        if self.mode_instance and hasattr(self.mode_instance, 'on_xbee_status_change'):
+            self.logger.info("Calling mode_instance.on_xbee_status_change")
+            await self.mode_instance.on_xbee_status_change(status, detail)
+            self.logger.info("mode_instance.on_xbee_status_change completed")
+        else:
+            self.logger.warning("Cannot call on_xbee_status_change - mode_instance=%s", self.mode_instance)
 
     def _create_mode_instance(self, mode_name: str) -> Any:
         if mode_name == "gui":
@@ -218,3 +233,21 @@ class DRTSystem(BaseSystem, RecordingStateMixin):
     def get_device_type(self, device_id: str) -> Optional[DRTDeviceType]:
         """Get the device type for a specific device."""
         return self.device_types.get(device_id)
+
+    async def rescan_xbee_network(self) -> None:
+        """Trigger a rescan of the XBee network for wireless devices."""
+        if self.connection_manager:
+            self.logger.info("Triggering XBee network rescan...")
+            await self.connection_manager.rescan_xbee_network()
+
+    @property
+    def xbee_connected(self) -> bool:
+        """Check if XBee dongle is connected."""
+        return self.connection_manager is not None and self.connection_manager.xbee_connected
+
+    @property
+    def xbee_port(self) -> Optional[str]:
+        """Return the XBee dongle port if connected, None otherwise."""
+        if self.connection_manager:
+            return self.connection_manager.xbee_port
+        return None

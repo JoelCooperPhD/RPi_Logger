@@ -141,7 +141,14 @@ class DRTModuleRuntime(ModuleRuntime):
         )
         self.connection_manager.on_device_connected = self._on_device_connected
         self.connection_manager.on_device_disconnected = self._on_device_disconnected
+        self.connection_manager.on_xbee_status_change = self._on_xbee_status_change
         await self.connection_manager.start()
+
+        # Sync XBee dongle state after start (in case already connected)
+        if self.connection_manager.xbee_connected:
+            port = self.connection_manager.xbee_port or ""
+            self.logger.info("XBee dongle already connected on %s, syncing view", port)
+            await self._on_xbee_status_change('connected', port)
 
     async def _stop_connection_manager(self) -> None:
         manager = self.connection_manager
@@ -188,6 +195,12 @@ class DRTModuleRuntime(ModuleRuntime):
     async def _on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if self.view:
             self.view.on_device_data(port, data_type, payload)
+
+    async def _on_xbee_status_change(self, status: str, detail: str) -> None:
+        """Handle XBee dongle status changes."""
+        self.logger.info("XBee dongle status change: %s %s", status, detail)
+        if self.view:
+            self.view.on_xbee_dongle_status_change(status, detail)
 
     # ------------------------------------------------------------------
     # Recording control
@@ -289,6 +302,24 @@ class DRTModuleRuntime(ModuleRuntime):
     @property
     def recording(self) -> bool:
         return self._recording_active
+
+    @property
+    def xbee_connected(self) -> bool:
+        """Check if XBee dongle is connected."""
+        return self.connection_manager is not None and self.connection_manager.xbee_connected
+
+    @property
+    def xbee_port(self) -> Optional[str]:
+        """Return the XBee dongle port if connected."""
+        if self.connection_manager:
+            return self.connection_manager.xbee_port
+        return None
+
+    async def rescan_xbee_network(self) -> None:
+        """Trigger a rescan of the XBee network."""
+        if self.connection_manager:
+            self.logger.info("Triggering XBee network rescan...")
+            await self.connection_manager.rescan_xbee_network()
 
     @staticmethod
     def _coerce_int(value: Any, default: int) -> int:
