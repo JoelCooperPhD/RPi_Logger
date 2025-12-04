@@ -1,16 +1,16 @@
 import asyncio
 from rpi_logger.core.logging_utils import get_module_logger
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, messagebox
 from typing import TYPE_CHECKING, Optional, Dict, Any
 from collections import deque
 from pathlib import Path
 
 from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase
 from .drt_plotter import DRTPlotter
-from .sdrt_config_window import SDRTConfigWindow
-from .wdrt_config_window import WDRTConfigWindow
+from .drt_config_window import DRTConfigWindow
 from .quick_status_panel import QuickStatusPanel
+from .battery_widget import CompactBatteryWidget
 from ...device_types import DRTDeviceType
 
 if TYPE_CHECKING:
@@ -32,6 +32,23 @@ class DeviceTab:
         self.stim_on_button: Optional[ttk.Button] = None
         self.stim_off_button: Optional[ttk.Button] = None
         self.configure_button: Optional[ttk.Button] = None
+        self.battery_widget: Optional[CompactBatteryWidget] = None
+
+
+class WirelessDeviceEntry:
+    """Entry for a wireless device displayed in the dongle tab."""
+
+    def __init__(self, device_id: str, parent_frame: tk.Frame):
+        self.device_id = device_id
+        self.frame = parent_frame
+        self.battery_percent: Optional[int] = None
+        self.connected: bool = True
+
+        # UI elements
+        self.row_frame: Optional[ttk.Frame] = None
+        self.id_label: Optional[ttk.Label] = None
+        self.status_indicator: Optional[tk.Label] = None
+        self.battery_widget: Optional[CompactBatteryWidget] = None
 
 
 class DongleTab:
@@ -46,6 +63,13 @@ class DongleTab:
         self.devices_var = tk.StringVar(value="0")
         self.search_button: Optional[ttk.Button] = None
         self.status_label: Optional[ttk.Label] = None
+        self.rtc_sync_button: Optional[ttk.Button] = None
+
+        # Wireless devices section
+        self.devices_frame: Optional[ttk.LabelFrame] = None
+        self.devices_container: Optional[ttk.Frame] = None
+        self.no_devices_label: Optional[ttk.Label] = None
+        self.wireless_devices: Dict[str, WirelessDeviceEntry] = {}
 
 
 class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
@@ -70,8 +94,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         self.empty_state_label: Optional[ttk.Label] = None
 
         self.stimulus_state: Dict[str, int] = {}
-        self.sdrt_config_window: Optional[SDRTConfigWindow] = None
-        self.wdrt_config_window: Optional[WDRTConfigWindow] = None
+        self.config_window: Optional[DRTConfigWindow] = None
         self.quick_panel: Optional[QuickStatusPanel] = quick_panel
         self.devices_panel_visible_var = None
 
@@ -201,6 +224,32 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         ttk.Label(results_frame, text="Response Count:", anchor='w').grid(row=2, column=0, sticky='w', pady=2)
         ttk.Label(results_frame, textvariable=tab.click_count_var, anchor='e').grid(row=2, column=1, sticky='e', pady=2)
 
+        # Add battery display for USB wDRT devices
+        if device_type == DRTDeviceType.WDRT_USB:
+            battery_frame = ttk.LabelFrame(tab_frame, text="Battery", padding=(10, 5))
+            battery_frame.grid(row=2, column=1, sticky='nsew', padx=5, pady=5)
+            battery_frame.columnconfigure(1, weight=1)
+
+            ttk.Label(battery_frame, text="Level:", anchor='w').grid(row=0, column=0, sticky='w', pady=2)
+
+            # Add compact battery widget
+            tab.battery_widget = CompactBatteryWidget(battery_frame, segment_size=8)
+            tab.battery_widget.grid(row=0, column=1, sticky='w', padx=(5, 0), pady=2)
+            tab.battery_widget.set_percent(None)  # Unknown initially
+
+            ttk.Label(battery_frame, textvariable=tab.battery_var, anchor='e', width=5).grid(
+                row=0, column=2, sticky='e', pady=2, padx=(5, 0)
+            )
+
+            # Add refresh button
+            refresh_btn = ttk.Button(
+                battery_frame,
+                text="Refresh",
+                width=8,
+                command=lambda: self._on_refresh_battery(device_id)
+            )
+            refresh_btn.grid(row=0, column=3, sticky='e', padx=(10, 0), pady=2)
+
         configure_frame = ttk.Frame(tab_frame)
         configure_frame.grid(row=5, column=1, sticky='nsew', padx=5, pady=5)
         configure_frame.columnconfigure(0, weight=1)
@@ -230,11 +279,11 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         tab.port_var.set(port)
 
         tab_frame.columnconfigure(0, weight=1)
-        tab_frame.rowconfigure(2, weight=1)
+        tab_frame.rowconfigure(3, weight=1)
 
         # Status frame
         status_frame = ttk.LabelFrame(tab_frame, text="Dongle Status", padding=(15, 10))
-        status_frame.grid(row=0, column=0, sticky='ew', padx=10, pady=10)
+        status_frame.grid(row=0, column=0, sticky='ew', padx=10, pady=(10, 5))
         status_frame.columnconfigure(1, weight=1)
 
         ttk.Label(status_frame, text="Status:", anchor='w').grid(row=0, column=0, sticky='w', pady=3)
@@ -244,12 +293,50 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         ttk.Label(status_frame, text="Port:", anchor='w').grid(row=1, column=0, sticky='w', pady=3)
         ttk.Label(status_frame, textvariable=tab.port_var, anchor='w').grid(row=1, column=1, sticky='w', pady=3, padx=(10, 0))
 
-        ttk.Label(status_frame, text="Wireless Devices:", anchor='w').grid(row=2, column=0, sticky='w', pady=3)
-        ttk.Label(status_frame, textvariable=tab.devices_var, anchor='w').grid(row=2, column=1, sticky='w', pady=3, padx=(10, 0))
+        # Wireless devices section
+        tab.devices_frame = ttk.LabelFrame(tab_frame, text="Connected Wireless Devices", padding=(15, 10))
+        tab.devices_frame.grid(row=1, column=0, sticky='nsew', padx=10, pady=5)
+        tab.devices_frame.columnconfigure(0, weight=1)
+
+        # Container for device entries
+        tab.devices_container = ttk.Frame(tab.devices_frame)
+        tab.devices_container.pack(fill=tk.BOTH, expand=True)
+        tab.devices_container.columnconfigure(0, weight=1)
+
+        # No devices label (shown when no wireless devices connected)
+        tab.no_devices_label = ttk.Label(
+            tab.devices_container,
+            text="No wireless devices discovered yet.\nUse 'Search for Devices' to scan the network.",
+            foreground='gray',
+            justify='center'
+        )
+        tab.no_devices_label.pack(pady=20)
+
+        # RTC sync section
+        rtc_frame = ttk.LabelFrame(tab_frame, text="Real-Time Clock Sync", padding=(15, 10))
+        rtc_frame.grid(row=2, column=0, sticky='ew', padx=10, pady=5)
+        rtc_frame.columnconfigure(0, weight=1)
+
+        rtc_info = ttk.Label(
+            rtc_frame,
+            text="Synchronize the clock on all connected wireless wDRT devices\nwith your computer's time.",
+            wraplength=350,
+            justify='left',
+            foreground='gray'
+        )
+        rtc_info.pack(anchor=tk.W, pady=(0, 5))
+
+        tab.rtc_sync_button = ttk.Button(
+            rtc_frame,
+            text="Sync RTC on All Devices",
+            command=self._on_sync_all_rtc,
+            width=25
+        )
+        tab.rtc_sync_button.pack(anchor=tk.W, pady=5)
 
         # Search controls frame
         controls_frame = ttk.LabelFrame(tab_frame, text="Network Discovery", padding=(15, 10))
-        controls_frame.grid(row=1, column=0, sticky='ew', padx=10, pady=5)
+        controls_frame.grid(row=3, column=0, sticky='ew', padx=10, pady=5)
         controls_frame.columnconfigure(0, weight=1)
 
         info_label = ttk.Label(
@@ -260,7 +347,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             justify='left',
             foreground='gray'
         )
-        info_label.grid(row=0, column=0, sticky='w', pady=(0, 10))
+        info_label.pack(anchor=tk.W, pady=(0, 5))
 
         tab.search_button = ttk.Button(
             controls_frame,
@@ -268,11 +355,11 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             command=self._on_rescan_xbee,
             width=25
         )
-        tab.search_button.grid(row=1, column=0, sticky='w', pady=5)
+        tab.search_button.pack(anchor=tk.W, pady=5)
 
         # Spacer frame to push content up
         spacer = ttk.Frame(tab_frame)
-        spacer.grid(row=2, column=0, sticky='nsew')
+        spacer.grid(row=4, column=0, sticky='nsew')
 
         # Add dongle tab - insert at beginning if other tabs exist, otherwise just add
         if self.notebook.index("end") > 0:
@@ -303,11 +390,8 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         if self.dongle_tab is None:
             return
 
-        # Count wireless devices
-        wireless_count = sum(
-            1 for tab in self.device_tabs.values()
-            if tab.device_type == DRTDeviceType.WDRT_WIRELESS
-        )
+        # Count wireless devices from the dongle tab's device list
+        wireless_count = len(self.dongle_tab.wireless_devices)
         self.dongle_tab.devices_var.set(str(wireless_count))
 
     def _on_rescan_xbee(self) -> None:
@@ -337,6 +421,133 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         """Reset the search button state."""
         if self.dongle_tab and self.dongle_tab.search_button:
             self.dongle_tab.search_button.config(state='normal', text='Search for Devices')
+
+    def _on_sync_all_rtc(self) -> None:
+        """Sync RTC on all connected wireless devices."""
+        if not self.dongle_tab:
+            return
+
+        wireless_device_ids = list(self.dongle_tab.wireless_devices.keys())
+        if not wireless_device_ids:
+            messagebox.showinfo("No Devices", "No wireless devices connected to sync.")
+            return
+
+        self.logger.info("Syncing RTC on %d wireless devices", len(wireless_device_ids))
+
+        if self.dongle_tab.rtc_sync_button:
+            self.dongle_tab.rtc_sync_button.config(state='disabled', text='Syncing...')
+
+        if self.async_bridge:
+            self.async_bridge.run_coroutine(self._sync_all_rtc_async(wireless_device_ids))
+        else:
+            self.logger.error("No async_bridge available for RTC sync")
+
+    async def _sync_all_rtc_async(self, device_ids: list) -> None:
+        """Async implementation of RTC sync for all wireless devices."""
+        success_count = 0
+        fail_count = 0
+
+        for device_id in device_ids:
+            handler = self.system.get_device_handler(device_id)
+            if handler:
+                try:
+                    await handler.sync_rtc()
+                    success_count += 1
+                    self.logger.info("RTC synced on %s", device_id)
+                except Exception as e:
+                    self.logger.error("Failed to sync RTC on %s: %s", device_id, e)
+                    fail_count += 1
+            else:
+                fail_count += 1
+
+        # Reset button and show result
+        if self.dongle_tab and self.dongle_tab.rtc_sync_button:
+            self.root.after(0, lambda: self._finish_rtc_sync(success_count, fail_count))
+
+    def _finish_rtc_sync(self, success_count: int, fail_count: int) -> None:
+        """Finish RTC sync and show result."""
+        if self.dongle_tab and self.dongle_tab.rtc_sync_button:
+            self.dongle_tab.rtc_sync_button.config(state='normal', text='Sync RTC on All Devices')
+
+        if fail_count == 0:
+            messagebox.showinfo("Success", f"RTC synchronized on {success_count} device(s)")
+        else:
+            messagebox.showwarning("Partial Success",
+                                   f"RTC sync completed.\nSuccess: {success_count}\nFailed: {fail_count}")
+
+    def _add_wireless_device_entry(self, device_id: str) -> None:
+        """Add a wireless device entry to the dongle tab."""
+        if not self.dongle_tab or device_id in self.dongle_tab.wireless_devices:
+            return
+
+        # Hide the "no devices" label
+        if self.dongle_tab.no_devices_label:
+            self.dongle_tab.no_devices_label.pack_forget()
+
+        container = self.dongle_tab.devices_container
+        entry = WirelessDeviceEntry(device_id, container)
+
+        # Create row frame
+        entry.row_frame = ttk.Frame(container)
+        entry.row_frame.pack(fill=tk.X, pady=2)
+        entry.row_frame.columnconfigure(1, weight=1)
+
+        # Status indicator (green circle for connected)
+        entry.status_indicator = tk.Label(
+            entry.row_frame,
+            text="●",
+            fg='green',
+            font=('TkDefaultFont', 10)
+        )
+        entry.status_indicator.grid(row=0, column=0, padx=(0, 5))
+
+        # Device ID label
+        short_id = device_id.split('/')[-1] if '/' in device_id else device_id
+        entry.id_label = ttk.Label(entry.row_frame, text=short_id, width=15, anchor='w')
+        entry.id_label.grid(row=0, column=1, sticky='w')
+
+        # Battery widget
+        entry.battery_widget = CompactBatteryWidget(entry.row_frame, segment_size=6)
+        entry.battery_widget.grid(row=0, column=2, padx=(10, 0))
+        entry.battery_widget.set_percent(None)  # Unknown initially
+
+        # Battery percentage label
+        entry.battery_label = ttk.Label(entry.row_frame, text="---%", width=5)
+        entry.battery_label.grid(row=0, column=3, padx=(5, 0))
+
+        self.dongle_tab.wireless_devices[device_id] = entry
+        self._update_dongle_device_count()
+        self.logger.info("Added wireless device entry: %s", device_id)
+
+    def _remove_wireless_device_entry(self, device_id: str) -> None:
+        """Remove a wireless device entry from the dongle tab."""
+        if not self.dongle_tab or device_id not in self.dongle_tab.wireless_devices:
+            return
+
+        entry = self.dongle_tab.wireless_devices.pop(device_id)
+        if entry.row_frame:
+            entry.row_frame.destroy()
+
+        # Show "no devices" label if no devices left
+        if not self.dongle_tab.wireless_devices and self.dongle_tab.no_devices_label:
+            self.dongle_tab.no_devices_label.pack(pady=20)
+
+        self._update_dongle_device_count()
+        self.logger.info("Removed wireless device entry: %s", device_id)
+
+    def _update_wireless_device_battery(self, device_id: str, percent: int) -> None:
+        """Update the battery display for a wireless device in the dongle tab."""
+        if not self.dongle_tab or device_id not in self.dongle_tab.wireless_devices:
+            return
+
+        entry = self.dongle_tab.wireless_devices[device_id]
+        entry.battery_percent = percent
+
+        if entry.battery_widget:
+            entry.battery_widget.set_percent(percent)
+
+        if hasattr(entry, 'battery_label') and entry.battery_label:
+            entry.battery_label.config(text=f"{percent}%")
 
     def on_xbee_dongle_status_change(self, status: str, detail: str) -> None:
         """Handle XBee dongle status changes."""
@@ -468,46 +679,90 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
 
         parent = getattr(self, 'root', None)
 
-        if tab.device_type == DRTDeviceType.SDRT:
-            # Use sDRT config window
-            if not self.sdrt_config_window:
-                self.sdrt_config_window = SDRTConfigWindow(self.system, self.async_bridge, parent=parent)
-            self.sdrt_config_window.show_for_device(device_id)
-        else:
-            # Use wDRT config window for wDRT USB and wireless
-            handler = self.system.get_device_handler(device_id)
-            if handler:
-                self.wdrt_config_window = WDRTConfigWindow(
-                    parent,
-                    device_id,
-                    on_upload=lambda params: self._on_wdrt_upload(device_id, params),
-                    on_iso_preset=lambda: self._on_wdrt_iso(device_id),
-                    on_rtc_sync=lambda: self._on_wdrt_rtc_sync(device_id),
-                    on_get_config=lambda: self._on_wdrt_get_config(device_id),
-                    on_get_battery=lambda: self._on_wdrt_get_battery(device_id),
-                )
+        # Use unified config window for all device types
+        handler = self.system.get_device_handler(device_id)
+        if handler:
+            self.config_window = DRTConfigWindow(
+                parent,
+                device_id,
+                device_type=tab.device_type,
+                on_upload=lambda params: self._on_config_upload(device_id, params),
+                on_iso_preset=lambda: self._on_config_iso(device_id),
+                on_get_config=lambda: self._on_config_get(device_id),
+            )
 
-    def _on_wdrt_upload(self, device_id: str, params: Dict[str, int]):
+    def _on_config_upload(self, device_id: str, params: Dict[str, int]):
+        """Handle config upload for any DRT device type."""
         handler = self.system.get_device_handler(device_id)
         if handler and self.async_bridge:
-            self.async_bridge.run_coroutine(handler.send_command('set', params))
+            tab = self.device_tabs.get(device_id)
+            if tab and tab.device_type == DRTDeviceType.SDRT:
+                # sDRT uses individual commands
+                self.async_bridge.run_coroutine(self._upload_sdrt_config(handler, params))
+            else:
+                # wDRT uses single 'set' command
+                self.async_bridge.run_coroutine(handler.send_command('set', params))
 
-    def _on_wdrt_iso(self, device_id: str):
+    async def _upload_sdrt_config(self, handler, params: Dict[str, int]) -> None:
+        """Upload config to sDRT device using individual commands."""
+        try:
+            if 'lowerISI' in params:
+                await handler.set_lower_isi(params['lowerISI'])
+            if 'upperISI' in params:
+                await handler.set_upper_isi(params['upperISI'])
+            if 'stimDur' in params:
+                await handler.set_stimulus_duration(params['stimDur'])
+            if 'intensity' in params:
+                # Convert percentage to 0-255 range for sDRT
+                intensity = int(params['intensity'] * 2.55)
+                await handler.set_intensity(intensity)
+            self.logger.info("sDRT config uploaded successfully")
+        except Exception as e:
+            self.logger.error("Failed to upload sDRT config: %s", e)
+
+    def _on_config_iso(self, device_id: str):
+        """Handle ISO preset for any DRT device type."""
         handler = self.system.get_device_handler(device_id)
         if handler and self.async_bridge:
-            self.async_bridge.run_coroutine(handler.send_command('iso'))
+            tab = self.device_tabs.get(device_id)
+            if tab and tab.device_type == DRTDeviceType.SDRT:
+                self.async_bridge.run_coroutine(handler.set_iso_params())
+            else:
+                self.async_bridge.run_coroutine(handler.send_command('iso'))
 
-    def _on_wdrt_rtc_sync(self, device_id: str):
+    def _on_config_get(self, device_id: str):
+        """Handle get config for any DRT device type."""
         handler = self.system.get_device_handler(device_id)
         if handler and self.async_bridge:
-            self.async_bridge.run_coroutine(handler.send_command('set_rtc'))
+            tab = self.device_tabs.get(device_id)
+            if tab and tab.device_type == DRTDeviceType.SDRT:
+                self.async_bridge.run_coroutine(self._get_sdrt_config(handler, device_id))
+            else:
+                self.async_bridge.run_coroutine(handler.send_command('get_config'))
 
-    def _on_wdrt_get_config(self, device_id: str):
-        handler = self.system.get_device_handler(device_id)
-        if handler and self.async_bridge:
-            self.async_bridge.run_coroutine(handler.send_command('get_config'))
+    async def _get_sdrt_config(self, handler, device_id: str) -> None:
+        """Get config from sDRT device."""
+        try:
+            config = await handler.get_device_config()
+            if config and self.config_window:
+                self.root.after(0, lambda: self.config_window.update_config(config))
+        except Exception as e:
+            self.logger.error("Failed to get sDRT config: %s", e)
 
-    def _on_wdrt_get_battery(self, device_id: str):
+    def _update_device_tab_battery(self, device_id: str, percent: int) -> None:
+        """Update battery display for USB wDRT device in its tab."""
+        tab = self.device_tabs.get(device_id)
+        if not tab:
+            return
+
+        tab.battery_var.set(f"{percent}%")
+
+        # Update the battery widget if it exists
+        if hasattr(tab, 'battery_widget') and tab.battery_widget:
+            tab.battery_widget.set_percent(percent)
+
+    def _on_refresh_battery(self, device_id: str) -> None:
+        """Request battery update for a device."""
         handler = self.system.get_device_handler(device_id)
         if handler and self.async_bridge:
             self.async_bridge.run_coroutine(handler.send_command('get_battery'))
@@ -526,9 +781,19 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 self.empty_state_label.grid_remove()
                 self.notebook.lift()
 
-            # Update dongle device count for wireless devices
+            # Add wireless devices to the dongle tab's device list
             if device_type == DRTDeviceType.WDRT_WIRELESS:
-                self._update_dongle_device_count()
+                self._add_wireless_device_entry(device_id)
+                # Request initial battery status
+                handler = self.system.get_device_handler(device_id)
+                if handler and self.async_bridge:
+                    self.async_bridge.run_coroutine(handler.send_command('get_battery'))
+
+            # Request initial battery for USB wDRT devices
+            elif device_type == DRTDeviceType.WDRT_USB:
+                handler = self.system.get_device_handler(device_id)
+                if handler and self.async_bridge:
+                    self.async_bridge.run_coroutine(handler.send_command('get_battery'))
 
             if self.quick_panel:
                 self.quick_panel.device_connected(device_id)
@@ -556,9 +821,9 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             del self.device_tabs[device_id]
             self.logger.info("Removed tab for device %s", device_id)
 
-        # Update dongle device count for wireless devices
+        # Remove wireless devices from the dongle tab's device list
         if was_wireless:
-            self._update_dongle_device_count()
+            self._remove_wireless_device_entry(device_id)
 
         # Show empty state only if no devices and no dongle tab
         if self.empty_state_label and not self.device_tabs and not self.dongle_tab:
@@ -573,20 +838,22 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         tab = self.device_tabs.get(port)
 
-        if data_type == 'battery' and tab:
-            # Update battery in wDRT config window if open
+        if data_type == 'battery':
             percent = data.get('percent')
-            if self.wdrt_config_window and percent is not None:
-                try:
-                    self.wdrt_config_window.update_battery(int(percent))
-                except Exception:
-                    pass  # Window may have been closed
+            if percent is not None:
+                # Route battery data based on device type
+                if tab and tab.device_type == DRTDeviceType.WDRT_WIRELESS:
+                    # Update battery in dongle tab for wireless devices
+                    self._update_wireless_device_battery(port, int(percent))
+                elif tab and tab.device_type == DRTDeviceType.WDRT_USB:
+                    # Update battery in device tab for USB wDRT
+                    self._update_device_tab_battery(port, int(percent))
 
         elif data_type == 'config' and tab:
             # Update config window if open
-            if tab.device_type != DRTDeviceType.SDRT and self.wdrt_config_window:
+            if self.config_window:
                 try:
-                    self.wdrt_config_window.update_config(data)
+                    self.config_window.update_config(data)
                 except Exception:
                     pass  # Window may have been closed
 
@@ -663,12 +930,12 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                 else:
                     tab.plotter.update_trial(port, 0, is_hit=False)
 
-            # Update battery in config window if open
-            if battery is not None and self.wdrt_config_window:
-                try:
-                    self.wdrt_config_window.update_battery(int(battery))
-                except Exception:
-                    pass
+            # Update battery based on device type
+            if battery is not None and tab:
+                if tab.device_type == DRTDeviceType.WDRT_WIRELESS:
+                    self._update_wireless_device_battery(port, int(battery))
+                elif tab.device_type == DRTDeviceType.WDRT_USB:
+                    self._update_device_tab_battery(port, int(battery))
 
         elif data_type == 'reaction_time' and tab:
             # Standalone RT event
