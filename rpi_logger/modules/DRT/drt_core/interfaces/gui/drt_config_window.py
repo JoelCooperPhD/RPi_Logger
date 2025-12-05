@@ -1,35 +1,36 @@
-"""
-Unified DRT Configuration Window
+"""DRT configuration dialog for device settings.
 
-Configuration dialog for all DRT device types (sDRT, wDRT USB, wDRT wireless).
-Allows setting stimulus parameters without battery or RTC controls.
-Battery and RTC management are handled elsewhere:
-- Wireless wDRT: Battery and RTC in XBee dongle tab
-- USB wDRT: Battery in device tab
+Supports all DRT device types (sDRT, wDRT USB, wDRT wireless) with adaptive UI.
+Uses the modern dark theme styling consistent with VOG module.
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional, Dict, Any, Callable
-import logging
+from pathlib import Path
 
-from ...device_types import DRTDeviceType
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.ui.theme.styles import Theme
 from rpi_logger.core.ui.theme.colors import Colors
+from rpi_logger.core.ui.theme.widgets import RoundedButton
+from rpi_logger.modules.base import ConfigLoader
 
-logger = logging.getLogger(__name__)
+from ...device_types import DRTDeviceType
 
 
-class DRTConfigWindow(tk.Toplevel):
-    """
-    Unified configuration window for all DRT device types.
+class DRTConfigWindow:
+    """Modal dialog for configuring DRT device settings.
 
     Features:
     - Parameter configuration (ISI, stimulus duration, intensity)
     - ISO standard preset button
     - Read from device / Upload to device
     - Works for sDRT, wDRT USB, and wDRT wireless
+    - Position persistence in config file
     """
+
+    # Config key for saving dialog position
+    CONFIG_DIALOG_GEOMETRY_KEY = "config_dialog_geometry"
 
     def __init__(
         self,
@@ -41,8 +42,7 @@ class DRTConfigWindow(tk.Toplevel):
         on_get_config: Optional[Callable[[], None]] = None,
         **kwargs
     ):
-        """
-        Initialize the configuration window.
+        """Initialize the configuration window.
 
         Args:
             parent: Parent widget
@@ -53,13 +53,13 @@ class DRTConfigWindow(tk.Toplevel):
             on_get_config: Callback to request config from device
             **kwargs: Additional toplevel options
         """
-        super().__init__(parent, **kwargs)
-
         self.device_id = device_id
         self.device_type = device_type
         self.on_upload = on_upload
         self.on_iso_preset = on_iso_preset
         self.on_get_config = on_get_config
+        self.logger = get_module_logger("DRTConfigWindow")
+        self._config_path = Path(__file__).parent.parent.parent.parent / "config.txt"
 
         # Determine device type label
         type_label = {
@@ -68,15 +68,26 @@ class DRTConfigWindow(tk.Toplevel):
             DRTDeviceType.WDRT_WIRELESS: "wDRT Wireless",
         }.get(device_type, "DRT")
 
-        # Window setup
-        self.title(f"{type_label} Configuration - {device_id}")
-        self.geometry("420x320")
-        self.resizable(False, False)
+        # Window dimensions
+        width, height = 380, 340
 
-        # Make modal
-        self.transient(parent)
-        self.grab_set()
-        Theme.configure_toplevel(self)
+        # Calculate position before creating dialog
+        saved_pos = self._load_saved_position_static()
+        if saved_pos:
+            x, y = saved_pos
+        else:
+            # Center on parent
+            x = parent.winfo_x() + (parent.winfo_width() - width) // 2
+            y = parent.winfo_y() + (parent.winfo_height() - height) // 2
+
+        # Create modal dialog with full geometry (size + position) immediately
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.geometry(f"{width}x{height}+{x}+{y}")
+        self.dialog.title(f"{type_label} Configuration - {device_id}")
+        self.dialog.resizable(False, False)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        Theme.configure_toplevel(self.dialog)
 
         # Variables for entry fields
         self._vars = {
@@ -86,22 +97,23 @@ class DRTConfigWindow(tk.Toplevel):
             'intensity': tk.StringVar(value="100"),
         }
 
-        self._create_widgets()
+        self._loading = False
+        self._build_ui()
+
+        # Register close handler to clean up and save position
+        self.dialog.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # Request current config
         if self.on_get_config:
-            self.after(100, self.on_get_config)
+            self.dialog.after(100, self.on_get_config)
 
-    def _create_widgets(self) -> None:
+    def _build_ui(self) -> None:
         """Create the window widgets."""
         # Main container with padding
-        main_frame = ttk.Frame(self, padding="10")
+        main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # Device info section
-        info_frame = ttk.LabelFrame(main_frame, text="Device Info", padding="5")
-        info_frame.pack(fill=tk.X, pady=(0, 10))
-
         short_id = self.device_id.split('/')[-1] if '/' in self.device_id else self.device_id
         type_label = {
             DRTDeviceType.SDRT: "sDRT",
@@ -109,75 +121,132 @@ class DRTConfigWindow(tk.Toplevel):
             DRTDeviceType.WDRT_WIRELESS: "wDRT Wireless",
         }.get(self.device_type, "DRT")
 
-        ttk.Label(info_frame, text=f"Device: {type_label} - {short_id}").pack(anchor=tk.W)
-
         # Configuration section
-        config_frame = ttk.LabelFrame(main_frame, text="Stimulus Configuration", padding="5")
+        config_frame = ttk.LabelFrame(main_frame, text="Configuration")
         config_frame.pack(fill=tk.X, pady=(0, 10))
+        config_frame.columnconfigure(1, weight=1)
 
         # Parameter entries
         params = [
-            ("Lower ISI (ms):", 'lowerISI', "Min inter-stimulus interval"),
-            ("Upper ISI (ms):", 'upperISI', "Max inter-stimulus interval"),
-            ("Stimulus Duration (ms):", 'stimDur', "How long stimulus stays on"),
-            ("Intensity (%):", 'intensity', "Stimulus brightness (0-100)"),
+            ("Lower ISI (ms):", 'lowerISI', "3000-5000"),
+            ("Upper ISI (ms):", 'upperISI', "3000-5000"),
+            ("Stimulus Duration (ms):", 'stimDur', "1000"),
+            ("Intensity (%):", 'intensity', "0-100"),
         ]
 
-        for label_text, key, tooltip in params:
-            row = ttk.Frame(config_frame)
-            row.pack(fill=tk.X, pady=2)
+        for row_idx, (label_text, key, hint) in enumerate(params):
+            ttk.Label(config_frame, text=label_text, style='Inframe.TLabel').grid(
+                row=row_idx, column=0, sticky="w", padx=5, pady=2)
+            ttk.Entry(config_frame, textvariable=self._vars[key], width=10).grid(
+                row=row_idx, column=1, sticky="e", padx=5, pady=2)
 
-            label = ttk.Label(row, text=label_text, width=22, anchor=tk.W)
-            label.pack(side=tk.LEFT)
-
-            entry = ttk.Entry(row, textvariable=self._vars[key], width=10)
-            entry.pack(side=tk.LEFT, padx=(5, 0))
-
-            # Tooltip/hint
-            hint = ttk.Label(row, text=f"({tooltip})", style='Secondary.TLabel')
-            hint.pack(side=tk.LEFT, padx=(10, 0))
+        # Separator
+        ttk.Separator(config_frame, orient=tk.HORIZONTAL).grid(
+            row=len(params), column=0, columnspan=2, sticky="ew", pady=5)
 
         # Validation hints
         hint_label = ttk.Label(
             config_frame,
-            text="Valid ranges: ISI 0-65535ms, Duration 0-65535ms, Intensity 0-100%",
-            style='Muted.TLabel',
-            font=('TkDefaultFont', 8)
+            text="ISI: 0-65535ms, Duration: 0-65535ms, Intensity: 0-100%",
+            style='Muted.TLabel'
         )
-        hint_label.pack(anchor=tk.W, pady=(5, 0))
+        hint_label.grid(row=len(params) + 1, column=0, columnspan=2, sticky="w", padx=5, pady=2)
 
-        # Buttons section
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=(0, 10))
+        # Preset LabelFrame
+        preset_lf = ttk.LabelFrame(main_frame, text="Presets")
+        preset_lf.pack(fill=tk.X, pady=(0, 10))
 
-        # ISO Preset button
-        iso_btn = ttk.Button(
-            button_frame,
-            text="Load ISO Preset",
-            command=self._on_iso_preset
-        )
-        iso_btn.pack(side=tk.LEFT, padx=(0, 5))
+        # Use tk.Frame with bg for RoundedButton
+        preset_btn_frame = tk.Frame(preset_lf, bg=Colors.BG_DARKER)
+        preset_btn_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        # Get Config button
-        get_btn = ttk.Button(
-            button_frame,
-            text="Read from Device",
-            command=self._on_get_config
-        )
-        get_btn.pack(side=tk.LEFT, padx=(0, 5))
+        RoundedButton(
+            preset_btn_frame, text="ISO Standard",
+            command=self._on_iso_preset,
+            width=120, height=32, style='default',
+            bg=Colors.BG_DARKER
+        ).pack(side=tk.LEFT, padx=2)
 
-        # Upload button
-        upload_btn = ttk.Button(
-            button_frame,
-            text="Upload to Device",
-            command=self._on_upload
-        )
-        upload_btn.pack(side=tk.LEFT)
+        # Actions LabelFrame
+        actions_lf = ttk.LabelFrame(main_frame, text="Actions")
+        actions_lf.pack(fill=tk.X, pady=(0, 10))
 
+        # Use tk.Frame with bg for RoundedButtons
+        action_btn_frame = tk.Frame(actions_lf, bg=Colors.BG_DARKER)
+        action_btn_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        RoundedButton(
+            action_btn_frame, text="Read from Device",
+            command=self._on_get_config,
+            width=130, height=32, style='default',
+            bg=Colors.BG_DARKER
+        ).pack(side=tk.LEFT, padx=2)
+
+        RoundedButton(
+            action_btn_frame, text="Upload to Device",
+            command=self._on_upload,
+            width=130, height=32, style='default',
+            bg=Colors.BG_DARKER
+        ).pack(side=tk.LEFT, padx=2)
+
+        # Close button at bottom
+        close_frame = tk.Frame(main_frame, bg=Colors.BG_DARKER)
+        close_frame.pack(fill=tk.X, pady=(10, 0))
+
+        RoundedButton(
+            close_frame, text="Close",
+            command=self._on_close,
+            width=80, height=32, style='default',
+            bg=Colors.BG_DARKER
+        ).pack(side=tk.RIGHT, padx=2)
+
+    def _load_saved_position_static(self) -> Optional[tuple]:
+        """Load saved dialog position from config file.
+
+        Returns:
+            Tuple of (x, y) coordinates or None if not found.
+        """
+        try:
+            if not self._config_path.exists():
+                return None
+            config = ConfigLoader.load(self._config_path, defaults={}, strict=False)
+            geometry = config.get(self.CONFIG_DIALOG_GEOMETRY_KEY, "")
+            if geometry and "+" in geometry:
+                # Parse "+x+y" format
+                parts = geometry.split("+")
+                if len(parts) >= 3:
+                    x = int(parts[1])
+                    y = int(parts[2])
+                    return (x, y)
+        except Exception:
+            pass
+        return None
+
+    def _save_position(self):
+        """Save current dialog position to config file."""
+        try:
+            if not self._config_path.exists():
+                return
+            geometry = self.dialog.geometry()
+            # Extract just the position part (+x+y)
+            if "+" in geometry:
+                pos_start = geometry.index("+")
+                position = geometry[pos_start:]  # e.g., "+100+200"
+                ConfigLoader.update_config_values(
+                    self._config_path,
+                    {self.CONFIG_DIALOG_GEOMETRY_KEY: position}
+                )
+                self.logger.debug("Saved config dialog position: %s", position)
+        except Exception as e:
+            self.logger.debug("Could not save position: %s", e)
+
+    def _on_close(self):
+        """Handle dialog close."""
+        self._save_position()
+        self.dialog.destroy()
 
     def _validate_inputs(self) -> Optional[Dict[str, int]]:
-        """
-        Validate input values.
+        """Validate input values.
 
         Returns:
             Dict of validated values, or None if validation failed
@@ -210,7 +279,7 @@ class DRTConfigWindow(tk.Toplevel):
             }
 
         except ValueError as e:
-            messagebox.showerror("Validation Error", str(e))
+            messagebox.showerror("Validation Error", str(e), parent=self.dialog)
             return None
 
     def _filter_value(
@@ -220,8 +289,7 @@ class DRTConfigWindow(tk.Toplevel):
         min_val: int,
         max_val: int
     ) -> int:
-        """
-        Filter and validate a numeric value.
+        """Filter and validate a numeric value.
 
         Args:
             value: String value to parse
@@ -243,7 +311,7 @@ class DRTConfigWindow(tk.Toplevel):
         params = self._validate_inputs()
         if params and self.on_upload:
             self.on_upload(params)
-            messagebox.showinfo("Success", "Configuration uploaded to device")
+            messagebox.showinfo("Success", "Configuration uploaded to device", parent=self.dialog)
 
     def _on_iso_preset(self) -> None:
         """Handle ISO preset button click."""
@@ -263,8 +331,7 @@ class DRTConfigWindow(tk.Toplevel):
             self.on_get_config()
 
     def update_config(self, config: Dict[str, Any]) -> None:
-        """
-        Update the displayed configuration.
+        """Update the displayed configuration.
 
         Args:
             config: Configuration dict from device
