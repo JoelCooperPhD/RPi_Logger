@@ -9,10 +9,13 @@ from tkinter import ttk, messagebox
 from typing import Any, Optional
 import asyncio
 from datetime import datetime
+from pathlib import Path
 
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.ui.theme.styles import Theme
 from rpi_logger.core.ui.theme.colors import Colors
+from rpi_logger.core.ui.theme.widgets import RoundedButton
+from rpi_logger.modules.base import ConfigLoader
 
 # Debug log file
 CONFIG_WINDOW_DEBUG_LOG = "/tmp/vog_serial_debug.log"
@@ -40,6 +43,9 @@ class VOGConfigWindow:
     config responses in real-time rather than polling with delays.
     """
 
+    # Config key for saving dialog position
+    CONFIG_DIALOG_GEOMETRY_KEY = "config_dialog_geometry"
+
     def __init__(self, parent: tk.Tk, port: str, system: Any, device_type: str = 'svog', async_bridge=None):
         self.port = port
         self.system = system
@@ -47,21 +53,27 @@ class VOGConfigWindow:
         self.async_bridge = async_bridge
         self.logger = get_module_logger("VOGConfigWindow")
         self._handler = None  # Store handler reference for cleanup
+        self._config_path = Path(__file__).parent.parent.parent.parent / "config.txt"
+
+        # Determine window size based on device type
+        if device_type == 'wvog':
+            width, height = 365, 365
+        else:
+            width, height = 345, 345
+
+        # Load saved position before creating dialog
+        saved_pos = self._load_saved_position_static()
 
         # Create modal dialog
         self.dialog = tk.Toplevel(parent)
         title = f"Configure {device_type.upper()} - {port}"
         self.dialog.title(title)
 
-        # Size depends on device type
-        if device_type == 'wvog':
-            self.dialog.geometry("400x350")
-        else:
-            self.dialog.geometry("380x320")
+        # Hide window until positioned to prevent flicker
+        self.dialog.withdraw()
 
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
         Theme.configure_toplevel(self.dialog)
 
         # Config values
@@ -74,11 +86,19 @@ class VOGConfigWindow:
         # Register close handler to clean up callback
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Center dialog
+        # Set geometry with position before showing
         self.dialog.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - self.dialog.winfo_width()) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - self.dialog.winfo_height()) // 2
-        self.dialog.geometry(f"+{x}+{y}")
+        if saved_pos:
+            self.dialog.geometry(f"{width}x{height}+{saved_pos[0]}+{saved_pos[1]}")
+        else:
+            # Center on parent
+            x = parent.winfo_x() + (parent.winfo_width() - width) // 2
+            y = parent.winfo_y() + (parent.winfo_height() - height) // 2
+            self.dialog.geometry(f"{width}x{height}+{x}+{y}")
+
+        # Show window and grab focus
+        self.dialog.deiconify()
+        self.dialog.grab_set()
 
     def _is_wvog(self) -> bool:
         """Check if device is wVOG type (handles various formats like 'wvog', 'wVOG_USB')."""
@@ -98,64 +118,73 @@ class VOGConfigWindow:
 
     def _build_svog_ui(self, main_frame: ttk.Frame):
         """Build sVOG-specific configuration UI."""
+        # Configuration LabelFrame for consistent styling with wVOG
+        config_lf = ttk.LabelFrame(main_frame, text="Configuration")
+        config_lf.grid(row=0, column=0, columnspan=2, sticky="news", pady=2, padx=2)
+        config_lf.grid_columnconfigure(1, weight=1)
+
         # Config name
         row = 0
-        ttk.Label(main_frame, text="Config Name:").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Config Name:", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=5)
         self.config_vars['config_name'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['config_name'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Entry(config_lf, textvariable=self.config_vars['config_name'], width=20).grid(row=row, column=1, sticky="ew", padx=5, pady=5)
+
+        # Separator
+        row += 1
+        ttk.Separator(config_lf, orient=tk.HORIZONTAL).grid(row=row, column=0, columnspan=2, sticky="ew", pady=5)
 
         # Max Open Time
         row += 1
-        ttk.Label(main_frame, text="Max Open (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Max Open (ms):", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['max_open'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['max_open'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Entry(config_lf, textvariable=self.config_vars['max_open'], width=10).grid(row=row, column=1, sticky="e", padx=5, pady=2)
 
         # Max Close Time
         row += 1
-        ttk.Label(main_frame, text="Max Close (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Max Close (ms):", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['max_close'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['max_close'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Entry(config_lf, textvariable=self.config_vars['max_close'], width=10).grid(row=row, column=1, sticky="e", padx=5, pady=2)
 
         # Debounce Time
         row += 1
-        ttk.Label(main_frame, text="Debounce (ms):").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Debounce (ms):", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['debounce'] = tk.StringVar()
-        ttk.Entry(main_frame, textvariable=self.config_vars['debounce'], width=20).grid(row=row, column=1, sticky="ew", pady=5)
+        ttk.Entry(config_lf, textvariable=self.config_vars['debounce'], width=10).grid(row=row, column=1, sticky="e", padx=5, pady=2)
 
         # Click Mode
         row += 1
-        ttk.Label(main_frame, text="Click Mode:").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Click Mode:", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['click_mode'] = tk.StringVar()
         click_combo = ttk.Combobox(
-            main_frame,
+            config_lf,
             textvariable=self.config_vars['click_mode'],
             values=["0 - Single", "1 - Double", "2 - Hold"],
             width=17,
             state="readonly"
         )
-        click_combo.grid(row=row, column=1, sticky="ew", pady=5)
+        click_combo.grid(row=row, column=1, sticky="e", padx=5, pady=2)
 
         # Button Control
         row += 1
-        ttk.Label(main_frame, text="Button Control:").grid(row=row, column=0, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Button Control:", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['button_control'] = tk.StringVar()
         btn_combo = ttk.Combobox(
-            main_frame,
+            config_lf,
             textvariable=self.config_vars['button_control'],
             values=["0 - Disabled", "1 - Enabled"],
             width=17,
             state="readonly"
         )
-        btn_combo.grid(row=row, column=1, sticky="ew", pady=5)
+        btn_combo.grid(row=row, column=1, sticky="e", padx=5, pady=2)
 
         # Device Version (read-only)
         row += 1
-        ttk.Label(main_frame, text="Device Version:").grid(row=row, column=0, sticky="w", pady=5)
-        self.version_label = ttk.Label(main_frame, text="-")
-        self.version_label.grid(row=row, column=1, sticky="w", pady=5)
+        ttk.Label(config_lf, text="Device Version:", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
+        self.version_label = ttk.Label(config_lf, text="-", style='Inframe.TLabel')
+        self.version_label.grid(row=row, column=1, sticky="e", padx=5, pady=2)
 
         # Separator and buttons
-        self._build_buttons(main_frame, row + 1)
+        self._build_buttons(main_frame, 1)
 
     def _build_wvog_ui(self, main_frame: ttk.Frame):
         """Build wVOG-specific configuration UI matching RS_Logger layout."""
@@ -167,7 +196,7 @@ class VOGConfigWindow:
         row = 0
 
         # Name (experiment type) - entry expands to fill space
-        ttk.Label(config_lf, text="Name:").grid(row=row, column=0, sticky="w", padx=5, pady=2)
+        ttk.Label(config_lf, text="Name:", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['experiment_type'] = tk.StringVar()
         ttk.Entry(config_lf, textvariable=self.config_vars['experiment_type']).grid(
             row=row, column=1, sticky="ew", padx=5, pady=2)
@@ -179,21 +208,21 @@ class VOGConfigWindow:
 
         # Open Duration - entry right-aligned
         row += 1
-        ttk.Label(config_lf, text="Open Duration (ms):").grid(row=row, column=0, sticky="w", padx=5, pady=2)
+        ttk.Label(config_lf, text="Open Duration (ms):", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['open_time'] = tk.StringVar()
         ttk.Entry(config_lf, textvariable=self.config_vars['open_time'], width=10).grid(
             row=row, column=1, sticky="e", padx=5, pady=2)
 
         # Closed Duration - entry right-aligned
         row += 1
-        ttk.Label(config_lf, text="Closed Duration (ms):").grid(row=row, column=0, sticky="w", padx=5, pady=2)
+        ttk.Label(config_lf, text="Closed Duration (ms):", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['close_time'] = tk.StringVar()
         ttk.Entry(config_lf, textvariable=self.config_vars['close_time'], width=10).grid(
             row=row, column=1, sticky="e", padx=5, pady=2)
 
         # Debounce Time - entry right-aligned
         row += 1
-        ttk.Label(config_lf, text="Debounce Time (ms):").grid(row=row, column=0, sticky="w", padx=5, pady=2)
+        ttk.Label(config_lf, text="Debounce Time (ms):", style='Inframe.TLabel').grid(row=row, column=0, sticky="w", padx=5, pady=2)
         self.config_vars['debounce'] = tk.StringVar()
         ttk.Entry(config_lf, textvariable=self.config_vars['debounce'], width=10).grid(
             row=row, column=1, sticky="e", padx=5, pady=2)
@@ -209,7 +238,8 @@ class VOGConfigWindow:
         start_clear_cb = ttk.Checkbutton(
             config_lf, text="Start Clear",
             variable=self.config_vars['start_state'],
-            onvalue="1", offvalue="0"
+            onvalue="1", offvalue="0",
+            style='Switch.TCheckbutton'
         )
         start_clear_cb.grid(row=row, column=0, sticky="w", padx=5, pady=2)
 
@@ -217,7 +247,8 @@ class VOGConfigWindow:
         verbose_cb = ttk.Checkbutton(
             config_lf, text="Verbose",
             variable=self.config_vars['verbose'],
-            onvalue="1", offvalue="0"
+            onvalue="1", offvalue="0",
+            style='Switch.TCheckbutton'
         )
         verbose_cb.grid(row=row, column=1, sticky="e", padx=5, pady=2)
 
@@ -226,25 +257,33 @@ class VOGConfigWindow:
         ttk.Separator(config_lf, orient=tk.HORIZONTAL).grid(
             row=row, column=0, columnspan=2, sticky="ew", pady=5)
 
-        # Upload Settings button
+        # Upload Settings button - use tk.Frame with bg color for RoundedButton
         row += 1
-        upload_btn = ttk.Button(config_lf, text="Upload Settings", command=self._apply_config)
-        upload_btn.grid(row=row, column=0, columnspan=2, sticky="ew", padx=20, pady=5)
+        upload_frame = tk.Frame(config_lf, bg=Colors.BG_DARKER)
+        upload_frame.grid(row=row, column=0, columnspan=2, pady=5)
+        RoundedButton(
+            upload_frame, text="Upload Settings", command=self._apply_config,
+            width=150, height=32, style='default', bg=Colors.BG_DARKER
+        ).pack()
 
         # Preset Configurations LabelFrame
         preset_lf = ttk.LabelFrame(main_frame, text="Preset Configurations:")
         preset_lf.grid(row=1, column=0, sticky="ew", pady=5, padx=2)
+
+        # Use tk.Frame with bg for RoundedButtons
+        preset_btn_frame = tk.Frame(preset_lf, bg=Colors.BG_DARKER)
+        preset_btn_frame.pack(fill=tk.X, padx=2, pady=4)
         for i in range(4):
-            preset_lf.grid_columnconfigure(i, weight=1)
+            preset_btn_frame.columnconfigure(i, weight=1)
 
-        ttk.Button(preset_lf, text="Cycle", command=self._preset_cycle).grid(row=0, column=0, sticky="ew", padx=2, pady=2)
-        ttk.Button(preset_lf, text="Peek", command=self._preset_peek).grid(row=0, column=1, sticky="ew", padx=2, pady=2)
-        ttk.Button(preset_lf, text="eBlindfold", command=self._preset_eblindfold).grid(row=0, column=2, sticky="ew", padx=2, pady=2)
-        ttk.Button(preset_lf, text="Direct", command=self._preset_direct).grid(row=0, column=3, sticky="ew", padx=2, pady=2)
-
-        # Close button at bottom - matches padding of LabelFrames above (padx=2)
-        ttk.Button(main_frame, text="Close", command=self._on_close).grid(
-            row=2, column=0, sticky="ew", pady=5, padx=2)
+        RoundedButton(preset_btn_frame, text="Cycle", command=self._preset_cycle,
+                      width=75, height=28, style='default', bg=Colors.BG_DARKER).grid(row=0, column=0, padx=2)
+        RoundedButton(preset_btn_frame, text="Peek", command=self._preset_peek,
+                      width=75, height=28, style='default', bg=Colors.BG_DARKER).grid(row=0, column=1, padx=2)
+        RoundedButton(preset_btn_frame, text="eBlindfold", command=self._preset_eblindfold,
+                      width=75, height=28, style='default', bg=Colors.BG_DARKER).grid(row=0, column=2, padx=2)
+        RoundedButton(preset_btn_frame, text="Direct", command=self._preset_direct,
+                      width=75, height=28, style='default', bg=Colors.BG_DARKER).grid(row=0, column=3, padx=2)
 
         # Store version label reference (not displayed for wVOG, but needed for compatibility)
         self.version_label = ttk.Label(main_frame, text="")
@@ -255,17 +294,17 @@ class VOGConfigWindow:
 
     def _build_buttons(self, main_frame: ttk.Frame, start_row: int):
         """Build common buttons at bottom of dialog."""
-        # Separator
-        ttk.Separator(main_frame, orient=tk.HORIZONTAL).grid(
-            row=start_row, column=0, columnspan=2, sticky="ew", pady=10)
+        # Use tk.Frame with bg color for RoundedButtons
+        btn_frame = tk.Frame(main_frame, bg=Colors.BG_DARKER)
+        btn_frame.grid(row=start_row, column=0, columnspan=2, pady=10, padx=2)
 
-        # Buttons
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.grid(row=start_row + 1, column=0, columnspan=2, pady=10)
-
-        ttk.Button(btn_frame, text="Refresh", command=self._load_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Apply", command=self._apply_config).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Close", command=self._on_close).pack(side=tk.LEFT, padx=5)
+        btn_bg = Colors.BG_DARKER
+        RoundedButton(btn_frame, text="Refresh", command=self._load_config,
+                      width=80, height=32, style='default', bg=btn_bg).pack(side=tk.LEFT, padx=4)
+        RoundedButton(btn_frame, text="Apply", command=self._apply_config,
+                      width=80, height=32, style='default', bg=btn_bg).pack(side=tk.LEFT, padx=4)
+        RoundedButton(btn_frame, text="Close", command=self._on_close,
+                      width=80, height=32, style='default', bg=btn_bg).pack(side=tk.LEFT, padx=4)
 
     def _load_config(self):
         """Load current configuration from device.
@@ -355,11 +394,54 @@ class VOGConfigWindow:
         self._safe_update_ui(config)
 
     def _on_close(self):
-        """Handle dialog close - clean up callback registration."""
+        """Handle dialog close - save position and clean up callback registration."""
+        self._save_position()
         if self._handler:
             self._handler.clear_config_callback()
             self._handler = None
         self.dialog.destroy()
+
+    def _load_saved_position_static(self) -> Optional[tuple]:
+        """Load saved dialog position from config file.
+
+        This method can be called before self.dialog exists.
+
+        Returns:
+            Tuple of (x, y) coordinates or None if not found.
+        """
+        try:
+            if not self._config_path.exists():
+                return None
+            config = ConfigLoader.load(self._config_path, defaults={}, strict=False)
+            geometry = config.get(self.CONFIG_DIALOG_GEOMETRY_KEY, "")
+            if geometry and "+" in geometry:
+                # Parse "+x+y" format
+                parts = geometry.split("+")
+                if len(parts) >= 3:
+                    x = int(parts[1])
+                    y = int(parts[2])
+                    return (x, y)
+        except Exception as e:
+            pass  # Can't use self.logger yet if called early
+        return None
+
+    def _save_position(self):
+        """Save current dialog position to config file."""
+        try:
+            if not self._config_path.exists():
+                return
+            geometry = self.dialog.geometry()
+            # Extract just the position part (+x+y)
+            if "+" in geometry:
+                pos_start = geometry.index("+")
+                position = geometry[pos_start:]  # e.g., "+100+200"
+                ConfigLoader.update_config_values(
+                    self._config_path,
+                    {self.CONFIG_DIALOG_GEOMETRY_KEY: position}
+                )
+                self.logger.debug("Saved config dialog position: %s", position)
+        except Exception as e:
+            self.logger.debug("Could not save position: %s", e)
 
     def _safe_update_ui(self, config: dict):
         """Safely update UI, checking if dialog still exists."""
