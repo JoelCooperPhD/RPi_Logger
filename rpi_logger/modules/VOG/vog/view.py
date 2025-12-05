@@ -11,8 +11,6 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
-import numpy as np
-
 from rpi_logger.core.logging_utils import ensure_structured_logger, get_module_logger
 from vmc import LegacyTkViewBridge, StubCodexView
 
@@ -30,6 +28,15 @@ try:
 except ImportError:
     VOGPlotter = None
     HAS_MATPLOTLIB = False
+
+try:
+    from rpi_logger.core.ui.theme import Theme, RoundedButton, Colors
+    HAS_THEME = True
+except ImportError:
+    HAS_THEME = False
+    Theme = None
+    RoundedButton = None
+    Colors = None
 
 try:
     # Try relative import first (works when imported as rpi_logger.modules.VOG.vog.view)
@@ -65,7 +72,10 @@ class _SystemPlaceholder:
 
 
 class _LoopAsyncBridge:
-    """Lightweight bridge that schedules coroutines on the active asyncio loop."""
+    """Lightweight bridge that schedules coroutines on the active asyncio loop.
+
+    Uses run_coroutine_threadsafe for thread-safe scheduling from Tkinter callbacks.
+    """
 
     def __init__(self) -> None:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -75,7 +85,8 @@ class _LoopAsyncBridge:
 
     def run_coroutine(self, coro):
         loop = self._resolve_loop()
-        return loop.create_task(coro)
+        # Use run_coroutine_threadsafe for thread-safe scheduling from Tk thread
+        return asyncio.run_coroutine_threadsafe(coro, loop)
 
     def _resolve_loop(self) -> asyncio.AbstractEventLoop:
         if self.loop and not self.loop.is_closed():
@@ -156,6 +167,9 @@ class VOGTkinterGUI:
         if not self._notebook:
             return {}
 
+        # Normalize device_type to string (may be enum or string)
+        device_type = device_type.value if hasattr(device_type, 'value') else str(device_type)
+
         tab_widgets: Dict[str, Any] = {}
 
         # Create tab frame - matches RS_Logger layout
@@ -200,6 +214,7 @@ class VOGTkinterGUI:
         lf = ttk.LabelFrame(parent, text="Lens State")
         lf.grid(row=1, column=1, sticky="NEWS")
         lf.grid_columnconfigure(0, weight=1)
+        lf.grid_columnconfigure(1, weight=1)
 
         # Button labels differ by device type
         if device_type == 'wvog':
@@ -209,12 +224,23 @@ class VOGTkinterGUI:
             open_text = "Clear"
             close_text = "Opaque"
 
-        stm_on = ttk.Button(lf, text=open_text, command=self._on_lens_clear)
-        stm_on.grid(row=0, column=0, sticky="NEWS", padx=2, pady=2)
-        tab_widgets['stm_on'] = stm_on
+        # Use RoundedButton if available, otherwise fall back to ttk.Button
+        if RoundedButton is not None:
+            stm_on = RoundedButton(lf, text=open_text, command=self._on_lens_clear,
+                                   width=80, height=32, style='default')
+            stm_on.grid(row=0, column=0, padx=2, pady=2)
 
-        stm_off = ttk.Button(lf, text=close_text, command=self._on_lens_opaque)
-        stm_off.grid(row=0, column=1, sticky="NEWS", padx=2, pady=2)
+            stm_off = RoundedButton(lf, text=close_text, command=self._on_lens_opaque,
+                                    width=80, height=32, style='default')
+            stm_off.grid(row=0, column=1, padx=2, pady=2)
+        else:
+            stm_on = ttk.Button(lf, text=open_text, command=self._on_lens_clear)
+            stm_on.grid(row=0, column=0, sticky="NEWS", padx=2, pady=2)
+
+            stm_off = ttk.Button(lf, text=close_text, command=self._on_lens_opaque)
+            stm_off.grid(row=0, column=1, sticky="NEWS", padx=2, pady=2)
+
+        tab_widgets['stm_on'] = stm_on
         tab_widgets['stm_off'] = stm_off
 
     def _add_results(self, parent: tk.Widget, tab_widgets: Dict):
@@ -244,11 +270,20 @@ class VOGTkinterGUI:
         f.grid(row=5, column=1, sticky="NEWS")
         f.grid_columnconfigure(0, weight=1)
 
-        configure_btn = ttk.Button(
-            f, text="Configure Unit",
-            command=lambda p=port: self._on_configure_clicked(p)
-        )
-        configure_btn.grid(row=0, column=0, sticky="NEWS")
+        # Use RoundedButton if available, otherwise fall back to ttk.Button
+        if RoundedButton is not None:
+            configure_btn = RoundedButton(
+                f, text="Configure Unit",
+                command=lambda p=port: self._on_configure_clicked(p),
+                width=120, height=32, style='default'
+            )
+            configure_btn.grid(row=0, column=0, pady=2)
+        else:
+            configure_btn = ttk.Button(
+                f, text="Configure Unit",
+                command=lambda p=port: self._on_configure_clicked(p)
+            )
+            configure_btn.grid(row=0, column=0, sticky="NEWS")
         tab_widgets['configure'] = configure_btn
 
     # ------------------------------------------------------------------
@@ -256,7 +291,9 @@ class VOGTkinterGUI:
 
     def on_device_connected(self, port: str, device_type: str = 'svog'):
         """Handle device connection - create tab and register in devices map."""
-        self.logger.info("%s device connected: %s", device_type.upper(), port)
+        # Handle both string and enum device_type
+        type_str = device_type.value if hasattr(device_type, 'value') else str(device_type)
+        self.logger.info("%s device connected: %s", type_str.upper(), port)
 
         if port in self.devices:
             return
@@ -432,6 +469,20 @@ class VOGTkinterGUI:
             self.logger.warning("Configuration dialog not available (import failed)")
             return
 
+        # Check if runtime is properly bound (not placeholder)
+        if isinstance(self.system, _SystemPlaceholder):
+            self.logger.warning("Runtime not yet bound - cannot configure device")
+            try:
+                from tkinter import messagebox
+                messagebox.showwarning(
+                    "Not Ready",
+                    "System not fully initialized. Please wait a moment and try again.",
+                    parent=self._notebook.winfo_toplevel() if self._notebook else None
+                )
+            except Exception:
+                pass
+            return
+
         if not self.system or not hasattr(self.system, 'get_device_handler'):
             self.logger.warning("System not available for configuration (system=%s)", type(self.system).__name__)
             return
@@ -454,9 +505,9 @@ class VOGTkinterGUI:
             return
 
         try:
-            # VOGConfigWindow is modal - wait for it to close
-            dialog = VOGConfigWindow(root, port, self.system, device_type, async_bridge=self.async_bridge)
-            dialog.dialog.wait_window()
+            # VOGConfigWindow is modal (transient + grab_set), but we don't use wait_window()
+            # to avoid blocking the asyncio event loop. The dialog handles its own lifecycle.
+            VOGConfigWindow(root, port, self.system, device_type, async_bridge=self.async_bridge)
         except Exception as e:
             self.logger.error("Failed to create config window: %s", e, exc_info=True)
 
@@ -528,6 +579,14 @@ class VOGView:
             self.logger.warning("Tkinter unavailable; cannot mount VOG GUI")
             return None
 
+        # Apply theme to root window if available
+        if HAS_THEME and Theme is not None:
+            try:
+                root = parent.winfo_toplevel()
+                Theme.apply(root)
+            except Exception as e:
+                self.logger.debug("Could not apply theme: %s", e)
+
         frame_cls = ttk.Frame if ttk is not None else tk.Frame
         if hasattr(parent, "columnconfigure"):
             try:
@@ -552,6 +611,12 @@ class VOGView:
         if loop and isinstance(gui.async_bridge, _LoopAsyncBridge):
             gui.async_bridge.bind_loop(loop)
         self.gui = gui
+
+        # Apply pending runtime binding if bind_runtime was called before GUI was created
+        if self._runtime:
+            gui.system = self._runtime
+            self.logger.info("Applied pending runtime binding to GUI (system=%s)", type(self._runtime).__name__)
+
         return container
 
     def bind_runtime(self, runtime) -> None:

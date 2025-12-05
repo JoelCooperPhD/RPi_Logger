@@ -3,6 +3,8 @@ from tkinter import ttk, scrolledtext
 from pathlib import Path
 from typing import Dict, Optional, Any
 
+from rpi_logger.core.ui.theme import Theme, Colors
+
 
 class QuickStatusPanel:
     """Simple monitor mirroring the DRT output CSV file contents."""
@@ -42,12 +44,10 @@ class QuickStatusPanel:
             height=2,
             wrap=tk.NONE,
             undo=False,
-            font=('TkFixedFont', 9),
-            bg='#f5f5f5',
-            fg='#333333'
+            font=('TkFixedFont', 9)
         )
         text_widget.grid(row=0, column=0, sticky='ew')
-        text_widget.config(state='disabled')
+        Theme.configure_scrolled_text(text_widget, readonly=True)
 
         self.frame = frame
         self.text_widget = text_widget

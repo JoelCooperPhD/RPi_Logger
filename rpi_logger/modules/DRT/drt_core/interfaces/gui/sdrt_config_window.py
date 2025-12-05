@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Dict, Callable
 from math import ceil
 
+from rpi_logger.core.ui.theme import Theme, Colors
+
 if TYPE_CHECKING:
     from ...drt_system import DRTSystem
     from ...drt_handler import DRTHandler
@@ -58,6 +60,7 @@ class SDRTConfigWindow:
         selector_win.title("Select Device to Configure")
         selector_win.grab_set()
         selector_win.resizable(False, False)
+        Theme.configure_toplevel(selector_win)
 
         main_frame = ttk.LabelFrame(selector_win, text="Available sDRT Devices", padding=10)
         main_frame.grid(row=0, column=0, padx=10, pady=10, sticky='nsew')
@@ -94,6 +97,7 @@ class SDRTConfigWindow:
         self.config_window.withdraw()
         self.config_window.title(f"Configure sDRT Device - {port}")
         self.config_window.resizable(False, False)
+        Theme.configure_toplevel(self.config_window)
         if master is not None:
             try:
                 self.config_window.transient(master)

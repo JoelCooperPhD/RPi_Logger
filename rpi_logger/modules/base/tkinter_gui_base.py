@@ -242,12 +242,11 @@ class TkinterGUIBase:
         self.io_text = scrolledtext.ScrolledText(
             self.io_view_frame,
             height=height,
-            wrap=tk.WORD,
-            bg='#f5f5f5',
-            fg='#333333'
+            wrap=tk.WORD
         )
         self.io_text.grid(row=0, column=0, sticky='nsew')
-        self.io_text.config(state='disabled')
+        from rpi_logger.core.ui.theme import Theme
+        Theme.configure_scrolled_text(self.io_text, readonly=True)
 
         return self.io_text
 
@@ -267,12 +266,11 @@ class TkinterGUIBase:
         self.log_text = scrolledtext.ScrolledText(
             self.log_frame,
             height=height,
-            wrap=tk.WORD,
-            bg='#f5f5f5',
-            fg='#333333'
+            wrap=tk.WORD
         )
         self.log_text.grid(row=0, column=0, sticky='nsew')
-        self.log_text.config(state='disabled')  # Read-only
+        from rpi_logger.core.ui.theme import Theme
+        Theme.configure_scrolled_text(self.log_text, readonly=True)
 
         self._setup_log_handler()
 

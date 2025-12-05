@@ -29,6 +29,7 @@ else:
 
 from .model import StubCodexModel
 from .constants import PLACEHOLDER_GEOMETRY
+from rpi_logger.core.ui.theme import Theme
 
 _BASE_LOGGER = get_module_logger(__name__)
 PREF_SHOW_IO_PANEL = "view.show_io_panel"
@@ -187,6 +188,9 @@ class StubCodexView:
     def _build_ui(self) -> None:
         assert tk is not None and ttk is not None and scrolledtext is not None
 
+        # Apply the theme to the root window
+        Theme.apply(self.root)
+
         io_visible = self.model.get_preference_bool(
             PREF_SHOW_IO_PANEL,
             True,
@@ -238,10 +242,9 @@ class StubCodexView:
             height=4,
             wrap=tk.WORD,
             state=tk.DISABLED,
-            bg="#f5f5f5",
-            fg="#333333",
         )
         self.log_text.grid(row=0, column=0, sticky="nsew")
+        Theme.configure_scrolled_text(self.log_text, readonly=True)
 
         self._toggle_io_view()
         self._toggle_log_visibility()
@@ -271,16 +274,19 @@ class StubCodexView:
 
     def _create_menu_bar(self) -> None:
         menubar = tk.Menu(self.root)
+        Theme.configure_menu(menubar)
         self.root.config(menu=menubar)
         self.menubar = menubar
 
         file_menu = tk.Menu(menubar, tearoff=0)
+        Theme.configure_menu(file_menu)
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="Open Log File", command=self._open_log_file)
         file_menu.add_separator()
         file_menu.add_command(label="Quit", command=self._on_quit_clicked)
 
         view_menu = tk.Menu(menubar, tearoff=0)
+        Theme.configure_menu(view_menu)
         self.view_menu = view_menu
         menubar.add_cascade(label="View", menu=view_menu)
         view_menu.add_checkbutton(
@@ -295,6 +301,7 @@ class StubCodexView:
         )
 
         help_menu = tk.Menu(menubar, tearoff=0)
+        Theme.configure_menu(help_menu)
         menubar.add_cascade(label=self._help_menu_label, menu=help_menu)
         help_menu.add_command(label="Quick Start Guide", command=self._show_help)
         self.help_menu = help_menu
@@ -303,6 +310,7 @@ class StubCodexView:
         if self.menubar is None:
             return None
         menu = tk.Menu(self.menubar, tearoff=tearoff)
+        Theme.configure_menu(menu)
         help_index = None
         if self.help_menu is not None and label != self._help_menu_label:
             help_index = self._find_menu_index(self._help_menu_label)
@@ -319,6 +327,7 @@ class StubCodexView:
         if self.view_menu is None:
             return None
         submenu = tk.Menu(self.view_menu, tearoff=tearoff)
+        Theme.configure_menu(submenu)
         self.view_menu.add_cascade(label=label, menu=submenu)
         return submenu
 
@@ -538,14 +547,61 @@ class StubCodexView:
 
     @async_handler
     async def _on_quit_clicked(self) -> None:
-        if self.action_callback:
-            await self.action_callback("quit")
-        self._on_close()
+        """Handle explicit quit from File menu - actually terminates."""
+        self.request_quit()
 
     def _on_close(self) -> None:
+        """Handle window close (X button) - hide window instead of quitting.
+
+        The module process should continue running when the window is hidden.
+        Use request_quit() to actually terminate the process.
+        """
+        self.logger.info("Window close requested - hiding window")
+        self._cancel_geometry_save_handle(flush=True)
+        try:
+            self.root.withdraw()
+        except tk.TclError:
+            pass
+        # Notify runtime that window was hidden (not quit)
+        if self.action_callback:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.action_callback("hide"))
+            except RuntimeError:
+                pass
+
+    def show_window(self) -> None:
+        """Show the window if it was hidden."""
+        self.logger.info("Showing window")
+        try:
+            self.root.deiconify()
+            self.root.lift()
+            self.root.focus_force()
+        except tk.TclError:
+            pass
+
+    def hide_window(self) -> None:
+        """Hide the window without terminating the process."""
+        self.logger.info("Hiding window")
+        self._cancel_geometry_save_handle(flush=True)
+        try:
+            self.root.withdraw()
+        except tk.TclError:
+            pass
+
+    def is_window_visible(self) -> bool:
+        """Return True if window is currently visible."""
+        try:
+            return self.root.winfo_viewable()
+        except tk.TclError:
+            return False
+
+    def request_quit(self) -> None:
+        """Actually quit the application (called when module is deactivated)."""
         if self._close_requested:
             return
         self._close_requested = True
+        self.logger.info("Quit requested - terminating")
         self._cancel_geometry_save_handle(flush=True)
         if self.action_callback:
             try:

@@ -1,22 +1,36 @@
 """
-XBee Connection Manager
+Unified XBee manager for wireless device discovery.
 
-Manages XBee dongle detection, network discovery, and wireless device connections.
-Handles communication with wVOG devices over XBee 802.15.4 network.
+Combines functionality from:
+- rpi_logger/modules/VOG/vog_core/xbee_manager.py
+- rpi_logger/modules/DRT/drt_core/xbee_manager.py
+
+Key difference: This manager handles BOTH wVOG and wDRT devices through
+a single coordinator, using the higher baudrate (921600) to support wDRT.
 """
 
 import asyncio
-import re
+from dataclasses import dataclass, field
 from typing import Dict, Optional, Callable, Awaitable, Set, Any
-import logging
+from enum import Enum
 
 import serial.tools.list_ports
 
-from .device_types import XBEE_DONGLE, is_xbee_dongle
-from .transports import XBeeTransport
-from .utils.rtc import format_rtc_sync
+from rpi_logger.core.logging_utils import get_module_logger
+from .device_registry import (
+    DeviceType,
+    DeviceFamily,
+    XBEE_BAUDRATE,
+    parse_wireless_node_id,
+    get_spec,
+    extract_device_number,
+)
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger("XBeeManager")
+
+# XBee dongle identification
+XBEE_VID = 0x0403
+XBEE_PID = 0x6015
 
 # Try to import digi-xbee library
 try:
@@ -26,70 +40,92 @@ try:
     XBEE_AVAILABLE = True
 except ImportError:
     XBEE_AVAILABLE = False
+    XBeeDevice = None
+    RemoteRaw802Device = None
+    XBeeMessage = None
     logger.warning("digi-xbee library not installed - XBee support disabled")
 
-# Type aliases
-DeviceDiscoveredCallback = Callable[[str, 'XBeeTransport'], Awaitable[None]]
+
+def is_xbee_dongle(port_info) -> bool:
+    """Check if a port is an XBee dongle."""
+    return port_info.vid == XBEE_VID and port_info.pid == XBEE_PID
+
+
+@dataclass
+class WirelessDevice:
+    """Represents a discovered wireless device."""
+    node_id: str                 # e.g., "wVOG_01" or "wDRT_02"
+    device_type: DeviceType
+    family: DeviceFamily
+    address_64bit: str
+    device_number: Optional[int] = None
+    battery_percent: Optional[int] = None  # Reserved for future use
+
+
+class XBeeManagerState(Enum):
+    """XBee manager state."""
+    DISABLED = "disabled"
+    SCANNING = "scanning"
+    CONNECTED = "connected"
+    DISCOVERING = "discovering"
+
+
+# Type aliases for callbacks
+DongleCallback = Callable[[str], Awaitable[None]]
+DongleDisconnectCallback = Callable[[], Awaitable[None]]
+DeviceDiscoveredCallback = Callable[[WirelessDevice, Any], Awaitable[None]]  # device, remote_xbee
 DeviceLostCallback = Callable[[str], Awaitable[None]]
 StatusCallback = Callable[[str, str], Awaitable[None]]
 
 
 class XBeeManager:
     """
-    Manages XBee wireless network for wVOG devices.
+    Manages XBee coordinator and wireless device discovery.
 
-    Features:
-    - XBee dongle detection and initialization
-    - Network discovery for remote wVOG devices
-    - Message routing between coordinator and remote devices
-    - Automatic RTC synchronization on device discovery
-    - Mutual exclusion with USB wVOG (disabled when USB wVOG connected)
+    Handles both wVOG and wDRT wireless devices through a single coordinator.
+    Uses 921600 baudrate to support wDRT devices.
     """
 
-    # Default interval for periodic network rediscovery (in seconds)
+    DEFAULT_SCAN_INTERVAL = 1.0
     DEFAULT_REDISCOVERY_INTERVAL = 30.0
 
     def __init__(
         self,
-        scan_interval: float = 1.0,
-        rediscovery_interval: float = DEFAULT_REDISCOVERY_INTERVAL
+        scan_interval: float = DEFAULT_SCAN_INTERVAL,
+        rediscovery_interval: float = DEFAULT_REDISCOVERY_INTERVAL,
     ):
         """
         Initialize the XBee manager.
 
         Args:
             scan_interval: Interval between dongle scans in seconds
-            rediscovery_interval: Interval between network rediscovery scans in seconds
+            rediscovery_interval: Interval between network rediscovery in seconds
         """
-        if not XBEE_AVAILABLE:
-            raise RuntimeError("digi-xbee library not installed")
-
-        self.scan_interval = scan_interval
-        self.rediscovery_interval = rediscovery_interval
+        self._scan_interval = scan_interval
+        self._rediscovery_interval = rediscovery_interval
 
         # Callbacks
+        self.on_dongle_connected: Optional[DongleCallback] = None
+        self.on_dongle_disconnected: Optional[DongleDisconnectCallback] = None
         self.on_device_discovered: Optional[DeviceDiscoveredCallback] = None
         self.on_device_lost: Optional[DeviceLostCallback] = None
         self.on_status_change: Optional[StatusCallback] = None
 
         # XBee state
-        self._coordinator: Optional[XBeeDevice] = None
+        self._coordinator: Optional['XBeeDevice'] = None
         self._coordinator_port: Optional[str] = None
-        self._remote_devices: Dict[str, RemoteRaw802Device] = {}
-        self._transports: Dict[str, XBeeTransport] = {}
+        self._remote_devices: Dict[str, 'RemoteRaw802Device'] = {}
+        self._discovered_devices: Dict[str, WirelessDevice] = {}
 
         # State tracking
+        self._state = XBeeManagerState.DISABLED
         self._running = False
         self._enabled = True  # Can be disabled for mutual exclusion
         self._scan_task: Optional[asyncio.Task] = None
         self._rediscovery_task: Optional[asyncio.Task] = None
-        self._known_ports: Set[str] = set()
 
-        # Event loop reference - set during start() and used for thread-safe callbacks
-        try:
-            self._loop: Optional[asyncio.AbstractEventLoop] = asyncio.get_running_loop()
-        except RuntimeError:
-            self._loop = None  # No running loop yet, will be set in start()
+        # Event loop reference for thread-safe callbacks
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @property
     def is_connected(self) -> bool:
@@ -105,14 +141,28 @@ class XBeeManager:
         return self._enabled
 
     @property
+    def is_running(self) -> bool:
+        """Check if manager is running."""
+        return self._running
+
+    @property
+    def state(self) -> XBeeManagerState:
+        """Get current state."""
+        return self._state
+
+    @property
     def coordinator_port(self) -> Optional[str]:
-        """Return the port of the connected coordinator, or None if not connected."""
+        """Return the port of the connected coordinator, or None."""
         return self._coordinator_port if self.is_connected else None
 
     @property
-    def discovered_devices(self) -> Dict[str, XBeeTransport]:
-        """Return dict of discovered device node IDs to their transports."""
-        return self._transports.copy()
+    def discovered_devices(self) -> Dict[str, WirelessDevice]:
+        """Return dict of discovered device node IDs to their info."""
+        return dict(self._discovered_devices)
+
+    def get_remote_device(self, node_id: str) -> Optional['RemoteRaw802Device']:
+        """Get the raw XBee remote device for a node ID."""
+        return self._remote_devices.get(node_id)
 
     # =========================================================================
     # Lifecycle
@@ -120,6 +170,10 @@ class XBeeManager:
 
     async def start(self) -> None:
         """Start the XBee manager and begin scanning for dongle."""
+        if not XBEE_AVAILABLE:
+            logger.warning("XBee library not available, cannot start")
+            return
+
         if self._running:
             logger.warning("XBee manager already running")
             return
@@ -129,8 +183,10 @@ class XBeeManager:
             return
 
         self._running = True
-        self._loop = asyncio.get_running_loop()  # Store event loop reference
-        logger.info("Starting VOG XBee manager")
+        self._state = XBeeManagerState.SCANNING
+        self._loop = asyncio.get_running_loop()
+
+        logger.info("Starting unified XBee manager")
 
         # Start scanning for dongle
         self._scan_task = asyncio.create_task(self._scan_loop())
@@ -160,39 +216,34 @@ class XBeeManager:
         # Close coordinator
         await self._close_coordinator()
 
-        logger.info("VOG XBee manager stopped")
+        self._state = XBeeManagerState.DISABLED
+        logger.info("XBee manager stopped")
 
     async def disable(self) -> None:
         """
-        Disable XBee (for mutual exclusion with USB wVOG).
+        Disable XBee (for mutual exclusion with USB w-devices).
 
-        When a USB wVOG is connected, XBee should be disabled.
-        This properly stops the manager and cleans up state.
+        When a USB wVOG or wDRT is connected, XBee should be disabled
+        to avoid conflicts.
         """
         self._enabled = False
-        logger.info("XBee disabled (USB wVOG connected)")
+        logger.info("XBee disabled (USB wireless device connected)")
 
-        # Properly stop if running
         if self._running:
             await self.stop()
 
         if self.on_status_change:
-            await self.on_status_change('disabled', 'USB wVOG connected')
+            await self.on_status_change('disabled', 'USB wireless device connected')
 
     def enable(self) -> None:
         """
-        Re-enable XBee (when USB wVOG disconnected).
+        Re-enable XBee (when USB wireless device disconnected).
 
         Note: This only sets the enabled flag. Call start() separately
         to begin scanning for the dongle.
         """
         self._enabled = True
         logger.info("XBee enabled")
-
-        if self.on_status_change:
-            asyncio.create_task(
-                self.on_status_change('enabled', '')
-            )
 
     # =========================================================================
     # Dongle Scanning
@@ -203,7 +254,7 @@ class XBeeManager:
         while self._running and self._enabled:
             try:
                 await self._scan_for_dongle()
-                await asyncio.sleep(self.scan_interval)
+                await asyncio.sleep(self._scan_interval)
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -231,27 +282,26 @@ class XBeeManager:
             logger.error(f"Error scanning for XBee dongle: {e}")
 
     async def _initialize_coordinator(self, port: str) -> None:
-        """
-        Initialize the XBee coordinator on the given port.
-
-        Args:
-            port: Serial port of the XBee dongle
-        """
+        """Initialize the XBee coordinator on the given port."""
         try:
-            logger.info(f"Initializing XBee coordinator on {port}")
+            logger.info(f"Initializing XBee coordinator on {port} at {XBEE_BAUDRATE} baud")
 
             # Create and open coordinator
             self._coordinator = await asyncio.to_thread(
-                XBeeDevice, port, XBEE_DONGLE.baudrate
+                XBeeDevice, port, XBEE_BAUDRATE
             )
             await asyncio.to_thread(self._coordinator.open)
 
             self._coordinator_port = port
+            self._state = XBeeManagerState.CONNECTED
 
             # Set up message callback
             self._coordinator.add_data_received_callback(self._on_message_received)
 
             logger.info(f"XBee coordinator initialized on {port}")
+
+            if self.on_dongle_connected:
+                await self.on_dongle_connected(port)
 
             if self.on_status_change:
                 await self.on_status_change('connected', port)
@@ -270,6 +320,7 @@ class XBeeManager:
             logger.error(f"Failed to initialize XBee coordinator: {e}")
             self._coordinator = None
             self._coordinator_port = None
+            self._state = XBeeManagerState.SCANNING
 
     async def _close_coordinator(self) -> None:
         """Close the XBee coordinator and clean up."""
@@ -283,7 +334,7 @@ class XBeeManager:
             self._rediscovery_task = None
 
         # Notify about lost devices
-        for node_id in list(self._transports.keys()):
+        for node_id in list(self._discovered_devices.keys()):
             await self._handle_device_lost(node_id)
 
         # Close coordinator
@@ -297,9 +348,13 @@ class XBeeManager:
                 self._coordinator = None
                 self._coordinator_port = None
 
+        if self.on_dongle_disconnected:
+            await self.on_dongle_disconnected()
+
         if self.on_status_change:
             await self.on_status_change('disconnected', '')
 
+        self._state = XBeeManagerState.SCANNING if self._running else XBeeManagerState.DISABLED
         logger.info("XBee coordinator closed")
 
     # =========================================================================
@@ -313,6 +368,7 @@ class XBeeManager:
 
         try:
             logger.info("Starting XBee network discovery")
+            self._state = XBeeManagerState.DISCOVERING
 
             network = self._coordinator.get_network()
 
@@ -326,22 +382,18 @@ class XBeeManager:
 
         except Exception as e:
             logger.error(f"Error starting network discovery: {e}")
+            self._state = XBeeManagerState.CONNECTED
 
     async def _periodic_rediscovery_loop(self) -> None:
-        """
-        Periodically trigger network rediscovery to find new devices.
-
-        This catches devices that power on after the initial discovery,
-        or devices that temporarily went out of range and came back.
-        """
+        """Periodically trigger network rediscovery to find new devices."""
         logger.info(
             f"Starting periodic network rediscovery "
-            f"(interval: {self.rediscovery_interval}s)"
+            f"(interval: {self._rediscovery_interval}s)"
         )
 
         while self._running and self._enabled and self.is_connected:
             try:
-                await asyncio.sleep(self.rediscovery_interval)
+                await asyncio.sleep(self._rediscovery_interval)
 
                 if not self.is_connected:
                     break
@@ -360,11 +412,7 @@ class XBeeManager:
         """
         Callback when network discovery completes.
 
-        This is called from the XBee library's thread, so we need to
-        schedule processing on the main event loop.
-
-        Args:
-            status: Discovery status
+        Called from XBee library's thread - schedules processing on main loop.
         """
         if not self.is_connected:
             return
@@ -375,22 +423,20 @@ class XBeeManager:
 
             logger.info(f"Network discovery found {len(devices)} device(s)")
 
-            # Schedule processing on the main event loop
             loop = self._loop
             if loop is None or not loop.is_running():
-                logger.error(
-                    "No running event loop available for discovery callback. "
-                    "Devices will be discovered on next network scan."
-                )
+                logger.error("No running event loop for discovery callback")
                 return
 
             for device in devices:
-                # Capture device in closure properly
                 def schedule_discovery(d=device):
                     if loop.is_running():
                         loop.create_task(self._handle_device_discovered(d))
 
                 loop.call_soon_threadsafe(schedule_discovery)
+
+            # Update state back to connected
+            self._state = XBeeManagerState.CONNECTED
 
         except Exception as e:
             logger.error(f"Error processing discovery results: {e}")
@@ -399,71 +445,55 @@ class XBeeManager:
         self,
         remote_device: 'RemoteRaw802Device'
     ) -> None:
-        """
-        Handle a newly discovered XBee device.
-
-        Args:
-            remote_device: The discovered remote device
-        """
+        """Handle a newly discovered XBee device."""
         try:
             node_id = remote_device.get_node_id()
             if not node_id:
                 logger.warning("Discovered device has no node ID")
                 return
 
-            # Parse node ID to check if it's a wVOG
-            # Expected format: "wVOG_XX" where XX is a number (e.g., "wVOG_01", "wVOG 02")
-            match = re.match(r'^([a-zA-Z]+)[_\s]*(\d+)$', node_id.strip())
-            if not match:
-                logger.debug(f"Ignoring device with unrecognized node ID format: {node_id}")
-                return
-
-            device_type, device_num = match.groups()
-            if device_type.lower() != 'wvog':
-                logger.debug(f"Ignoring non-wVOG device: {node_id} (type: {device_type})")
+            # Parse node ID to determine device type (wVOG or wDRT)
+            device_type = parse_wireless_node_id(node_id)
+            if device_type is None:
+                logger.debug(f"Ignoring device with unrecognized node ID: {node_id}")
                 return
 
             # Skip if already known
-            if node_id in self._transports:
+            if node_id in self._discovered_devices:
                 return
 
-            logger.info(f"Discovered wVOG device: {node_id}")
+            spec = get_spec(device_type)
+            address = str(remote_device.get_64bit_addr())
+            device_number = extract_device_number(node_id)
 
-            # Store remote device
-            self._remote_devices[node_id] = remote_device
+            logger.info(f"Discovered wireless device: {node_id} ({device_type.value})")
 
-            # Create transport
-            transport = XBeeTransport(
-                remote_device=remote_device,
-                coordinator=self._coordinator,
-                node_id=node_id
+            # Store device info
+            device = WirelessDevice(
+                node_id=node_id,
+                device_type=device_type,
+                family=spec.family,
+                address_64bit=address,
+                device_number=device_number,
             )
-            await transport.connect()
-            self._transports[node_id] = transport
 
-            # Sync RTC
-            await self._sync_device_rtc(node_id)
+            self._discovered_devices[node_id] = device
+            self._remote_devices[node_id] = remote_device
 
             # Notify callback
             if self.on_device_discovered:
-                await self.on_device_discovered(node_id, transport)
+                await self.on_device_discovered(device, remote_device)
 
         except Exception as e:
             logger.error(f"Error handling discovered device: {e}")
 
     async def _handle_device_lost(self, node_id: str) -> None:
-        """
-        Handle a lost XBee device.
-
-        Args:
-            node_id: The node ID of the lost device
-        """
-        transport = self._transports.pop(node_id, None)
+        """Handle a lost XBee device."""
+        device = self._discovered_devices.pop(node_id, None)
         self._remote_devices.pop(node_id, None)
 
-        if transport:
-            await transport.disconnect()
-            logger.info(f"Lost wVOG device: {node_id}")
+        if device:
+            logger.info(f"Lost wireless device: {node_id}")
 
             if self.on_device_lost:
                 await self.on_device_lost(node_id)
@@ -476,13 +506,10 @@ class XBeeManager:
         """
         Callback for received XBee messages.
 
-        Routes messages to the appropriate transport.
-
-        Args:
-            message: The received XBee message
+        Called from XBee library's thread. Messages are routed to the
+        connection manager which will forward them to the appropriate module.
         """
         try:
-            # Get sender node ID
             remote = message.remote_device
             node_id = remote.get_node_id() if remote else None
 
@@ -490,80 +517,63 @@ class XBeeManager:
                 logger.debug("Received message from unknown device")
                 return
 
-            # Route to transport
-            transport = self._transports.get(node_id)
-            if transport:
-                data = message.data.decode('utf-8')
-                logger.debug(f"XBee manager received from {node_id}: '{data.strip()}'")
-                transport.handle_received_data(data)
-            else:
-                logger.debug(f"Message from untracked device: {node_id}")
+            # Log for debugging
+            data = message.data.decode('utf-8', errors='replace')
+            logger.debug(f"XBee received from {node_id}: '{data.strip()}'")
+
+            # TODO: Route message to appropriate handler
+            # This will be handled by the connection manager
 
         except Exception as e:
             logger.error(f"Error handling XBee message: {e}")
 
     # =========================================================================
-    # Device Commands
+    # Public Methods
     # =========================================================================
 
-    async def _sync_device_rtc(self, node_id: str) -> bool:
+    async def trigger_rediscovery(self) -> None:
+        """Manually trigger network rediscovery."""
+        if self.is_connected:
+            await self._start_network_discovery()
+
+    async def send_to_device(self, node_id: str, data: bytes) -> bool:
         """
-        Synchronize RTC on a remote device.
+        Send data to a wireless device.
 
         Args:
-            node_id: The device node ID
+            node_id: Target device node ID
+            data: Data to send
 
         Returns:
-            True if sync was successful
-        """
-        transport = self._transports.get(node_id)
-        if not transport:
-            return False
-
-        rtc_string = format_rtc_sync()
-        command = f"rtc>{rtc_string}"
-
-        logger.info(f"Syncing RTC for {node_id}")
-        return await transport.write_line(command, '\n')
-
-    async def sync_all_rtc(self) -> int:
-        """
-        Synchronize RTC on all connected wireless devices.
-
-        Returns:
-            Number of devices successfully synced
-        """
-        success_count = 0
-        for node_id in self._transports:
-            if await self._sync_device_rtc(node_id):
-                success_count += 1
-        return success_count
-
-    async def rescan_network(self) -> None:
-        """
-        Trigger a new network discovery.
-
-        Clears existing devices and rediscovers.
+            True if send was successful
         """
         if not self.is_connected:
-            logger.warning("Cannot rescan: not connected")
-            return
+            return False
 
-        # Clear existing devices
-        for node_id in list(self._transports.keys()):
-            await self._handle_device_lost(node_id)
+        remote = self._remote_devices.get(node_id)
+        if not remote:
+            logger.error(f"Unknown device: {node_id}")
+            return False
 
-        # Start new discovery
-        await self._start_network_discovery()
+        try:
+            await asyncio.to_thread(
+                self._coordinator.send_data, remote, data
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send to {node_id}: {e}")
+            return False
 
-    def get_transport(self, node_id: str) -> Optional[XBeeTransport]:
-        """
-        Get the transport for a specific device.
+    def get_devices_by_family(self, family: DeviceFamily) -> list[WirelessDevice]:
+        """Get all discovered devices of a specific family."""
+        return [
+            d for d in self._discovered_devices.values()
+            if d.family == family
+        ]
 
-        Args:
-            node_id: The device node ID
-
-        Returns:
-            Transport instance, or None if not found
-        """
-        return self._transports.get(node_id)
+    def get_devices_by_type(self, device_type: DeviceType) -> list[WirelessDevice]:
+        """Get all discovered devices of a specific type."""
+        return [
+            d for d in self._discovered_devices.values()
+            if d.device_type == device_type
+        ]

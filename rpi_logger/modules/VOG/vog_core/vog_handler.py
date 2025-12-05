@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.base import USBSerialDevice
 from rpi_logger.core.commands import StatusMessage
+from .transports import BaseTransport
 
 from .protocols import BaseVOGProtocol, SVOGProtocol, WVOGProtocol, VOGDataPacket, VOGResponse
 from .protocols.base_protocol import ResponseType
@@ -24,7 +24,7 @@ class VOGHandler:
 
     def __init__(
         self,
-        device: USBSerialDevice,
+        device: BaseTransport,
         port: str,
         output_dir: Path,
         system: Optional[Any] = None,
@@ -48,6 +48,7 @@ class VOGHandler:
         # Device state
         self._config: Dict[str, Any] = {}
         self._battery_percent: int = 0
+        self._config_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
         self.logger = get_module_logger(f"VOGHandler[{self.protocol.device_type}]")
 
@@ -107,6 +108,18 @@ class VOGHandler:
     def set_data_callback(self, callback: Callable[[str, str, Dict[str, Any]], None]):
         """Set callback for data events."""
         self._data_callback = callback
+
+    def set_config_callback(self, callback: Callable[[Dict[str, Any]], None]):
+        """Set callback for config updates.
+
+        The callback is invoked whenever a CONFIG response is received from the device.
+        This allows the config window to receive real-time updates without polling.
+        """
+        self._config_callback = callback
+
+    def clear_config_callback(self):
+        """Clear the config callback (e.g., when config window closes)."""
+        self._config_callback = None
 
     async def start(self):
         """Start the async read loop."""
@@ -369,6 +382,12 @@ class VOGHandler:
                 # Use protocol's config update method (polymorphic)
                 self.protocol.update_config_from_response(parsed, self._config)
                 self.logger.debug("Config updated: %s", self._config)
+                # Notify config callback if registered
+                if self._config_callback:
+                    try:
+                        self._config_callback(dict(self._config))
+                    except Exception as e:
+                        self.logger.error("Error in config callback: %s", e)
 
             elif parsed.response_type == ResponseType.BATTERY:
                 self._battery_percent = parsed.data.get('percent', 0)

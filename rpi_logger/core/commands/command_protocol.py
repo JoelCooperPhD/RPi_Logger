@@ -96,6 +96,56 @@ class CommandMessage:
     def quit() -> str:
         return CommandMessage.create("quit")
 
+    # =========================================================================
+    # Device Assignment Commands (for centralized device discovery)
+    # =========================================================================
+
+    @staticmethod
+    def assign_device(
+        device_id: str,
+        device_type: str,
+        port: str,
+        baudrate: int,
+        session_dir: str = None,
+        is_wireless: bool = False,
+    ) -> str:
+        """
+        Assign a device to the module.
+
+        Args:
+            device_id: Unique device identifier (port for USB, node_id for wireless)
+            device_type: Device type string (e.g., "sVOG", "wDRT_Wireless")
+            port: Serial port path (dongle port for wireless devices)
+            baudrate: Serial baudrate
+            session_dir: Optional current session directory
+            is_wireless: Whether this is a wireless device
+        """
+        kwargs = {
+            "device_id": device_id,
+            "device_type": device_type,
+            "port": port,
+            "baudrate": baudrate,
+            "is_wireless": is_wireless,
+        }
+        if session_dir:
+            kwargs["session_dir"] = session_dir
+        return CommandMessage.create("assign_device", **kwargs)
+
+    @staticmethod
+    def unassign_device(device_id: str) -> str:
+        """Remove a device from the module."""
+        return CommandMessage.create("unassign_device", device_id=device_id)
+
+    @staticmethod
+    def show_window() -> str:
+        """Show the module window."""
+        return CommandMessage.create("show_window")
+
+    @staticmethod
+    def hide_window() -> str:
+        """Hide the module window."""
+        return CommandMessage.create("hide_window")
+
 
 class StatusMessage:
 
@@ -209,6 +259,15 @@ class StatusType:
     ERROR = "error"
     WARNING = "warning"
     QUITTING = "quitting"
+
+    # Device assignment status (for centralized device discovery)
+    DEVICE_ASSIGNED = "device_assigned"
+    DEVICE_UNASSIGNED = "device_unassigned"
+    DEVICE_ERROR = "device_error"
+
+    # Window visibility status
+    WINDOW_SHOWN = "window_shown"
+    WINDOW_HIDDEN = "window_hidden"
 
 
 if __name__ == "__main__":

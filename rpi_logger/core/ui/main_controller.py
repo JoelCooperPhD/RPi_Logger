@@ -8,9 +8,9 @@ import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional, Dict
+from typing import Optional, Dict, Union
 
-
+from .theme import RoundedButton
 from ..logger_system import LoggerSystem
 from ..module_process import ModuleState
 from ..config_manager import get_config_manager
@@ -30,8 +30,8 @@ class MainController:
         self.root: Optional[tk.Tk] = None
         self.module_vars: Dict[str, tk.BooleanVar] = {}
 
-        self.session_button: Optional[ttk.Button] = None
-        self.trial_button: Optional[ttk.Button] = None
+        self.session_button: Optional[RoundedButton] = None
+        self.trial_button: Optional[RoundedButton] = None
 
         self.session_status_label: Optional[ttk.Label] = None
         self.trial_counter_label: Optional[ttk.Label] = None
@@ -49,8 +49,8 @@ class MainController:
         self,
         root: tk.Tk,
         module_vars: Dict[str, tk.BooleanVar],
-        session_button: ttk.Button,
-        trial_button: ttk.Button,
+        session_button: RoundedButton,
+        trial_button: RoundedButton,
         session_status_label: ttk.Label,
         trial_counter_label: ttk.Label,
         session_path_label: ttk.Label,
@@ -178,8 +178,8 @@ class MainController:
             self.session_active = True
             self.trial_counter = 0
 
-            self.session_button.config(text="Stop", style='Active.TButton')
-            self.trial_button.config(style='Active.TButton')
+            self.session_button.configure(text="Stop", style='danger')
+            self.trial_button.configure(style='success')
 
             self.session_status_label.config(text="Active")
             self.session_path_label.config(text=f"{full_session_dir}")
@@ -209,8 +209,8 @@ class MainController:
 
             self.session_active = False
 
-            self.session_button.config(text="Start", style='Active.TButton')
-            self.trial_button.config(style='Inactive.TButton')
+            self.session_button.configure(text="Start", style='success')
+            self.trial_button.configure(style='inactive')
 
             self.session_status_label.config(text="Idle")
 
@@ -245,7 +245,7 @@ class MainController:
 
             self.trial_active = True
 
-            self.trial_button.config(text="Pause", style='Active.TButton')
+            self.trial_button.configure(text="Pause", style='danger')
 
             await self.timer_manager.start_trial_timer()
 
@@ -273,7 +273,7 @@ class MainController:
                 await self.logger_system.event_logger.log_button_press("trial_pause", f"trial={self.trial_counter}")
                 await self.logger_system.event_logger.log_trial_stop(self.trial_counter)
 
-            self.trial_button.config(text="Record", style='Active.TButton')
+            self.trial_button.configure(text="Record", style='success')
 
             self.trial_counter_label.config(text=f"{self.trial_counter}")
 
@@ -408,3 +408,41 @@ class MainController:
             self.logger.info("Opened issue tracker: %s", url)
         except Exception as e:
             self.logger.error("Failed to open issue tracker: %s", e)
+
+    # =========================================================================
+    # Device Connection Handlers
+    # =========================================================================
+
+    async def on_usb_scan_toggle(self, enabled: bool) -> None:
+        """Handle USB scanning toggle from Connections menu."""
+        try:
+            if enabled:
+                self.logger.info("Enabling USB device scanning")
+                await self.logger_system.start_device_scanning()
+            else:
+                self.logger.info("Disabling USB device scanning")
+                await self.logger_system.stop_device_scanning()
+        except Exception as e:
+            self.logger.error("Error toggling USB scan: %s", e, exc_info=True)
+
+    async def on_device_connect_toggle(self, device_id: str, connect: bool) -> None:
+        """Handle device connect/disconnect from devices panel."""
+        try:
+            if connect:
+                self.logger.info("Connecting device: %s", device_id)
+                success = await self.logger_system.connect_device(device_id)
+                if not success:
+                    self.logger.error("Failed to connect device: %s", device_id)
+            else:
+                self.logger.info("Disconnecting device: %s", device_id)
+                await self.logger_system.disconnect_device(device_id)
+        except Exception as e:
+            self.logger.error("Error toggling device connection: %s", e, exc_info=True)
+
+    async def on_device_show_window(self, device_id: str) -> None:
+        """Handle show window button from devices panel."""
+        try:
+            self.logger.info("Showing window for device: %s", device_id)
+            await self.logger_system.show_device_window(device_id)
+        except Exception as e:
+            self.logger.error("Error showing device window: %s", e, exc_info=True)

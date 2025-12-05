@@ -10,6 +10,8 @@ from tkinter import ttk
 from typing import Optional
 import logging
 
+from rpi_logger.core.ui.theme import Colors
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,12 +30,12 @@ class BatteryWidget(ttk.Frame):
     HIGH_THRESHOLD = 30  # Above this: green
     LOW_THRESHOLD = 20   # Below this: red (between: yellow)
 
-    # Colors
-    COLOR_HIGH = '#4CAF50'      # Green
-    COLOR_MEDIUM = '#FFC107'    # Yellow/Amber
-    COLOR_LOW = '#F44336'       # Red
-    COLOR_EMPTY = '#E0E0E0'     # Gray (empty segment)
-    COLOR_BORDER = '#9E9E9E'    # Border color
+    # Colors - using theme colors for dark mode compatibility
+    COLOR_HIGH = Colors.SUCCESS         # Green
+    COLOR_MEDIUM = Colors.WARNING       # Yellow/Amber
+    COLOR_LOW = Colors.ERROR            # Red
+    COLOR_EMPTY = Colors.BG_FRAME       # Dark gray (empty segment)
+    COLOR_BORDER = Colors.BORDER        # Border color
 
     def __init__(
         self,
@@ -221,8 +223,8 @@ class CompactBatteryWidget(ttk.Frame):
                 self,
                 width=self.segment_size,
                 height=self.segment_size,
-                bg='white',
-                highlightbackground='gray',
+                bg=Colors.BG_FRAME,
+                highlightbackground=Colors.BORDER,
                 highlightthickness=1
             )
             segment.pack(side=tk.LEFT, padx=1)
@@ -240,7 +242,7 @@ class CompactBatteryWidget(ttk.Frame):
 
         if percent is None:
             for segment in self._segments:
-                segment.configure(bg='white')
+                segment.configure(bg=Colors.BG_FRAME)
             return
 
         # Number of filled segments (0-10)
@@ -250,14 +252,14 @@ class CompactBatteryWidget(ttk.Frame):
             if i < filled:
                 # Color based on level
                 if filled <= 2:
-                    color = 'red'
+                    color = Colors.ERROR
                 elif filled <= 4:
-                    color = 'orange'
+                    color = Colors.WARNING
                 else:
-                    color = 'black'
+                    color = Colors.SUCCESS
                 segment.configure(bg=color)
             else:
-                segment.configure(bg='white')
+                segment.configure(bg=Colors.BG_FRAME)
 
     def get_percent(self) -> Optional[int]:
         """Return the current battery percentage."""

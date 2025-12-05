@@ -21,6 +21,7 @@ from .config_manager import get_config_manager
 from .paths import STATE_FILE
 from .module_manager import ModuleManager
 from .session_manager import SessionManager
+from .devices import DeviceConnectionManager, DeviceInfo, XBeeDongleInfo
 
 if TYPE_CHECKING:
     from .event_logger import EventLogger
@@ -60,6 +61,15 @@ class LoggerSystem:
         self.session_manager = SessionManager()
         self.window_manager = WindowManager()
         self.config_manager = get_config_manager()
+
+        # Device connection manager
+        self.device_manager = DeviceConnectionManager()
+        self.device_manager.set_devices_changed_callback(self._on_devices_changed)
+        self.device_manager.set_device_connected_callback(self._on_device_connected)
+        self.device_manager.set_device_disconnected_callback(self._on_device_disconnected)
+
+        # UI callback for device panel updates
+        self.devices_ui_callback: Optional[Callable[[List[DeviceInfo], List[XBeeDongleInfo]], None]] = None
 
         # State
         self.shutdown_event = asyncio.Event()
@@ -449,3 +459,112 @@ class LoggerSystem:
             "selected_modules": self.module_manager.get_selected_modules(),
             "running_modules": running_modules,
         }
+
+    # ========== Device Management ==========
+
+    def set_devices_ui_callback(
+        self,
+        callback: Callable[[List[DeviceInfo], List[XBeeDongleInfo]], None]
+    ) -> None:
+        """Set callback for updating device panel UI."""
+        self.devices_ui_callback = callback
+
+    async def start_device_scanning(self) -> None:
+        """Start USB and XBee device scanning."""
+        await self.device_manager.start_scanning()
+        self.logger.info("Device scanning started")
+
+    async def stop_device_scanning(self) -> None:
+        """Stop USB and XBee device scanning."""
+        await self.device_manager.stop_scanning()
+        self.logger.info("Device scanning stopped")
+
+    def _on_devices_changed(self) -> None:
+        """Callback when device list changes - update UI."""
+        if self.devices_ui_callback:
+            devices = self.device_manager.get_all_devices()
+            dongles = self.device_manager.get_xbee_dongles()
+            self.devices_ui_callback(devices, dongles)
+
+    async def _on_device_connected(self, device: DeviceInfo) -> None:
+        """
+        Callback when a device is connected.
+
+        This auto-starts the appropriate module and assigns the device to it.
+        """
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device %s has no module_id", device.device_id)
+            return
+
+        self.logger.info(
+            "Device connected: %s -> module %s",
+            device.device_id, module_id
+        )
+
+        # Auto-start module if not running
+        if not self.is_module_running(module_id):
+            self.logger.info("Auto-starting module %s for device %s", module_id, device.device_id)
+            success = await self.set_module_enabled(module_id, True)
+            if not success:
+                self.logger.error("Failed to start module %s", module_id)
+                return
+
+        # Send assign_device command to module
+        session_dir_str = str(self.session_dir) if self.session_dir else None
+        command = CommandMessage.assign_device(
+            device_id=device.device_id,
+            device_type=device.device_type.value,
+            port=device.port or "",
+            baudrate=device.baudrate,
+            session_dir=session_dir_str,
+            is_wireless=device.is_wireless,
+        )
+        success = await self.module_manager.send_command(module_id, command)
+        if not success:
+            self.logger.error("Failed to send assign_device to module %s", module_id)
+
+    async def _on_device_disconnected(self, device_id: str) -> None:
+        """Callback when a device is disconnected."""
+        self.logger.info("Device disconnected: %s", device_id)
+
+        # Find which module had this device
+        # For now, we'll iterate through running modules and send unassign
+        for module_name in self.module_manager.get_running_modules():
+            command = CommandMessage.unassign_device(device_id)
+            await self.module_manager.send_command(module_name, command)
+
+    async def connect_device(self, device_id: str) -> bool:
+        """Connect a device (called from UI)."""
+        return await self.device_manager.connect_device(device_id)
+
+    async def disconnect_device(self, device_id: str) -> None:
+        """Disconnect a device (called from UI)."""
+        await self.device_manager.disconnect_device(device_id)
+
+    async def show_device_window(self, device_id: str) -> None:
+        """Show the window for a device's module.
+
+        If the module is not running, it will be enabled first.
+        """
+        device = self.device_manager.get_device(device_id)
+        if not device:
+            self.logger.warning("Device not found: %s", device_id)
+            return
+
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device has no module_id: %s", device_id)
+            return
+
+        # Ensure module is enabled/running
+        if not self.module_manager.is_module_enabled(module_id):
+            self.logger.info("Enabling module %s to show window for device %s", module_id, device_id)
+            success = await self.module_manager.set_module_enabled(module_id, True)
+            if not success:
+                self.logger.error("Failed to enable module %s", module_id)
+                return
+
+        # Send show_window command to module
+        command = CommandMessage.show_window()
+        await self.module_manager.send_command(module_id, command)

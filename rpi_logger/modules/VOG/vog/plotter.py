@@ -24,6 +24,20 @@ except ImportError:
     FigureCanvasTkAgg = None
     animation = None
 
+# Import theme colors for consistent styling
+try:
+    from rpi_logger.core.ui.theme import Colors
+    HAS_THEME = True
+except ImportError:
+    HAS_THEME = False
+    # Fallback colors if theme not available
+    class Colors:
+        BG_DARK = "#2b2b2b"
+        BG_DARKER = "#242424"
+        FG_PRIMARY = "#ecf0f1"
+        FG_SECONDARY = "#95a5a6"
+        BORDER = "#404055"
+
 if TYPE_CHECKING:
     from tkinter import Widget
 
@@ -43,11 +57,14 @@ class VOGPlotter:
         if not HAS_MATPLOTLIB:
             raise ImportError("matplotlib is required for VOGPlotter")
 
-        # Chart setup
-        self._fig = Figure(figsize=(4, 2), dpi=100)
-        self._fig.suptitle(title, fontsize=9)
+        # Chart setup with dark theme colors
+        self._fig = Figure(figsize=(4, 2), dpi=100, facecolor=Colors.BG_DARK, edgecolor=Colors.BORDER)
+        self._fig.suptitle(title, fontsize=9, color=Colors.FG_PRIMARY)
         self._canvas = FigureCanvasTkAgg(self._fig, master=frame)
-        self._canvas.get_tk_widget().grid(row=0, column=0, padx=2, pady=2, sticky='NEWS', rowspan=20)
+        # Set canvas widget background to match theme
+        canvas_widget = self._canvas.get_tk_widget()
+        canvas_widget.configure(bg=Colors.BG_DARK, highlightbackground=Colors.BORDER, highlightcolor=Colors.BORDER)
+        canvas_widget.grid(row=0, column=0, padx=2, pady=2, sticky='NEWS', rowspan=20)
 
         self._plt: list = []
 
@@ -67,7 +84,6 @@ class VOGPlotter:
         self._tst_array: Dict[str, Dict[str, np.ndarray]] = {}
         self._tst_xy: Dict[str, Dict[str, list]] = {}
 
-        self._tst_y_min = 0
         self._tst_y_max = 3000
 
         # All plot line objects for animation blitting
@@ -93,20 +109,30 @@ class VOGPlotter:
     def _add_tsot_plot(self):
         """Add bottom subplot for TSOT/TSCT timing data."""
         self._plt.append(self._fig.add_subplot(212))
-        self._plt[0].set_ylabel("TSOT-TSCT", fontsize=8)
-        self._plt[0].yaxis.set_label_position('right')
-        self._plt[0].tick_params(axis='both', labelsize=7)
+        ax = self._plt[0]
+        ax.set_facecolor(Colors.BG_DARKER)
+        ax.set_ylabel("TSOT-TSCT", fontsize=8, color=Colors.FG_PRIMARY)
+        ax.yaxis.set_label_position('right')
+        ax.tick_params(axis='both', labelsize=7, colors=Colors.FG_SECONDARY)
+        # Style spines
+        for spine in ax.spines.values():
+            spine.set_color(Colors.BORDER)
 
     def _add_state_plot(self):
         """Add top subplot for stimulus state (Clear/Opaque)."""
         self._plt.append(self._fig.add_subplot(211))
-        self._plt[1].xaxis.set_tick_params(labelbottom=False)
-        self._plt[1].set_ylabel("State", fontsize=8)
-        self._plt[1].yaxis.set_label_position('right')
-        self._plt[1].set_ylim([-0.2, 1.2])
-        self._plt[1].set_yticks([0, 1])
-        self._plt[1].set_yticklabels(["Opaque", "Clear"], fontsize=7)
-        self._plt[1].tick_params(axis='x', labelsize=7)
+        ax = self._plt[1]
+        ax.set_facecolor(Colors.BG_DARKER)
+        ax.xaxis.set_tick_params(labelbottom=False)
+        ax.set_ylabel("State", fontsize=8, color=Colors.FG_PRIMARY)
+        ax.yaxis.set_label_position('right')
+        ax.set_ylim([-0.2, 1.2])
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(["Opaque", "Clear"], fontsize=7)
+        ax.tick_params(axis='both', labelsize=7, colors=Colors.FG_SECONDARY)
+        # Style spines
+        for spine in ax.spines.values():
+            spine.set_color(Colors.BORDER)
 
     def add_device(self, unit_id: str):
         """Add a new device to the plotter.
@@ -263,7 +289,7 @@ class VOGPlotter:
             val = round(val / 1000) * 1000
             tic_width = max(1000, round(val / 3 / 1000) * 1000)
             self._plt[0].set_yticks(np.arange(0, val * 1.2, tic_width))
-            self._plt[0].set_ylim(self._tst_y_min - 0.3, val * 1.2)
+            self._plt[0].set_ylim(-0.3, val * 1.2)
             self._tst_y_max = val
             self._plt[0].figure.canvas.draw_idle()
 

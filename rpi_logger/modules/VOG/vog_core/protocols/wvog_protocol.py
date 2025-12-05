@@ -336,7 +336,8 @@ class WVOGProtocol(BaseVOGProtocol):
 
     def update_config_from_response(self, response, config: dict) -> None:
         """Update config from wVOG response (all values at once)."""
-        config.update(response.data.get('config', {}))
+        new_config = response.data.get('config', {})
+        config.update(new_config)
 
     def get_extended_packet_data(self, packet) -> dict:
         """Return wVOG extended packet data."""

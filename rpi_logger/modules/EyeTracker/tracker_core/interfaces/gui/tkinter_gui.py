@@ -8,6 +8,7 @@ from typing import Optional, TYPE_CHECKING
 import datetime
 
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.core.ui.theme import Theme, Colors
 from rpi_logger.modules.base import TkinterGUIBase, TkinterMenuBase
 
 if TYPE_CHECKING:
@@ -69,9 +70,9 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             content_frame,
             width=self.preview_width,
             height=self.preview_height,
-            bg='black',
+            bg=Colors.BG_CANVAS,
             highlightthickness=1,
-            highlightbackground='gray'
+            highlightbackground=Colors.BORDER
         )
         self.preview_canvas.grid(row=1, column=0, sticky='nsew')
 
@@ -186,7 +187,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             canvas_width // 2,
             canvas_height // 2,
             text="Waiting for eye tracker device...\n\nChecking every 3 seconds",
-            fill="white",
+            fill=Colors.FG_PRIMARY,
             justify='center'
         )
 

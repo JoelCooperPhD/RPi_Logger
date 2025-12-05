@@ -1,1 +1,0 @@
-"""VOG modes module."""

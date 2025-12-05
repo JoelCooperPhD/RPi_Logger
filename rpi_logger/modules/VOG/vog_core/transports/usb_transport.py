@@ -6,6 +6,7 @@ Wraps pyserial with an async interface compatible with BaseTransport.
 """
 
 import asyncio
+import threading
 from typing import Optional
 import logging
 
@@ -16,6 +17,8 @@ from .base_transport import BaseTransport
 logger = logging.getLogger(__name__)
 
 # Default timeout values
+# Note: Read timeout should be short enough to not block the event loop,
+# but we use a line buffer to accumulate partial reads
 DEFAULT_READ_TIMEOUT = 0.1
 DEFAULT_WRITE_TIMEOUT = 1.0
 
@@ -49,6 +52,8 @@ class USBTransport(BaseTransport):
         self.read_timeout = read_timeout
         self.write_timeout = write_timeout
         self._serial: Optional[serial.Serial] = None
+        self._lock = threading.Lock()  # Serialize access to serial port
+        self._read_buffer = b''  # Buffer for accumulating partial reads
 
     @property
     def is_connected(self) -> bool:
@@ -116,9 +121,14 @@ class USBTransport(BaseTransport):
             logger.error(f"Cannot write to {self.port}: not connected")
             return False
 
+        def _write_with_lock():
+            """Write data while holding the lock."""
+            with self._lock:
+                self._serial.write(data)
+                self._serial.flush()
+
         try:
-            await asyncio.to_thread(self._serial.write, data)
-            await asyncio.to_thread(self._serial.flush)
+            await asyncio.to_thread(_write_with_lock)
             logger.debug(f"Wrote to {self.port}: {data}")
             return True
         except serial.SerialException as e:
@@ -129,25 +139,46 @@ class USBTransport(BaseTransport):
         """
         Read a line from the serial port.
 
+        Uses internal buffering to handle partial reads properly.
+        Lock is only held briefly during buffer access, not during the read.
+
         Returns:
             The line read (decoded as UTF-8), or None if no data/timeout
         """
         if not self.is_connected:
             return None
 
-        try:
-            # Check if data is available
-            if not await asyncio.to_thread(lambda: self._serial.in_waiting > 0):
-                # Small sleep to prevent busy-waiting
-                await asyncio.sleep(0.01)
+        def _read_with_buffer():
+            """Read data and manage line buffer."""
+            # Read any available data (brief lock for serial access)
+            with self._lock:
+                waiting = self._serial.in_waiting
+                if waiting > 0:
+                    new_data = self._serial.read(waiting)
+                else:
+                    new_data = b''
+
+            # Update buffer (brief lock for buffer access)
+            with self._lock:
+                if new_data:
+                    self._read_buffer += new_data
+
+                # Check if we have a complete line in the buffer
+                newline_pos = self._read_buffer.find(b'\n')
+                if newline_pos >= 0:
+                    # Extract the line (including newline)
+                    line = self._read_buffer[:newline_pos + 1]
+                    self._read_buffer = self._read_buffer[newline_pos + 1:]
+                    return line
                 return None
 
-            # Read a line
-            line_bytes = await asyncio.to_thread(self._serial.readline)
+        try:
+            line_bytes = await asyncio.to_thread(_read_with_buffer)
             if line_bytes:
                 line = line_bytes.decode('utf-8', errors='replace').strip()
-                logger.debug(f"Read from {self.port}: {line}")
-                return line
+                if line:  # Only log non-empty lines
+                    logger.debug(f"Read from {self.port}: {line}")
+                return line if line else None
             return None
 
         except serial.SerialException as e:

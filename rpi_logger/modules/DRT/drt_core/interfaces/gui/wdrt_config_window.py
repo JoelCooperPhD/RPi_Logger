@@ -12,6 +12,7 @@ from math import ceil
 import logging
 
 from .battery_widget import BatteryWidget
+from rpi_logger.core.ui.theme import Theme, Colors
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class WDRTConfigWindow(tk.Toplevel):
         # Make modal
         self.transient(parent)
         self.grab_set()
+        Theme.configure_toplevel(self)
 
         # Variables for entry fields
         self._vars = {
@@ -136,14 +138,14 @@ class WDRTConfigWindow(tk.Toplevel):
             entry.pack(side=tk.LEFT, padx=(5, 0))
 
             # Tooltip/hint
-            hint = ttk.Label(row, text=f"({tooltip})", foreground='gray')
+            hint = ttk.Label(row, text=f"({tooltip})", style='Secondary.TLabel')
             hint.pack(side=tk.LEFT, padx=(10, 0))
 
         # Validation hints
         hint_label = ttk.Label(
             config_frame,
             text="Valid ranges: ISI 0-65535ms, Duration 0-65535ms, Intensity 0-100%",
-            foreground='gray',
+            style='Muted.TLabel',
             font=('TkDefaultFont', 8)
         )
         hint_label.pack(anchor=tk.W, pady=(5, 0))

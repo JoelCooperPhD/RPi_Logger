@@ -7,6 +7,7 @@ from tkinter import ttk, scrolledtext, messagebox
 from typing import Optional
 
 from ..paths import LOGO_PATH
+from .theme import Theme, Colors
 
 try:
     from PIL import Image
@@ -21,6 +22,7 @@ class AboutDialog:
         self.dialog.title("About")
         self.dialog.transient(parent)
         self.dialog.grab_set()
+        Theme.configure_toplevel(self.dialog)
 
         self.dialog.geometry("500x350")
         self.dialog.resizable(False, False)
@@ -100,6 +102,7 @@ class SystemInfoDialog:
         self.dialog.title("System Information")
         self.dialog.transient(parent)
         self.dialog.grab_set()
+        Theme.configure_toplevel(self.dialog)
 
         self.dialog.geometry("600x500")
 
@@ -120,6 +123,7 @@ class SystemInfoDialog:
             wrap=tk.WORD,
             state='disabled'
         )
+        Theme.configure_scrolled_text(self.text_widget, readonly=True)
         self.text_widget.pack(fill=tk.BOTH, expand=True)
 
         self._populate_info(logger_system)
@@ -218,6 +222,7 @@ class QuickStartDialog:
         self.dialog.title("Quick Start Guide")
         self.dialog.transient(parent)
         self.dialog.grab_set()
+        Theme.configure_toplevel(self.dialog)
 
         self.dialog.geometry("800x650")
 
@@ -238,6 +243,7 @@ class QuickStartDialog:
             wrap=tk.WORD,
             state='disabled'
         )
+        Theme.configure_scrolled_text(self.text_widget, readonly=True)
         self.text_widget.pack(fill=tk.BOTH, expand=True)
 
         self._populate_help()
@@ -440,6 +446,7 @@ class VOGHelpDialog:
         self.dialog.title("VOG Quick Start Guide")
         self.dialog.transient(parent)
         self.dialog.grab_set()
+        Theme.configure_toplevel(self.dialog)
 
         self.dialog.geometry("700x600")
 
@@ -460,6 +467,7 @@ class VOGHelpDialog:
             wrap=tk.WORD,
             state='disabled'
         )
+        Theme.configure_scrolled_text(self.text_widget, readonly=True)
         self.text_widget.pack(fill=tk.BOTH, expand=True)
 
         self._populate_help()

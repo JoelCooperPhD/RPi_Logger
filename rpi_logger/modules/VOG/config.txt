@@ -1,5 +1,5 @@
 display_name = VOG
-window_geometry = 691x495+590+545
+window_geometry = 1096x734+992+459
 preview_resolution = auto
 view.show_io_panel = false
 view.show_logger = true

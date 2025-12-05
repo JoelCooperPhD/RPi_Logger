@@ -181,7 +181,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             text="⚠ No DRT devices connected\n\nConnect sDRT, wDRT USB, or wDRT wireless to begin",
             font=('TkDefaultFont', 12),
             justify='center',
-            foreground='gray'
+            style='Secondary.TLabel'
         )
         self.empty_state_label.grid(row=0, column=0, sticky='nsew', padx=20, pady=20)
         self.empty_state_label.lift()
@@ -307,7 +307,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
         tab.no_devices_label = ttk.Label(
             tab.devices_container,
             text="No wireless devices discovered yet.\nUse 'Search for Devices' to scan the network.",
-            foreground='gray',
+            style='Secondary.TLabel',
             justify='center'
         )
         tab.no_devices_label.pack(pady=20)
@@ -322,7 +322,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
             text="Synchronize the clock on all connected wireless wDRT devices\nwith your computer's time.",
             wraplength=350,
             justify='left',
-            foreground='gray'
+            style='Secondary.TLabel'
         )
         rtc_info.pack(anchor=tk.W, pady=(0, 5))
 
@@ -345,7 +345,7 @@ class TkinterGUI(TkinterGUIBase, TkinterMenuBase):
                  "This will disconnect existing wireless devices and start a new search.",
             wraplength=350,
             justify='left',
-            foreground='gray'
+            style='Secondary.TLabel'
         )
         info_label.pack(anchor=tk.W, pady=(0, 5))
 

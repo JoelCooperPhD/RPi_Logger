@@ -42,6 +42,19 @@ class BaseCommandHandler(ABC):
             elif command == "quit":
                 await self.handle_quit(command_data)
                 return False  # Signal shutdown
+            # Device assignment commands (centralized device discovery)
+            elif command == "assign_device":
+                await self.handle_assign_device(command_data)
+                return True
+            elif command == "unassign_device":
+                await self.handle_unassign_device(command_data)
+                return True
+            elif command == "show_window":
+                await self.handle_show_window(command_data)
+                return True
+            elif command == "hide_window":
+                await self.handle_hide_window(command_data)
+                return True
             else:
                 handled = await self.handle_custom_command(command, command_data)
                 if not handled:
@@ -351,3 +364,134 @@ class BaseCommandHandler(ABC):
             error_msg = f"Failed to {action} recording: {str(e)}"
             StatusMessage.send("error", {"message": error_msg})
             self.logger.error(error_msg, exc_info=True)
+
+    # =========================================================================
+    # Device Assignment Commands (for centralized device discovery)
+    # =========================================================================
+
+    async def handle_assign_device(self, command_data: Dict[str, Any]) -> None:
+        """
+        Handle device assignment from main logger.
+
+        Expected command_data:
+            device_id: str - Unique device identifier
+            device_type: str - Device type (e.g., "sVOG", "wDRT_Wireless")
+            port: str - Serial port path
+            baudrate: int - Serial baudrate
+            session_dir: Optional[str] - Current session directory
+            is_wireless: bool - Whether this is a wireless device
+        """
+        device_id = command_data.get("device_id")
+        device_type = command_data.get("device_type")
+        port = command_data.get("port")
+        baudrate = command_data.get("baudrate")
+        session_dir = command_data.get("session_dir")
+        is_wireless = command_data.get("is_wireless", False)
+
+        self.logger.info(
+            "assign_device: device_id=%s, type=%s, port=%s, baudrate=%s, wireless=%s",
+            device_id, device_type, port, baudrate, is_wireless
+        )
+
+        # Update session dir if provided
+        if session_dir:
+            self._update_session_dir({"session_dir": session_dir})
+
+        # Delegate to system for actual device handling
+        if hasattr(self.system, 'assign_device'):
+            try:
+                success = await self.system.assign_device(
+                    device_id=device_id,
+                    device_type=device_type,
+                    port=port,
+                    baudrate=baudrate,
+                    is_wireless=is_wireless,
+                )
+                if success:
+                    StatusMessage.send("device_assigned", {
+                        "device_id": device_id,
+                        "device_type": device_type,
+                    })
+                else:
+                    StatusMessage.send("device_error", {
+                        "device_id": device_id,
+                        "message": "Failed to assign device",
+                    })
+            except Exception as e:
+                self.logger.error("Failed to assign device %s: %s", device_id, e)
+                StatusMessage.send("device_error", {
+                    "device_id": device_id,
+                    "message": str(e),
+                })
+        else:
+            self.logger.warning("System does not implement assign_device")
+            StatusMessage.send("error", {"message": "Module does not support device assignment"})
+
+    async def handle_unassign_device(self, command_data: Dict[str, Any]) -> None:
+        """Handle device unassignment from main logger."""
+        device_id = command_data.get("device_id")
+
+        self.logger.info("unassign_device: device_id=%s", device_id)
+
+        if hasattr(self.system, 'unassign_device'):
+            try:
+                await self.system.unassign_device(device_id)
+                StatusMessage.send("device_unassigned", {"device_id": device_id})
+            except Exception as e:
+                self.logger.error("Failed to unassign device %s: %s", device_id, e)
+                StatusMessage.send("device_error", {
+                    "device_id": device_id,
+                    "message": str(e),
+                })
+        else:
+            self.logger.warning("System does not implement unassign_device")
+
+    async def handle_show_window(self, command_data: Dict[str, Any]) -> None:
+        """Handle show window command from main logger."""
+        self.logger.info("show_window command received")
+
+        if self.gui:
+            window = None
+            if hasattr(self.gui, 'root'):
+                window = self.gui.root
+            elif hasattr(self.gui, 'window'):
+                window = self.gui.window
+
+            if window:
+                try:
+                    window.deiconify()
+                    window.lift()
+                    window.focus_force()
+                    StatusMessage.send("window_shown", {})
+                    self.logger.info("Window shown")
+                except Exception as e:
+                    self.logger.error("Failed to show window: %s", e)
+                    StatusMessage.send("error", {"message": f"Failed to show window: {e}"})
+            else:
+                self.logger.warning("No window available to show")
+        else:
+            self.logger.warning("No GUI available for show_window")
+
+    async def handle_hide_window(self, command_data: Dict[str, Any]) -> None:
+        """Handle hide window command from main logger."""
+        self.logger.info("hide_window command received")
+
+        if self.gui:
+            window = None
+            if hasattr(self.gui, 'root'):
+                window = self.gui.root
+            elif hasattr(self.gui, 'window'):
+                window = self.gui.window
+
+            if window:
+                try:
+                    window.withdraw()
+                    StatusMessage.send("window_hidden", {})
+                    self.logger.info("Window hidden")
+                except Exception as e:
+                    self.logger.error("Failed to hide window: %s", e)
+                    StatusMessage.send("error", {"message": f"Failed to hide window: {e}"})
+            else:
+                self.logger.warning("No window available to hide")
+        else:
+            self.logger.warning("No GUI available for hide_window")
