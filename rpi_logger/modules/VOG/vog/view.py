@@ -175,7 +175,7 @@ class VOGTkinterGUI:
         # Create tab frame - matches RS_Logger layout
         tab_frame = ttk.Frame(self._notebook, name=port.lower().replace('/', '_'))
         tab_frame.grid_columnconfigure(0, weight=1)  # Plotter column expands
-        tab_frame.grid_rowconfigure(3, weight=1)  # Row 3 is spacer between Lens State and Results
+        tab_frame.grid_rowconfigure(0, weight=1)  # Main content row expands
 
         tab_widgets['frame'] = tab_frame
         tab_widgets['device_type'] = device_type
@@ -198,21 +198,37 @@ class VOGTkinterGUI:
         else:
             tab_widgets['plot'] = None
 
-        # Add manual controls (right side)
-        self._add_manual_controls(tab_frame, tab_widgets, device_type)
+        # Create right-side controls panel with visible border
+        if HAS_THEME and Colors is not None:
+            # Use tk.Frame with explicit border for visibility
+            controls_panel = tk.Frame(
+                tab_frame,
+                bg=Colors.BG_FRAME,
+                highlightbackground=Colors.BORDER,
+                highlightcolor=Colors.BORDER,
+                highlightthickness=1
+            )
+        else:
+            controls_panel = ttk.Frame(tab_frame)
+        controls_panel.grid(row=0, column=1, sticky="NS", padx=(4, 2), pady=2)
+        controls_panel.grid_rowconfigure(1, weight=1)  # Spacer row expands
+        tab_widgets['controls_panel'] = controls_panel
 
-        # Add results display
-        self._add_results(tab_frame, tab_widgets)
+        # Add manual controls (inside controls panel)
+        self._add_manual_controls(controls_panel, tab_widgets, device_type)
 
-        # Add configure button
-        self._add_configure_button(tab_frame, tab_widgets, port)
+        # Add results display (inside controls panel)
+        self._add_results(controls_panel, tab_widgets)
+
+        # Add configure button (inside controls panel)
+        self._add_configure_button(controls_panel, tab_widgets, port)
 
         return tab_widgets
 
     def _add_manual_controls(self, parent: tk.Widget, tab_widgets: Dict, device_type: str):
         """Add lens control buttons."""
         lf = ttk.LabelFrame(parent, text="Lens State")
-        lf.grid(row=1, column=1, sticky="NEWS")
+        lf.grid(row=0, column=0, sticky="NEW", padx=4, pady=(4, 2))
         lf.grid_columnconfigure(0, weight=1)
         lf.grid_columnconfigure(1, weight=1)
 
@@ -226,12 +242,13 @@ class VOGTkinterGUI:
 
         # Use RoundedButton if available, otherwise fall back to ttk.Button
         if RoundedButton is not None:
+            btn_bg = Colors.BG_FRAME if Colors is not None else None
             stm_on = RoundedButton(lf, text=open_text, command=self._on_lens_clear,
-                                   width=80, height=32, style='default')
+                                   width=80, height=32, style='default', bg=btn_bg)
             stm_on.grid(row=0, column=0, padx=2, pady=2)
 
             stm_off = RoundedButton(lf, text=close_text, command=self._on_lens_opaque,
-                                    width=80, height=32, style='default')
+                                    width=80, height=32, style='default', bg=btn_bg)
             stm_off.grid(row=0, column=1, padx=2, pady=2)
         else:
             stm_on = ttk.Button(lf, text=open_text, command=self._on_lens_clear)
@@ -246,36 +263,38 @@ class VOGTkinterGUI:
     def _add_results(self, parent: tk.Widget, tab_widgets: Dict):
         """Add results display (trial number, TSOT, TSCT)."""
         lf = ttk.LabelFrame(parent, text="Results")
-        lf.grid(row=4, column=1, sticky="NEWS")
+        lf.grid(row=2, column=0, sticky="NEW", padx=4, pady=2)
         lf.grid_columnconfigure(1, weight=1)
 
         # Trial Number
         tab_widgets['trl_n'] = tk.StringVar(value="0")
-        ttk.Label(lf, text="Trial Number:").grid(row=0, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=tab_widgets['trl_n']).grid(row=0, column=1, sticky="E", padx=5)
+        ttk.Label(lf, text="Trial Number:", style='Inframe.TLabel').grid(row=0, column=0, sticky="W", padx=5)
+        ttk.Label(lf, textvariable=tab_widgets['trl_n'], style='Inframe.TLabel').grid(row=0, column=1, sticky="E", padx=5)
 
         # TSOT - Total Shutter Open Time
         tab_widgets['tsot'] = tk.StringVar(value="0")
-        ttk.Label(lf, text="TSOT (ms):").grid(row=1, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=tab_widgets['tsot']).grid(row=1, column=1, sticky="E", padx=5)
+        ttk.Label(lf, text="TSOT (ms):", style='Inframe.TLabel').grid(row=1, column=0, sticky="W", padx=5)
+        ttk.Label(lf, textvariable=tab_widgets['tsot'], style='Inframe.TLabel').grid(row=1, column=1, sticky="E", padx=5)
 
         # TSCT - Total Shutter Close Time
         tab_widgets['tsct'] = tk.StringVar(value="0")
-        ttk.Label(lf, text="TSCT (ms):").grid(row=2, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=tab_widgets['tsct']).grid(row=2, column=1, sticky="E", padx=5)
+        ttk.Label(lf, text="TSCT (ms):", style='Inframe.TLabel').grid(row=2, column=0, sticky="W", padx=5)
+        ttk.Label(lf, textvariable=tab_widgets['tsct'], style='Inframe.TLabel').grid(row=2, column=1, sticky="E", padx=5)
 
     def _add_configure_button(self, parent: tk.Widget, tab_widgets: Dict, port: str):
         """Add device configuration button."""
-        f = ttk.Frame(parent)
-        f.grid(row=5, column=1, sticky="NEWS")
+        f = ttk.Frame(parent, style='Inframe.TFrame')
+        f.grid(row=3, column=0, sticky="NEW", padx=4, pady=(2, 4))
         f.grid_columnconfigure(0, weight=1)
 
         # Use RoundedButton if available, otherwise fall back to ttk.Button
         if RoundedButton is not None:
+            btn_bg = Colors.BG_FRAME if Colors is not None else None
             configure_btn = RoundedButton(
                 f, text="Configure Unit",
                 command=lambda p=port: self._on_configure_clicked(p),
-                width=120, height=32, style='default'
+                width=120, height=32, style='default',
+                bg=btn_bg
             )
             configure_btn.grid(row=0, column=0, pady=2)
         else:

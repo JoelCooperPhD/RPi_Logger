@@ -143,6 +143,44 @@ class Theme:
             foreground=Colors.FG_MUTED
         )
 
+        # Section header frame and label (for USB/WIRELESS banners)
+        style.configure(
+            'SectionHeader.TFrame',
+            background=Colors.BG_DARKER
+        )
+        style.configure(
+            'SectionHeader.TLabel',
+            background=Colors.BG_DARKER,
+            foreground=Colors.FG_PRIMARY
+        )
+
+        # Inframe style (for frames inside labelframes)
+        style.configure(
+            'Inframe.TFrame',
+            background=Colors.BG_FRAME
+        )
+
+        # Small button style (for compact buttons like Show)
+        style.configure(
+            'Small.TButton',
+            background=Colors.BTN_DEFAULT_BG,
+            foreground=Colors.BTN_DEFAULT_FG,
+            borderwidth=0,
+            relief='flat',
+            padding=(6, 2)
+        )
+        style.map(
+            'Small.TButton',
+            background=[
+                ('pressed', Colors.BTN_DEFAULT_PRESSED),
+                ('active', Colors.BTN_DEFAULT_HOVER)
+            ],
+            foreground=[
+                ('pressed', Colors.BTN_DEFAULT_FG),
+                ('active', Colors.BTN_DEFAULT_FG)
+            ]
+        )
+
         # Status labels
         style.configure(
             'Status.Ready.TLabel',
@@ -298,6 +336,23 @@ class Theme:
             ]
         )
 
+        # Switch style checkbutton (for toggle switches in device tiles)
+        style.configure(
+            'Switch.TCheckbutton',
+            background=Colors.BG_FRAME,
+            foreground=Colors.FG_PRIMARY,
+            indicatorbackground=Colors.BG_INPUT,
+            indicatorforeground=Colors.SUCCESS
+        )
+        style.map(
+            'Switch.TCheckbutton',
+            background=[('active', Colors.BG_FRAME)],
+            indicatorbackground=[
+                ('selected', Colors.SUCCESS),
+                ('!selected', Colors.BG_INPUT)
+            ]
+        )
+
         # TSeparator
         style.configure(
             'TSeparator',
@@ -321,14 +376,18 @@ class Theme:
         style.configure(
             'TNotebook',
             background=Colors.BG_DARK,
-            bordercolor=Colors.BORDER
+            bordercolor=Colors.BORDER,
+            lightcolor=Colors.BG_DARK,
+            darkcolor=Colors.BG_DARK
         )
         style.configure(
             'TNotebook.Tab',
             background=Colors.BG_FRAME,
             foreground=Colors.FG_SECONDARY,
             padding=(12, 6),
-            bordercolor=Colors.BORDER
+            bordercolor=Colors.BORDER,
+            lightcolor=Colors.BG_FRAME,
+            darkcolor=Colors.BG_FRAME
         )
         style.map(
             'TNotebook.Tab',
@@ -339,6 +398,14 @@ class Theme:
             foreground=[
                 ('selected', Colors.FG_PRIMARY),
                 ('active', Colors.FG_PRIMARY)
+            ],
+            lightcolor=[
+                ('selected', Colors.BG_DARK),
+                ('active', Colors.BG_DARKER)
+            ],
+            darkcolor=[
+                ('selected', Colors.BG_DARK),
+                ('active', Colors.BG_DARKER)
             ]
         )
 
