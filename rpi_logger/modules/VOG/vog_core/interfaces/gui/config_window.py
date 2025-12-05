@@ -61,19 +61,22 @@ class VOGConfigWindow:
         else:
             width, height = 345, 345
 
-        # Load saved position before creating dialog
+        # Calculate position before creating dialog
         saved_pos = self._load_saved_position_static()
+        if saved_pos:
+            x, y = saved_pos
+        else:
+            # Center on parent
+            x = parent.winfo_x() + (parent.winfo_width() - width) // 2
+            y = parent.winfo_y() + (parent.winfo_height() - height) // 2
 
-        # Create modal dialog
+        # Create modal dialog with full geometry (size + position) immediately
         self.dialog = tk.Toplevel(parent)
-        title = f"Configure {device_type.upper()} - {port}"
-        self.dialog.title(title)
-
-        # Hide window until positioned to prevent flicker
-        self.dialog.withdraw()
-
+        self.dialog.geometry(f"{width}x{height}+{x}+{y}")
+        self.dialog.title(f"Configure {device_type.upper()} - {port}")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
+        self.dialog.grab_set()
         Theme.configure_toplevel(self.dialog)
 
         # Config values
@@ -85,20 +88,6 @@ class VOGConfigWindow:
 
         # Register close handler to clean up callback
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        # Set geometry with position before showing
-        self.dialog.update_idletasks()
-        if saved_pos:
-            self.dialog.geometry(f"{width}x{height}+{saved_pos[0]}+{saved_pos[1]}")
-        else:
-            # Center on parent
-            x = parent.winfo_x() + (parent.winfo_width() - width) // 2
-            y = parent.winfo_y() + (parent.winfo_height() - height) // 2
-            self.dialog.geometry(f"{width}x{height}+{x}+{y}")
-
-        # Show window and grab focus
-        self.dialog.deiconify()
-        self.dialog.grab_set()
 
     def _is_wvog(self) -> bool:
         """Check if device is wVOG type (handles various formats like 'wvog', 'wVOG_USB')."""
