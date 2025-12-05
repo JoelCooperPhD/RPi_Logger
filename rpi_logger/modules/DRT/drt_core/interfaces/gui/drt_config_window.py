@@ -14,7 +14,8 @@ from typing import Optional, Dict, Any, Callable
 import logging
 
 from ...device_types import DRTDeviceType
-from rpi_logger.core.ui.theme import Theme, Colors
+from rpi_logger.core.ui.theme.styles import Theme
+from rpi_logger.core.ui.theme.colors import Colors
 
 logger = logging.getLogger(__name__)
 

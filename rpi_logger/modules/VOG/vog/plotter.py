@@ -25,7 +25,7 @@ except ImportError:
 
 # Import theme colors for consistent styling
 try:
-    from rpi_logger.core.ui.theme import Colors
+    from rpi_logger.core.ui.theme.colors import Colors
     HAS_THEME = True
 except ImportError:
     HAS_THEME = False

@@ -30,7 +30,9 @@ except ImportError:
     HAS_MATPLOTLIB = False
 
 try:
-    from rpi_logger.core.ui.theme import Theme, RoundedButton, Colors
+    from rpi_logger.core.ui.theme.styles import Theme
+    from rpi_logger.core.ui.theme.widgets import RoundedButton
+    from rpi_logger.core.ui.theme.colors import Colors
     HAS_THEME = True
 except ImportError:
     HAS_THEME = False
@@ -734,7 +736,7 @@ class VOGView:
     def _show_vog_help(self) -> None:
         """Show VOG-specific help dialog."""
         try:
-            from rpi_logger.core.ui.help_dialogs import VOGHelpDialog
+            from .help_dialog import VOGHelpDialog
             root = getattr(self._stub_view, 'root', None)
             if root:
                 VOGHelpDialog(root)

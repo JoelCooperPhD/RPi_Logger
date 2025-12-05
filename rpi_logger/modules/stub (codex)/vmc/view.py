@@ -29,7 +29,7 @@ else:
 
 from .model import StubCodexModel
 from .constants import PLACEHOLDER_GEOMETRY
-from rpi_logger.core.ui.theme import Theme
+from rpi_logger.core.ui.theme.styles import Theme
 
 _BASE_LOGGER = get_module_logger(__name__)
 PREF_SHOW_IO_PANEL = "view.show_io_panel"
@@ -530,7 +530,7 @@ class StubCodexView:
 
     def _show_help(self) -> None:
         try:
-            from rpi_logger.core.ui.help_dialogs import QuickStartDialog
+            from rpi_logger.core.ui.dialogs.quick_start import QuickStartDialog
             QuickStartDialog(self.root)
         except Exception as exc:
             self.logger.error("Failed to open help dialog: %s", exc)

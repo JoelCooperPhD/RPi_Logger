@@ -3,7 +3,8 @@ from tkinter import ttk, scrolledtext
 from pathlib import Path
 from typing import Dict, Optional, Any
 
-from rpi_logger.core.ui.theme import Theme, Colors
+from rpi_logger.core.ui.theme.styles import Theme
+from rpi_logger.core.ui.theme.colors import Colors
 
 
 class QuickStatusPanel:

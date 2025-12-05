@@ -245,7 +245,7 @@ class TkinterGUIBase:
             wrap=tk.WORD
         )
         self.io_text.grid(row=0, column=0, sticky='nsew')
-        from rpi_logger.core.ui.theme import Theme
+        from rpi_logger.core.ui.theme.styles import Theme
         Theme.configure_scrolled_text(self.io_text, readonly=True)
 
         return self.io_text
@@ -269,7 +269,7 @@ class TkinterGUIBase:
             wrap=tk.WORD
         )
         self.log_text.grid(row=0, column=0, sticky='nsew')
-        from rpi_logger.core.ui.theme import Theme
+        from rpi_logger.core.ui.theme.styles import Theme
         Theme.configure_scrolled_text(self.log_text, readonly=True)
 
         self._setup_log_handler()

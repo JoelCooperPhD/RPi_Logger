@@ -326,14 +326,14 @@ class TkinterMenuBase:
 
     def _show_about(self):
         try:
-            from rpi_logger.core.ui.help_dialogs import AboutDialog
+            from rpi_logger.core.ui.dialogs.about import AboutDialog
             AboutDialog(self.root)
         except Exception as e:
             logger.error("Failed to show About dialog: %s", e)
 
     def _show_system_info(self):
         try:
-            from rpi_logger.core.ui.help_dialogs import SystemInfoDialog
+            from rpi_logger.core.ui.dialogs.system_info import SystemInfoDialog
             logger_system = getattr(self, 'system', None)
             SystemInfoDialog(self.root, logger_system)
         except Exception as e:
@@ -341,7 +341,7 @@ class TkinterMenuBase:
 
     def _show_help(self):
         try:
-            from rpi_logger.core.ui.help_dialogs import QuickStartDialog
+            from rpi_logger.core.ui.dialogs.quick_start import QuickStartDialog
             QuickStartDialog(self.root)
         except Exception as e:
             logger.error("Failed to show Help dialog: %s", e)
@@ -394,7 +394,7 @@ class TkinterMenuBase:
             else:
                 config_path = Path(__file__).parent.parent / "config.txt"
 
-            from rpi_logger.core.ui.help_dialogs import ResetSettingsDialog
+            from rpi_logger.core.ui.dialogs.reset_settings import ResetSettingsDialog
             ResetSettingsDialog(self.root, config_path)
         except Exception as e:
             logger.error("Failed to reset settings: %s", e)

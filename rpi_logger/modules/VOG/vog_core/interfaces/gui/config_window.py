@@ -11,7 +11,8 @@ import asyncio
 from datetime import datetime
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.core.ui.theme import Theme, Colors
+from rpi_logger.core.ui.theme.styles import Theme
+from rpi_logger.core.ui.theme.colors import Colors
 
 # Debug log file
 CONFIG_WINDOW_DEBUG_LOG = "/tmp/vog_serial_debug.log"

@@ -8,9 +8,9 @@ import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional, Dict, Union
+from typing import Optional, Dict
 
-from .theme import RoundedButton
+from .theme.widgets import RoundedButton
 from ..logger_system import LoggerSystem
 from ..module_process import ModuleState
 from ..config_manager import get_config_manager
@@ -338,21 +338,21 @@ class MainController:
 
     def show_about(self) -> None:
         try:
-            from .help_dialogs import AboutDialog
+            from .dialogs.about import AboutDialog
             AboutDialog(self.root)
         except Exception as e:
             self.logger.error("Failed to show About dialog: %s", e)
 
     def show_system_info(self) -> None:
         try:
-            from .help_dialogs import SystemInfoDialog
+            from .dialogs.system_info import SystemInfoDialog
             SystemInfoDialog(self.root, self.logger_system)
         except Exception as e:
             self.logger.error("Failed to show System Info dialog: %s", e)
 
     def show_help(self) -> None:
         try:
-            from .help_dialogs import QuickStartDialog
+            from .dialogs.quick_start import QuickStartDialog
             QuickStartDialog(self.root)
         except Exception as e:
             self.logger.error("Failed to show Help dialog: %s", e)
@@ -396,7 +396,7 @@ class MainController:
 
     def reset_settings(self) -> None:
         try:
-            from .help_dialogs import ResetSettingsDialog
+            from .dialogs.reset_settings import ResetSettingsDialog
             ResetSettingsDialog(self.root, CONFIG_PATH)
         except Exception as e:
             self.logger.error("Failed to reset settings: %s", e)

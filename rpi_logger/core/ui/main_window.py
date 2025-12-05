@@ -16,7 +16,9 @@ from ..paths import CONFIG_PATH, LOGO_PATH
 from .main_controller import MainController
 from .timer_manager import TimerManager
 from .devices_panel import USBDevicesPanel
-from .theme import Theme, Colors, RoundedButton
+from .theme.colors import Colors
+from .theme.styles import Theme
+from .theme.widgets import RoundedButton
 
 
 class TextHandler(logging.Handler):

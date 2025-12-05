@@ -10,7 +10,7 @@ from tkinter import ttk
 from typing import Optional
 import logging
 
-from rpi_logger.core.ui.theme import Colors
+from rpi_logger.core.ui.theme.colors import Colors
 
 logger = logging.getLogger(__name__)
 

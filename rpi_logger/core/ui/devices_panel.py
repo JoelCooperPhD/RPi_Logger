@@ -17,7 +17,8 @@ from typing import Callable, Dict, List, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
 from ..devices import DeviceInfo, XBeeDongleInfo, ConnectionState
-from .theme import Colors, RoundedButton
+from .theme.colors import Colors
+from .theme.widgets import RoundedButton
 
 logger = get_module_logger("DevicesPanel")
 

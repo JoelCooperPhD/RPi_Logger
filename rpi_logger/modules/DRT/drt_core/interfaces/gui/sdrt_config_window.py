@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, Dict, Callable
 from math import ceil
 
-from rpi_logger.core.ui.theme import Theme, Colors
+from rpi_logger.core.ui.theme.styles import Theme
+from rpi_logger.core.ui.theme.colors import Colors
 
 if TYPE_CHECKING:
     from ...drt_system import DRTSystem

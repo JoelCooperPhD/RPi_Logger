@@ -12,7 +12,8 @@ from math import ceil
 import logging
 
 from .battery_widget import BatteryWidget
-from rpi_logger.core.ui.theme import Theme, Colors
+from rpi_logger.core.ui.theme.styles import Theme
+from rpi_logger.core.ui.theme.colors import Colors
 
 logger = logging.getLogger(__name__)
 
