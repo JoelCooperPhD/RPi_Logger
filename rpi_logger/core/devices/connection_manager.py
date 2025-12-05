@@ -17,6 +17,10 @@ from .xbee_manager import XBeeManager, WirelessDevice, XBEE_AVAILABLE
 
 logger = get_module_logger("DeviceConnectionManager")
 
+# Callback type for saving/loading device connection state
+DeviceConnectionStateCallback = Callable[[str, bool], Awaitable[None]]  # (module_id, connected)
+LoadDeviceConnectionStateCallback = Callable[[str], Awaitable[bool]]  # (module_id) -> was_connected
+
 
 class ConnectionState(Enum):
     """Device connection state from UI perspective."""
@@ -88,9 +92,12 @@ class DeviceConnectionManager:
         self._on_devices_changed: Optional[DevicesChangedCallback] = None
         self._on_device_connected: Optional[DeviceConnectedCallback] = None
         self._on_device_disconnected: Optional[DeviceDisconnectedCallback] = None
+        self._on_save_connection_state: Optional[DeviceConnectionStateCallback] = None
+        self._on_load_connection_state: Optional[LoadDeviceConnectionStateCallback] = None
 
         # State
         self._scanning_enabled = False
+        self._pending_auto_connect_modules: Set[str] = set()  # Modules that should auto-connect when device found
 
     # =========================================================================
     # Callback Registration
@@ -107,6 +114,23 @@ class DeviceConnectionManager:
     def set_device_disconnected_callback(self, callback: DeviceDisconnectedCallback) -> None:
         """Set callback for when a device is disconnected from a module."""
         self._on_device_disconnected = callback
+
+    def set_save_connection_state_callback(self, callback: DeviceConnectionStateCallback) -> None:
+        """Set callback for saving device connection state to config."""
+        self._on_save_connection_state = callback
+
+    def set_load_connection_state_callback(self, callback: LoadDeviceConnectionStateCallback) -> None:
+        """Set callback for loading device connection state from config."""
+        self._on_load_connection_state = callback
+
+    def set_pending_auto_connect(self, module_id: str) -> None:
+        """Mark a module as pending auto-connect when its device is discovered."""
+        self._pending_auto_connect_modules.add(module_id)
+        logger.info(f"Module {module_id} marked for auto-connect when device found")
+
+    def clear_pending_auto_connect(self, module_id: str) -> None:
+        """Clear pending auto-connect for a module."""
+        self._pending_auto_connect_modules.discard(module_id)
 
     # =========================================================================
     # Scanning Control
@@ -244,6 +268,10 @@ class DeviceConnectionManager:
 
         logger.info(f"Device connected: {device_id} ({device.device_type.value})")
 
+        # Save connection state to config
+        if self._on_save_connection_state and device.module_id:
+            await self._on_save_connection_state(device.module_id, True)
+
         # Notify callback
         if self._on_device_connected:
             await self._on_device_connected(device)
@@ -255,14 +283,19 @@ class DeviceConnectionManager:
         await self._disconnect_device_internal(device_id)
         self._notify_changed()
 
-    async def _disconnect_device_internal(self, device_id: str) -> None:
+    async def _disconnect_device_internal(self, device_id: str, save_state: bool = True) -> None:
         """Internal disconnect without UI notification."""
         device = self._find_device(device_id)
         if device and device_id in self._connected_devices:
+            module_id = device.module_id
             device.state = ConnectionState.DISCOVERED
             self._connected_devices.discard(device_id)
 
             logger.info(f"Device disconnected: {device_id}")
+
+            # Save connection state to config (only if explicitly disconnected)
+            if save_state and self._on_save_connection_state and module_id:
+                await self._on_save_connection_state(module_id, False)
 
             if self._on_device_disconnected:
                 await self._on_device_disconnected(device_id)
@@ -298,6 +331,14 @@ class DeviceConnectionManager:
             )
             self._usb_devices[usb_device.port] = device_info
             logger.info(f"USB device discovered: {device_info.display_name}")
+
+            # Check if this module should auto-connect
+            if spec.module_id in self._pending_auto_connect_modules:
+                logger.info(f"Auto-connecting device {usb_device.port} for module {spec.module_id}")
+                self._pending_auto_connect_modules.discard(spec.module_id)
+                # Connect the device (this will trigger the connected callback)
+                await self.connect_device(usb_device.port)
+                return  # _notify_changed is called inside connect_device
 
         self._notify_changed()
 

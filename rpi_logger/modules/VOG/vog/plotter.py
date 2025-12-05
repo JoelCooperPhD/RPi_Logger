@@ -1,13 +1,12 @@
 """VOG real-time plotter using matplotlib FuncAnimation.
 
-Based on RS_Logger's sVOG_UIPlotter.py pattern - uses device-keyed dictionaries
-(maps) to support multiple simultaneous devices.
+Real-time plotting of stimulus state and shutter timing data for single-device display.
 """
 
 from __future__ import annotations
 
 import time
-from typing import Dict, Optional, Set, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import numpy as np
 
@@ -45,9 +44,6 @@ if TYPE_CHECKING:
 class VOGPlotter:
     """Real-time plotter for VOG stimulus state and shutter timing data.
 
-    Supports multiple devices via device-keyed dictionaries. Each device gets
-    its own set of plot lines and data arrays.
-
     Layout:
         - Top subplot (211): Stimulus state (Clear/Opaque) over time
         - Bottom subplot (212): TSOT (Total Shutter Open Time) and TSCT over time
@@ -68,9 +64,6 @@ class VOGPlotter:
 
         self._plt: list = []
 
-        # Track registered device IDs
-        self._unit_ids: Set[str] = set()
-
         # Time axis: 60 seconds of history at 100ms resolution
         self._time_array = np.arange(-60, 0, 0.1)
 
@@ -78,21 +71,23 @@ class VOGPlotter:
         self._next_update = time.time()
         self._interval = 0.1  # 100ms between plot updates
 
-        # Total Shutter Times - device-keyed maps
-        self._tsot_now: Dict[str, Optional[float]] = {}
-        self._tsct_now: Dict[str, Optional[float]] = {}
-        self._tst_array: Dict[str, Dict[str, np.ndarray]] = {}
-        self._tst_xy: Dict[str, Dict[str, list]] = {}
+        # Total Shutter Times
+        self._tsot_now: Optional[float] = None
+        self._tsct_now: Optional[float] = None
+        self._tsot_array = np.empty([600])
+        self._tsot_array[:] = np.nan
+        self._tsct_array = np.empty([600])
+        self._tsct_array[:] = np.nan
+        self._tsot_line = None
+        self._tsct_line = None
 
         self._tst_y_max = 3000
 
-        # All plot line objects for animation blitting
-        self._plot_lines: Set = set()
-
-        # Stimulus State - device-keyed maps
-        self._state_now: Dict[str, float] = {}
-        self._state_array: Dict[str, np.ndarray] = {}
-        self._state_xy: Dict[str, list] = {}
+        # Stimulus State
+        self._state_now: float = np.nan
+        self._state_array = np.empty([600])
+        self._state_array[:] = np.nan
+        self._state_line = None
 
         # Animation control
         self._ani: Optional[animation.FuncAnimation] = None
@@ -100,6 +95,9 @@ class VOGPlotter:
         # Build subplots
         self._add_tsot_plot()
         self._add_state_plot()
+
+        # Initialize plot lines
+        self._init_plot_lines()
 
         # Control flags
         self.run = False
@@ -134,36 +132,19 @@ class VOGPlotter:
         for spine in ax.spines.values():
             spine.set_color(Colors.BORDER)
 
-    def add_device(self, unit_id: str):
-        """Add a new device to the plotter.
-
-        Creates data arrays and plot lines for the device.
-        """
-        if unit_id in self._unit_ids:
-            return
-
-        # Initialize TSOT/TSCT data
-        self._tsot_now[unit_id] = None
-        self._tsct_now[unit_id] = None
-
-        self._tst_array[unit_id] = {}
-        self._tst_xy[unit_id] = {}
-
-        # TSOT array and line
-        self._tst_array[unit_id]['tsot'] = np.empty([600])
-        self._tst_array[unit_id]['tsot'][:] = np.nan
-        self._tst_xy[unit_id]['tsot'] = self._plt[0].plot(
-            self._time_array, self._tst_array[unit_id]['tsot'], marker="o", markersize=3
+    def _init_plot_lines(self):
+        """Initialize plot lines for data display."""
+        # TSOT line
+        self._tsot_line, = self._plt[0].plot(
+            self._time_array, self._tsot_array, marker="o", markersize=3
         )
 
         # Get color from TSOT line to match TSCT
-        c = self._tst_xy[unit_id]['tsot'][0].get_color()
+        c = self._tsot_line.get_color()
 
-        # TSCT array and line (same color, different marker)
-        self._tst_array[unit_id]['tsct'] = np.empty([600])
-        self._tst_array[unit_id]['tsct'][:] = np.nan
-        self._tst_xy[unit_id]['tsct'] = self._plt[0].plot(
-            self._time_array, self._tst_array[unit_id]['tsct'], marker="_", color=c, markersize=3
+        # TSCT line (same color, different marker)
+        self._tsct_line, = self._plt[0].plot(
+            self._time_array, self._tsct_array, marker="_", color=c, markersize=3
         )
 
         # Configure TST axes
@@ -172,101 +153,64 @@ class VOGPlotter:
         self._plt[0].set_yticks(np.arange(0, 3000, 1000))
         self._plt[0].set_ylim([0, 3000])
 
-        # Initialize state data
-        self._state_now[unit_id] = np.nan
-        self._state_array[unit_id] = np.empty([600])
-        self._state_array[unit_id][:] = np.nan
-        self._state_xy[unit_id] = self._plt[1].plot(
-            self._time_array, self._state_array[unit_id], marker=""
+        # State line
+        self._state_line, = self._plt[1].plot(
+            self._time_array, self._state_array, marker=""
         )
 
         # Configure state axes
         self._plt[1].set_xticks([-60, -50, -40, -30, -20, -10, 0])
         self._plt[1].set_xlim([-62, 2])
 
-        # Start animation if not already running
-        if self._ani is None:
-            self._ani = animation.FuncAnimation(
-                self._fig,
-                self._animate,
-                init_func=lambda prt=unit_id: self._init_animation(prt),
-                interval=10,
-                blit=True,
-                cache_frame_data=False
-            )
+        # Start animation
+        self._ani = animation.FuncAnimation(
+            self._fig,
+            self._animate,
+            init_func=self._init_animation,
+            interval=10,
+            blit=True,
+            cache_frame_data=False
+        )
 
-        self._unit_ids.add(unit_id)
-
-    def remove_device(self, unit_id: str):
-        """Remove a device from the plotter."""
-        if unit_id not in self._unit_ids:
-            return
-
-        self._state_array.pop(unit_id, None)
-        self._state_xy.pop(unit_id, None)
-        self._state_now.pop(unit_id, None)
-        self._tst_array.pop(unit_id, None)
-        self._tst_xy.pop(unit_id, None)
-        self._tsot_now.pop(unit_id, None)
-        self._tsct_now.pop(unit_id, None)
-        self._unit_ids.discard(unit_id)
-
-    def _init_animation(self, p: str):
+    def _init_animation(self):
         """Initialize animation with current data."""
-        if p not in self._state_xy:
-            return self._plot_lines
-
-        self._state_xy[p][0].set_data(self._time_array, self._state_array[p])
-        self._tst_xy[p]['tsot'][0].set_data(self._time_array, self._tst_array[p]['tsot'])
-        self._tst_xy[p]['tsct'][0].set_data(self._time_array, self._tst_array[p]['tsct'])
-
-        self._plot_lines.update(self._state_xy[p])
-        self._plot_lines.update(self._tst_xy[p]['tsot'])
-        self._plot_lines.update(self._tst_xy[p]['tsct'])
-
-        return self._plot_lines
+        self._state_line.set_data(self._time_array, self._state_array)
+        self._tsot_line.set_data(self._time_array, self._tsot_array)
+        self._tsct_line.set_data(self._time_array, self._tsct_array)
+        return [self._state_line, self._tsot_line, self._tsct_line]
 
     def _animate(self, i):
         """Animation frame callback."""
         if self.run and self._ready_to_update():
-            for unit_id in self._unit_ids:
-                if unit_id not in self._tst_array:
-                    continue
+            # Rescale Y axis if needed
+            self._rescale_y(self._tsot_now, self._tsct_now)
 
-                # Rescale Y axis if needed
-                self._rescale_y(self._tsot_now.get(unit_id), self._tsct_now.get(unit_id))
+            # Roll and update TST arrays
+            self._tsot_array = np.roll(self._tsot_array, -1)
+            self._tsct_array = np.roll(self._tsct_array, -1)
 
-                # Roll and update TST arrays
-                self._tst_array[unit_id]['tsot'] = np.roll(self._tst_array[unit_id]['tsot'], -1)
-                self._tst_array[unit_id]['tsct'] = np.roll(self._tst_array[unit_id]['tsct'], -1)
+            if self._tsot_now is not None:
+                self._tsot_array[-1] = self._tsot_now
+            else:
+                self._tsot_array[-1] = np.nan
 
-                if self._tsot_now.get(unit_id) is not None:
-                    self._tst_array[unit_id]['tsot'][-1] = self._tsot_now[unit_id]
-                else:
-                    self._tst_array[unit_id]['tsot'][-1] = np.nan
+            if self._tsct_now is not None:
+                self._tsct_array[-1] = self._tsct_now
+            else:
+                self._tsct_array[-1] = np.nan
 
-                if self._tsct_now.get(unit_id) is not None:
-                    self._tst_array[unit_id]['tsct'][-1] = self._tsct_now[unit_id]
-                else:
-                    self._tst_array[unit_id]['tsct'][-1] = np.nan
+            self._tsot_line.set_data(self._time_array, self._tsot_array)
+            self._tsct_line.set_data(self._time_array, self._tsct_array)
 
-                self._tst_xy[unit_id]['tsot'][0].set_data(self._time_array, self._tst_array[unit_id]['tsot'])
-                self._tst_xy[unit_id]['tsct'][0].set_data(self._time_array, self._tst_array[unit_id]['tsct'])
+            self._tsot_now = None
+            self._tsct_now = None
 
-                self._tsot_now[unit_id] = None
-                self._tsct_now[unit_id] = None
+            # Roll and update state array
+            self._state_array = np.roll(self._state_array, -1)
+            self._state_array[-1] = self._state_now
+            self._state_line.set_data(self._time_array, self._state_array)
 
-                self._plot_lines.update(self._tst_xy[unit_id]['tsot'])
-                self._plot_lines.update(self._tst_xy[unit_id]['tsct'])
-
-                # Roll and update state array
-                self._state_array[unit_id] = np.roll(self._state_array[unit_id], -1)
-                self._state_array[unit_id][-1] = self._state_now.get(unit_id, np.nan)
-                self._state_xy[unit_id][0].set_data(self._time_array, self._state_array[unit_id])
-
-                self._plot_lines.update(self._state_xy[unit_id])
-
-        return self._plot_lines
+        return [self._state_line, self._tsot_line, self._tsct_line]
 
     def _ready_to_update(self) -> bool:
         """Check if enough time has passed for next update."""
@@ -296,28 +240,25 @@ class VOGPlotter:
     # ------------------------------------------------------------------
     # Public update methods
 
-    def tsot_update(self, unit_id: str, val: float):
-        """Update TSOT value for a device."""
-        self._tsot_now[unit_id] = val
+    def tsot_update(self, val: float):
+        """Update TSOT value."""
+        self._tsot_now = val
 
-    def tsct_update(self, unit_id: str, val: float):
-        """Update TSCT value for a device."""
-        self._tsct_now[unit_id] = val
+    def tsct_update(self, val: float):
+        """Update TSCT value."""
+        self._tsct_now = val
 
-    def state_update(self, unit_id: str, val: float):
-        """Update stimulus state for a device.
+    def state_update(self, val: float):
+        """Update stimulus state.
 
-        Always accepts updates if the device is registered. The animation
-        function checks self.run before displaying data, so updates received
-        before the plotter is fully started will be stored and shown once
-        animation begins. This ensures we don't miss the first state change
-        that arrives immediately after sending trial start command.
+        Always accepts updates. The animation function checks self.run before
+        displaying data, so updates received before the plotter is fully started
+        will be stored and shown once animation begins.
         """
-        if unit_id in self._state_now:
-            self._state_now[unit_id] = val
+        self._state_now = val
 
     # ------------------------------------------------------------------
-    # Session and recording control (matches DRT plotter pattern)
+    # Session and recording control
 
     def start_session(self):
         """Start a new session - clear plot and start animation (blank)."""
@@ -338,44 +279,35 @@ class VOGPlotter:
         # Only initialize state to 0 if it's NaN (no data received yet).
         # Don't overwrite if a state update already arrived before this
         # method was called (due to async timing with Tk event loop).
-        for port in list(self._state_now.keys()):
-            current = self._state_now.get(port)
-            # Check if current is NaN (np.isnan returns True for np.nan)
-            if current is None or (isinstance(current, float) and np.isnan(current)):
-                self._state_now[port] = 0
+        if np.isnan(self._state_now):
+            self._state_now = 0
 
         self.recording = True
 
     def stop_recording(self):
         """Pause recording - creates gap in data, animation keeps marching."""
         # Set state to NaN to create visible gap in line
-        for port in list(self._state_now.keys()):
-            self._state_now[port] = np.nan
+        self._state_now = np.nan
         self.recording = False
         # Note: self.run stays True so animation keeps advancing time
 
     def stop(self):
         """Stop session completely - freeze animation."""
-        for port in list(self._state_now.keys()):
-            self._state_now[port] = np.nan
+        self._state_now = np.nan
         self.run = False
         self._session_active = False
         self.recording = False
 
     def clear_all(self):
-        """Clear all data from all devices."""
-        for unit_id in list(self._state_array.keys()):
-            self._state_now[unit_id] = np.nan
-            self._state_array[unit_id][:] = np.nan
-            if unit_id in self._state_xy:
-                self._state_xy[unit_id][0].set_data(self._time_array, self._state_array[unit_id])
+        """Clear all data."""
+        self._state_now = np.nan
+        self._state_array[:] = np.nan
+        self._state_line.set_data(self._time_array, self._state_array)
 
-        for unit_id in list(self._tst_array.keys()):
-            self._tst_array[unit_id]['tsot'][:] = np.nan
-            self._tst_array[unit_id]['tsct'][:] = np.nan
-            if unit_id in self._tst_xy:
-                self._tst_xy[unit_id]['tsot'][0].set_data(self._time_array, self._tst_array[unit_id]['tsot'])
-                self._tst_xy[unit_id]['tsct'][0].set_data(self._time_array, self._tst_array[unit_id]['tsct'])
+        self._tsot_array[:] = np.nan
+        self._tsct_array[:] = np.nan
+        self._tsot_line.set_data(self._time_array, self._tsot_array)
+        self._tsct_line.set_data(self._time_array, self._tsct_array)
 
         # Reset Y scale
         self._tst_y_max = 3000

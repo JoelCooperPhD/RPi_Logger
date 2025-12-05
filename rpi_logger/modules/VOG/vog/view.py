@@ -1,7 +1,7 @@
 """VOG view factory for VMC integration.
 
-Implements the RS_Logger sVOG GUI pattern with device-keyed maps,
-real-time matplotlib plotting, and tabbed multi-device support.
+Implements the RS_Logger sVOG GUI pattern with real-time matplotlib plotting
+for single-device support.
 """
 
 from __future__ import annotations
@@ -100,12 +100,10 @@ class _LoopAsyncBridge:
 
 
 class VOGTkinterGUI:
-    """Tkinter GUI for VOG with RS_Logger-style device maps and plotting.
+    """Tkinter GUI for VOG with RS_Logger-style plotting.
 
     Key features:
-    - Tabbed notebook for multi-device support
     - Real-time matplotlib plotting of stimulus state and shutter timing
-    - Device-keyed dictionaries (maps) for state management
     - Results display (trial number, TSOT, TSCT)
     - Configuration dialog for device settings
     """
@@ -123,109 +121,110 @@ class VOGTkinterGUI:
         self.logger = ensure_structured_logger(logger, fallback_name="VOGTkinterGUI") if logger else get_module_logger("VOGTkinterGUI")
         self.async_bridge: Optional[_LoopAsyncBridge] = None
 
-        # Device maps - keyed by port (e.g., '/dev/ttyACM0')
-        # Each entry contains: frame, device_type, plot, stm_on, stm_off, configure, trl_n, tsot, tsct
-        self.devices: Dict[str, Dict[str, Any]] = {}
+        # Single device state
+        self._port: Optional[str] = None
+        self._device_type: str = 'svog'
+        self._plotter: Optional[VOGPlotter] = None
 
-        # Session and recording state (separate as in RS_Logger)
+        # Results display variables
+        self._trl_n: Optional[tk.StringVar] = None
+        self._tsot: Optional[tk.StringVar] = None
+        self._tsct: Optional[tk.StringVar] = None
+
+        # Control buttons
+        self._stm_on: Optional[Any] = None
+        self._stm_off: Optional[Any] = None
+        self._configure_btn: Optional[Any] = None
+
+        # Session and recording state
         # _session_active: True when Start pressed, False when Stop pressed
         # _running: True when Record is active, False when Paused
         self._session_active = False
         self._running = False
-        self._plot_recording_state: Optional[bool] = None  # Track plotter sync state
-
-        # Configuration dialog (created on demand, not stored)
-        # VOGConfigWindow is modal and self-contained
+        self._plot_recording_state: Optional[bool] = None
 
         # UI references
         self.root = embedded_parent
         self._frame: Optional[tk.Frame] = None
-        self._notebook: Optional[ttk.Notebook] = None
+        self._content_frame: Optional[tk.Frame] = None
+        self._controls_panel: Optional[tk.Frame] = None
 
         # Create UI
         if embedded_parent:
             self._build_ui(embedded_parent)
 
     def _build_ui(self, parent: tk.Widget):
-        """Build the embedded UI with notebook and controls."""
+        """Build the embedded UI with plotter and controls."""
         # Main frame
         self._frame = ttk.Frame(parent)
         self._frame.pack(fill=tk.BOTH, expand=True)
         self._frame.columnconfigure(0, weight=1)
         self._frame.rowconfigure(0, weight=1)
 
-        # Device notebook (tabs for each device)
-        self._notebook = ttk.Notebook(self._frame)
-        self._notebook.grid(row=0, column=0, sticky="NSEW")
+        # Content frame
+        self._content_frame = ttk.Frame(self._frame)
+        self._content_frame.grid(row=0, column=0, sticky="NSEW")
+        self._content_frame.columnconfigure(0, weight=1)
+        self._content_frame.rowconfigure(0, weight=1)
 
-    def build_tab(self, port: str, device_type: str = 'svog') -> Dict[str, Any]:
-        """Build a tab for a device and return the widget map.
+        # Build device UI immediately with default device type
+        # Port is None until a device connects - configure button will be disabled
+        self._build_device_ui(None, 'svog')
 
-        This follows the RS_Logger pattern where build_tab returns a dict
-        containing all the widgets and state for the device.
+    def _build_device_ui(self, port: Optional[str], device_type: str):
+        """Build UI components for the device.
+
+        Args:
+            port: Device port, or None if no device connected yet
+            device_type: Device type ('svog' or 'wvog')
         """
-        if not self._notebook:
-            return {}
+        if not self._content_frame:
+            return
 
         # Normalize device_type to string (may be enum or string)
         device_type = device_type.value if hasattr(device_type, 'value') else str(device_type)
+        self._device_type = device_type
 
-        tab_widgets: Dict[str, Any] = {}
-
-        # Create tab frame - matches RS_Logger layout
-        tab_frame = ttk.Frame(self._notebook, name=port.lower().replace('/', '_'))
-        tab_frame.grid_columnconfigure(0, weight=1)  # Plotter column expands
-        tab_frame.grid_rowconfigure(0, weight=1)  # Main content row expands
-
-        tab_widgets['frame'] = tab_frame
-        tab_widgets['device_type'] = device_type
-
-        # Add tab to notebook
-        short_port = port.split('/')[-1]
-        tab_text = f"{short_port} ({device_type.upper()})"
-        self._notebook.add(tab_frame, text=tab_text)
-
-        # Add plotter (left side, spanning rows)
+        # Add plotter (left side)
         if HAS_MATPLOTLIB and VOGPlotter is not None:
             try:
                 title = f"{device_type.upper()} - Visual Occlusion Glasses"
-                plotter = VOGPlotter(tab_frame, title=title)
-                plotter.add_device(port)
-                tab_widgets['plot'] = plotter
+                self._plotter = VOGPlotter(self._content_frame, title=title)
+                self.logger.info("Created plotter for %s", port or "pending device")
             except Exception as e:
                 self.logger.warning("Could not create plotter: %s", e)
-                tab_widgets['plot'] = None
+                self._plotter = None
         else:
-            tab_widgets['plot'] = None
+            self._plotter = None
 
         # Create right-side controls panel with visible border
         if HAS_THEME and Colors is not None:
-            # Use tk.Frame with explicit border for visibility
-            controls_panel = tk.Frame(
-                tab_frame,
+            self._controls_panel = tk.Frame(
+                self._content_frame,
                 bg=Colors.BG_FRAME,
                 highlightbackground=Colors.BORDER,
                 highlightcolor=Colors.BORDER,
                 highlightthickness=1
             )
         else:
-            controls_panel = ttk.Frame(tab_frame)
-        controls_panel.grid(row=0, column=1, sticky="NS", padx=(4, 2), pady=2)
-        controls_panel.grid_rowconfigure(1, weight=1)  # Spacer row expands
-        tab_widgets['controls_panel'] = controls_panel
+            self._controls_panel = ttk.Frame(self._content_frame)
+        self._controls_panel.grid(row=0, column=1, sticky="NS", padx=(4, 2), pady=2)
+        self._controls_panel.grid_rowconfigure(1, weight=1)
 
-        # Add manual controls (inside controls panel)
-        self._add_manual_controls(controls_panel, tab_widgets, device_type)
+        # Add manual controls
+        self._add_manual_controls(self._controls_panel, device_type)
 
-        # Add results display (inside controls panel)
-        self._add_results(controls_panel, tab_widgets)
+        # Add results display
+        self._add_results(self._controls_panel)
 
-        # Add configure button (inside controls panel)
-        self._add_configure_button(controls_panel, tab_widgets, port)
+        # Add configure button
+        self._add_configure_button(self._controls_panel)
 
-        return tab_widgets
+        # Disable configure button if no device connected yet
+        if port is None and self._configure_btn:
+            self._configure_btn.configure(state='disabled')
 
-    def _add_manual_controls(self, parent: tk.Widget, tab_widgets: Dict, device_type: str):
+    def _add_manual_controls(self, parent: tk.Widget, device_type: str):
         """Add lens control buttons."""
         lf = ttk.LabelFrame(parent, text="Lens State")
         lf.grid(row=0, column=0, sticky="NEW", padx=4, pady=(4, 2))
@@ -243,45 +242,42 @@ class VOGTkinterGUI:
         # Use RoundedButton if available, otherwise fall back to ttk.Button
         if RoundedButton is not None:
             btn_bg = Colors.BG_FRAME if Colors is not None else None
-            stm_on = RoundedButton(lf, text=open_text, command=self._on_lens_clear,
-                                   width=80, height=32, style='default', bg=btn_bg)
-            stm_on.grid(row=0, column=0, padx=2, pady=2)
+            self._stm_on = RoundedButton(lf, text=open_text, command=self._on_lens_clear,
+                                         width=80, height=32, style='default', bg=btn_bg)
+            self._stm_on.grid(row=0, column=0, padx=2, pady=2)
 
-            stm_off = RoundedButton(lf, text=close_text, command=self._on_lens_opaque,
-                                    width=80, height=32, style='default', bg=btn_bg)
-            stm_off.grid(row=0, column=1, padx=2, pady=2)
+            self._stm_off = RoundedButton(lf, text=close_text, command=self._on_lens_opaque,
+                                          width=80, height=32, style='default', bg=btn_bg)
+            self._stm_off.grid(row=0, column=1, padx=2, pady=2)
         else:
-            stm_on = ttk.Button(lf, text=open_text, command=self._on_lens_clear)
-            stm_on.grid(row=0, column=0, sticky="NEWS", padx=2, pady=2)
+            self._stm_on = ttk.Button(lf, text=open_text, command=self._on_lens_clear)
+            self._stm_on.grid(row=0, column=0, sticky="NEWS", padx=2, pady=2)
 
-            stm_off = ttk.Button(lf, text=close_text, command=self._on_lens_opaque)
-            stm_off.grid(row=0, column=1, sticky="NEWS", padx=2, pady=2)
+            self._stm_off = ttk.Button(lf, text=close_text, command=self._on_lens_opaque)
+            self._stm_off.grid(row=0, column=1, sticky="NEWS", padx=2, pady=2)
 
-        tab_widgets['stm_on'] = stm_on
-        tab_widgets['stm_off'] = stm_off
-
-    def _add_results(self, parent: tk.Widget, tab_widgets: Dict):
+    def _add_results(self, parent: tk.Widget):
         """Add results display (trial number, TSOT, TSCT)."""
         lf = ttk.LabelFrame(parent, text="Results")
         lf.grid(row=2, column=0, sticky="NEW", padx=4, pady=2)
         lf.grid_columnconfigure(1, weight=1)
 
         # Trial Number
-        tab_widgets['trl_n'] = tk.StringVar(value="0")
+        self._trl_n = tk.StringVar(value="0")
         ttk.Label(lf, text="Trial Number:", style='Inframe.TLabel').grid(row=0, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=tab_widgets['trl_n'], style='Inframe.TLabel').grid(row=0, column=1, sticky="E", padx=5)
+        ttk.Label(lf, textvariable=self._trl_n, style='Inframe.TLabel').grid(row=0, column=1, sticky="E", padx=5)
 
         # TSOT - Total Shutter Open Time
-        tab_widgets['tsot'] = tk.StringVar(value="0")
+        self._tsot = tk.StringVar(value="0")
         ttk.Label(lf, text="TSOT (ms):", style='Inframe.TLabel').grid(row=1, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=tab_widgets['tsot'], style='Inframe.TLabel').grid(row=1, column=1, sticky="E", padx=5)
+        ttk.Label(lf, textvariable=self._tsot, style='Inframe.TLabel').grid(row=1, column=1, sticky="E", padx=5)
 
         # TSCT - Total Shutter Close Time
-        tab_widgets['tsct'] = tk.StringVar(value="0")
+        self._tsct = tk.StringVar(value="0")
         ttk.Label(lf, text="TSCT (ms):", style='Inframe.TLabel').grid(row=2, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=tab_widgets['tsct'], style='Inframe.TLabel').grid(row=2, column=1, sticky="E", padx=5)
+        ttk.Label(lf, textvariable=self._tsct, style='Inframe.TLabel').grid(row=2, column=1, sticky="E", padx=5)
 
-    def _add_configure_button(self, parent: tk.Widget, tab_widgets: Dict, port: str):
+    def _add_configure_button(self, parent: tk.Widget):
         """Add device configuration button."""
         f = ttk.Frame(parent, style='Inframe.TFrame')
         f.grid(row=3, column=0, sticky="NEW", padx=4, pady=(2, 4))
@@ -290,79 +286,87 @@ class VOGTkinterGUI:
         # Use RoundedButton if available, otherwise fall back to ttk.Button
         if RoundedButton is not None:
             btn_bg = Colors.BG_FRAME if Colors is not None else None
-            configure_btn = RoundedButton(
+            self._configure_btn = RoundedButton(
                 f, text="Configure Unit",
-                command=lambda p=port: self._on_configure_clicked(p),
+                command=self._on_configure_clicked,
                 width=120, height=32, style='default',
                 bg=btn_bg
             )
-            configure_btn.grid(row=0, column=0, pady=2)
+            self._configure_btn.grid(row=0, column=0, pady=2)
         else:
-            configure_btn = ttk.Button(
+            self._configure_btn = ttk.Button(
                 f, text="Configure Unit",
-                command=lambda p=port: self._on_configure_clicked(p)
+                command=self._on_configure_clicked
             )
-            configure_btn.grid(row=0, column=0, sticky="NEWS")
-        tab_widgets['configure'] = configure_btn
+            self._configure_btn.grid(row=0, column=0, sticky="NEWS")
 
     # ------------------------------------------------------------------
     # Device connection/disconnection
 
     def on_device_connected(self, port: str, device_type: str = 'svog'):
-        """Handle device connection - create tab and register in devices map."""
-        # Handle both string and enum device_type
+        """Handle device connection - update port and enable configure button."""
         type_str = device_type.value if hasattr(device_type, 'value') else str(device_type)
         self.logger.info("%s device connected: %s", type_str.upper(), port)
 
-        if port in self.devices:
+        if self._port is not None:
+            self.logger.warning("Device already connected at %s, ignoring new connection at %s", self._port, port)
             return
 
-        # Build tab and store in devices map
-        tab_widgets = self.build_tab(port, device_type)
-        self.devices[port] = tab_widgets
+        self._port = port
+        self._device_type = type_str
+
+        # Enable configure button now that device is connected
+        if self._configure_btn:
+            self._configure_btn.configure(state='normal')
 
     def on_device_disconnected(self, port: str):
-        """Handle device disconnection - remove tab and clean up."""
+        """Handle device disconnection - clean up UI."""
         self.logger.info("Device disconnected: %s", port)
 
-        if port not in self.devices:
+        if self._port != port:
             return
 
-        tab_widgets = self.devices.pop(port)
-
-        # Remove plotter device
-        if tab_widgets.get('plot'):
+        # Clean up plotter
+        if self._plotter:
             try:
-                tab_widgets['plot'].remove_device(port)
+                self._plotter.stop()
             except Exception:
                 pass
+            self._plotter = None
 
-        # Remove tab from notebook
-        if self._notebook and 'frame' in tab_widgets:
+        # Clear controls panel
+        if self._controls_panel:
             try:
-                self._notebook.forget(tab_widgets['frame'])
+                self._controls_panel.destroy()
             except Exception:
                 pass
+            self._controls_panel = None
+
+        # Reset state
+        self._port = None
+        self._stm_on = None
+        self._stm_off = None
+        self._configure_btn = None
+        self._trl_n = None
+        self._tsot = None
+        self._tsct = None
 
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         """Handle data from device - update plots and displays."""
         self.logger.debug("on_device_data: port=%s type=%s data=%s", port, data_type, data)
 
-        if port not in self.devices:
-            self.logger.warning("on_device_data: port %s not in devices", port)
+        if port != self._port:
+            self.logger.warning("on_device_data: port %s does not match connected port %s", port, self._port)
             return
-
-        dev = self.devices[port]
 
         # Handle stimulus state updates
         if data_type == 'stimulus' or data.get('event') == 'stimulus':
             state = data.get('state', data.get('value'))
-            self.logger.debug("Stimulus update: state=%s, plot=%s, running=%s", state, dev.get('plot'), self._running)
-            if state is not None and dev.get('plot'):
+            self.logger.debug("Stimulus update: state=%s, plotter=%s, running=%s", state, self._plotter, self._running)
+            if state is not None and self._plotter:
                 try:
-                    plot = dev['plot']
-                    self.logger.debug("Calling state_update: recording=%s, run=%s", plot.recording, plot.run)
-                    plot.state_update(port, int(state))
+                    self.logger.debug("Calling state_update: recording=%s, run=%s", self._plotter.recording, self._plotter.run)
+                    self._plotter.state_update(int(state))
                 except (ValueError, TypeError) as e:
                     self.logger.error("state_update failed: %s", e)
 
@@ -372,22 +376,21 @@ class VOGTkinterGUI:
             opened = data.get('shutter_open')
             closed = data.get('shutter_closed')
 
-            if trial is not None:
-                dev['trl_n'].set(str(trial))
+            if trial is not None and self._trl_n:
+                self._trl_n.set(str(trial))
             if opened is not None:
-                dev['tsot'].set(str(opened))
-                if dev.get('plot'):
-                    dev['plot'].tsot_update(port, int(opened))
+                if self._tsot:
+                    self._tsot.set(str(opened))
+                if self._plotter:
+                    self._plotter.tsot_update(int(opened))
             if closed is not None:
-                dev['tsct'].set(str(closed))
-                if dev.get('plot'):
-                    dev['plot'].tsct_update(port, int(closed))
-
-        # Config and version responses are handled directly by VOGConfigWindow
-        # when it's open - it loads config from handler.get_config()
+                if self._tsct:
+                    self._tsct.set(str(closed))
+                if self._plotter:
+                    self._plotter.tsct_update(int(closed))
 
     # ------------------------------------------------------------------
-    # Recording state management (matches DRT pattern)
+    # Recording state management
 
     def sync_recording_state(self):
         """Sync recording state with system - enable/disable controls."""
@@ -403,72 +406,47 @@ class VOGTkinterGUI:
             return
         self._plot_recording_state = recording
 
-        for port, dev in self.devices.items():
-            plotter = dev.get('plot')
-            if not plotter:
-                continue
+        if self._plotter:
             if recording:
-                plotter.start_recording()
+                self._plotter.start_recording()
             else:
-                plotter.stop_recording()
+                self._plotter.stop_recording()
 
     def _sync_control_states(self):
         """Enable/disable controls based on recording state."""
         recording = getattr(self.system, 'recording', False)
         state = 'disabled' if recording else 'normal'
 
-        for port, dev in self.devices.items():
-            if dev.get('stm_on'):
-                dev['stm_on'].configure(state=state)
-            if dev.get('stm_off'):
-                dev['stm_off'].configure(state=state)
-            if dev.get('configure'):
-                dev['configure'].configure(state=state)
+        if self._stm_on:
+            self._stm_on.configure(state=state)
+        if self._stm_off:
+            self._stm_off.configure(state=state)
+        if self._configure_btn:
+            self._configure_btn.configure(state=state)
 
     def handle_session_started(self) -> None:
-        """Handle session start (Start button) - clear and start plotters."""
+        """Handle session start (Start button) - clear and start plotter."""
         self._plot_recording_state = None
         self._session_active = True
-        for port, dev in self.devices.items():
-            plotter = dev.get('plot')
-            if plotter:
-                plotter.start_session()
-            # Reset results
-            dev['trl_n'].set('0')
-            dev['tsot'].set('0')
-            dev['tsct'].set('0')
+        if self._plotter:
+            self._plotter.start_session()
+        # Reset results
+        if self._trl_n:
+            self._trl_n.set('0')
+        if self._tsot:
+            self._tsot.set('0')
+        if self._tsct:
+            self._tsct.set('0')
 
     def handle_session_stopped(self) -> None:
-        """Handle session stop (Stop button) - freeze plotters completely."""
+        """Handle session stop (Stop button) - freeze plotter completely."""
         self._plot_recording_state = None
         self._session_active = False
-        for port, dev in self.devices.items():
-            plotter = dev.get('plot')
-            if plotter:
-                plotter.stop()
+        if self._plotter:
+            self._plotter.stop()
 
     # ------------------------------------------------------------------
     # Button callbacks
-
-    def _get_active_port(self) -> Optional[str]:
-        """Get the port of the currently selected tab."""
-        if not self._notebook or not self.devices:
-            return None
-
-        try:
-            current_tab = self._notebook.select()
-            if current_tab:
-                tab_text = self._notebook.tab(current_tab, 'text')
-                # Find port by matching tab text
-                for port in self.devices:
-                    short_port = port.split('/')[-1]
-                    if short_port in tab_text:
-                        return port
-        except Exception:
-            pass
-
-        # Fallback: return first device
-        return next(iter(self.devices), None)
 
     def _on_lens_clear(self):
         """Handle lens clear/open button click."""
@@ -480,9 +458,13 @@ class VOGTkinterGUI:
         if self._action_callback and self.async_bridge:
             self.async_bridge.run_coroutine(self._action_callback("peek_close"))
 
-    def _on_configure_clicked(self, port: str):
+    def _on_configure_clicked(self):
         """Handle configure button click - show config dialog."""
-        self.logger.info("Configure button clicked for port: %s", port)
+        self.logger.info("Configure button clicked for port: %s", self._port)
+
+        if self._port is None:
+            self.logger.warning("No device connected - cannot configure")
+            return
 
         if VOGConfigWindow is None:
             self.logger.warning("Configuration dialog not available (import failed)")
@@ -496,7 +478,7 @@ class VOGTkinterGUI:
                 messagebox.showwarning(
                     "Not Ready",
                     "System not fully initialized. Please wait a moment and try again.",
-                    parent=self._notebook.winfo_toplevel() if self._notebook else None
+                    parent=self._frame.winfo_toplevel() if self._frame else None
                 )
             except Exception:
                 pass
@@ -506,16 +488,11 @@ class VOGTkinterGUI:
             self.logger.warning("System not available for configuration (system=%s)", type(self.system).__name__)
             return
 
-        # Get device type from devices map
-        device_type = 'svog'
-        if port in self.devices:
-            device_type = self.devices[port].get('device_type', 'svog')
-
         # Get root window for the dialog
         root = None
-        if self._notebook:
+        if self._frame:
             try:
-                root = self._notebook.winfo_toplevel()
+                root = self._frame.winfo_toplevel()
             except Exception as e:
                 self.logger.error("Failed to get toplevel window: %s", e)
 
@@ -524,9 +501,7 @@ class VOGTkinterGUI:
             return
 
         try:
-            # VOGConfigWindow is modal (transient + grab_set), but we don't use wait_window()
-            # to avoid blocking the asyncio event loop. The dialog handles its own lifecycle.
-            VOGConfigWindow(root, port, self.system, device_type, async_bridge=self.async_bridge)
+            VOGConfigWindow(root, self._port, self.system, self._device_type, async_bridge=self.async_bridge)
         except Exception as e:
             self.logger.error("Failed to create config window: %s", e, exc_info=True)
 
@@ -535,15 +510,11 @@ class VOGTkinterGUI:
 
     def handle_window_close(self):
         """Handle window close event."""
-        # Stop recording and session
         self._running = False
         self._session_active = False
         self._plot_recording_state = None
-        # Stop all plotters
-        for dev in self.devices.values():
-            plotter = dev.get('plot')
-            if plotter:
-                plotter.stop()
+        if self._plotter:
+            self._plotter.stop()
 
     def show(self):
         """Show the VOG frame."""

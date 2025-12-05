@@ -67,9 +67,14 @@ class LoggerSystem:
         self.device_manager.set_devices_changed_callback(self._on_devices_changed)
         self.device_manager.set_device_connected_callback(self._on_device_connected)
         self.device_manager.set_device_disconnected_callback(self._on_device_disconnected)
+        self.device_manager.set_save_connection_state_callback(self._save_device_connection_state)
+        self.device_manager.set_load_connection_state_callback(self._load_device_connection_state)
 
         # UI callback for device panel updates
         self.devices_ui_callback: Optional[Callable[[List[DeviceInfo], List[XBeeDongleInfo]], None]] = None
+
+        # UI callback for window visibility changes (device_id, visible)
+        self.window_visibility_callback: Optional[Callable[[str, bool], None]] = None
 
         # State
         self.shutdown_event = asyncio.Event()
@@ -159,6 +164,9 @@ class LoggerSystem:
                     except Exception as e:
                         self.logger.error("UI callback error: %s", e)
                 return
+            elif status.get_status_type() in ("window_hidden", "window_shown"):
+                visible = status.get_status_type() == "window_shown"
+                self._notify_window_visibility(module_name, visible)
             elif status.is_error():
                 self.logger.error("Module %s error: %s",
                                 module_name,
@@ -178,6 +186,23 @@ class LoggerSystem:
                 await self.ui_callback(module_name, process.get_state(), status)
             except Exception as e:
                 self.logger.error("UI callback error: %s", e)
+
+    def _notify_window_visibility(self, module_name: str, visible: bool) -> None:
+        """Notify UI about window visibility change for all devices of a module."""
+        if not self.window_visibility_callback:
+            return
+
+        # Find all devices that belong to this module
+        devices = self.device_manager.get_devices_for_module(module_name)
+        self.logger.debug(
+            "Window visibility changed for module %s (visible=%s), updating %d devices",
+            module_name, visible, len(devices)
+        )
+        for device in devices:
+            try:
+                self.window_visibility_callback(device.device_id, visible)
+            except Exception as e:
+                self.logger.error("Window visibility callback error: %s", e)
 
     # ========== Module Management (delegate to ModuleManager) ==========
 
@@ -469,8 +494,20 @@ class LoggerSystem:
         """Set callback for updating device panel UI."""
         self.devices_ui_callback = callback
 
+    def set_window_visibility_callback(
+        self,
+        callback: Callable[[str, bool], None]
+    ) -> None:
+        """Set callback for window visibility changes.
+
+        The callback receives (device_id, visible) when a module window is shown/hidden.
+        """
+        self.window_visibility_callback = callback
+
     async def start_device_scanning(self) -> None:
         """Start USB and XBee device scanning."""
+        # Load device connection states and mark modules for auto-connect
+        await self._load_pending_auto_connects()
         await self.device_manager.start_scanning()
         self.logger.info("Device scanning started")
 
@@ -547,6 +584,17 @@ class LoggerSystem:
 
         If the module is not running, it will be enabled first.
         """
+        await self.toggle_device_window(device_id, visible=True)
+
+    async def hide_device_window(self, device_id: str) -> None:
+        """Hide the window for a device's module."""
+        await self.toggle_device_window(device_id, visible=False)
+
+    async def toggle_device_window(self, device_id: str, visible: bool) -> None:
+        """Show or hide the window for a device's module.
+
+        If showing and the module is not running, it will be enabled first.
+        """
         device = self.device_manager.get_device(device_id)
         if not device:
             self.logger.warning("Device not found: %s", device_id)
@@ -557,14 +605,66 @@ class LoggerSystem:
             self.logger.warning("Device has no module_id: %s", device_id)
             return
 
-        # Ensure module is enabled/running
-        if not self.module_manager.is_module_enabled(module_id):
-            self.logger.info("Enabling module %s to show window for device %s", module_id, device_id)
-            success = await self.module_manager.set_module_enabled(module_id, True)
-            if not success:
-                self.logger.error("Failed to enable module %s", module_id)
-                return
+        if visible:
+            # Ensure module is enabled/running when showing
+            if not self.module_manager.is_module_enabled(module_id):
+                self.logger.info("Enabling module %s to show window for device %s", module_id, device_id)
+                success = await self.module_manager.set_module_enabled(module_id, True)
+                if not success:
+                    self.logger.error("Failed to enable module %s", module_id)
+                    return
 
-        # Send show_window command to module
-        command = CommandMessage.show_window()
-        await self.module_manager.send_command(module_id, command)
+            # Send show_window command to module
+            command = CommandMessage.show_window()
+            await self.module_manager.send_command(module_id, command)
+        else:
+            # Send hide_window command to module
+            command = CommandMessage.hide_window()
+            await self.module_manager.send_command(module_id, command)
+
+    # ========== Device Connection State Persistence ==========
+
+    async def _save_device_connection_state(self, module_id: str, connected: bool) -> None:
+        """Save device connection state to module config."""
+        modules = self.module_manager.get_available_modules()
+        module_info = next((m for m in modules if m.name == module_id), None)
+
+        if not module_info or not module_info.config_path:
+            self.logger.warning("Cannot save connection state - no config for %s", module_id)
+            return
+
+        success = await self.config_manager.write_config_async(
+            module_info.config_path,
+            {'device_connected': connected}
+        )
+
+        if success:
+            self.logger.info("Saved device_connected=%s for module %s", connected, module_id)
+        else:
+            self.logger.error("Failed to save device_connected for module %s", module_id)
+
+    async def _load_device_connection_state(self, module_id: str) -> bool:
+        """Load device connection state from module config."""
+        modules = self.module_manager.get_available_modules()
+        module_info = next((m for m in modules if m.name == module_id), None)
+
+        if not module_info or not module_info.config_path:
+            return False
+
+        config = await self.config_manager.read_config_async(module_info.config_path)
+        return self.config_manager.get_bool(config, 'device_connected', default=False)
+
+    async def _load_pending_auto_connects(self) -> None:
+        """Load device connection states and mark modules for auto-connect."""
+        modules = self.module_manager.get_available_modules()
+
+        for module_info in modules:
+            if not module_info.config_path:
+                continue
+
+            config = await self.config_manager.read_config_async(module_info.config_path)
+            was_connected = self.config_manager.get_bool(config, 'device_connected', default=False)
+
+            if was_connected:
+                self.logger.info("Module %s had device connected - marking for auto-connect", module_info.name)
+                self.device_manager.set_pending_auto_connect(module_info.name)

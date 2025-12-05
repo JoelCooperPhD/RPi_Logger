@@ -156,6 +156,9 @@ class MainWindow:
         # Wire up device UI callback
         self.logger_system.set_devices_ui_callback(self.update_devices_display)
 
+        # Wire up window visibility callback for Show/Hide button state
+        self.logger_system.set_window_visibility_callback(self.on_window_visibility_changed)
+
         self.timer_manager.set_labels(
             self.current_time_label,
             self.session_timer_label,
@@ -473,8 +476,8 @@ class MainWindow:
             on_connect_toggle=lambda device_id, connect: self._schedule_task(
                 self.controller.on_device_connect_toggle(device_id, connect)
             ),
-            on_show_window=lambda device_id: self._schedule_task(
-                self.controller.on_device_show_window(device_id)
+            on_toggle_window=lambda device_id, visible: self._schedule_task(
+                self.controller.on_device_toggle_window(device_id, visible)
             ),
         )
         # Right column of main content area
@@ -492,6 +495,14 @@ class MainWindow:
                 self.logger.debug("  Dongle %s has children: %s", d.port, list(d.child_devices.keys()))
         if self.devices_panel:
             self.devices_panel.update_devices(devices, dongles)
+
+    def on_window_visibility_changed(self, device_id: str, visible: bool) -> None:
+        """Handle window visibility change for a device.
+
+        This updates the Show/Hide button text in the devices panel.
+        """
+        if self.devices_panel:
+            self.devices_panel.set_window_visible(device_id, visible)
 
     def _build_logger_frame(self) -> None:
         self.logger_frame = ttk.LabelFrame(self.root, text="System Log", padding="3")

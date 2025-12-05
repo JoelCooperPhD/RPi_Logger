@@ -49,6 +49,7 @@ class ModuleProcess:
         self.state = ModuleState.STOPPED
         self.last_status = None
         self.error_message = None
+        self.window_visible = False
 
         self.stdout_task: Optional[asyncio.Task] = None
         self.stderr_task: Optional[asyncio.Task] = None
@@ -303,6 +304,10 @@ class ModuleProcess:
             self.shutdown_event.set()
             self._was_forcefully_stopped = False
             await self._update_enabled_state(False)
+        elif status_type == "window_hidden":
+            self.window_visible = False
+        elif status_type == "window_shown":
+            self.window_visible = True
 
         if self.status_callback:
             try:

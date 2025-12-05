@@ -562,6 +562,9 @@ class StubCodexView:
             self.root.withdraw()
         except tk.TclError:
             pass
+        # Notify main logger that window was hidden via status message
+        from rpi_logger.core.commands.command_protocol import StatusMessage
+        StatusMessage.send("window_hidden")
         # Notify runtime that window was hidden (not quit)
         if self.action_callback:
             try:
@@ -579,6 +582,9 @@ class StubCodexView:
             self.root.focus_force()
         except tk.TclError:
             pass
+        # Notify main logger that window was shown via status message
+        from rpi_logger.core.commands.command_protocol import StatusMessage
+        StatusMessage.send("window_shown")
 
     def hide_window(self) -> None:
         """Hide the window without terminating the process."""
@@ -588,6 +594,9 @@ class StubCodexView:
             self.root.withdraw()
         except tk.TclError:
             pass
+        # Notify main logger that window was hidden via status message
+        from rpi_logger.core.commands.command_protocol import StatusMessage
+        StatusMessage.send("window_hidden")
 
     def is_window_visible(self) -> bool:
         """Return True if window is currently visible."""

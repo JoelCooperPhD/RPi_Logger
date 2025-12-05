@@ -439,10 +439,11 @@ class MainController:
         except Exception as e:
             self.logger.error("Error toggling device connection: %s", e, exc_info=True)
 
-    async def on_device_show_window(self, device_id: str) -> None:
-        """Handle show window button from devices panel."""
+    async def on_device_toggle_window(self, device_id: str, visible: bool) -> None:
+        """Handle show/hide window button from devices panel."""
         try:
-            self.logger.info("Showing window for device: %s", device_id)
-            await self.logger_system.show_device_window(device_id)
+            action = "Showing" if visible else "Hiding"
+            self.logger.info("%s window for device: %s", action, device_id)
+            await self.logger_system.toggle_device_window(device_id, visible)
         except Exception as e:
-            self.logger.error("Error showing device window: %s", e, exc_info=True)
+            self.logger.error("Error toggling device window: %s", e, exc_info=True)
