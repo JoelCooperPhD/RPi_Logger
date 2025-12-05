@@ -1,291 +1,273 @@
 """
 USB Devices panel for main window.
 
-Displays discovered USB devices as distinct tiles with activate/show controls.
+Displays discovered devices in two sections:
+- USB: Direct USB-connected devices
+- WIRELESS: Devices connected via XBee dongles
+
+Each device is shown as a single-line tile with:
+- Round toggle button (green when on, dark when off)
+- Device name
+- Show/Hide button
 """
 
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
 from ..devices import DeviceInfo, XBeeDongleInfo, ConnectionState
-from .theme import Theme, Colors, RoundedButton
+from .theme import Colors, RoundedButton
 
 logger = get_module_logger("DevicesPanel")
 
 
-class DeviceTile(ttk.LabelFrame):
-    """
-    A distinct tile frame for a single device.
+class RoundToggle(tk.Canvas):
+    """A round toggle button that shows green when active, dark when inactive."""
 
-    Shows device info with activate checkbox and show/hide window button.
+    def __init__(
+        self,
+        parent,
+        size: int = 20,
+        command: Optional[Callable[[bool], None]] = None,
+        active: bool = False,
+    ):
+        super().__init__(
+            parent,
+            width=size,
+            height=size,
+            highlightthickness=0,
+            bg=Colors.BG_FRAME,
+            cursor="hand2"
+        )
+        self._size = size
+        self._command = command
+        self._active = active
+        self._hovering = False
+        self._draw()
+        self._bind_events()
+
+    def _draw(self) -> None:
+        """Draw the round toggle."""
+        self.delete("all")
+        padding = 2
+
+        if self._active:
+            # Green filled circle when active
+            fill_color = Colors.SUCCESS_HOVER if self._hovering else Colors.STATUS_CONNECTED
+            self.create_oval(
+                padding, padding,
+                self._size - padding, self._size - padding,
+                fill=fill_color,
+                outline=fill_color
+            )
+        else:
+            # Dark circle with border when inactive
+            fill_color = Colors.BG_DARKER if self._hovering else Colors.BG_DARK
+            self.create_oval(
+                padding, padding,
+                self._size - padding, self._size - padding,
+                fill=fill_color,
+                outline=Colors.BORDER_LIGHT if self._hovering else Colors.BORDER,
+                width=2
+            )
+
+    def _bind_events(self) -> None:
+        """Bind mouse events."""
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+
+    def _on_enter(self, event) -> None:
+        self._hovering = True
+        self._draw()
+
+    def _on_leave(self, event) -> None:
+        self._hovering = False
+        self._draw()
+
+    def _on_click(self, event) -> None:
+        self._active = not self._active
+        self._draw()
+        if self._command:
+            self._command(self._active)
+
+    def set_active(self, active: bool) -> None:
+        """Set the toggle state without triggering callback."""
+        if self._active != active:
+            self._active = active
+            self._draw()
+
+    def get_active(self) -> bool:
+        """Get the current toggle state."""
+        return self._active
+
+
+class DeviceRow(ttk.Frame):
+    """
+    A single-line row for a device.
+
+    Layout: [Round Toggle] [Device Name] [Show Button]
     """
 
     def __init__(
         self,
         parent,
         device: DeviceInfo,
-        on_activate_toggle: Callable[[str, bool], None],
-        on_show_hide: Callable[[str], None],
+        on_toggle: Callable[[str, bool], None],
+        on_show: Callable[[str], None],
     ):
-        # Use device display name as frame title
-        super().__init__(parent, text=device.display_name, padding=5)
+        super().__init__(parent, style='Inframe.TFrame')
         self.device = device
-        self._on_activate_toggle = on_activate_toggle
-        self._on_show_hide = on_show_hide
+        self._on_toggle = on_toggle
+        self._on_show = on_show
 
-        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=1)  # Device name expands
 
-        # Row 0: Device type and status
-        info_frame = ttk.Frame(self)
-        info_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        info_frame.columnconfigure(1, weight=1)
-
-        # Device type label
-        type_text = self._get_device_type_text()
-        self.type_label = ttk.Label(info_frame, text=type_text, style='Secondary.TLabel')
-        self.type_label.grid(row=0, column=0, sticky="w")
-
-        # Status label (right-aligned)
-        self.status_label = ttk.Label(
-            info_frame,
-            text=self._get_status_text(),
-            foreground=self._get_status_color()
+        # Round toggle button (column 0)
+        is_connected = device.state == ConnectionState.CONNECTED
+        self.toggle_btn = RoundToggle(
+            self,
+            size=20,
+            command=self._on_toggle_click,
+            active=is_connected
         )
-        self.status_label.grid(row=0, column=1, sticky="e")
+        self.toggle_btn.grid(row=0, column=0, padx=(4, 10), pady=4)
 
-        # Row 1: Battery (if available)
-        if device.battery_percent is not None:
-            battery_text = f"Battery: {device.battery_percent}%"
-            self.battery_label = ttk.Label(self, text=battery_text)
-            self.battery_label.grid(row=1, column=0, sticky="w", pady=(0, 5))
-        else:
-            self.battery_label = None
-
-        # Row 2: Port info
-        if device.port:
-            port_text = f"Port: {device.port}"
-            if device.is_wireless:
-                port_text = f"Via: {device.port} (wireless)"
-            self.port_label = ttk.Label(self, text=port_text, style='Secondary.TLabel')
-            self.port_label.grid(row=2, column=0, sticky="w", pady=(0, 5))
-
-        # Row 3: Control buttons
-        btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=3, column=0, sticky="ew")
-        btn_frame.columnconfigure(0, weight=1)
-
-        # Activate checkbox
-        self.activate_var = tk.BooleanVar(
-            value=device.state == ConnectionState.CONNECTED
+        # Device name (column 1)
+        self.name_label = ttk.Label(
+            self,
+            text=device.display_name,
+            style='Inframe.TLabel'
         )
-        self.activate_cb = ttk.Checkbutton(
-            btn_frame,
-            text="Activate",
-            variable=self.activate_var,
-            command=self._on_activate_click,
-        )
-        self.activate_cb.grid(row=0, column=0, sticky="w")
+        self.name_label.grid(row=0, column=1, sticky="w", pady=4)
 
-        # Show/Hide button - use RoundedButton for consistent styling
+        # Show button (column 2) - rounded with twice the width
         self.show_btn = RoundedButton(
-            btn_frame,
+            self,
             text="Show",
             command=self._on_show_click,
             width=70,
-            height=28,
+            height=24,
+            corner_radius=6,
             style='default',
+            bg=Colors.BG_FRAME
         )
-        self.show_btn.grid(row=0, column=1, sticky="e", padx=(5, 0))
+        self.show_btn.grid(row=0, column=2, padx=(8, 4), pady=4)
 
-        self._update_button_states()
-
-    def _get_device_type_text(self) -> str:
-        """Get human-readable device type."""
-        type_map = {
-            "sVOG": "Serial VOG",
-            "wVOG_USB": "Wireless VOG (USB)",
-            "wVOG_Wireless": "Wireless VOG",
-            "sDRT": "Serial DRT",
-            "wDRT_USB": "Wireless DRT (USB)",
-            "wDRT_Wireless": "Wireless DRT",
-            "XBee_Coordinator": "XBee Coordinator",
-        }
-        return type_map.get(self.device.device_type.value, self.device.device_type.value)
-
-    def _get_status_text(self) -> str:
-        """Get display text for connection state."""
-        state_map = {
-            ConnectionState.DISCOVERED: "Ready",
-            ConnectionState.CONNECTING: "Connecting...",
-            ConnectionState.CONNECTED: "Active",
-            ConnectionState.ERROR: "Error",
-        }
-        return state_map.get(self.device.state, "Unknown")
-
-    def _get_status_color(self) -> str:
-        """Get color for status text."""
-        color_map = {
-            ConnectionState.DISCOVERED: Colors.STATUS_READY,
-            ConnectionState.CONNECTING: Colors.STATUS_CONNECTING,
-            ConnectionState.CONNECTED: Colors.STATUS_CONNECTED,
-            ConnectionState.ERROR: Colors.STATUS_ERROR,
-        }
-        return color_map.get(self.device.state, Colors.FG_SECONDARY)
-
-    def _on_activate_click(self) -> None:
-        self._on_activate_toggle(self.device.device_id, self.activate_var.get())
+    def _on_toggle_click(self, active: bool) -> None:
+        """Handle toggle click."""
+        self._on_toggle(self.device.device_id, active)
 
     def _on_show_click(self) -> None:
-        self._on_show_hide(self.device.device_id)
+        """Handle show button click."""
+        self._on_show(self.device.device_id)
 
-    def _update_button_states(self) -> None:
-        """Update button states based on device state."""
-        # Show button is always enabled - clicking it will activate if needed
-        self.show_btn.configure(state="normal")
+    def _update_state(self) -> None:
+        """Update visual state based on device state."""
+        is_connected = self.device.state == ConnectionState.CONNECTED
+        self.toggle_btn.set_active(is_connected)
 
     def update_device(self, device: DeviceInfo) -> None:
-        """Update tile with new device info."""
+        """Update with new device info."""
         self.device = device
-
-        # Update title
-        self.configure(text=device.display_name)
-
-        # Update type
-        self.type_label.configure(text=self._get_device_type_text())
-
-        # Update status
-        self.status_label.configure(
-            text=self._get_status_text(),
-            foreground=self._get_status_color()
-        )
-
-        # Update battery if present
-        if self.battery_label and device.battery_percent is not None:
-            self.battery_label.configure(text=f"Battery: {device.battery_percent}%")
-
-        # Update checkbox state
-        self.activate_var.set(device.state == ConnectionState.CONNECTED)
-
-        # Update button states
-        self._update_button_states()
+        self.name_label.configure(text=device.display_name)
+        self._update_state()
 
 
-class DongleTile(ttk.LabelFrame):
+class DeviceSection(ttk.Frame):
     """
-    A tile frame for an XBee dongle.
+    A section frame containing devices of a certain type.
 
-    Shows dongle info and contains nested child device tiles.
+    Has a banner header and contains device rows.
     """
 
     def __init__(
         self,
         parent,
-        dongle: XBeeDongleInfo,
-        on_activate_toggle: Callable[[str, bool], None],
-        on_show_hide: Callable[[str], None],
+        title: str,
+        on_toggle: Callable[[str, bool], None],
+        on_show: Callable[[str], None],
     ):
-        super().__init__(parent, text=f"XBee Dongle ({dongle.port})", padding=5)
-        self.dongle = dongle
-        self._on_activate_toggle = on_activate_toggle
-        self._on_show_hide = on_show_hide
-        self._child_tiles: Dict[str, DeviceTile] = {}
+        super().__init__(parent, style='Inframe.TFrame')
+        self._title = title
+        self._on_toggle = on_toggle
+        self._on_show = on_show
+        self._device_rows: Dict[str, DeviceRow] = {}
 
         self.columnconfigure(0, weight=1)
 
-        # Row 0: Status
-        status_frame = ttk.Frame(self)
-        status_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        status_frame.columnconfigure(1, weight=1)
+        # Banner header
+        self.header = ttk.Frame(self, style='SectionHeader.TFrame')
+        self.header.grid(row=0, column=0, sticky="ew")
+        self.header.columnconfigure(0, weight=1)
 
-        ttk.Label(status_frame, text="XBee Coordinator", style='Secondary.TLabel').grid(
-            row=0, column=0, sticky="w"
+        self.header_label = ttk.Label(
+            self.header,
+            text=title,
+            style='SectionHeader.TLabel',
+            font=('TkDefaultFont', 9, 'bold')
         )
+        self.header_label.grid(row=0, column=0, sticky="w", padx=8, pady=4)
 
-        status_text, status_color = self._get_status()
-        self.status_label = ttk.Label(
-            status_frame, text=status_text, foreground=status_color
+        # Content frame for device rows
+        self.content = ttk.Frame(self, style='Inframe.TFrame')
+        self.content.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
+        self.content.columnconfigure(0, weight=1)
+
+        # Empty state label
+        self.empty_label = ttk.Label(
+            self.content,
+            text="No devices",
+            style='Inframe.Secondary.TLabel',
+            font=('TkDefaultFont', 9, 'italic')
         )
-        self.status_label.grid(row=0, column=1, sticky="e")
+        self.empty_label.grid(row=0, column=0, sticky="w", padx=8, pady=4)
 
-        # Row 1: Child devices container (indented)
-        self.children_frame = ttk.Frame(self)
-        self.children_frame.grid(row=1, column=0, sticky="ew", padx=(15, 0))
-        self.children_frame.columnconfigure(0, weight=1)
-
-        # Empty state for no child devices
-        self.no_children_label = ttk.Label(
-            self.children_frame,
-            text="No wireless devices found",
-            style='Muted.TLabel',
-            font=("TkDefaultFont", 9, "italic"),
-        )
-        self._update_children()
-
-    def _get_status(self) -> tuple:
-        """Get status text and color."""
-        state_map = {
-            ConnectionState.DISCOVERED: ("Scanning...", Colors.STATUS_CONNECTING),
-            ConnectionState.CONNECTING: ("Connecting...", Colors.STATUS_CONNECTING),
-            ConnectionState.CONNECTED: ("Connected", Colors.STATUS_CONNECTED),
-            ConnectionState.ERROR: ("Error", Colors.STATUS_ERROR),
-        }
-        return state_map.get(self.dongle.state, ("Unknown", Colors.FG_SECONDARY))
-
-    def _update_children(self) -> None:
-        """Update child device tiles incrementally to avoid flashing."""
-        if not self.dongle.child_devices:
-            # No children - show empty label and clear tiles
-            self.no_children_label.grid(row=0, column=0, sticky="w", pady=5)
-            for tile in self._child_tiles.values():
-                tile.destroy()
-            self._child_tiles.clear()
+    def update_devices(self, devices: List[DeviceInfo]) -> None:
+        """Update the section with a list of devices."""
+        if not devices:
+            # Show empty state
+            self.empty_label.grid(row=0, column=0, sticky="w", padx=8, pady=4)
+            for row in self._device_rows.values():
+                row.destroy()
+            self._device_rows.clear()
             return
 
-        self.no_children_label.grid_remove()
+        # Hide empty label
+        self.empty_label.grid_remove()
 
-        # Build set of current child IDs
-        current_child_ids = set(self.dongle.child_devices.keys())
+        # Build set of current device IDs
+        current_ids = {d.device_id for d in devices}
 
-        # Remove tiles for children that no longer exist
-        removed_child_ids = set(self._child_tiles.keys()) - current_child_ids
-        for child_id in removed_child_ids:
-            self._child_tiles[child_id].destroy()
-            del self._child_tiles[child_id]
+        # Remove rows for devices that no longer exist
+        removed_ids = set(self._device_rows.keys()) - current_ids
+        for device_id in removed_ids:
+            self._device_rows[device_id].destroy()
+            del self._device_rows[device_id]
 
-        # Update or create tiles for current children
-        for idx, device in enumerate(self.dongle.child_devices.values()):
-            if device.device_id in self._child_tiles:
-                # Update existing tile in-place
-                self._child_tiles[device.device_id].update_device(device)
-                self._child_tiles[device.device_id].grid(
-                    row=idx, column=0, sticky="ew", pady=(0, 5)
+        # Update or create rows
+        for idx, device in enumerate(devices):
+            if device.device_id in self._device_rows:
+                # Update existing row
+                self._device_rows[device.device_id].update_device(device)
+                self._device_rows[device.device_id].grid(
+                    row=idx, column=0, sticky="ew", padx=4, pady=1
                 )
             else:
-                # Create new tile
-                tile = DeviceTile(
-                    self.children_frame,
+                # Create new row
+                row = DeviceRow(
+                    self.content,
                     device,
-                    self._on_activate_toggle,
-                    self._on_show_hide,
+                    self._on_toggle,
+                    self._on_show
                 )
-                tile.grid(row=idx, column=0, sticky="ew", pady=(0, 5))
-                self._child_tiles[device.device_id] = tile
-
-    def update_dongle(self, dongle: XBeeDongleInfo) -> None:
-        """Update dongle tile with new info."""
-        self.dongle = dongle
-        self.configure(text=f"XBee Dongle ({dongle.port})")
-
-        status_text, status_color = self._get_status()
-        self.status_label.configure(text=status_text, foreground=status_color)
-
-        self._update_children()
+                row.grid(row=idx, column=0, sticky="ew", padx=4, pady=1)
+                self._device_rows[device.device_id] = row
 
 
 class USBDevicesPanel(ttk.LabelFrame):
-    """Panel showing all discovered USB devices as tiles."""
+    """Panel showing all discovered devices organized by connection type."""
 
     def __init__(
         self,
@@ -297,25 +279,23 @@ class USBDevicesPanel(ttk.LabelFrame):
         self._on_connect_toggle = on_connect_toggle
         self._on_show_window = on_show_window
 
-        self._device_tiles: Dict[str, DeviceTile] = {}
-        self._dongle_tiles: Dict[str, DongleTile] = {}
-
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
 
-        # Scrollable device list
-        container = ttk.Frame(self)
+        # Main container with scrolling
+        container = ttk.Frame(self, style='Inframe.TFrame')
         container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
         container.columnconfigure(0, weight=1)
         container.rowconfigure(0, weight=1)
 
         # Create canvas with scrollbar
-        self.canvas = tk.Canvas(container, height=150, highlightthickness=0)
-        Theme.configure_canvas(self.canvas, use_dark_bg=True)
+        self.canvas = tk.Canvas(container, height=150, highlightthickness=0, bd=0)
+        self.canvas.configure(bg=Colors.BG_FRAME)
+
         self.scrollbar = ttk.Scrollbar(
             container, orient="vertical", command=self.canvas.yview
         )
-        self.scrollable_frame = ttk.Frame(self.canvas)
+        self.scrollable_frame = ttk.Frame(self.canvas, style='Inframe.TFrame')
         self.scrollable_frame.columnconfigure(0, weight=1)
 
         self.scrollable_frame.bind(
@@ -339,14 +319,30 @@ class USBDevicesPanel(ttk.LabelFrame):
         self.canvas.bind_all("<Button-4>", self._on_mousewheel)
         self.canvas.bind_all("<Button-5>", self._on_mousewheel)
 
-        # Empty state label
+        # Create sections
+        self.usb_section = DeviceSection(
+            self.scrollable_frame,
+            "USB",
+            self._on_connect_toggle,
+            self._on_show_window
+        )
+        self.usb_section.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+
+        self.wireless_section = DeviceSection(
+            self.scrollable_frame,
+            "WIRELESS",
+            self._on_connect_toggle,
+            self._on_show_window
+        )
+        self.wireless_section.grid(row=1, column=0, sticky="ew")
+
+        # Empty state (shown when no devices at all)
         self.empty_label = ttk.Label(
             self.scrollable_frame,
             text="No devices detected.\nConnect a supported device.",
-            style='Muted.TLabel',
+            style='Inframe.Secondary.TLabel',
             justify="center",
         )
-        self.empty_label.grid(row=0, column=0, pady=20)
 
     def _on_canvas_configure(self, event) -> None:
         """Update scrollable frame width when canvas resizes."""
@@ -364,94 +360,36 @@ class USBDevicesPanel(ttk.LabelFrame):
         devices: List[DeviceInfo],
         dongles: List[XBeeDongleInfo],
     ) -> None:
-        """Update the device list display with tiles.
+        """Update the device list display.
 
-        Layout:
-        - USB devices (direct connection) as top-level tiles
-        - XBee dongles as tiles with nested child devices indented beneath
-
-        This method performs incremental updates to avoid flashing:
-        - Existing tiles are updated in-place
-        - New tiles are created only for new devices
-        - Tiles are destroyed only when devices are removed
+        Args:
+            devices: List of USB-connected devices (non-wireless)
+            dongles: List of XBee dongles with their child wireless devices
         """
-        has_any = bool(devices) or bool(dongles)
+        # Collect all wireless devices from dongles
+        wireless_devices = []
+        for dongle in dongles:
+            wireless_devices.extend(dongle.child_devices.values())
 
-        # Show/hide empty label
+        has_any = bool(devices) or bool(wireless_devices)
+
+        # Show/hide sections based on content
         if has_any:
             self.empty_label.grid_remove()
+            self.usb_section.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+            self.wireless_section.grid(row=1, column=0, sticky="ew")
         else:
+            self.usb_section.grid_remove()
+            self.wireless_section.grid_remove()
             self.empty_label.grid(row=0, column=0, pady=20)
-            # Clear all tiles when no devices
-            for tile in self._device_tiles.values():
-                tile.destroy()
-            self._device_tiles.clear()
-            for tile in self._dongle_tiles.values():
-                tile.destroy()
-            self._dongle_tiles.clear()
             return
 
-        # Build sets of current IDs for comparison
-        current_device_ids = {d.device_id for d in devices}
-        current_dongle_ports = {d.port for d in dongles}
+        # Update sections
+        self.usb_section.update_devices(devices)
+        self.wireless_section.update_devices(wireless_devices)
 
-        # Remove tiles for devices that no longer exist
-        removed_device_ids = set(self._device_tiles.keys()) - current_device_ids
-        for device_id in removed_device_ids:
-            self._device_tiles[device_id].destroy()
-            del self._device_tiles[device_id]
-
-        removed_dongle_ports = set(self._dongle_tiles.keys()) - current_dongle_ports
-        for port in removed_dongle_ports:
-            self._dongle_tiles[port].destroy()
-            del self._dongle_tiles[port]
-
-        row_idx = 0
-
-        # First: USB devices (non-dongle)
-        for device in devices:
-            if device.device_id in self._device_tiles:
-                # Update existing tile in-place
-                self._device_tiles[device.device_id].update_device(device)
-                self._device_tiles[device.device_id].grid(
-                    row=row_idx, column=0, sticky="ew", pady=(0, 5), padx=2
-                )
-            else:
-                # Create new tile
-                tile = DeviceTile(
-                    self.scrollable_frame,
-                    device,
-                    self._on_connect_toggle,
-                    self._on_show_window,
-                )
-                tile.grid(row=row_idx, column=0, sticky="ew", pady=(0, 5), padx=2)
-                self._device_tiles[device.device_id] = tile
-            row_idx += 1
-
-        # Second: XBee dongles with nested child devices
-        for dongle in dongles:
-            if dongle.port in self._dongle_tiles:
-                # Update existing dongle tile in-place
-                self._dongle_tiles[dongle.port].update_dongle(dongle)
-                self._dongle_tiles[dongle.port].grid(
-                    row=row_idx, column=0, sticky="ew", pady=(0, 5), padx=2
-                )
-            else:
-                # Create new dongle tile
-                dongle_tile = DongleTile(
-                    self.scrollable_frame,
-                    dongle,
-                    self._on_connect_toggle,
-                    self._on_show_window,
-                )
-                dongle_tile.grid(row=row_idx, column=0, sticky="ew", pady=(0, 5), padx=2)
-                self._dongle_tiles[dongle.port] = dongle_tile
-            row_idx += 1
-
-        total_devices = len(devices) + sum(
-            len(d.child_devices) for d in dongles
-        )
+        total_devices = len(devices) + len(wireless_devices)
         logger.debug(
-            "Updated devices panel: %d USB devices, %d dongles, %d total devices",
-            len(devices), len(dongles), total_devices
+            "Updated devices panel: %d USB devices, %d wireless devices, %d total",
+            len(devices), len(wireless_devices), total_devices
         )
