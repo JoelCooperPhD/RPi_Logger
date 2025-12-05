@@ -3,6 +3,9 @@ Module Manager - Handles module discovery, selection, and lifecycle.
 
 This module provides centralized management of logger modules including
 discovery, selection state, and process lifecycle management.
+
+The ModuleManager now delegates state tracking to ModuleStateManager and
+acts primarily as a process manager that responds to state change events.
 """
 
 import asyncio
@@ -12,6 +15,15 @@ from typing import Dict, List, Optional, Callable, Set
 
 from .module_discovery import ModuleInfo, discover_modules
 from .module_process import ModuleProcess, ModuleState
+from .module_state_manager import (
+    ModuleStateManager,
+    StateChange,
+    StateEvent,
+    ActualState,
+    DesiredState,
+    RUNNING_STATES,
+    STOPPED_STATES,
+)
 from .commands import StatusMessage
 from .window_manager import WindowGeometry
 from .config_manager import get_config_manager
@@ -21,11 +33,14 @@ class ModuleManager:
     """
     Manages module discovery, selection, and lifecycle.
 
+    This class now integrates with ModuleStateManager for state tracking
+    and acts as a process manager that responds to state change events.
+
     Responsibilities:
     - Discover available modules
-    - Track which modules are selected/enabled
     - Manage module processes (start, stop, status)
-    - Handle module configuration
+    - Respond to state manager events (START_REQUESTED, STOP_REQUESTED)
+    - Report actual state changes back to state manager
     """
 
     def __init__(
@@ -34,6 +49,7 @@ class ModuleManager:
         session_prefix: str = "session",
         log_level: str = "info",
         status_callback: Optional[Callable] = None,
+        state_manager: Optional[ModuleStateManager] = None,
     ):
         self.logger = get_module_logger("ModuleManager")
         self.session_dir = Path(session_dir)
@@ -41,89 +57,127 @@ class ModuleManager:
         self.log_level = log_level
         self.status_callback = status_callback
 
+        # State manager (can be injected or created)
+        self.state_manager = state_manager or ModuleStateManager()
+
+        # Process tracking
         self.available_modules: List[ModuleInfo] = []
-        self.module_enabled_state: Dict[str, bool] = {}
-        self.module_state_changing: Dict[str, bool] = {}
         self.module_processes: Dict[str, ModuleProcess] = {}
-        self.state_change_callbacks: List[Callable] = []
         self.window_geometry_cache: Dict[str, Optional[WindowGeometry]] = {}
-        self._state_locks: Dict[str, asyncio.Lock] = {}
+
+        # Locks for process operations
+        self._process_locks: Dict[str, asyncio.Lock] = {}
+
+        # Legacy compatibility (deprecated - use state_manager instead)
+        self._legacy_state_changing: Dict[str, bool] = {}
+        self._legacy_callbacks: List[Callable] = []
+
+        # Track forcefully stopped modules
         self.forcefully_stopped_modules: Set[str] = set()
 
         self.config_manager = get_config_manager()
 
+        # Health check task
+        self._health_check_task: Optional[asyncio.Task] = None
+        self._shutdown = False
+
+        # Discover modules and register with state manager
         self._discover_modules()
 
+        # Register as observer for state manager events
+        self.state_manager.add_observer(
+            self._handle_state_event,
+            events={StateEvent.START_REQUESTED, StateEvent.STOP_REQUESTED}
+        )
+
     def _discover_modules(self) -> None:
-        """Discover all available modules."""
+        """Discover all available modules and register with state manager."""
         self.logger.info("Discovering modules...")
         self.available_modules = discover_modules()
         self.logger.info("Found %d modules: %s",
                         len(self.available_modules),
                         [m.name for m in self.available_modules])
 
-    async def load_enabled_modules(self) -> None:
-        """Load module enabled state from configs (sets state, does not start modules)."""
-        self.module_enabled_state.clear()
-
+        # Register each module with state manager
         for module_info in self.available_modules:
-            if not module_info.config_path:
-                self.module_enabled_state[module_info.name] = True
-                self.logger.debug("Module %s has no config, defaulting to enabled", module_info.name)
-                continue
+            self.state_manager.register_module(module_info.name)
 
-            config = await self.config_manager.read_config_async(module_info.config_path)
-            enabled = self.config_manager.get_bool(config, 'enabled', default=True)
+    def _get_process_lock(self, module_name: str) -> asyncio.Lock:
+        """Get or create a lock for a module's process operations."""
+        lock = self._process_locks.get(module_name)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._process_locks[module_name] = lock
+        return lock
 
-            self.module_enabled_state[module_info.name] = enabled
-            if enabled:
-                self.logger.info("Module %s enabled in config", module_info.name)
-            else:
-                self.logger.info("Module %s disabled in config", module_info.name)
+    # =========================================================================
+    # State Manager Event Handler
+    # =========================================================================
+
+    async def _handle_state_event(self, change: StateChange) -> None:
+        """Handle events from the state manager."""
+        if change.event == StateEvent.START_REQUESTED:
+            await self._start_module_process(change.module_name)
+
+        elif change.event == StateEvent.STOP_REQUESTED:
+            await self._stop_module_process(change.module_name)
+
+    # =========================================================================
+    # Module State Queries (delegate to state manager)
+    # =========================================================================
+
+    def is_module_enabled(self, module_name: str) -> bool:
+        """Check if a module is enabled (user's desired state)."""
+        return self.state_manager.is_module_enabled(module_name)
+
+    def is_module_running(self, module_name: str) -> bool:
+        """Check if a module process is currently running."""
+        # Check both state manager and actual process
+        process = self.module_processes.get(module_name)
+        return process is not None and process.is_running()
+
+    def get_module_state(self, module_name: str) -> Optional[ModuleState]:
+        """Get the current state of a module process."""
+        process = self.module_processes.get(module_name)
+        if process:
+            return process.get_state()
+        return None
+
+    def is_module_state_changing(self, module_name: str) -> bool:
+        """Check if a module is currently transitioning state."""
+        actual = self.state_manager.get_actual_state(module_name)
+        return actual in (ActualState.STARTING, ActualState.STOPPING)
+
+    def get_module_enabled_states(self) -> Dict[str, bool]:
+        """Get all module enabled states."""
+        return self.state_manager.get_desired_states()
+
+    def get_selected_modules(self) -> List[str]:
+        """Get list of currently enabled module names."""
+        return self.state_manager.get_enabled_modules()
+
+    def get_running_modules(self) -> List[str]:
+        """Get list of currently running module names."""
+        return [
+            name for name, proc in self.module_processes.items()
+            if proc.is_running()
+        ]
 
     def get_available_modules(self) -> List[ModuleInfo]:
         """Get list of all discovered modules."""
         return self.available_modules
 
-    def register_state_change_callback(self, callback: Callable) -> None:
-        """Register a callback to be notified of module state changes."""
-        self.state_change_callbacks.append(callback)
-
-    async def _notify_state_change_started(self, module_name: str, target_state: bool) -> None:
-        """Notify callbacks that state change has started."""
-        for callback in self.state_change_callbacks:
-            try:
-                if asyncio.iscoroutinefunction(callback):
-                    await callback(module_name, "started", target_state)
-                else:
-                    callback(module_name, "started", target_state)
-            except Exception as e:
-                self.logger.error("State change callback error: %s", e)
-
-    async def _notify_state_change_completed(self, module_name: str, target_state: bool, success: bool) -> None:
-        """Notify callbacks that state change has completed."""
-        for callback in self.state_change_callbacks:
-            try:
-                if asyncio.iscoroutinefunction(callback):
-                    await callback(module_name, "completed", target_state, success)
-                else:
-                    callback(module_name, "completed", target_state, success)
-            except Exception as e:
-                self.logger.error("State change callback error: %s", e)
-
-    def _get_state_lock(self, module_name: str) -> asyncio.Lock:
-        lock = self._state_locks.get(module_name)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._state_locks[module_name] = lock
-        return lock
+    # =========================================================================
+    # Module State Setters
+    # =========================================================================
 
     async def set_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """
-        CENTRAL STATE MACHINE: Set module enabled state and start/stop accordingly.
+        Set module enabled state (central entry point).
 
-        This is the SINGLE ENTRY POINT for all module state changes.
-        All paths (GUI, CLI, config, crashes) route through here.
+        This sets the desired state in the state manager, which will
+        trigger START_REQUESTED or STOP_REQUESTED events that this
+        manager responds to.
 
         Args:
             module_name: Name of the module
@@ -132,71 +186,36 @@ class ModuleManager:
         Returns:
             True if state change succeeded, False otherwise
         """
-        lock = self._get_state_lock(module_name)
+        # Set desired state - this triggers reconciliation which will
+        # call _start_module_process or _stop_module_process
+        # Note: Don't hold the lock here as the event handlers need it
+        await self.state_manager.set_desired_state(module_name, enabled)
 
-        async with lock:
-            current_state = self.module_enabled_state.get(module_name, False)
-            is_running = self.is_module_running(module_name)
+        # Wait for actual state to match (with timeout)
+        try:
+            await asyncio.wait_for(
+                self._wait_for_state_consistency(module_name),
+                timeout=30.0
+            )
+            return True
+        except asyncio.TimeoutError:
+            self.logger.error(
+                "Timeout waiting for module %s to reach state: enabled=%s",
+                module_name, enabled
+            )
+            return False
 
-            if current_state == enabled and ((enabled and is_running) or (not enabled and not is_running)):
-                self.logger.debug("Module %s already in desired state: enabled=%s, running=%s",
-                                module_name, enabled, is_running)
-                return True
-
-            self.module_state_changing[module_name] = True
-            await self._notify_state_change_started(module_name, enabled)
-
-            success = False
-            try:
-                if enabled:
-                    success = await self._start_module_internal(module_name)
-                else:
-                    success = await self._stop_module_internal(module_name)
-
-                if success:
-                    self.module_enabled_state[module_name] = enabled
-                    self.logger.info("Module %s state changed to: %s", module_name, enabled)
-                else:
-                    self.logger.warning("Failed to change %s state to: %s", module_name, enabled)
-
-            finally:
-                self.module_state_changing[module_name] = False
-                await self._notify_state_change_completed(module_name, enabled, success)
-
-            return success
-
-    def is_module_enabled(self, module_name: str) -> bool:
-        """Check if a module is enabled (checkbox state)."""
-        return self.module_enabled_state.get(module_name, False)
-
-    def is_module_state_changing(self, module_name: str) -> bool:
-        """Check if a module is currently transitioning state."""
-        return self.module_state_changing.get(module_name, False)
-
-    def get_module_enabled_states(self) -> Dict[str, bool]:
-        """Get all module enabled states."""
-        return self.module_enabled_state.copy()
-
-
-
-
-
-    def get_selected_modules(self) -> List[str]:
-        """Get list of currently enabled module names."""
-        return [name for name, enabled in self.module_enabled_state.items() if enabled]
-
-
+    async def _wait_for_state_consistency(self, module_name: str) -> None:
+        """Wait for a module's actual state to match its desired state."""
+        while not self.state_manager.is_state_consistent(module_name):
+            await asyncio.sleep(0.1)
 
     async def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """
         Update a module's enabled state in its config file.
 
-        Args:
-            module_name: Name of the module
-            enabled: New enabled state
-
-        Returns:
-            True if config was updated successfully, False otherwise
+        Note: This is now handled by ConfigPersistenceObserver automatically
+        when desired state changes. This method exists for explicit config updates.
         """
         module_info = next(
             (m for m in self.available_modules if m.name == module_name),
@@ -218,94 +237,373 @@ class ModuleManager:
 
         return success
 
-    def is_module_running(self, module_name: str) -> bool:
-        """Check if a module process is currently running."""
-        process = self.module_processes.get(module_name)
-        return process is not None and process.is_running()
+    # =========================================================================
+    # Config Loading
+    # =========================================================================
 
-    def get_module_state(self, module_name: str) -> Optional[ModuleState]:
-        """Get the current state of a module process."""
-        process = self.module_processes.get(module_name)
-        if process:
-            return process.get_state()
-        return None
+    async def load_enabled_modules(self) -> None:
+        """Load module enabled state from configs (sets desired state)."""
+        for module_info in self.available_modules:
+            if not module_info.config_path:
+                # No config - default to disabled
+                await self.state_manager.set_desired_state(
+                    module_info.name, False, reconcile=False
+                )
+                self.logger.debug(
+                    "Module %s has no config, defaulting to disabled",
+                    module_info.name
+                )
+                continue
+
+            config = await self.config_manager.read_config_async(module_info.config_path)
+            enabled = self.config_manager.get_bool(config, 'enabled', default=False)
+
+            await self.state_manager.set_desired_state(
+                module_info.name, enabled, reconcile=False
+            )
+
+            if enabled:
+                self.logger.info("Module %s enabled in config", module_info.name)
+            else:
+                self.logger.debug("Module %s disabled in config", module_info.name)
+
+    # =========================================================================
+    # Process Management
+    # =========================================================================
 
     async def start_module(self, module_name: str) -> bool:
-        """
-        Start a module (PUBLIC API - delegates to state machine).
-
-        Args:
-            module_name: Name of the module to start
-
-        Returns:
-            True if module started successfully, False otherwise
-        """
+        """Start a module (routes through state machine)."""
         return await self.set_module_enabled(module_name, True)
 
-    def set_window_geometry(self, module_name: str, geometry: Optional[WindowGeometry]) -> None:
+    async def stop_module(self, module_name: str) -> bool:
+        """Stop a module (routes through state machine)."""
+        return await self.set_module_enabled(module_name, False)
+
+    async def _start_module_process(self, module_name: str) -> bool:
+        """
+        Internal: Start a module process.
+
+        Called in response to START_REQUESTED event.
+        """
+        lock = self._get_process_lock(module_name)
+
+        async with lock:
+            # Update actual state to STARTING
+            await self.state_manager.set_actual_state(
+                module_name, ActualState.STARTING
+            )
+
+            # Clean up any existing process
+            if module_name in self.module_processes:
+                process = self.module_processes[module_name]
+                if process.is_running():
+                    self.logger.info(
+                        "Module %s still running, stopping first...",
+                        module_name
+                    )
+                    await process.stop()
+                    await asyncio.sleep(0.1)
+                self.module_processes.pop(module_name, None)
+
+            # Find module info
+            module_info = next(
+                (m for m in self.available_modules if m.name == module_name),
+                None
+            )
+            if not module_info:
+                self.logger.error("Module info not found: %s", module_name)
+                await self.state_manager.set_actual_state(
+                    module_name,
+                    ActualState.ERROR,
+                    error_message="Module not found"
+                )
+                return False
+
+            self.logger.info(
+                "Starting module %s with session dir: %s",
+                module_name, self.session_dir
+            )
+
+            # Get cached geometry
+            window_geometry = self.window_geometry_cache.get(module_name)
+
+            # Create and start process
+            process = ModuleProcess(
+                module_info,
+                self.session_dir,
+                session_prefix=self.session_prefix,
+                status_callback=self._process_status_callback,
+                log_level=self.log_level,
+                window_geometry=window_geometry,
+            )
+
+            try:
+                success = await process.start()
+
+                if success:
+                    self.module_processes[module_name] = process
+                    self.forcefully_stopped_modules.discard(module_name)
+
+                    # Update actual state to IDLE (running)
+                    await self.state_manager.set_actual_state(
+                        module_name, ActualState.IDLE
+                    )
+                    self.logger.info("Module %s started successfully", module_name)
+                else:
+                    await self.state_manager.set_actual_state(
+                        module_name,
+                        ActualState.ERROR,
+                        error_message="Failed to start"
+                    )
+                    self.logger.error("Module %s failed to start", module_name)
+
+                return success
+
+            except Exception as e:
+                self.logger.error(
+                    "Exception starting %s: %s",
+                    module_name, e, exc_info=True
+                )
+                await self.state_manager.set_actual_state(
+                    module_name,
+                    ActualState.ERROR,
+                    error_message=str(e)
+                )
+                return False
+
+    async def _stop_module_process(self, module_name: str) -> bool:
+        """
+        Internal: Stop a module process.
+
+        Called in response to STOP_REQUESTED event.
+        """
+        lock = self._get_process_lock(module_name)
+
+        async with lock:
+            process = self.module_processes.get(module_name)
+
+            if not process:
+                self.logger.debug(
+                    "Module %s already stopped (no process)",
+                    module_name
+                )
+                await self.state_manager.set_actual_state(
+                    module_name, ActualState.STOPPED
+                )
+                return True
+
+            if not process.is_running():
+                self.logger.debug("Module %s already stopped", module_name)
+                self._handle_process_stopped(module_name, process)
+                return True
+
+            # Update actual state to STOPPING
+            await self.state_manager.set_actual_state(
+                module_name, ActualState.STOPPING
+            )
+
+            try:
+                # Pause recording if active
+                if process.is_recording():
+                    await process.pause()
+
+                # Stop the process
+                await process.stop()
+
+                # Handle cleanup
+                self._handle_process_stopped(module_name, process)
+
+                self.logger.info("Module %s stopped successfully", module_name)
+                return True
+
+            except Exception as e:
+                self.logger.error(
+                    "Error stopping %s: %s",
+                    module_name, e, exc_info=True
+                )
+                self.forcefully_stopped_modules.add(module_name)
+                await self.state_manager.set_actual_state(
+                    module_name, ActualState.STOPPED
+                )
+                return False
+
+    def _handle_process_stopped(self, module_name: str, process: ModuleProcess) -> None:
+        """Handle cleanup when a process stops."""
+        if process.was_forcefully_stopped:
+            self.forcefully_stopped_modules.add(module_name)
+        else:
+            self.forcefully_stopped_modules.discard(module_name)
+
+        self.module_processes.pop(module_name, None)
+
+        # Update state manager (don't await in sync context)
+        asyncio.create_task(
+            self.state_manager.set_actual_state(module_name, ActualState.STOPPED)
+        )
+
+    async def _process_status_callback(
+        self,
+        process: ModuleProcess,
+        status: Optional[StatusMessage]
+    ) -> None:
+        """Handle status updates from module processes."""
+        module_name = process.module_info.name
+
+        # Update actual state based on process state
+        process_state = process.get_state()
+        actual_state = self._convert_process_state(process_state)
+
+        if actual_state:
+            current = self.state_manager.get_actual_state(module_name)
+            if current != actual_state:
+                await self.state_manager.set_actual_state(module_name, actual_state)
+
+        # Handle process death
+        if not process.is_running():
+            current = self.state_manager.get_actual_state(module_name)
+            if current in RUNNING_STATES:
+                self.logger.warning(
+                    "Module %s process died unexpectedly",
+                    module_name
+                )
+                await self.state_manager.set_actual_state(
+                    module_name, ActualState.CRASHED
+                )
+                # Also update desired state to disabled
+                await self.state_manager.set_desired_state(
+                    module_name, False, reconcile=False
+                )
+
+        # Forward to external callback
+        if self.status_callback:
+            await self.status_callback(process, status)
+
+    def _convert_process_state(self, process_state: ModuleState) -> Optional[ActualState]:
+        """Convert ModuleProcess state to ActualState."""
+        mapping = {
+            ModuleState.STOPPED: ActualState.STOPPED,
+            ModuleState.STARTING: ActualState.STARTING,
+            ModuleState.INITIALIZING: ActualState.INITIALIZING,
+            ModuleState.IDLE: ActualState.IDLE,
+            ModuleState.RECORDING: ActualState.RECORDING,
+            ModuleState.STOPPING: ActualState.STOPPING,
+            ModuleState.ERROR: ActualState.ERROR,
+            ModuleState.CRASHED: ActualState.CRASHED,
+        }
+        return mapping.get(process_state)
+
+    # =========================================================================
+    # Bulk Operations
+    # =========================================================================
+
+    async def stop_all(self) -> None:
+        """Stop all running module processes."""
+        import time
+        self.logger.info("Stopping all modules")
+
+        # Disable reconciliation during bulk stop
+        self.state_manager.disable_reconciliation()
+
+        stop_tasks = []
+        for module_name, process in list(self.module_processes.items()):
+            if process.is_running():
+                async def stop_module_task(name: str, proc: ModuleProcess):
+                    try:
+                        module_start = time.time()
+                        await self.state_manager.set_actual_state(
+                            name, ActualState.STOPPING
+                        )
+                        await proc.stop()
+                        module_duration = time.time() - module_start
+                        self.logger.info(
+                            "Module %s stopped in %.3fs",
+                            name, module_duration
+                        )
+                        if proc.was_forcefully_stopped:
+                            self.forcefully_stopped_modules.add(name)
+                        else:
+                            self.forcefully_stopped_modules.discard(name)
+                        await self.state_manager.set_actual_state(
+                            name, ActualState.STOPPED
+                        )
+                    except Exception as e:
+                        self.logger.error("Error stopping %s: %s", name, e)
+                        self.forcefully_stopped_modules.add(name)
+                        await self.state_manager.set_actual_state(
+                            name, ActualState.STOPPED
+                        )
+
+                stop_tasks.append(stop_module_task(module_name, process))
+
+        if stop_tasks:
+            await asyncio.gather(*stop_tasks, return_exceptions=True)
+
+        self.module_processes.clear()
+
+        # Re-enable reconciliation
+        self.state_manager.enable_reconciliation()
+
+        self.logger.info("All modules stopped")
+
+    # =========================================================================
+    # Health Check
+    # =========================================================================
+
+    async def start_health_check(self, interval: float = 5.0) -> None:
+        """Start the health check loop."""
+        if self._health_check_task is not None:
+            return
+
+        self._shutdown = False
+        self._health_check_task = asyncio.create_task(
+            self._health_check_loop(interval)
+        )
+        self.logger.info("Health check started (interval: %.1fs)", interval)
+
+    async def stop_health_check(self) -> None:
+        """Stop the health check loop."""
+        self._shutdown = True
+        if self._health_check_task:
+            self._health_check_task.cancel()
+            try:
+                await self._health_check_task
+            except asyncio.CancelledError:
+                pass
+            self._health_check_task = None
+        self.logger.info("Health check stopped")
+
+    async def _health_check_loop(self, interval: float) -> None:
+        """Periodically verify module processes are healthy."""
+        while not self._shutdown:
+            await asyncio.sleep(interval)
+
+            for module_name, process in list(self.module_processes.items()):
+                if not process.is_running():
+                    actual = self.state_manager.get_actual_state(module_name)
+                    if actual in RUNNING_STATES:
+                        self.logger.warning(
+                            "Health check: module %s died unexpectedly",
+                            module_name
+                        )
+                        await self.state_manager.set_actual_state(
+                            module_name, ActualState.CRASHED
+                        )
+                        # Update desired state
+                        await self.state_manager.set_desired_state(
+                            module_name, False, reconcile=False
+                        )
+
+    # =========================================================================
+    # Utility Methods
+    # =========================================================================
+
+    def set_window_geometry(
+        self,
+        module_name: str,
+        geometry: Optional[WindowGeometry]
+    ) -> None:
         """Cache window geometry for a module to use on next start."""
         self.window_geometry_cache[module_name] = geometry
-
-    async def _start_module_internal(
-        self,
-        module_name: str
-    ) -> bool:
-        """
-        Internal method to start a module process.
-
-        Args:
-            module_name: Name of the module to start
-
-        Returns:
-            True if module started successfully, False otherwise
-        """
-        window_geometry = self.window_geometry_cache.get(module_name)
-        if module_name in self.module_processes:
-            process = self.module_processes[module_name]
-
-            if process.is_running() and process.get_state() != ModuleState.STOPPED:
-                self.logger.info("Module %s still running (state=%s), stopping...", module_name, process.get_state())
-                await process.stop()
-                await asyncio.sleep(0.1)
-            else:
-                self.logger.debug("Module %s process exists but not running (state=%s), cleaning up",
-                                module_name, process.get_state())
-
-            self.module_processes.pop(module_name, None)
-
-        # Find module info
-        module_info = next(
-            (m for m in self.available_modules if m.name == module_name),
-            None
-        )
-        if not module_info:
-            self.logger.error("Module info not found: %s", module_name)
-            return False
-
-        self.logger.info("Using session directory for %s: %s", module_name, self.session_dir)
-
-        # Create and start process
-        process = ModuleProcess(
-            module_info,
-            self.session_dir,
-            session_prefix=self.session_prefix,
-            status_callback=self.status_callback,
-            log_level=self.log_level,
-            window_geometry=window_geometry,
-        )
-
-        try:
-            success = await process.start()
-            if success:
-                self.module_processes[module_name] = process
-                self.logger.info("Module %s started successfully", module_name)
-                self.forcefully_stopped_modules.discard(module_name)
-            else:
-                self.logger.error("Module %s failed to start", module_name)
-            return success
-        except Exception as e:
-            self.logger.error("Exception starting %s: %s", module_name, e, exc_info=True)
-            return False
 
     def set_session_dir(self, session_dir: Path) -> None:
         """Update the base session directory used for new module launches."""
@@ -316,7 +614,10 @@ class ModuleManager:
         """Send a raw command string to a running module process."""
         process = self.module_processes.get(module_name)
         if not process or not process.is_running():
-            self.logger.warning("Cannot send command to %s - process not running", module_name)
+            self.logger.warning(
+                "Cannot send command to %s - process not running",
+                module_name
+            )
             return False
         try:
             await process.send_command(command)
@@ -325,107 +626,8 @@ class ModuleManager:
             self.logger.error("Failed to send command to %s: %s", module_name, exc)
             return False
 
-    async def stop_module(self, module_name: str) -> bool:
-        """
-        Stop a module (PUBLIC API - delegates to state machine).
-
-        Args:
-            module_name: Name of the module to stop
-
-        Returns:
-            True if module stopped successfully, False otherwise
-        """
-        return await self.set_module_enabled(module_name, False)
-
-    async def _stop_module_internal(self, module_name: str) -> bool:
-        """
-        Internal method to stop a module process.
-
-        Args:
-            module_name: Name of the module to stop
-
-        Returns:
-            True if module stopped successfully, False otherwise
-        """
-        process = self.module_processes.get(module_name)
-        if not process:
-            self.logger.info("Module %s already stopped (no active process)", module_name)
-            # Preserve existing force-stop knowledge when no process object is available
-            return True
-
-        if not process.is_running():
-            self.logger.info("Module %s already stopped", module_name)
-            if process.was_forcefully_stopped:
-                self.forcefully_stopped_modules.add(module_name)
-            else:
-                self.forcefully_stopped_modules.discard(module_name)
-            self.module_processes.pop(module_name, None)
-            return True
-
-        try:
-            if process.is_recording():
-                await process.pause()
-
-            await process.stop()
-
-            if process.was_forcefully_stopped:
-                self.forcefully_stopped_modules.add(module_name)
-            else:
-                self.forcefully_stopped_modules.discard(module_name)
-            self.module_processes.pop(module_name, None)
-
-            self.logger.info("Module %s stopped successfully", module_name)
-            return True
-        except Exception as e:
-            self.logger.error("Error stopping %s: %s", module_name, e, exc_info=True)
-            self.forcefully_stopped_modules.add(module_name)
-            return False
-
-    async def stop_all(self) -> None:
-        """Stop all running module processes."""
-        import time
-        self.logger.info("Stopping all modules")
-
-        stop_tasks = []
-        for module_name, process in self.module_processes.items():
-            if process.is_running():
-                async def stop_module_task(name: str, proc: ModuleProcess):
-                    try:
-                        module_start = time.time()
-                        await proc.stop()
-                        module_duration = time.time() - module_start
-                        self.logger.info("⏱️  Module %s stopped in %.3fs", name, module_duration)
-                        if proc.was_forcefully_stopped:
-                            self.forcefully_stopped_modules.add(name)
-                        else:
-                            self.forcefully_stopped_modules.discard(name)
-                    except Exception as e:
-                        self.logger.error("Error stopping %s: %s", name, e)
-                        self.forcefully_stopped_modules.add(name)
-
-                stop_tasks.append(stop_module_task(module_name, process))
-
-        if stop_tasks:
-            await asyncio.gather(*stop_tasks, return_exceptions=True)
-
-        self.module_processes.clear()
-        self.logger.info("All modules stopped")
-
-    def get_running_modules(self) -> List[str]:
-        """Get list of currently running module names."""
-        return [
-            name for name, proc in self.module_processes.items()
-            if proc.is_running()
-        ]
-
     def cleanup_stopped_process(self, module_name: str) -> None:
-        """
-        Remove a stopped process from tracking dict.
-        Called by ModuleProcess when it detects process has exited.
-
-        Args:
-            module_name: Name of the module to clean up
-        """
+        """Remove a stopped process from tracking."""
         if module_name in self.module_processes:
             process = self.module_processes[module_name]
             if not process.is_running():
@@ -434,4 +636,34 @@ class ModuleManager:
                     self.forcefully_stopped_modules.add(module_name)
                 else:
                     self.forcefully_stopped_modules.discard(module_name)
-                self.logger.info("Cleaned up stopped process: %s", module_name)
+                self.logger.debug("Cleaned up stopped process: %s", module_name)
+
+    # =========================================================================
+    # Legacy Compatibility (deprecated)
+    # =========================================================================
+
+    @property
+    def module_enabled_state(self) -> Dict[str, bool]:
+        """Legacy property - use state_manager.get_desired_states() instead."""
+        return self.state_manager.get_desired_states()
+
+    @module_enabled_state.setter
+    def module_enabled_state(self, value: Dict[str, bool]) -> None:
+        """Legacy setter - sets desired states without reconciliation."""
+        for name, enabled in value.items():
+            # Set state without reconciliation (sync context)
+            self.state_manager._desired_state[name] = (
+                DesiredState.ENABLED if enabled else DesiredState.DISABLED
+            )
+
+    @property
+    def module_state_changing(self) -> Dict[str, bool]:
+        """Legacy property for state changing check."""
+        return {
+            name: self.is_module_state_changing(name)
+            for name in self.state_manager.get_registered_modules()
+        }
+
+    def register_state_change_callback(self, callback: Callable) -> None:
+        """Legacy: Register a callback for state changes."""
+        self._legacy_callbacks.append(callback)

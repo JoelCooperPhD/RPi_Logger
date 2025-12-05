@@ -109,30 +109,41 @@ class DeviceRow(ttk.Frame):
     A single-line row for a device.
 
     Layout: [Round Toggle] [Device Name] [Connect/Disconnect Button] [Show/Hide Button]
+
+    Two Independent States:
+    - Connected: Device is connected and module is running (green dot, "Disconnect" button)
+    - Window Visible: Module window is shown ("Hide" button) vs hidden ("Show" button)
+
+    Behavior:
+    - Dot and Connect button: Toggle connection state
+    - Show button when disconnected: Connects first, then shows window
+    - Show button when connected: Just shows window
+    - Hide button or window X: Just hides window, keeps module running
+    - Disconnect: Stops module (window goes away too)
     """
 
     def __init__(
         self,
         parent,
         device: DeviceInfo,
-        on_toggle: Callable[[str, bool], None],
-        on_toggle_window: Callable[[str, bool], None],
+        on_connect_change: Callable[[str, bool], None],
+        on_visibility_change: Callable[[str, bool], None],
     ):
         super().__init__(parent, style='Inframe.TFrame')
         self.device = device
-        self._on_toggle = on_toggle
-        self._on_toggle_window = on_toggle_window
-        self._window_visible = False  # Track window visibility locally
+        self._on_connect_change = on_connect_change
+        self._on_visibility_change = on_visibility_change
+        self._is_connected = device.state == ConnectionState.CONNECTED
+        self._is_visible = False  # Window visibility, updated via callback
 
         self.columnconfigure(1, weight=1)  # Device name expands
 
-        # Round toggle button (column 0)
-        is_connected = device.state == ConnectionState.CONNECTED
+        # Round toggle button (column 0) - reflects connection state
         self.toggle_btn = RoundToggle(
             self,
             size=20,
             command=self._on_toggle_click,
-            active=is_connected
+            active=self._is_connected
         )
         self.toggle_btn.grid(row=0, column=0, padx=(4, 10), pady=4)
 
@@ -144,12 +155,12 @@ class DeviceRow(ttk.Frame):
         )
         self.name_label.grid(row=0, column=1, sticky="w", pady=4)
 
-        # Connect/Disconnect button (column 2) - same size as Show/Hide
+        # Connect/Disconnect button (column 2)
         self.connect_btn = RoundedButton(
             self,
-            text="Disconnect" if is_connected else "Connect",
+            text="Disconnect" if self._is_connected else "Connect",
             command=self._on_connect_click,
-            width=70,
+            width=80,
             height=24,
             corner_radius=6,
             style='default',
@@ -157,12 +168,12 @@ class DeviceRow(ttk.Frame):
         )
         self.connect_btn.grid(row=0, column=2, padx=(8, 4), pady=4)
 
-        # Show/Hide button (column 3) - rounded with twice the width
+        # Show/Hide button (column 3)
         self.show_btn = RoundedButton(
             self,
-            text="Show",
+            text="Hide" if self._is_visible else "Show",
             command=self._on_show_click,
-            width=70,
+            width=80,
             height=24,
             corner_radius=6,
             style='default',
@@ -171,54 +182,41 @@ class DeviceRow(ttk.Frame):
         self.show_btn.grid(row=0, column=3, padx=(0, 4), pady=4)
 
     def _on_toggle_click(self, active: bool) -> None:
-        """Handle toggle click."""
-        self._on_toggle(self.device.device_id, active)
-        self._update_connect_button_text()
+        """Handle dot toggle click - toggle connection."""
+        # Revert visual state until confirmed by callback
+        self.toggle_btn.set_active(self._is_connected)
+        self._on_connect_change(self.device.device_id, active)
 
     def _on_connect_click(self) -> None:
         """Handle connect/disconnect button click."""
-        # Toggle the connection state
-        is_currently_connected = self.toggle_btn.get_active()
-        new_state = not is_currently_connected
-        self.toggle_btn.set_active(new_state)
-        self._update_connect_button_text()
-        self._on_toggle(self.device.device_id, new_state)
+        self._on_connect_change(self.device.device_id, not self._is_connected)
 
     def _on_show_click(self) -> None:
         """Handle show/hide button click."""
-        # Toggle visibility state and update button text
-        self._window_visible = not self._window_visible
-        self._update_show_button_text()
-        # Notify the callback with the new visibility state
-        self._on_toggle_window(self.device.device_id, self._window_visible)
+        self._on_visibility_change(self.device.device_id, not self._is_visible)
 
-    def _update_show_button_text(self) -> None:
-        """Update the show/hide button text based on visibility state."""
-        text = "Hide" if self._window_visible else "Show"
-        self.show_btn.configure(text=text)
+    def set_connected(self, connected: bool) -> None:
+        """Set the connection state (called by callback)."""
+        self._is_connected = connected
+        self.toggle_btn.set_active(connected)
+        self.connect_btn.configure(text="Disconnect" if connected else "Connect")
+        # If disconnected, window is also not visible
+        if not connected:
+            self._is_visible = False
+            self.show_btn.configure(text="Show")
 
-    def _update_connect_button_text(self) -> None:
-        """Update the connect/disconnect button text based on connection state."""
-        is_connected = self.toggle_btn.get_active()
-        text = "Disconnect" if is_connected else "Connect"
-        self.connect_btn.configure(text=text)
-
-    def _update_state(self) -> None:
-        """Update visual state based on device state."""
-        is_connected = self.device.state == ConnectionState.CONNECTED
-        self.toggle_btn.set_active(is_connected)
-        self._update_connect_button_text()
-
-    def set_window_visible(self, visible: bool) -> None:
-        """Set window visibility state (called when window is closed externally)."""
-        self._window_visible = visible
-        self._update_show_button_text()
+    def set_visible(self, visible: bool) -> None:
+        """Set the window visibility state (called by callback)."""
+        self._is_visible = visible
+        self.show_btn.configure(text="Hide" if visible else "Show")
 
     def update_device(self, device: DeviceInfo) -> None:
         """Update with new device info."""
         self.device = device
         self.name_label.configure(text=device.display_name)
-        self._update_state()
+        # Sync connection state from device
+        connected = device.state == ConnectionState.CONNECTED
+        self.set_connected(connected)
 
 
 class DeviceSection(ttk.Frame):
@@ -232,13 +230,13 @@ class DeviceSection(ttk.Frame):
         self,
         parent,
         title: str,
-        on_toggle: Callable[[str, bool], None],
-        on_toggle_window: Callable[[str, bool], None],
+        on_connect_change: Callable[[str, bool], None],
+        on_visibility_change: Callable[[str, bool], None],
     ):
         super().__init__(parent, style='Inframe.TFrame')
         self._title = title
-        self._on_toggle = on_toggle
-        self._on_toggle_window = on_toggle_window
+        self._on_connect_change = on_connect_change
+        self._on_visibility_change = on_visibility_change
         self._device_rows: Dict[str, DeviceRow] = {}
 
         self.columnconfigure(0, weight=1)
@@ -305,32 +303,44 @@ class DeviceSection(ttk.Frame):
                 row = DeviceRow(
                     self.content,
                     device,
-                    self._on_toggle,
-                    self._on_toggle_window
+                    self._on_connect_change,
+                    self._on_visibility_change,
                 )
                 row.grid(row=idx, column=0, sticky="ew", padx=4, pady=1)
                 self._device_rows[device.device_id] = row
 
-    def set_window_visible(self, device_id: str, visible: bool) -> bool:
-        """Set window visibility for a device. Returns True if device was found."""
+    def set_device_connected(self, device_id: str, connected: bool) -> bool:
+        """Set device connection state. Returns True if device was found."""
         if device_id in self._device_rows:
-            self._device_rows[device_id].set_window_visible(visible)
+            self._device_rows[device_id].set_connected(connected)
+            return True
+        return False
+
+    def set_device_visible(self, device_id: str, visible: bool) -> bool:
+        """Set device window visibility. Returns True if device was found."""
+        if device_id in self._device_rows:
+            self._device_rows[device_id].set_visible(visible)
             return True
         return False
 
 
 class USBDevicesPanel(ttk.LabelFrame):
-    """Panel showing all discovered devices organized by connection type."""
+    """Panel showing all discovered devices organized by connection type.
+
+    Two Independent Callbacks:
+    - on_connect_change: Called when connection state should change (dot, Connect button)
+    - on_visibility_change: Called when window visibility should change (Show/Hide button)
+    """
 
     def __init__(
         self,
         parent,
-        on_connect_toggle: Callable[[str, bool], None],
-        on_toggle_window: Callable[[str, bool], None],
+        on_connect_change: Callable[[str, bool], None],
+        on_visibility_change: Callable[[str, bool], None],
     ):
         super().__init__(parent, text="Devices")
-        self._on_connect_toggle = on_connect_toggle
-        self._on_toggle_window = on_toggle_window
+        self._on_connect_change = on_connect_change
+        self._on_visibility_change = on_visibility_change
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -376,16 +386,16 @@ class USBDevicesPanel(ttk.LabelFrame):
         self.usb_section = DeviceSection(
             self.scrollable_frame,
             "USB",
-            self._on_connect_toggle,
-            self._on_toggle_window
+            self._on_connect_change,
+            self._on_visibility_change,
         )
         self.usb_section.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
         self.wireless_section = DeviceSection(
             self.scrollable_frame,
             "WIRELESS",
-            self._on_connect_toggle,
-            self._on_toggle_window
+            self._on_connect_change,
+            self._on_visibility_change,
         )
         self.wireless_section.grid(row=1, column=0, sticky="ew")
 
@@ -447,13 +457,20 @@ class USBDevicesPanel(ttk.LabelFrame):
             len(devices), len(wireless_devices), total_devices
         )
 
-    def set_window_visible(self, device_id: str, visible: bool) -> None:
-        """Set window visibility for a device (called when window is closed externally).
+    def set_device_connected(self, device_id: str, connected: bool) -> None:
+        """Set device connection state (called by callback).
 
         This searches both USB and wireless sections for the device.
         """
-        # Try USB section first
-        if self.usb_section.set_window_visible(device_id, visible):
+        if self.usb_section.set_device_connected(device_id, connected):
             return
-        # Try wireless section
-        self.wireless_section.set_window_visible(device_id, visible)
+        self.wireless_section.set_device_connected(device_id, connected)
+
+    def set_device_visible(self, device_id: str, visible: bool) -> None:
+        """Set device window visibility (called by callback).
+
+        This searches both USB and wireless sections for the device.
+        """
+        if self.usb_section.set_device_visible(device_id, visible):
+            return
+        self.wireless_section.set_device_visible(device_id, visible)

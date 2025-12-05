@@ -38,15 +38,25 @@ try:
     from ..drt_core.interfaces.gui.drt_plotter import DRTPlotter
     HAS_MATPLOTLIB = True
 except ImportError:
-    DRTPlotter = None
-    HAS_MATPLOTLIB = False
+    try:
+        from rpi_logger.modules.DRT.drt_core.interfaces.gui.drt_plotter import DRTPlotter
+        HAS_MATPLOTLIB = True
+    except ImportError:
+        DRTPlotter = None
+        HAS_MATPLOTLIB = False
 
 try:
     from ..drt_core.interfaces.gui.drt_config_window import DRTConfigWindow
 except ImportError:
-    DRTConfigWindow = None
+    try:
+        from rpi_logger.modules.DRT.drt_core.interfaces.gui.drt_config_window import DRTConfigWindow
+    except ImportError:
+        DRTConfigWindow = None
 
-from ..drt_core.device_types import DRTDeviceType
+try:
+    from ..drt_core.device_types import DRTDeviceType
+except ImportError:
+    from rpi_logger.modules.DRT.drt_core.device_types import DRTDeviceType
 
 ActionCallback = Optional[Callable[..., Awaitable[None]]]
 
@@ -168,20 +178,29 @@ class DRTTkinterGUI:
 
     def _build_ui(self, parent: tk.Widget):
         """Build the embedded UI with plotter and controls."""
-        # Main frame
-        self._frame = ttk.Frame(parent)
-        self._frame.pack(fill=tk.BOTH, expand=True)
-        self._frame.columnconfigure(0, weight=1)
-        self._frame.rowconfigure(0, weight=1)
+        self.logger.info("=== DRTTkinterGUI._build_ui STARTING ===")
+        self.logger.info("Parent widget: %s", parent)
 
-        # Content frame
-        self._content_frame = ttk.Frame(self._frame)
-        self._content_frame.grid(row=0, column=0, sticky="NSEW")
-        self._content_frame.columnconfigure(0, weight=1)
-        self._content_frame.rowconfigure(0, weight=1)
+        try:
+            # Main frame
+            self._frame = ttk.Frame(parent)
+            self._frame.pack(fill=tk.BOTH, expand=True)
+            self._frame.columnconfigure(0, weight=1)
+            self._frame.rowconfigure(0, weight=1)
+            self.logger.info("Created main frame: %s", self._frame)
 
-        # Build device UI immediately with default device type
-        self._build_device_ui(None, DRTDeviceType.SDRT)
+            # Content frame
+            self._content_frame = ttk.Frame(self._frame)
+            self._content_frame.grid(row=0, column=0, sticky="NSEW")
+            self._content_frame.columnconfigure(0, weight=1)
+            self._content_frame.rowconfigure(0, weight=1)
+            self.logger.info("Created content frame: %s", self._content_frame)
+
+            # Build device UI immediately with default device type
+            self._build_device_ui(None, DRTDeviceType.SDRT)
+            self.logger.info("=== DRTTkinterGUI._build_ui COMPLETED ===")
+        except Exception as e:
+            self.logger.error("=== DRTTkinterGUI._build_ui FAILED: %s ===", e, exc_info=True)
 
     def _build_device_ui(self, port: Optional[str], device_type: DRTDeviceType):
         """Build UI components for the device.
@@ -328,6 +347,9 @@ class DRTTkinterGUI:
         self._port = port
         self._device_type = device_type
 
+        # Update window title with device info
+        self._update_window_title()
+
         # Add device to plotter if it exists
         if self._plotter:
             self._plotter.add_device(port)
@@ -352,10 +374,14 @@ class DRTTkinterGUI:
 
         # Reset state
         self._port = None
+        self._device_type = None
 
         # Disable configure button
         if self._configure_btn:
             self._configure_btn.configure(state='disabled')
+
+        # Reset window title
+        self._update_window_title()
 
         # Reset results
         if self._trial_n:
@@ -366,6 +392,38 @@ class DRTTkinterGUI:
             self._click_count.set("0")
         if self._battery_var:
             self._battery_var.set("---%")
+
+    def _update_window_title(self) -> None:
+        """Update window title based on connected device."""
+        if not self.root:
+            return
+
+        try:
+            toplevel = self.root.winfo_toplevel()
+            if self._port and self._device_type:
+                # Format: "DRT - USB:ACM0" or "DRT - Wireless:ACM0"
+                # Extract short port name (e.g., "ACM0" from "/dev/ttyACM0")
+                port_short = self._port
+                if '/' in port_short:
+                    port_short = port_short.split('/')[-1]
+                if port_short.startswith('tty'):
+                    port_short = port_short[3:]
+
+                # Determine connection type from device_type
+                device_type_str = self._device_type.value if hasattr(self._device_type, 'value') else str(self._device_type)
+                device_type_lower = device_type_str.lower()
+                if 'wireless' in device_type_lower:
+                    conn_type = "Wireless"
+                else:
+                    conn_type = "USB"
+
+                title = f"DRT - {conn_type}:{port_short}"
+            else:
+                title = "DRT"
+
+            toplevel.title(title)
+        except Exception as e:
+            self.logger.warning("Failed to update window title: %s", e)
 
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         """Handle data from device - update plots and displays."""
@@ -676,6 +734,9 @@ class DRTView:
         self.model.subscribe(self._on_model_change)
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
+        self.logger.info("=== DRTView._build_embedded_gui STARTING ===")
+        self.logger.info("HAS_TK=%s, HAS_THEME=%s, HAS_MATPLOTLIB=%s", HAS_TK, HAS_THEME, HAS_MATPLOTLIB)
+
         if not HAS_TK:
             self.logger.warning("Tkinter unavailable; cannot mount DRT GUI")
             return None
@@ -718,6 +779,7 @@ class DRTView:
             gui.system = self._runtime
             self.logger.info("Applied pending runtime binding to GUI (system=%s)", type(self._runtime).__name__)
 
+        self.logger.info("=== DRTView._build_embedded_gui COMPLETED ===")
         return container
 
     def bind_runtime(self, runtime) -> None:

@@ -317,13 +317,16 @@ class VOGTkinterGUI:
         self._port = port
         self._device_type = type_str
 
+        # Update window title with device info
+        self._update_window_title()
+
         # Enable configure button now that device is connected
         if self._configure_btn:
             self._configure_btn.configure(state='normal')
 
-    def on_device_disconnected(self, port: str):
+    def on_device_disconnected(self, port: str, device_type: str = None):
         """Handle device disconnection - clean up UI."""
-        self.logger.info("Device disconnected: %s", port)
+        self.logger.info("Device disconnected: %s (type: %s)", port, device_type)
 
         if self._port != port:
             return
@@ -346,12 +349,47 @@ class VOGTkinterGUI:
 
         # Reset state
         self._port = None
+        self._device_type = None
         self._stm_on = None
         self._stm_off = None
         self._configure_btn = None
         self._trl_n = None
         self._tsot = None
         self._tsct = None
+
+        # Reset window title
+        self._update_window_title()
+
+    def _update_window_title(self) -> None:
+        """Update window title based on connected device."""
+        if not self.root:
+            return
+
+        try:
+            toplevel = self.root.winfo_toplevel()
+            if self._port and self._device_type:
+                # Format: "VOG - USB:ACM0" or "VOG - Wireless:ACM0"
+                # Extract short port name (e.g., "ACM0" from "/dev/ttyACM0")
+                port_short = self._port
+                if '/' in port_short:
+                    port_short = port_short.split('/')[-1]
+                if port_short.startswith('tty'):
+                    port_short = port_short[3:]
+
+                # Determine connection type from device_type
+                device_type_lower = self._device_type.lower()
+                if 'wireless' in device_type_lower:
+                    conn_type = "Wireless"
+                else:
+                    conn_type = "USB"
+
+                title = f"VOG - {conn_type}:{port_short}"
+            else:
+                title = "VOG"
+
+            toplevel.title(title)
+        except Exception as e:
+            self.logger.warning("Failed to update window title: %s", e)
 
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         """Handle data from device - update plots and displays."""
@@ -646,10 +684,10 @@ class VOGView:
             return
         self.call_in_gui(self.gui.on_device_connected, port, device_type)
 
-    def on_device_disconnected(self, port: str) -> None:
+    def on_device_disconnected(self, port: str, device_type: str = None) -> None:
         if not self.gui:
             return
-        self.call_in_gui(self.gui.on_device_disconnected, port)
+        self.call_in_gui(self.gui.on_device_disconnected, port, device_type)
 
     def on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if not self.gui:

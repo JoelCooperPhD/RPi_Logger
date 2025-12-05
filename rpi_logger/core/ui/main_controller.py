@@ -334,7 +334,10 @@ class MainController:
                 success = await self.logger_system.set_module_enabled(module_name, True)
                 if not success:
                     self.logger.error("Failed to auto-start module: %s", module_name)
-                    self.module_vars[module_name].set(False)
+                    # Note: checkbox will be auto-updated by UIStateObserver
+
+        # Signal that startup is complete (for state file cleanup)
+        await self.logger_system.on_startup_complete()
 
     def show_about(self) -> None:
         try:
@@ -425,25 +428,38 @@ class MainController:
         except Exception as e:
             self.logger.error("Error toggling USB scan: %s", e, exc_info=True)
 
-    async def on_device_connect_toggle(self, device_id: str, connect: bool) -> None:
-        """Handle device connect/disconnect from devices panel."""
+    async def on_device_connect_change(self, device_id: str, connect: bool) -> None:
+        """Handle device connection change request from UI (dot or Connect button).
+
+        connect=True: Connect device and start module (window shown automatically)
+        connect=False: Stop module and disconnect device
+        """
         try:
             if connect:
                 self.logger.info("Connecting device: %s", device_id)
-                success = await self.logger_system.connect_device(device_id)
+                success = await self.logger_system.connect_and_start_device(device_id)
                 if not success:
                     self.logger.error("Failed to connect device: %s", device_id)
             else:
                 self.logger.info("Disconnecting device: %s", device_id)
-                await self.logger_system.disconnect_device(device_id)
+                await self.logger_system.stop_and_disconnect_device(device_id)
         except Exception as e:
-            self.logger.error("Error toggling device connection: %s", e, exc_info=True)
+            self.logger.error("Error changing device connection: %s", e, exc_info=True)
 
-    async def on_device_toggle_window(self, device_id: str, visible: bool) -> None:
-        """Handle show/hide window button from devices panel."""
+    async def on_device_visibility_change(self, device_id: str, visible: bool) -> None:
+        """Handle device window visibility change request from UI (Show/Hide button).
+
+        visible=True: Show window (connect first if not connected)
+        visible=False: Hide window (keep module running)
+        """
         try:
-            action = "Showing" if visible else "Hiding"
-            self.logger.info("%s window for device: %s", action, device_id)
-            await self.logger_system.toggle_device_window(device_id, visible)
+            if visible:
+                self.logger.info("Showing device window: %s", device_id)
+                success = await self.logger_system.show_device_window(device_id)
+                if not success:
+                    self.logger.error("Failed to show device window: %s", device_id)
+            else:
+                self.logger.info("Hiding device window: %s", device_id)
+                await self.logger_system.hide_device_window(device_id)
         except Exception as e:
-            self.logger.error("Error toggling device window: %s", e, exc_info=True)
+            self.logger.error("Error changing device visibility: %s", e, exc_info=True)

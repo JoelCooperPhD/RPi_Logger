@@ -3,6 +3,9 @@ Logger System - Main coordinator for the RPi Logger.
 
 This is the facade that coordinates between ModuleManager, SessionManager,
 WindowManager, and other components. It provides a unified API for the UI.
+
+The LoggerSystem now integrates with ModuleStateManager for centralized
+state management and uses observers for state synchronization.
 """
 
 import asyncio
@@ -10,10 +13,23 @@ import datetime
 import json
 from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
-from typing import Dict, List, Optional, Callable, TYPE_CHECKING
+from typing import Dict, List, Optional, Callable, Set, TYPE_CHECKING
 
 from .module_discovery import ModuleInfo
 from .module_process import ModuleState
+from .module_state_manager import (
+    ModuleStateManager,
+    StateChange,
+    StateEvent,
+    ActualState,
+    DesiredState,
+    RUNNING_STATES,
+)
+from .observers import (
+    ConfigPersistenceObserver,
+    SessionRecoveryObserver,
+    UIStateObserver,
+)
 from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
 from rpi_logger.modules.base import gui_utils
@@ -21,7 +37,7 @@ from .config_manager import get_config_manager
 from .paths import STATE_FILE
 from .module_manager import ModuleManager
 from .session_manager import SessionManager
-from .devices import DeviceConnectionManager, DeviceInfo, XBeeDongleInfo
+from .devices import DeviceConnectionManager, DeviceInfo, XBeeDongleInfo, ConnectionState
 
 if TYPE_CHECKING:
     from .event_logger import EventLogger
@@ -35,6 +51,12 @@ class LoggerSystem:
     - ModuleManager: Module discovery and lifecycle
     - SessionManager: Session and recording control
     - WindowManager: Window layout and geometry
+    - ModuleStateManager: Centralized state tracking
+
+    State synchronization is handled through observers:
+    - ConfigPersistenceObserver: Persists enabled state to config files
+    - SessionRecoveryObserver: Manages running_modules.json
+    - UIStateObserver: Updates UI elements
     """
 
     def __init__(
@@ -51,16 +73,47 @@ class LoggerSystem:
         self.log_level = log_level
         self.ui_callback = ui_callback
 
-        # Managers
+        # Create the centralized state manager
+        self.state_manager = ModuleStateManager()
+
+        # Create managers with shared state manager
         self.module_manager = ModuleManager(
             session_dir=self._session_dir,
             session_prefix=session_prefix,
             log_level=log_level,
             status_callback=self._module_status_callback,
+            state_manager=self.state_manager,
         )
         self.session_manager = SessionManager()
         self.window_manager = WindowManager()
         self.config_manager = get_config_manager()
+
+        # Create observers
+        self._config_observer = ConfigPersistenceObserver.from_module_infos(
+            self.module_manager.get_available_modules()
+        )
+        self._session_recovery_observer = SessionRecoveryObserver(STATE_FILE)
+        self._ui_observer = UIStateObserver()
+
+        # Register observers with state manager
+        self.state_manager.add_observer(
+            self._config_observer,
+            events={StateEvent.DESIRED_STATE_CHANGED}
+        )
+        self.state_manager.add_observer(
+            self._session_recovery_observer,
+            events={
+                StateEvent.ACTUAL_STATE_CHANGED,
+                StateEvent.STARTUP_COMPLETE,
+            }
+        )
+        self.state_manager.add_observer(
+            self._ui_observer,
+            events={
+                StateEvent.DESIRED_STATE_CHANGED,
+                StateEvent.ACTUAL_STATE_CHANGED,
+            }
+        )
 
         # Device connection manager
         self.device_manager = DeviceConnectionManager()
@@ -73,14 +126,15 @@ class LoggerSystem:
         # UI callback for device panel updates
         self.devices_ui_callback: Optional[Callable[[List[DeviceInfo], List[XBeeDongleInfo]], None]] = None
 
-        # UI callback for window visibility changes (device_id, visible)
-        self.window_visibility_callback: Optional[Callable[[str, bool], None]] = None
+        # UI callbacks for device state changes
+        self.device_connected_callback: Optional[Callable[[str, bool], None]] = None
+        self.device_visible_callback: Optional[Callable[[str, bool], None]] = None
 
         # State
         self.shutdown_event = asyncio.Event()
         self.event_logger: Optional['EventLogger'] = None
         self._gracefully_quitting_modules: set[str] = set()
-        self._shutdown_restart_candidates: List[str] = []
+        self._startup_modules: Set[str] = set()
 
     @property
     def session_dir(self) -> Path:
@@ -112,34 +166,69 @@ class LoggerSystem:
         """Return to the idle directory after a session finishes."""
         self.set_session_dir(self.idle_session_dir)
 
+    # =========================================================================
+    # Initialization
+    # =========================================================================
+
     async def async_init(self) -> None:
         """Complete async initialization. Must be called after construction."""
         await self._load_enabled_modules()
 
+        # Start health check
+        await self.module_manager.start_health_check()
+
     async def _load_enabled_modules(self) -> None:
-        """Load enabled modules asynchronously, avoiding blocking I/O."""
-        running_modules_from_last_session = None
+        """
+        Load enabled modules asynchronously.
 
-        if STATE_FILE.exists():
-            try:
-                def read_state():
-                    with open(STATE_FILE, 'r') as f:
-                        return json.load(f)
+        Priority:
+        1. If running_modules.json exists (crash recovery), use that
+        2. Otherwise, load from individual module config.txt files
+        """
+        # Try to load from session recovery file first
+        running_modules = await self._session_recovery_observer.load_state_file()
 
-                state = await asyncio.to_thread(read_state)
-                running_modules_from_last_session = set(state.get('running_modules', []))
-                self.logger.info("Loaded running modules from last session: %s", running_modules_from_last_session)
+        if running_modules:
+            # Session recovery - restore previously running modules
+            self.logger.info(
+                "Restoring modules from last session: %s",
+                running_modules
+            )
+            self._startup_modules = running_modules.copy()
 
-                await asyncio.to_thread(STATE_FILE.unlink)
-            except Exception as e:
-                self.logger.error("Failed to load running modules state: %s", e)
+            # Set desired state for recovered modules
+            for module_name in running_modules:
+                await self.state_manager.set_desired_state(
+                    module_name, True, reconcile=False
+                )
+                self.state_manager.mark_startup_module(module_name)
+                self.logger.info(
+                    "Module %s will be restored from last session",
+                    module_name
+                )
 
-        if running_modules_from_last_session:
-            for module_name in running_modules_from_last_session:
-                self.module_manager.module_enabled_state[module_name] = True
-                self.logger.info("Module %s will be restored from last session", module_name)
+            # Note: We don't delete the state file here - it's deleted
+            # after startup completes successfully
         else:
+            # Fresh start - load from config files
             await self.module_manager.load_enabled_modules()
+
+    async def on_startup_complete(self) -> None:
+        """
+        Called after auto_start_modules finishes.
+
+        This verifies startup success and cleans up the recovery state file.
+        """
+        # Check if all startup modules successfully started
+        await self.state_manager.check_startup_complete()
+
+        # Update state file with actually running modules
+        running = set(self.module_manager.get_running_modules())
+        await self._session_recovery_observer.write_state_file(running)
+
+    # =========================================================================
+    # Module Status Callback
+    # =========================================================================
 
     async def _module_status_callback(self, process, status: Optional[StatusMessage]) -> None:
         """Handle status updates from module processes."""
@@ -150,14 +239,20 @@ class LoggerSystem:
 
             if status.get_status_type() == "recording_started":
                 self.logger.info("Module %s started recording", module_name)
+                await self.state_manager.set_actual_state(
+                    module_name, ActualState.RECORDING
+                )
             elif status.get_status_type() == "recording_stopped":
                 self.logger.info("Module %s stopped recording", module_name)
+                await self.state_manager.set_actual_state(
+                    module_name, ActualState.IDLE
+                )
             elif status.get_status_type() == "quitting":
                 self.logger.info("Module %s is quitting", module_name)
                 self._gracefully_quitting_modules.add(module_name)
                 self.module_manager.cleanup_stopped_process(module_name)
                 if not self.module_manager.is_module_state_changing(module_name):
-                    await self.module_manager.set_module_enabled(module_name, False)
+                    await self.state_manager.set_desired_state(module_name, False)
                 if self.ui_callback:
                     try:
                         await self.ui_callback(module_name, process.get_state(), status)
@@ -166,17 +261,18 @@ class LoggerSystem:
                 return
             elif status.get_status_type() in ("window_hidden", "window_shown"):
                 visible = status.get_status_type() == "window_shown"
-                self._notify_window_visibility(module_name, visible)
+                self._notify_device_visible_for_module(module_name, visible)
             elif status.is_error():
                 self.logger.error("Module %s error: %s",
                                 module_name,
                                 status.get_error_message())
 
-        if not process.is_running() and self.module_manager.is_module_enabled(module_name):
+        if not process.is_running() and self.state_manager.is_module_enabled(module_name):
             if module_name not in self._gracefully_quitting_modules:
                 self.logger.warning("Module %s crashed/stopped unexpectedly - unchecking", module_name)
                 self.module_manager.cleanup_stopped_process(module_name)
-                await self.module_manager.set_module_enabled(module_name, False)
+                await self.state_manager.set_actual_state(module_name, ActualState.CRASHED)
+                await self.state_manager.set_desired_state(module_name, False, reconcile=False)
 
         if not process.is_running() and module_name in self._gracefully_quitting_modules:
             self._gracefully_quitting_modules.discard(module_name)
@@ -187,38 +283,83 @@ class LoggerSystem:
             except Exception as e:
                 self.logger.error("UI callback error: %s", e)
 
-    def _notify_window_visibility(self, module_name: str, visible: bool) -> None:
-        """Notify UI about window visibility change for all devices of a module."""
-        if not self.window_visibility_callback:
+    def _notify_device_connected(self, device_id: str, connected: bool) -> None:
+        """Notify UI about device connection state change."""
+        if not self.device_connected_callback:
             return
 
-        # Find all devices that belong to this module
+        self.logger.debug("Device %s connected=%s", device_id, connected)
+        try:
+            self.device_connected_callback(device_id, connected)
+        except Exception as e:
+            self.logger.error("Device connected callback error: %s", e)
+
+    def _notify_device_visible(self, device_id: str, visible: bool) -> None:
+        """Notify UI about device window visibility change."""
+        if not self.device_visible_callback:
+            return
+
+        self.logger.debug("Device %s visible=%s", device_id, visible)
+        try:
+            self.device_visible_callback(device_id, visible)
+        except Exception as e:
+            self.logger.error("Device visible callback error: %s", e)
+
+    def _notify_device_connected_for_module(self, module_name: str, connected: bool) -> None:
+        """Notify UI about connection state change for all devices of a module."""
+        if not self.device_connected_callback:
+            return
+
         devices = self.device_manager.get_devices_for_module(module_name)
         self.logger.debug(
-            "Window visibility changed for module %s (visible=%s), updating %d devices",
-            module_name, visible, len(devices)
+            "Module %s connected=%s, updating %d devices",
+            module_name, connected, len(devices)
         )
         for device in devices:
             try:
-                self.window_visibility_callback(device.device_id, visible)
+                self.device_connected_callback(device.device_id, connected)
             except Exception as e:
-                self.logger.error("Window visibility callback error: %s", e)
+                self.logger.error("Device connected callback error: %s", e)
 
-    # ========== Module Management (delegate to ModuleManager) ==========
+    def _notify_device_visible_for_module(self, module_name: str, visible: bool) -> None:
+        """Notify UI about visibility change for all devices of a module."""
+        if not self.device_visible_callback:
+            return
+
+        devices = self.device_manager.get_devices_for_module(module_name)
+        for device in devices:
+            try:
+                self.device_visible_callback(device.device_id, visible)
+            except Exception as e:
+                self.logger.error("Device visible callback error: %s", e)
+
+    # =========================================================================
+    # UI Observer Access
+    # =========================================================================
+
+    def get_ui_observer(self) -> UIStateObserver:
+        """Get the UI state observer for registering checkboxes."""
+        return self._ui_observer
+
+    def register_ui_checkbox(self, module_name: str, var) -> None:
+        """Register a UI checkbox variable for a module."""
+        self._ui_observer.register_checkbox(module_name, var)
+
+    def set_ui_root(self, root) -> None:
+        """Set the Tk root for thread-safe UI updates."""
+        self._ui_observer.set_root(root)
+
+    # =========================================================================
+    # Module Management (delegate to ModuleManager)
+    # =========================================================================
 
     def get_available_modules(self) -> List[ModuleInfo]:
         """Get list of all discovered modules."""
         return self.module_manager.get_available_modules()
 
-
-
-
-
     def get_selected_modules(self) -> List[str]:
         """Get list of selected module names."""
         return self.module_manager.get_selected_modules()
-
-
 
     async def toggle_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """Update a module's enabled state in config."""
@@ -235,7 +376,6 @@ class LoggerSystem:
     def get_running_modules(self) -> List[str]:
         """Get list of currently running module names."""
         return self.module_manager.get_running_modules()
-
 
     async def send_module_command(self, module_name: str, command: str, **kwargs) -> bool:
         """Send a command to a running module via its command interface."""
@@ -257,11 +397,11 @@ class LoggerSystem:
 
     def is_module_enabled(self, module_name: str) -> bool:
         """Check if module is enabled (checkbox state)."""
-        return self.module_manager.is_module_enabled(module_name)
+        return self.state_manager.is_module_enabled(module_name)
 
     def get_module_enabled_states(self) -> Dict[str, bool]:
         """Get all module enabled states."""
-        return self.module_manager.get_module_enabled_states()
+        return self.state_manager.get_desired_states()
 
     def _normalize_geometry(self, geometry: WindowGeometry) -> WindowGeometry:
         width, height, x, y = gui_utils.normalize_geometry_values(
@@ -314,7 +454,9 @@ class LoggerSystem:
         """Stop a module."""
         return await self.module_manager.stop_module(module_name)
 
-    # ========== Session Management (delegate to SessionManager) ==========
+    # =========================================================================
+    # Session Management (delegate to SessionManager)
+    # =========================================================================
 
     async def start_session_all(self) -> Dict[str, bool]:
         """Start session on all modules."""
@@ -361,7 +503,9 @@ class LoggerSystem:
         """Check if currently recording."""
         return self.session_manager.recording
 
-    # ========== Cleanup and State Management ==========
+    # =========================================================================
+    # Cleanup and State Management
+    # =========================================================================
 
     async def stop_all(self, request_geometry: bool = True) -> None:
         """
@@ -377,7 +521,7 @@ class LoggerSystem:
         if self.session_manager.recording:
             pause_start = time.time()
             await self.pause_all()
-            self.logger.info("⏱️  Paused all modules in %.3fs", time.time() - pause_start)
+            self.logger.info("Paused all modules in %.3fs", time.time() - pause_start)
 
         if request_geometry:
             self.logger.debug(
@@ -386,80 +530,34 @@ class LoggerSystem:
 
         stop_start = time.time()
         await self.module_manager.stop_all()
-        self.logger.info("⏱️  Stopped all modules in %.3fs", time.time() - stop_start)
+        self.logger.info("Stopped all modules in %.3fs", time.time() - stop_start)
 
     async def save_running_modules_state(self) -> bool:
         """Persist snapshot of modules running at shutdown initiation."""
-        all_running = self.module_manager.get_running_modules()
-        running_modules = [
-            module
-            for module in all_running
-            if module not in self.module_manager.forcefully_stopped_modules
-        ]
-        skipped = set(all_running) - set(running_modules)
+        running_modules = set(self.module_manager.get_running_modules())
+
+        # Filter out forcefully stopped modules
+        filtered = running_modules - self.module_manager.forcefully_stopped_modules
+        skipped = running_modules - filtered
+
         if skipped:
             self.logger.info(
                 "Skipping force-stopped modules from restart snapshot: %s",
                 sorted(skipped)
             )
-        self._shutdown_restart_candidates = list(running_modules)
-        return await self._write_running_modules_state(self._shutdown_restart_candidates)
+
+        return await self._session_recovery_observer.save_shutdown_state(filtered)
 
     async def update_running_modules_state_after_cleanup(self) -> bool:
         """Rewrite restart state excluding modules that failed to stop cleanly."""
-        if not self._shutdown_restart_candidates:
-            # Ensure stale state is removed if nothing was running
-            return await self._write_running_modules_state([])
+        # Get modules that should have been running
+        running_modules = set(self.module_manager.get_running_modules())
 
-        filtered = [
-            module for module in self._shutdown_restart_candidates
-            if module not in self.module_manager.forcefully_stopped_modules
-        ]
+        # Update forcefully stopped tracking
+        for module_name in self.module_manager.forcefully_stopped_modules:
+            self._session_recovery_observer.mark_forcefully_stopped(module_name)
 
-        excluded = set(self._shutdown_restart_candidates) - set(filtered)
-        if excluded:
-            self.logger.info(
-                "Excluding modules from auto-restart due to forceful stop: %s",
-                sorted(excluded)
-            )
-
-        self._shutdown_restart_candidates = filtered
-        return await self._write_running_modules_state(filtered)
-
-    async def _write_running_modules_state(self, modules: List[str]) -> bool:
-        import time
-        save_start = time.time()
-
-        try:
-            if not modules:
-                if STATE_FILE.exists():
-                    await asyncio.to_thread(STATE_FILE.unlink)
-                    self.logger.info("Cleared running modules state file")
-                else:
-                    self.logger.debug("No running modules; state file already absent")
-                return True
-
-            await asyncio.to_thread(STATE_FILE.parent.mkdir, parents=True, exist_ok=True)
-
-            state = {
-                'timestamp': datetime.datetime.now().isoformat(),
-                'running_modules': modules,
-            }
-
-            def write_json():
-                with open(STATE_FILE, 'w') as f:
-                    json.dump(state, f, indent=2)
-
-            await asyncio.to_thread(write_json)
-
-            save_duration = time.time() - save_start
-            self.logger.info("⏱️  Updated running modules state in %.3fs: %s",
-                            save_duration, modules)
-            return True
-
-        except Exception as e:
-            self.logger.error("Failed to write running modules state: %s", e, exc_info=True)
-            return False
+        return await self._session_recovery_observer.finalize_shutdown_state(running_modules)
 
     async def cleanup(self, request_geometry: bool = True) -> None:
         """
@@ -471,7 +569,13 @@ class LoggerSystem:
                              Can be set to False for faster shutdown if modules save their own.
         """
         self.logger.info("Cleaning up logger system")
+
+        # Stop health check
+        await self.module_manager.stop_health_check()
+
+        # Stop all modules
         await self.stop_all(request_geometry=request_geometry)
+
         self.shutdown_event.set()
 
     def get_session_info(self) -> dict:
@@ -485,7 +589,9 @@ class LoggerSystem:
             "running_modules": running_modules,
         }
 
-    # ========== Device Management ==========
+    # =========================================================================
+    # Device Management
+    # =========================================================================
 
     def set_devices_ui_callback(
         self,
@@ -494,15 +600,25 @@ class LoggerSystem:
         """Set callback for updating device panel UI."""
         self.devices_ui_callback = callback
 
-    def set_window_visibility_callback(
+    def set_device_connected_callback(
         self,
         callback: Callable[[str, bool], None]
     ) -> None:
-        """Set callback for window visibility changes.
+        """Set callback for device connection state changes.
 
-        The callback receives (device_id, visible) when a module window is shown/hidden.
+        The callback receives (device_id, connected) when connection state changes.
         """
-        self.window_visibility_callback = callback
+        self.device_connected_callback = callback
+
+    def set_device_visible_callback(
+        self,
+        callback: Callable[[str, bool], None]
+    ) -> None:
+        """Set callback for device window visibility changes.
+
+        The callback receives (device_id, visible) when window visibility changes.
+        """
+        self.device_visible_callback = callback
 
     async def start_device_scanning(self) -> None:
         """Start USB and XBee device scanning."""
@@ -528,6 +644,7 @@ class LoggerSystem:
         Callback when a device is connected.
 
         This auto-starts the appropriate module and assigns the device to it.
+        The module window will be visible after this.
         """
         module_id = device.module_id
         if not module_id:
@@ -560,6 +677,11 @@ class LoggerSystem:
         success = await self.module_manager.send_command(module_id, command)
         if not success:
             self.logger.error("Failed to send assign_device to module %s", module_id)
+            return
+
+        # Module started with window visible - update UI
+        self._notify_device_connected(device.device_id, True)
+        self._notify_device_visible(device.device_id, True)
 
     async def _on_device_disconnected(self, device_id: str) -> None:
         """Callback when a device is disconnected."""
@@ -579,50 +701,9 @@ class LoggerSystem:
         """Disconnect a device (called from UI)."""
         await self.device_manager.disconnect_device(device_id)
 
-    async def show_device_window(self, device_id: str) -> None:
-        """Show the window for a device's module.
-
-        If the module is not running, it will be enabled first.
-        """
-        await self.toggle_device_window(device_id, visible=True)
-
-    async def hide_device_window(self, device_id: str) -> None:
-        """Hide the window for a device's module."""
-        await self.toggle_device_window(device_id, visible=False)
-
-    async def toggle_device_window(self, device_id: str, visible: bool) -> None:
-        """Show or hide the window for a device's module.
-
-        If showing and the module is not running, it will be enabled first.
-        """
-        device = self.device_manager.get_device(device_id)
-        if not device:
-            self.logger.warning("Device not found: %s", device_id)
-            return
-
-        module_id = device.module_id
-        if not module_id:
-            self.logger.warning("Device has no module_id: %s", device_id)
-            return
-
-        if visible:
-            # Ensure module is enabled/running when showing
-            if not self.module_manager.is_module_enabled(module_id):
-                self.logger.info("Enabling module %s to show window for device %s", module_id, device_id)
-                success = await self.module_manager.set_module_enabled(module_id, True)
-                if not success:
-                    self.logger.error("Failed to enable module %s", module_id)
-                    return
-
-            # Send show_window command to module
-            command = CommandMessage.show_window()
-            await self.module_manager.send_command(module_id, command)
-        else:
-            # Send hide_window command to module
-            command = CommandMessage.hide_window()
-            await self.module_manager.send_command(module_id, command)
-
-    # ========== Device Connection State Persistence ==========
+    # =========================================================================
+    # Device Connection State Persistence
+    # =========================================================================
 
     async def _save_device_connection_state(self, module_id: str, connected: bool) -> None:
         """Save device connection state to module config."""
@@ -668,3 +749,164 @@ class LoggerSystem:
             if was_connected:
                 self.logger.info("Module %s had device connected - marking for auto-connect", module_info.name)
                 self.device_manager.set_pending_auto_connect(module_info.name)
+
+    # =========================================================================
+    # Device Connection & Visibility API
+    # =========================================================================
+
+    async def connect_and_start_device(self, device_id: str) -> bool:
+        """Connect a device and start its module.
+
+        Called when user clicks the green dot or Connect button.
+        Window is shown automatically when module starts.
+
+        Returns:
+            True if device is now connected with module running.
+        """
+        self.logger.info("connect_and_start_device: %s", device_id)
+
+        device = self.device_manager.get_device(device_id)
+        if not device:
+            self.logger.warning("Device not found: %s", device_id)
+            return False
+
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device has no module_id: %s", device_id)
+            return False
+
+        # Step 1: Connect device if not connected
+        if device.state != ConnectionState.CONNECTED:
+            self.logger.info("Connecting device %s", device_id)
+            connected = await self.connect_device(device_id)
+            if not connected:
+                self.logger.error("Failed to connect device %s", device_id)
+                return False
+            # connect_device triggers _on_device_connected which starts module
+            self._notify_device_connected(device_id, True)
+            self._notify_device_visible(device_id, True)
+            return True
+
+        # Step 2: Start module if not running (device already connected)
+        if not self.is_module_running(module_id):
+            self.logger.info("Starting module %s for device %s", module_id, device_id)
+            success = await self.set_module_enabled(module_id, True)
+            if not success:
+                self.logger.error("Failed to start module %s", module_id)
+                return False
+            self._notify_device_connected(device_id, True)
+            self._notify_device_visible(device_id, True)
+            return True
+
+        # Already connected and running
+        self._notify_device_connected(device_id, True)
+        return True
+
+    async def stop_and_disconnect_device(self, device_id: str) -> bool:
+        """Stop module and disconnect device.
+
+        Called when user clicks the green dot (when on) or Disconnect button.
+
+        Returns:
+            True if device is now disconnected.
+        """
+        self.logger.info("stop_and_disconnect_device: %s", device_id)
+
+        device = self.device_manager.get_device(device_id)
+        if not device:
+            self.logger.warning("Device not found: %s", device_id)
+            self._notify_device_connected(device_id, False)
+            self._notify_device_visible(device_id, False)
+            return True
+
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device has no module_id: %s", device_id)
+            self._notify_device_connected(device_id, False)
+            return True
+
+        # Step 1: Stop module if running
+        if self.is_module_running(module_id):
+            self.logger.info("Stopping module %s", module_id)
+            await self.set_module_enabled(module_id, False)
+
+        # Step 2: Disconnect device
+        # (The device manager handles actual disconnection)
+
+        # Notify UI
+        self._notify_device_connected(device_id, False)
+        self._notify_device_visible(device_id, False)
+        return True
+
+    async def show_device_window(self, device_id: str) -> bool:
+        """Show the device's module window.
+
+        If the device is not connected, connects first.
+
+        Returns:
+            True if window is now visible.
+        """
+        self.logger.info("show_device_window: %s", device_id)
+
+        device = self.device_manager.get_device(device_id)
+        if not device:
+            self.logger.warning("Device not found: %s", device_id)
+            return False
+
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device has no module_id: %s", device_id)
+            return False
+
+        # If not connected, connect first (which starts module and shows window)
+        if device.state != ConnectionState.CONNECTED:
+            success = await self.connect_and_start_device(device_id)
+            return success
+
+        # If module not running, start it (which shows window)
+        if not self.is_module_running(module_id):
+            self.logger.info("Starting module %s for device %s", module_id, device_id)
+            success = await self.set_module_enabled(module_id, True)
+            if success:
+                self._notify_device_visible(device_id, True)
+            return success
+
+        # Module running - just show window
+        self.logger.info("Sending show_window to module %s", module_id)
+        command = CommandMessage.show_window()
+        success = await self.module_manager.send_command(module_id, command)
+        if success:
+            self._notify_device_visible(device_id, True)
+        return success
+
+    async def hide_device_window(self, device_id: str) -> bool:
+        """Hide the device's module window.
+
+        Does NOT stop the module - it keeps running in the background.
+
+        Returns:
+            True if window is now hidden.
+        """
+        self.logger.info("hide_device_window: %s", device_id)
+
+        device = self.device_manager.get_device(device_id)
+        if not device:
+            self.logger.warning("Device not found: %s", device_id)
+            self._notify_device_visible(device_id, False)
+            return True
+
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device has no module_id: %s", device_id)
+            self._notify_device_visible(device_id, False)
+            return True
+
+        # Hide window if module is running
+        if self.is_module_running(module_id):
+            self.logger.info("Sending hide_window to module %s", module_id)
+            command = CommandMessage.hide_window()
+            await self.module_manager.send_command(module_id, command)
+
+        # Notify UI
+        self._notify_device_visible(device_id, False)
+        return True

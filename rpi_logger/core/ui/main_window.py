@@ -158,8 +158,12 @@ class MainWindow:
         # Wire up device UI callback
         self.logger_system.set_devices_ui_callback(self.update_devices_display)
 
-        # Wire up window visibility callback for Show/Hide button state
-        self.logger_system.set_window_visibility_callback(self.on_window_visibility_changed)
+        # Wire up device state callbacks for UI updates
+        self.logger_system.set_device_connected_callback(self.on_device_connected_changed)
+        self.logger_system.set_device_visible_callback(self.on_device_visible_changed)
+
+        # Set UI root for thread-safe state updates
+        self.logger_system.set_ui_root(self.root)
 
         self.timer_manager.set_labels(
             self.current_time_label,
@@ -183,6 +187,9 @@ class MainWindow:
             is_enabled = self.logger_system.is_module_enabled(module_info.name)
             var = tk.BooleanVar(value=is_enabled)
             self.module_vars[module_info.name] = var
+
+            # Register checkbox with UI observer for automatic state sync
+            self.logger_system.register_ui_checkbox(module_info.name, var)
 
             modules_menu.add_checkbutton(
                 label=module_info.display_name,
@@ -475,11 +482,11 @@ class MainWindow:
         """Build the USB devices panel in the right column."""
         self.devices_panel = USBDevicesPanel(
             self._main_frame,
-            on_connect_toggle=lambda device_id, connect: self._schedule_task(
-                self.controller.on_device_connect_toggle(device_id, connect)
+            on_connect_change=lambda device_id, connect: self._schedule_task(
+                self.controller.on_device_connect_change(device_id, connect)
             ),
-            on_toggle_window=lambda device_id, visible: self._schedule_task(
-                self.controller.on_device_toggle_window(device_id, visible)
+            on_visibility_change=lambda device_id, visible: self._schedule_task(
+                self.controller.on_device_visibility_change(device_id, visible)
             ),
         )
         # Right column of main content area
@@ -498,13 +505,21 @@ class MainWindow:
         if self.devices_panel:
             self.devices_panel.update_devices(devices, dongles)
 
-    def on_window_visibility_changed(self, device_id: str, visible: bool) -> None:
-        """Handle window visibility change for a device.
+    def on_device_connected_changed(self, device_id: str, connected: bool) -> None:
+        """Handle device connection state change (from LoggerSystem).
 
-        This updates the Show/Hide button text in the devices panel.
+        Updates dot and Connect/Disconnect button.
         """
         if self.devices_panel:
-            self.devices_panel.set_window_visible(device_id, visible)
+            self.devices_panel.set_device_connected(device_id, connected)
+
+    def on_device_visible_changed(self, device_id: str, visible: bool) -> None:
+        """Handle device window visibility change (from LoggerSystem).
+
+        Updates Show/Hide button.
+        """
+        if self.devices_panel:
+            self.devices_panel.set_device_visible(device_id, visible)
 
     def _build_logger_frame(self) -> None:
         self.logger_frame = ttk.LabelFrame(self.root, text="System Log", padding="3")
@@ -513,7 +528,7 @@ class MainWindow:
 
         self.logger_text = ScrolledText(
             self.logger_frame,
-            height=2,
+            height=4,
             wrap=tk.WORD,
             state='disabled'
         )
