@@ -7,7 +7,7 @@ with their specific protocol.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, Callable, Awaitable
+from typing import Optional, Dict, Any, Callable, Awaitable, Set
 from pathlib import Path
 import asyncio
 import logging
@@ -15,6 +15,18 @@ import logging
 from ..device_types import DRTDeviceType
 
 logger = logging.getLogger(__name__)
+
+
+def _task_exception_handler(task: asyncio.Task) -> None:
+    """Handle exceptions from fire-and-forget tasks."""
+    try:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("Unhandled exception in background task: %s", exc)
+    except asyncio.CancelledError:
+        pass
 
 
 class BaseDRTHandler(ABC):
@@ -62,6 +74,9 @@ class BaseDRTHandler(ABC):
         self._trial_number = 0
         self._buffered_trial_data: Optional[Dict[str, Any]] = None
         self._trial_label: str = ""  # Condition/experiment label for CSV output
+
+        # Track pending background tasks for cleanup
+        self._pending_tasks: Set[asyncio.Task] = set()
 
     @property
     @abstractmethod
@@ -122,6 +137,12 @@ class BaseDRTHandler(ABC):
             except asyncio.CancelledError:
                 pass
             self._read_task = None
+
+        # Cancel any pending background tasks
+        for task in self._pending_tasks:
+            if not task.done():
+                task.cancel()
+        self._pending_tasks.clear()
 
         logger.info(f"Handler stopped for {self.device_id}")
 
@@ -286,6 +307,26 @@ class BaseDRTHandler(ABC):
             f"(running={self._running}, connected={self.is_connected}, "
             f"errors={self._consecutive_errors})"
         )
+
+    def _create_background_task(self, coro) -> asyncio.Task:
+        """
+        Create a tracked background task with exception handling.
+
+        Args:
+            coro: Coroutine to run
+
+        Returns:
+            The created task
+        """
+        task = asyncio.create_task(coro)
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._on_task_done)
+        return task
+
+    def _on_task_done(self, task: asyncio.Task) -> None:
+        """Callback when a background task completes."""
+        self._pending_tasks.discard(task)
+        _task_exception_handler(task)
 
     async def _dispatch_data_event(
         self,

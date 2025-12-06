@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
 from .constants import DEFAULT_SESSION_PREFIX
 from .entities import AudioDeviceInfo, AudioSnapshot
 from .level_meter import LevelMeter
+
+_logger = logging.getLogger(__name__)
 
 
 class AudioState:
@@ -37,7 +40,7 @@ class AudioState:
             try:
                 observer(snapshot)
             except Exception:
-                continue
+                _logger.debug("Observer notification failed", exc_info=True)
 
     def snapshot(self) -> AudioSnapshot:
         return AudioSnapshot(
@@ -64,6 +67,22 @@ class AudioState:
             if device_id in self.selected_devices:
                 self.selected_devices[device_id] = info
 
+        self._update_status()
+        self._notify()
+
+    def set_device(self, device_id: int, device: AudioDeviceInfo) -> None:
+        """Add or update a single device (used by centralized discovery)."""
+        self.devices[device_id] = device
+        if device_id in self.selected_devices:
+            self.selected_devices[device_id] = device
+        self._update_status()
+        self._notify()
+
+    def remove_device(self, device_id: int) -> None:
+        """Remove a single device (used by centralized discovery)."""
+        self.devices.pop(device_id, None)
+        self.selected_devices.pop(device_id, None)
+        self.level_meters.pop(device_id, None)
         self._update_status()
         self._notify()
 

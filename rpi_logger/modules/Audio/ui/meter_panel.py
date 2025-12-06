@@ -8,11 +8,51 @@ from typing import Dict, Tuple
 try:  # pragma: no cover - Tk unavailable on headless hosts
     import tkinter as tk
     from tkinter import ttk
+
+    from rpi_logger.core.ui.theme.colors import Colors
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
+    Colors = None  # type: ignore
 
 from ..domain import DB_MAX, DB_MIN, DB_RED, DB_YELLOW, AudioSnapshot
+
+
+# Meter-specific colors derived from theme
+class MeterColors:
+    """Audio meter colors using theme palette with dark background variants."""
+
+    # Background zones (dark tinted variants for meter zones)
+    BG_GREEN = "#1a3a1a"
+    BG_GREEN_BORDER = "#2a4a2a"
+    BG_YELLOW = "#3a3a1a"
+    BG_YELLOW_BORDER = "#4a4a2a"
+    BG_RED = "#3a1a1a"
+    BG_RED_BORDER = "#4a2a2a"
+
+    # Signal level colors from theme (set after Colors import)
+    LEVEL_GREEN: str
+    LEVEL_YELLOW: str
+    LEVEL_RED: str
+    PEAK_LINE: str
+
+
+def _init_meter_colors() -> None:
+    """Initialize meter colors from theme (called after import)."""
+    if Colors is not None:
+        MeterColors.LEVEL_GREEN = Colors.SUCCESS
+        MeterColors.LEVEL_YELLOW = Colors.WARNING
+        MeterColors.LEVEL_RED = Colors.ERROR
+        MeterColors.PEAK_LINE = Colors.FG_PRIMARY
+    else:
+        # Fallback if Colors unavailable (headless)
+        MeterColors.LEVEL_GREEN = "#2ecc71"
+        MeterColors.LEVEL_YELLOW = "#f39c12"
+        MeterColors.LEVEL_RED = "#e74c3c"
+        MeterColors.PEAK_LINE = "#ecf0f1"
+
+
+_init_meter_colors()
 
 
 class MeterPanel:
@@ -74,9 +114,9 @@ class MeterPanel:
                 device_frame,
                 width=260,
                 height=32,
-                bg="#1a1a1a",
+                bg=Colors.BG_CANVAS if Colors else "#1e1e1e",
                 highlightthickness=1,
-                highlightbackground="gray",
+                highlightbackground=Colors.BORDER if Colors else "#404055",
             )
             canvas.grid(row=1, column=0, sticky="ew")
             self._meter_canvases[device_id] = canvas
@@ -123,8 +163,8 @@ class MeterPanel:
                 padding_y,
                 x_offset + green_width,
                 padding_y + meter_height,
-                fill="#1a3a1a",
-                outline="#2a4a2a",
+                fill=MeterColors.BG_GREEN,
+                outline=MeterColors.BG_GREEN_BORDER,
             )
             x_offset += green_width
             items["bg_yellow"] = canvas.create_rectangle(
@@ -132,8 +172,8 @@ class MeterPanel:
                 padding_y,
                 x_offset + yellow_width,
                 padding_y + meter_height,
-                fill="#3a3a1a",
-                outline="#4a4a2a",
+                fill=MeterColors.BG_YELLOW,
+                outline=MeterColors.BG_YELLOW_BORDER,
             )
             x_offset += yellow_width
             items["bg_red"] = canvas.create_rectangle(
@@ -141,13 +181,21 @@ class MeterPanel:
                 padding_y,
                 x_offset + red_width,
                 padding_y + meter_height,
-                fill="#3a1a1a",
-                outline="#4a2a2a",
+                fill=MeterColors.BG_RED,
+                outline=MeterColors.BG_RED_BORDER,
             )
-            items["level_green"] = canvas.create_rectangle(0, 0, 0, 0, fill="#00ff00", outline="")
-            items["level_yellow"] = canvas.create_rectangle(0, 0, 0, 0, fill="#ffff00", outline="")
-            items["level_red"] = canvas.create_rectangle(0, 0, 0, 0, fill="#ff0000", outline="")
-            items["peak_line"] = canvas.create_line(0, 0, 0, 0, fill="#ffffff", width=2)
+            items["level_green"] = canvas.create_rectangle(
+                0, 0, 0, 0, fill=MeterColors.LEVEL_GREEN, outline=""
+            )
+            items["level_yellow"] = canvas.create_rectangle(
+                0, 0, 0, 0, fill=MeterColors.LEVEL_YELLOW, outline=""
+            )
+            items["level_red"] = canvas.create_rectangle(
+                0, 0, 0, 0, fill=MeterColors.LEVEL_RED, outline=""
+            )
+            items["peak_line"] = canvas.create_line(
+                0, 0, 0, 0, fill=MeterColors.PEAK_LINE, width=2
+            )
             self._canvas_items[device_id] = items
 
         rms_position = max(DB_MIN, min(rms_db, DB_MAX))

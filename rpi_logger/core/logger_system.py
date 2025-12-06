@@ -122,9 +122,10 @@ class LoggerSystem:
         self.device_manager.set_device_disconnected_callback(self._on_device_disconnected)
         self.device_manager.set_save_connection_state_callback(self._save_device_connection_state)
         self.device_manager.set_load_connection_state_callback(self._load_device_connection_state)
+        self.device_manager.set_xbee_data_router(self._route_xbee_to_module)
 
-        # UI callback for device panel updates
-        self.devices_ui_callback: Optional[Callable[[List[DeviceInfo], List[XBeeDongleInfo]], None]] = None
+        # UI callback for device panel updates (usb_devices, dongles, network_devices, audio_devices)
+        self.devices_ui_callback: Optional[Callable[[List[DeviceInfo], List[XBeeDongleInfo], List[DeviceInfo], List[DeviceInfo]], None]] = None
 
         # UI callbacks for device state changes
         self.device_connected_callback: Optional[Callable[[str, bool], None]] = None
@@ -386,14 +387,22 @@ class LoggerSystem:
         """Start a module (routes through state machine)."""
         window_geometry = await self._load_module_geometry(module_name)
         self.module_manager.set_window_geometry(module_name, window_geometry)
-        return await self.module_manager.start_module(module_name)
+        success = await self.module_manager.start_module(module_name)
+        if success:
+            # Set up XBee send callback for the module
+            self._setup_xbee_send_callback(module_name)
+        return success
 
     async def set_module_enabled(self, module_name: str, enabled: bool) -> bool:
         """Set module enabled state (central state machine entry point)."""
         if enabled:
             window_geometry = await self._load_module_geometry(module_name)
             self.module_manager.set_window_geometry(module_name, window_geometry)
-        return await self.module_manager.set_module_enabled(module_name, enabled)
+        success = await self.module_manager.set_module_enabled(module_name, enabled)
+        if success and enabled:
+            # Set up XBee send callback for the module
+            self._setup_xbee_send_callback(module_name)
+        return success
 
     def is_module_enabled(self, module_name: str) -> bool:
         """Check if module is enabled (checkbox state)."""
@@ -595,9 +604,13 @@ class LoggerSystem:
 
     def set_devices_ui_callback(
         self,
-        callback: Callable[[List[DeviceInfo], List[XBeeDongleInfo]], None]
+        callback: Callable[[List[DeviceInfo], List[XBeeDongleInfo], List[DeviceInfo], List[DeviceInfo], List[DeviceInfo], List[DeviceInfo]], None]
     ) -> None:
-        """Set callback for updating device panel UI."""
+        """Set callback for updating device panel UI.
+
+        Args:
+            callback: Function receiving (usb_devices, dongles, network_devices, audio_devices, internal_devices, camera_devices)
+        """
         self.devices_ui_callback = callback
 
     def set_device_connected_callback(
@@ -637,7 +650,11 @@ class LoggerSystem:
         if self.devices_ui_callback:
             devices = self.device_manager.get_all_devices()
             dongles = self.device_manager.get_xbee_dongles()
-            self.devices_ui_callback(devices, dongles)
+            network_devices = self.device_manager.get_network_devices()
+            audio_devices = self.device_manager.get_audio_devices()
+            internal_devices = self.device_manager.get_internal_devices()
+            camera_devices = self.device_manager.get_camera_devices()
+            self.devices_ui_callback(devices, dongles, network_devices, audio_devices, internal_devices, camera_devices)
 
     async def _on_device_connected(self, device: DeviceInfo) -> None:
         """
@@ -645,6 +662,12 @@ class LoggerSystem:
 
         This auto-starts the appropriate module and assigns the device to it.
         The module window will be visible after this.
+
+        For internal devices (like Notes), no hardware assignment is needed -
+        the module just starts up.
+
+        For wireless devices, we create the XBee transport before assigning,
+        so the module can retrieve it via get_wireless_transport().
         """
         module_id = device.module_id
         if not module_id:
@@ -656,28 +679,59 @@ class LoggerSystem:
             device.device_id, module_id
         )
 
+        # For wireless devices, create transport before assigning to module
+        if device.is_wireless:
+            transport = await self.device_manager.create_wireless_transport(device.device_id)
+            if not transport:
+                self.logger.error("Failed to create wireless transport for %s", device.device_id)
+                return
+
         # Auto-start module if not running
         if not self.is_module_running(module_id):
             self.logger.info("Auto-starting module %s for device %s", module_id, device.device_id)
             success = await self.set_module_enabled(module_id, True)
             if not success:
                 self.logger.error("Failed to start module %s", module_id)
+                # Clean up transport on failure
+                if device.is_wireless:
+                    await self.device_manager.destroy_wireless_transport(device.device_id)
                 return
 
-        # Send assign_device command to module
-        session_dir_str = str(self.session_dir) if self.session_dir else None
-        command = CommandMessage.assign_device(
-            device_id=device.device_id,
-            device_type=device.device_type.value,
-            port=device.port or "",
-            baudrate=device.baudrate,
-            session_dir=session_dir_str,
-            is_wireless=device.is_wireless,
-        )
-        success = await self.module_manager.send_command(module_id, command)
-        if not success:
-            self.logger.error("Failed to send assign_device to module %s", module_id)
-            return
+        # For internal devices, no hardware assignment is needed - just start the module
+        if device.is_internal:
+            self.logger.debug("Internal device %s - skipping assign_device", device.device_id)
+        else:
+            # Send assign_device command to module (for hardware devices)
+            session_dir_str = str(self.session_dir) if self.session_dir else None
+            command = CommandMessage.assign_device(
+                device_id=device.device_id,
+                device_type=device.device_type.value,
+                port=device.port or "",
+                baudrate=device.baudrate,
+                session_dir=session_dir_str,
+                is_wireless=device.is_wireless,
+                is_network=device.is_network,
+                network_address=device.network_address,
+                network_port=device.network_port,
+                sounddevice_index=device.sounddevice_index,
+                audio_channels=device.audio_channels,
+                audio_sample_rate=device.audio_sample_rate,
+                # Camera fields
+                is_camera=device.is_camera,
+                camera_type=device.camera_type,
+                camera_stable_id=device.camera_stable_id,
+                camera_dev_path=device.camera_dev_path,
+                camera_hw_model=device.camera_hw_model,
+                camera_location=device.camera_location,
+                display_name=device.display_name,
+            )
+            success = await self.module_manager.send_command(module_id, command)
+            if not success:
+                self.logger.error("Failed to send assign_device to module %s", module_id)
+                # Clean up transport on failure
+                if device.is_wireless:
+                    await self.device_manager.destroy_wireless_transport(device.device_id)
+                return
 
         # Module started with window visible - update UI
         self._notify_device_connected(device.device_id, True)
@@ -910,3 +964,66 @@ class LoggerSystem:
         # Notify UI
         self._notify_device_visible(device_id, False)
         return True
+
+    # =========================================================================
+    # XBee Wireless Communication Routing
+    # =========================================================================
+
+    async def _route_xbee_to_module(self, node_id: str, data: str) -> None:
+        """
+        Route incoming XBee data to the appropriate module.
+
+        Called by the connection manager when XBee data is received
+        for a connected device.
+
+        Note: This is the legacy async routing mechanism. The preferred approach
+        is for modules to use get_wireless_transport() to get an XBeeTransport
+        that directly receives data via the registered handler.
+        """
+        # Find which module owns this device
+        device = self.device_manager.get_device(node_id)
+        if not device:
+            self.logger.debug("XBee data for unknown device: %s", node_id)
+            return
+
+        module_id = device.module_id
+        if not module_id:
+            self.logger.debug("XBee device %s has no module_id", node_id)
+            return
+
+        # Get the module process and forward the data
+        module = self.module_manager.get_module(module_id)
+        if module and module.is_running():
+            await module.send_xbee_data(node_id, data)
+        else:
+            self.logger.debug("Module %s not running for XBee device %s", module_id, node_id)
+
+    def get_wireless_transport(self, node_id: str):
+        """
+        Get the wireless transport for a device.
+
+        Modules can call this method to get an XBeeTransport for a wireless device.
+        The transport is created by DeviceConnectionManager when the device is
+        connected and registered for message routing.
+
+        Args:
+            node_id: The wireless device's node ID (e.g., "wVOG_01")
+
+        Returns:
+            XBeeTransport if found, None otherwise
+        """
+        return self.device_manager.get_wireless_transport(node_id)
+
+    async def _send_xbee_from_module(self, node_id: str, data: bytes) -> bool:
+        """
+        Send data to XBee device on behalf of a module.
+
+        Called when a module process sends an xbee_send status message.
+        """
+        return await self.device_manager.send_to_wireless_device(node_id, data)
+
+    def _setup_xbee_send_callback(self, module_id: str) -> None:
+        """Set up XBee send callback for a module."""
+        module = self.module_manager.get_module(module_id)
+        if module:
+            module.set_xbee_send_callback(self._send_xbee_from_module)

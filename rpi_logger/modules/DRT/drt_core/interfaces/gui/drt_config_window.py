@@ -5,7 +5,7 @@ Uses the modern dark theme styling consistent with VOG module.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk
 from typing import Optional, Dict, Any, Callable
 from pathlib import Path
 
@@ -62,14 +62,17 @@ class DRTConfigWindow:
         self._config_path = Path(__file__).parent.parent.parent.parent / "config.txt"
 
         # Determine device type label
-        type_label = {
-            DRTDeviceType.SDRT: "sDRT",
-            DRTDeviceType.WDRT_USB: "wDRT USB",
-            DRTDeviceType.WDRT_WIRELESS: "wDRT Wireless",
+        type_prefix = {
+            DRTDeviceType.SDRT: "DRT-USB",
+            DRTDeviceType.WDRT_USB: "DRT-USB",
+            DRTDeviceType.WDRT_WIRELESS: "DRT-XB",
         }.get(device_type, "DRT")
 
+        # Extract short port name (e.g., "ACM1" from "/dev/ttyACM1")
+        short_port = device_id.split('/')[-1].replace('tty', '') if '/' in device_id else device_id
+
         # Window dimensions
-        width, height = 380, 340
+        width, height = 265, 255
 
         # Calculate position before creating dialog
         saved_pos = self._load_saved_position_static()
@@ -83,7 +86,7 @@ class DRTConfigWindow:
         # Create modal dialog with full geometry (size + position) immediately
         self.dialog = tk.Toplevel(parent)
         self.dialog.geometry(f"{width}x{height}+{x}+{y}")
-        self.dialog.title(f"{type_label} Configuration - {device_id}")
+        self.dialog.title(f"{type_prefix}:{short_port}")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -113,92 +116,44 @@ class DRTConfigWindow:
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Device info section
-        short_id = self.device_id.split('/')[-1] if '/' in self.device_id else self.device_id
-        type_label = {
-            DRTDeviceType.SDRT: "sDRT",
-            DRTDeviceType.WDRT_USB: "wDRT USB",
-            DRTDeviceType.WDRT_WIRELESS: "wDRT Wireless",
-        }.get(self.device_type, "DRT")
+        # Runtime Parameters LabelFrame
+        params_lf = ttk.LabelFrame(main_frame, text="Runtime Parameters")
+        params_lf.pack(fill=tk.X, pady=(0, 5))
+        params_lf.columnconfigure(1, weight=1)
 
-        # Configuration section
-        config_frame = ttk.LabelFrame(main_frame, text="Configuration")
-        config_frame.pack(fill=tk.X, pady=(0, 10))
-        config_frame.columnconfigure(1, weight=1)
-
-        # Parameter entries
+        # Parameter entries (order matches RS_Logger: Upper, Lower, Duration, Intensity)
         params = [
-            ("Lower ISI (ms):", 'lowerISI', "3000-5000"),
-            ("Upper ISI (ms):", 'upperISI', "3000-5000"),
-            ("Stimulus Duration (ms):", 'stimDur', "1000"),
-            ("Intensity (%):", 'intensity', "0-100"),
+            ("Upper ISI (ms):", 'upperISI'),
+            ("Lower ISI (ms):", 'lowerISI'),
+            ("Stimulus Duration (ms):", 'stimDur'),
+            ("Stimulus Intensity (%):", 'intensity'),
         ]
 
-        for row_idx, (label_text, key, hint) in enumerate(params):
-            ttk.Label(config_frame, text=label_text, style='Inframe.TLabel').grid(
-                row=row_idx, column=0, sticky="w", padx=5, pady=2)
-            ttk.Entry(config_frame, textvariable=self._vars[key], width=10).grid(
-                row=row_idx, column=1, sticky="e", padx=5, pady=2)
+        for row_idx, (label_text, key) in enumerate(params):
+            ttk.Label(params_lf, text=label_text, style='Inframe.TLabel').grid(
+                row=row_idx, column=0, sticky="w", padx=5, pady=1)
+            ttk.Entry(params_lf, textvariable=self._vars[key], width=7).grid(
+                row=row_idx, column=2, sticky="w", padx=5, pady=1)
 
-        # Separator
-        ttk.Separator(config_frame, orient=tk.HORIZONTAL).grid(
-            row=len(params), column=0, columnspan=2, sticky="ew", pady=5)
+        # Buttons frame (inside Runtime Parameters frame)
+        btn_frame = tk.Frame(params_lf, bg=Colors.BG_DARKER)
+        btn_frame.grid(row=len(params), column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 10))
 
-        # Validation hints
-        hint_label = ttk.Label(
-            config_frame,
-            text="ISI: 0-65535ms, Duration: 0-65535ms, Intensity: 0-100%",
-            style='Muted.TLabel'
-        )
-        hint_label.grid(row=len(params) + 1, column=0, columnspan=2, sticky="w", padx=5, pady=2)
-
-        # Preset LabelFrame
-        preset_lf = ttk.LabelFrame(main_frame, text="Presets")
-        preset_lf.pack(fill=tk.X, pady=(0, 10))
-
-        # Use tk.Frame with bg for RoundedButton
-        preset_btn_frame = tk.Frame(preset_lf, bg=Colors.BG_DARKER)
-        preset_btn_frame.pack(fill=tk.X, padx=5, pady=5)
-
+        # Upload Custom button
         RoundedButton(
-            preset_btn_frame, text="ISO Standard",
-            command=self._on_iso_preset,
-            width=120, height=32, style='default',
-            bg=Colors.BG_DARKER
-        ).pack(side=tk.LEFT, padx=2)
-
-        # Actions LabelFrame
-        actions_lf = ttk.LabelFrame(main_frame, text="Actions")
-        actions_lf.pack(fill=tk.X, pady=(0, 10))
-
-        # Use tk.Frame with bg for RoundedButtons
-        action_btn_frame = tk.Frame(actions_lf, bg=Colors.BG_DARKER)
-        action_btn_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        RoundedButton(
-            action_btn_frame, text="Read from Device",
-            command=self._on_get_config,
-            width=130, height=32, style='default',
-            bg=Colors.BG_DARKER
-        ).pack(side=tk.LEFT, padx=2)
-
-        RoundedButton(
-            action_btn_frame, text="Upload to Device",
+            btn_frame, text="Upload Custom",
             command=self._on_upload,
-            width=130, height=32, style='default',
+            width=195, height=32, style='default',
             bg=Colors.BG_DARKER
-        ).pack(side=tk.LEFT, padx=2)
+        ).pack(anchor=tk.CENTER, pady=(5, 5))
 
-        # Close button at bottom
-        close_frame = tk.Frame(main_frame, bg=Colors.BG_DARKER)
-        close_frame.pack(fill=tk.X, pady=(10, 0))
-
+        # Upload ISO button
         RoundedButton(
-            close_frame, text="Close",
-            command=self._on_close,
-            width=80, height=32, style='default',
+            btn_frame, text="Upload ISO",
+            command=self._on_iso_preset,
+            width=195, height=32, style='default',
             bg=Colors.BG_DARKER
-        ).pack(side=tk.RIGHT, padx=2)
+        ).pack(anchor=tk.CENTER, pady=(0, 5))
 
     def _load_saved_position_static(self) -> Optional[tuple]:
         """Load saved dialog position from config file.
@@ -311,19 +266,19 @@ class DRTConfigWindow:
         params = self._validate_inputs()
         if params and self.on_upload:
             self.on_upload(params)
-            messagebox.showinfo("Success", "Configuration uploaded to device", parent=self.dialog)
+            self._clear_fields()
 
     def _on_iso_preset(self) -> None:
         """Handle ISO preset button click."""
-        # Set ISO values in fields
-        self._vars['lowerISI'].set("3000")
-        self._vars['upperISI'].set("5000")
-        self._vars['stimDur'].set("1000")
-        self._vars['intensity'].set("100")
-
-        # Also send to device if callback available
+        # Send ISO preset to device if callback available
         if self.on_iso_preset:
             self.on_iso_preset()
+        self._clear_fields()
+
+    def _clear_fields(self) -> None:
+        """Clear all input fields."""
+        for var in self._vars.values():
+            var.set("")
 
     def _on_get_config(self) -> None:
         """Handle get config button click."""

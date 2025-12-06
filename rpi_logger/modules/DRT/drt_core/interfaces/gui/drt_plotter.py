@@ -135,8 +135,6 @@ class DRTPlotter:
         for spine in self._ax_rt.spines.values():
             spine.set_color(Colors.BORDER)
 
-        self._fig.tight_layout()
-
     def add_device(self, port: str):
         """Add a device to track in the plotter."""
         if port in self._unit_ids:

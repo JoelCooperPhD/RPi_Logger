@@ -9,6 +9,17 @@ from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.app.views.adapter import ViewAdapter
 from rpi_logger.modules.Cameras.app.widgets.settings_panel import DEFAULT_SETTINGS, SettingsWindow
 
+try:
+    from rpi_logger.core.ui.theme.styles import Theme
+    from rpi_logger.core.ui.theme.widgets import RoundedButton
+    from rpi_logger.core.ui.theme.colors import Colors
+    HAS_THEME = True
+except ImportError:
+    HAS_THEME = False
+    Theme = None
+    RoundedButton = None
+    Colors = None
+
 
 class CamerasView:
     """Composes the Cameras Tk UI (tabs, metrics, settings)."""
@@ -64,6 +75,14 @@ class CamerasView:
     # ------------------------------------------------------------------ Layout
 
     def _build_layout(self, parent, tk, ttk) -> None:
+        # Apply theme to root window if available
+        if HAS_THEME and Theme is not None:
+            try:
+                root = parent.winfo_toplevel()
+                Theme.apply(root)
+            except Exception:
+                pass
+
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(0, weight=1)
 
@@ -73,12 +92,24 @@ class CamerasView:
         self._notebook = notebook
         self._adapter.attach(notebook)
 
-        placeholder = ttk.Frame(notebook, padding="16")
-        ttk.Label(
-            placeholder,
-            text="Waiting for cameras...",
-            anchor="center",
-        ).grid(row=0, column=0, sticky="nsew")
+        # Use themed colors if available
+        if HAS_THEME and Colors is not None:
+            placeholder = tk.Frame(notebook, bg=Colors.BG_FRAME, padx=16, pady=16)
+            lbl = tk.Label(
+                placeholder,
+                text="Waiting for cameras...",
+                anchor="center",
+                bg=Colors.BG_FRAME,
+                fg=Colors.FG_PRIMARY,
+            )
+        else:
+            placeholder = ttk.Frame(notebook, padding="16")
+            lbl = ttk.Label(
+                placeholder,
+                text="Waiting for cameras...",
+                anchor="center",
+            )
+        lbl.grid(row=0, column=0, sticky="nsew")
         placeholder.columnconfigure(0, weight=1)
         placeholder.rowconfigure(0, weight=1)
         self._placeholder_tab = placeholder
@@ -102,7 +133,11 @@ class CamerasView:
             self._io_stub_history = {}
 
         def _builder(frame) -> None:
-            container = ttk.Frame(frame)
+            # Use themed colors if available
+            if HAS_THEME and Colors is not None:
+                container = tk.Frame(frame, bg=Colors.BG_FRAME)
+            else:
+                container = ttk.Frame(frame)
             container.grid(row=0, column=0, sticky="ew")
             for idx in range(6):
                 container.columnconfigure(idx, weight=1, uniform="iofields")
@@ -117,12 +152,18 @@ class CamerasView:
                 ("wait", "Wait (ms)"),
             ]
             for col, (key, label_text) in enumerate(fields):
-                name = ttk.Label(container, text=label_text, anchor="center")
-                val = ttk.Label(container, textvariable=self._io_stub_fields[key], anchor="center")
-                try:
-                    val.configure(font=("TkFixedFont", 9))
-                except Exception:
-                    pass
+                if HAS_THEME and Colors is not None:
+                    name = tk.Label(container, text=label_text, anchor="center",
+                                    bg=Colors.BG_FRAME, fg=Colors.FG_SECONDARY)
+                    val = tk.Label(container, textvariable=self._io_stub_fields[key], anchor="center",
+                                   bg=Colors.BG_FRAME, fg=Colors.FG_PRIMARY, font=("TkFixedFont", 9))
+                else:
+                    name = ttk.Label(container, text=label_text, anchor="center")
+                    val = ttk.Label(container, textvariable=self._io_stub_fields[key], anchor="center")
+                    try:
+                        val.configure(font=("TkFixedFont", 9))
+                    except Exception:
+                        pass
                 name.grid(row=0, column=col, sticky="ew", padx=2)
                 val.grid(row=1, column=col, sticky="ew", padx=2)
 
@@ -241,8 +282,20 @@ class CamerasView:
             from tkinter import ttk  # type: ignore  # noqa: F401
         except Exception:
             return
-        placeholder = ttk.Frame(self._notebook, padding="16")
-        ttk.Label(placeholder, text="Waiting for cameras...", anchor="center").grid(row=0, column=0, sticky="nsew")
+        # Use themed colors if available
+        if HAS_THEME and Colors is not None:
+            placeholder = tk.Frame(self._notebook, bg=Colors.BG_FRAME, padx=16, pady=16)
+            lbl = tk.Label(
+                placeholder,
+                text="Waiting for cameras...",
+                anchor="center",
+                bg=Colors.BG_FRAME,
+                fg=Colors.FG_PRIMARY,
+            )
+        else:
+            placeholder = ttk.Frame(self._notebook, padding="16")
+            lbl = ttk.Label(placeholder, text="Waiting for cameras...", anchor="center")
+        lbl.grid(row=0, column=0, sticky="nsew")
         placeholder.columnconfigure(0, weight=1)
         placeholder.rowconfigure(0, weight=1)
         self._placeholder_tab = placeholder
@@ -415,11 +468,8 @@ class CamerasView:
         self._camera_settings[camera_id] = dict(settings)
         if self._settings_window:
             self._settings_window.set_camera_settings(camera_id, settings)
-            if self._active_camera_id == camera_id and self._settings_window._panel:
-                try:
-                    self._settings_window._panel.apply(settings)
-                except Exception:
-                    self._logger.debug("Settings panel apply failed for %s", camera_id, exc_info=True)
+            if self._active_camera_id == camera_id and self._settings_window.has_panel():
+                self._settings_window.apply_to_panel(settings)
 
     def update_camera_capabilities(self, camera_id: str, capabilities: Any) -> None:
         """Store per-camera options derived from capabilities and refresh settings UI."""
@@ -478,20 +528,21 @@ class CamerasView:
 
         # Align stored defaults with the available options to avoid stale hardcoded values.
         if self._settings_window:
-            self._settings_window._latest.setdefault(camera_id, dict(DEFAULT_SETTINGS))
-            latest = self._settings_window._latest[camera_id]
+            latest = self._settings_window.get_latest_settings(camera_id)
+            updated = dict(latest)
             if preview_res:
-                if latest.get("preview_resolution") not in preview_res:
-                    latest["preview_resolution"] = preview_res[0]
+                if updated.get("preview_resolution") not in preview_res:
+                    updated["preview_resolution"] = preview_res[0]
             if record_res:
-                if latest.get("record_resolution") not in record_res:
-                    latest["record_resolution"] = record_res[0]
+                if updated.get("record_resolution") not in record_res:
+                    updated["record_resolution"] = record_res[0]
             if preview_fps_values:
-                if latest.get("preview_fps") not in preview_fps_values:
-                    latest["preview_fps"] = default_preview_fps if default_preview_fps in preview_fps_values else preview_fps_values[0]
+                if updated.get("preview_fps") not in preview_fps_values:
+                    updated["preview_fps"] = default_preview_fps if default_preview_fps in preview_fps_values else preview_fps_values[0]
             if record_fps_values:
-                if latest.get("record_fps") not in record_fps_values:
-                    latest["record_fps"] = record_fps_values[0]
+                if updated.get("record_fps") not in record_fps_values:
+                    updated["record_fps"] = record_fps_values[0]
+            self._settings_window.set_latest_settings(camera_id, updated)
 
         self._logger.info(
             "Updated settings options for %s (resolutions=%s fps=%s/%s)",
@@ -508,8 +559,7 @@ class CamerasView:
                 preview_fps_values=preview_fps_values,
                 record_fps_values=record_fps_values,
             )
-            if self._active_camera_id == camera_id and self._settings_window._panel:
-                try:
-                    self._settings_window._panel.apply(self._settings_window._latest.get(camera_id, dict(DEFAULT_SETTINGS)))
-                except Exception:
-                    self._logger.debug("Failed to apply normalized settings for %s", camera_id, exc_info=True)
+            if self._active_camera_id == camera_id and self._settings_window.has_panel():
+                self._settings_window.apply_to_panel(
+                    self._settings_window.get_latest_settings(camera_id)
+                )

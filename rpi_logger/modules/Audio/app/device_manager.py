@@ -1,49 +1,34 @@
-"""Device discovery + enablement logic for the audio module."""
+"""Device enablement logic for the audio module.
+
+Device discovery is centralized in the main logger. This manager handles
+enabling/disabling devices that are assigned by the main logger.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Dict, Iterable, Tuple
+from typing import Iterable
 
 from ..domain import AudioDeviceInfo, AudioState
-from ..services import DeviceDiscoveryService, RecorderService
+from ..services import RecorderService
 
 
 class DeviceManager:
-    """Manage discovery and enable/disable of audio devices."""
+    """Manage enable/disable of audio devices.
+
+    Device discovery is now centralized in the main logger.
+    This manager handles device enablement after assignment.
+    """
 
     def __init__(
         self,
         state: AudioState,
-        discovery_service: DeviceDiscoveryService,
         recorder_service: RecorderService,
         logger: logging.Logger,
     ) -> None:
         self.state = state
-        self.discovery_service = discovery_service
         self.recorder_service = recorder_service
         self.logger = logger.getChild("DeviceManager")
-
-    async def discover_devices(self) -> Tuple[Dict[int, AudioDeviceInfo], set[int]]:
-        devices = await asyncio.to_thread(self.discovery_service.list_input_devices)
-        previous_ids = set(self.state.devices.keys())
-        self.state.set_devices(devices)
-
-        removed = previous_ids - set(devices.keys())
-        for missing in removed:
-            await self.recorder_service.disable_device(missing)
-
-        new_ids = set(devices.keys()) - previous_ids
-        if removed:
-            self.logger.info("Removed %d missing device(s): %s", len(removed), sorted(removed))
-        self.logger.debug(
-            "Discovery result: %d devices (%d new, %d removed)",
-            len(devices),
-            len(new_ids),
-            len(removed),
-        )
-        return devices, new_ids
 
     async def toggle_device(self, device_id: int, enabled: bool) -> None:
         self.logger.debug("Toggle requested for device %d (enabled=%s)", device_id, enabled)

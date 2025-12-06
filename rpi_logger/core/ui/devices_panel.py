@@ -1,13 +1,18 @@
 """
-USB Devices panel for main window.
+Devices panel for main window.
 
-Displays discovered devices in two sections:
+Displays discovered devices in sections:
+- INTERNAL: Software-only modules (Notes, etc.) - always available
 - USB: Direct USB-connected devices
 - WIRELESS: Devices connected via XBee dongles
+- NETWORK: Network-discovered devices (eye trackers via mDNS)
+- AUDIO: Audio input devices (microphones)
+- CAMERA: USB cameras and Pi CSI cameras
 
 Each device is shown as a single-line tile with:
 - Round toggle button (green when on, dark when off)
 - Device name
+- Connect/Disconnect button
 - Show/Hide button
 """
 
@@ -382,14 +387,22 @@ class USBDevicesPanel(ttk.LabelFrame):
         self.canvas.bind_all("<Button-4>", self._on_mousewheel)
         self.canvas.bind_all("<Button-5>", self._on_mousewheel)
 
-        # Create sections
+        # Create sections - INTERNAL first since it's always available
+        self.internal_section = DeviceSection(
+            self.scrollable_frame,
+            "INTERNAL",
+            self._on_connect_change,
+            self._on_visibility_change,
+        )
+        self.internal_section.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+
         self.usb_section = DeviceSection(
             self.scrollable_frame,
             "USB",
             self._on_connect_change,
             self._on_visibility_change,
         )
-        self.usb_section.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self.usb_section.grid(row=1, column=0, sticky="ew", pady=(0, 8))
 
         self.wireless_section = DeviceSection(
             self.scrollable_frame,
@@ -397,7 +410,31 @@ class USBDevicesPanel(ttk.LabelFrame):
             self._on_connect_change,
             self._on_visibility_change,
         )
-        self.wireless_section.grid(row=1, column=0, sticky="ew")
+        self.wireless_section.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+
+        self.network_section = DeviceSection(
+            self.scrollable_frame,
+            "NETWORK",
+            self._on_connect_change,
+            self._on_visibility_change,
+        )
+        self.network_section.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+
+        self.audio_section = DeviceSection(
+            self.scrollable_frame,
+            "AUDIO",
+            self._on_connect_change,
+            self._on_visibility_change,
+        )
+        self.audio_section.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+
+        self.camera_section = DeviceSection(
+            self.scrollable_frame,
+            "CAMERA",
+            self._on_connect_change,
+            self._on_visibility_change,
+        )
+        self.camera_section.grid(row=5, column=0, sticky="ew")
 
         # Empty state (shown when no devices at all)
         self.empty_label = ttk.Label(
@@ -422,55 +459,107 @@ class USBDevicesPanel(ttk.LabelFrame):
         self,
         devices: List[DeviceInfo],
         dongles: List[XBeeDongleInfo],
+        network_devices: Optional[List[DeviceInfo]] = None,
+        audio_devices: Optional[List[DeviceInfo]] = None,
+        internal_devices: Optional[List[DeviceInfo]] = None,
+        camera_devices: Optional[List[DeviceInfo]] = None,
     ) -> None:
         """Update the device list display.
 
         Args:
             devices: List of USB-connected devices (non-wireless)
             dongles: List of XBee dongles with their child wireless devices
+            network_devices: List of network-discovered devices (e.g., eye trackers)
+            audio_devices: List of audio devices (e.g., USB microphones)
+            internal_devices: List of internal/virtual devices (e.g., Notes)
+            camera_devices: List of camera devices (USB and Pi cameras)
         """
+        if network_devices is None:
+            network_devices = []
+        if audio_devices is None:
+            audio_devices = []
+        if internal_devices is None:
+            internal_devices = []
+        if camera_devices is None:
+            camera_devices = []
+
         # Collect all wireless devices from dongles
         wireless_devices = []
         for dongle in dongles:
             wireless_devices.extend(dongle.child_devices.values())
 
-        has_any = bool(devices) or bool(wireless_devices)
+        has_any = (
+            bool(devices) or bool(wireless_devices) or bool(network_devices)
+            or bool(audio_devices) or bool(internal_devices) or bool(camera_devices)
+        )
 
         # Show/hide sections based on content
         if has_any:
             self.empty_label.grid_remove()
-            self.usb_section.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-            self.wireless_section.grid(row=1, column=0, sticky="ew")
+            self.internal_section.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+            self.usb_section.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+            self.wireless_section.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+            self.network_section.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+            self.audio_section.grid(row=4, column=0, sticky="ew", pady=(0, 8))
+            self.camera_section.grid(row=5, column=0, sticky="ew")
         else:
+            self.internal_section.grid_remove()
             self.usb_section.grid_remove()
             self.wireless_section.grid_remove()
+            self.network_section.grid_remove()
+            self.audio_section.grid_remove()
+            self.camera_section.grid_remove()
             self.empty_label.grid(row=0, column=0, pady=20)
             return
 
         # Update sections
+        self.internal_section.update_devices(internal_devices)
         self.usb_section.update_devices(devices)
         self.wireless_section.update_devices(wireless_devices)
+        self.network_section.update_devices(network_devices)
+        self.audio_section.update_devices(audio_devices)
+        self.camera_section.update_devices(camera_devices)
 
-        total_devices = len(devices) + len(wireless_devices)
+        total_devices = (
+            len(devices) + len(wireless_devices) + len(network_devices)
+            + len(audio_devices) + len(internal_devices) + len(camera_devices)
+        )
         logger.debug(
-            "Updated devices panel: %d USB devices, %d wireless devices, %d total",
-            len(devices), len(wireless_devices), total_devices
+            "Updated devices panel: %d internal, %d USB, %d wireless, %d network, %d audio, %d camera, %d total",
+            len(internal_devices), len(devices), len(wireless_devices),
+            len(network_devices), len(audio_devices), len(camera_devices), total_devices
         )
 
     def set_device_connected(self, device_id: str, connected: bool) -> None:
         """Set device connection state (called by callback).
 
-        This searches both USB and wireless sections for the device.
+        This searches all sections for the device.
         """
+        if self.internal_section.set_device_connected(device_id, connected):
+            return
         if self.usb_section.set_device_connected(device_id, connected):
             return
-        self.wireless_section.set_device_connected(device_id, connected)
+        if self.wireless_section.set_device_connected(device_id, connected):
+            return
+        if self.network_section.set_device_connected(device_id, connected):
+            return
+        if self.audio_section.set_device_connected(device_id, connected):
+            return
+        self.camera_section.set_device_connected(device_id, connected)
 
     def set_device_visible(self, device_id: str, visible: bool) -> None:
         """Set device window visibility (called by callback).
 
-        This searches both USB and wireless sections for the device.
+        This searches all sections for the device.
         """
+        if self.internal_section.set_device_visible(device_id, visible):
+            return
         if self.usb_section.set_device_visible(device_id, visible):
             return
-        self.wireless_section.set_device_visible(device_id, visible)
+        if self.wireless_section.set_device_visible(device_id, visible):
+            return
+        if self.network_section.set_device_visible(device_id, visible):
+            return
+        if self.audio_section.set_device_visible(device_id, visible):
+            return
+        self.camera_section.set_device_visible(device_id, visible)

@@ -8,7 +8,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Any, Optional
 import asyncio
-from datetime import datetime
 from pathlib import Path
 
 from rpi_logger.core.logging_utils import get_module_logger
@@ -16,20 +15,6 @@ from rpi_logger.core.ui.theme.styles import Theme
 from rpi_logger.core.ui.theme.colors import Colors
 from rpi_logger.core.ui.theme.widgets import RoundedButton
 from rpi_logger.modules.base import ConfigLoader
-
-# Debug log file
-CONFIG_WINDOW_DEBUG_LOG = "/tmp/vog_serial_debug.log"
-
-
-def _log_debug(msg: str):
-    """Log to debug file."""
-    try:
-        with open(CONFIG_WINDOW_DEBUG_LOG, "a") as f:
-            timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-            f.write(f"[{timestamp}] CONFIG_WINDOW: {msg}\n")
-            f.flush()
-    except Exception:
-        pass
 
 
 class VOGConfigWindow:
@@ -304,9 +289,7 @@ class VOGConfigWindow:
         3. Request fresh config from device via async bridge
         4. Callback updates UI as responses arrive
         """
-        _log_debug(f"_load_config called for port={self.port}")
         handler = self.system.get_device_handler(self.port)
-        _log_debug(f"_load_config: got handler={handler}")
         if not handler:
             messagebox.showerror("Error", f"Device not connected on {self.port}", parent=self.dialog)
             return
@@ -318,26 +301,19 @@ class VOGConfigWindow:
 
         # Register callback to receive config updates
         handler.set_config_callback(self._on_config_received)
-        _log_debug(f"_load_config: registered config callback")
 
         # First, populate from any cached config immediately
         cached_config = handler.get_config()
-        _log_debug(f"_load_config: cached_config={cached_config}")
         if cached_config:
-            _log_debug(f"_load_config: calling _update_ui_from_config with cached config")
             self._update_ui_from_config(cached_config)
 
         # Show loading state
         self._set_loading(True)
 
         # Request fresh config from device via async bridge
-        _log_debug(f"_load_config: async_bridge={self.async_bridge}")
         if self.async_bridge:
-            _log_debug(f"_load_config: calling async_bridge.run_coroutine(handler.get_device_config())")
-            future = self.async_bridge.run_coroutine(handler.get_device_config())
-            _log_debug(f"_load_config: run_coroutine returned future={future}")
+            self.async_bridge.run_coroutine(handler.get_device_config())
         else:
-            _log_debug("_load_config: NO async_bridge available!")
             self.logger.warning("No async bridge available - cannot request device config")
             self._set_loading(False)
 
@@ -363,22 +339,16 @@ class VOGConfigWindow:
         This is called from the handler's read loop when CONFIG responses arrive.
         We schedule UI update on the main thread via dialog.after().
         """
-        _log_debug(f"_on_config_received called with: {config}")
         self.logger.debug("Config callback received: %s", config)
         try:
             if self.dialog.winfo_exists():
-                _log_debug("Dialog exists, scheduling _handle_config_update")
                 # Clear loading state and update UI
                 self.dialog.after(0, lambda: self._handle_config_update(config))
-            else:
-                _log_debug("Dialog does NOT exist!")
-        except tk.TclError as e:
-            _log_debug(f"TclError in _on_config_received: {e}")
+        except tk.TclError:
             pass  # Dialog was destroyed
 
     def _handle_config_update(self, config: dict):
         """Handle config update on main thread."""
-        _log_debug(f"_handle_config_update called with: {config}")
         self._set_loading(False)
         self._safe_update_ui(config)
 
@@ -434,31 +404,19 @@ class VOGConfigWindow:
 
     def _safe_update_ui(self, config: dict):
         """Safely update UI, checking if dialog still exists."""
-        _log_debug(f"_safe_update_ui called with config")
         try:
-            exists = self.dialog.winfo_exists()
-            _log_debug(f"_safe_update_ui: dialog.winfo_exists()={exists}")
-            if exists:
-                _log_debug(f"_safe_update_ui: calling _update_ui_from_config")
+            if self.dialog.winfo_exists():
                 self._update_ui_from_config(config)
-                _log_debug(f"_safe_update_ui: _update_ui_from_config completed")
-            else:
-                _log_debug(f"_safe_update_ui: dialog does not exist, skipping update")
-        except tk.TclError as e:
-            _log_debug(f"_safe_update_ui: TclError: {e}")
+        except tk.TclError:
             pass  # Dialog was destroyed
 
     def _update_ui_from_config(self, config: dict):
         """Update UI with config values."""
-        _log_debug(f"_update_ui_from_config: device_type={self.device_type}")
         # Handle various device_type formats: 'wvog', 'wVOG_USB', 'wVOG', etc.
         is_wvog = 'wvog' in self.device_type.lower()
-        _log_debug(f"_update_ui_from_config: is_wvog={is_wvog}")
         if is_wvog:
-            _log_debug(f"_update_ui_from_config: calling _update_wvog_ui_from_config")
             self._update_wvog_ui_from_config(config)
         else:
-            _log_debug(f"_update_ui_from_config: calling _update_svog_ui_from_config")
             self._update_svog_ui_from_config(config)
 
         version = config.get('deviceVer', '-')
@@ -481,36 +439,28 @@ class VOGConfigWindow:
 
     def _update_wvog_ui_from_config(self, config: dict):
         """Update wVOG UI with config values."""
-        _log_debug(f"_update_wvog_ui_from_config called with: {config}")
-
         # Experiment type (typ key or experiment_type)
         exp_type = config.get('experiment_type', config.get('typ', ''))
-        _log_debug(f"  experiment_type from config: {repr(exp_type)}")
         self.config_vars['experiment_type'].set(str(exp_type))
 
         # Open time (opn key or open_time)
         open_time = config.get('open_time', config.get('opn', ''))
-        _log_debug(f"  open_time from config: {repr(open_time)}")
         self.config_vars['open_time'].set(str(open_time))
 
         # Close time (cls key or close_time)
         close_time = config.get('close_time', config.get('cls', ''))
-        _log_debug(f"  close_time from config: {repr(close_time)}")
         self.config_vars['close_time'].set(str(close_time))
 
         # Debounce (dbc key or debounce)
         debounce = config.get('debounce', config.get('dbc', ''))
-        _log_debug(f"  debounce from config: {repr(debounce)}")
         self.config_vars['debounce'].set(str(debounce))
 
         # Start state (srt key) - now just 0 or 1 for checkbutton
         start_state = config.get('start_state', config.get('srt', '0'))
-        _log_debug(f"  start_state from config: {repr(start_state)}")
         self.config_vars['start_state'].set(str(start_state) if str(start_state) in ('0', '1') else '0')
 
         # Verbose / print cycle (dta key)
         verbose = config.get('verbose', config.get('dta', '0'))
-        _log_debug(f"  verbose from config: {repr(verbose)}")
         if 'verbose' in self.config_vars:
             self.config_vars['verbose'].set(str(verbose) if str(verbose) in ('0', '1') else '0')
 
@@ -522,9 +472,6 @@ class VOGConfigWindow:
         dark_opacity = config.get('dark_opacity', config.get('drk', ''))
         if 'dark_opacity' in self.config_vars:
             self.config_vars['dark_opacity'].set(str(dark_opacity))
-
-        _log_debug(f"  After update - experiment_type var value: {self.config_vars['experiment_type'].get()}")
-        _log_debug(f"  After update - open_time var value: {self.config_vars['open_time'].get()}")
 
     def _validate_numeric_field(self, field_name: str, display_name: str, allow_zero: bool = True) -> Optional[str]:
         """Validate a numeric field value.

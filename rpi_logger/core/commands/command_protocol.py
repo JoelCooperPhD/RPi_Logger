@@ -108,17 +108,44 @@ class CommandMessage:
         baudrate: int,
         session_dir: str = None,
         is_wireless: bool = False,
+        is_network: bool = False,
+        network_address: str = None,
+        network_port: int = None,
+        sounddevice_index: int = None,
+        audio_channels: int = None,
+        audio_sample_rate: float = None,
+        # Camera device fields
+        is_camera: bool = False,
+        camera_type: str = None,
+        camera_stable_id: str = None,
+        camera_dev_path: str = None,
+        camera_hw_model: str = None,
+        camera_location: str = None,
+        display_name: str = None,
     ) -> str:
         """
         Assign a device to the module.
 
         Args:
-            device_id: Unique device identifier (port for USB, node_id for wireless)
-            device_type: Device type string (e.g., "sVOG", "wDRT_Wireless")
-            port: Serial port path (dongle port for wireless devices)
-            baudrate: Serial baudrate
+            device_id: Unique device identifier (port for USB, node_id for wireless, hardware_id for network)
+            device_type: Device type string (e.g., "sVOG", "wDRT_Wireless", "Pupil_Labs_Neon")
+            port: Serial port path (dongle port for wireless devices, None for network)
+            baudrate: Serial baudrate (0 for network devices)
             session_dir: Optional current session directory
             is_wireless: Whether this is a wireless device
+            is_network: Whether this is a network device
+            network_address: IP address for network devices
+            network_port: API port for network devices (e.g., 8080)
+            sounddevice_index: Index in sounddevice for audio devices
+            audio_channels: Number of input channels for audio devices
+            audio_sample_rate: Sample rate for audio devices
+            is_camera: Whether this is a camera device
+            camera_type: Camera type ("usb" or "picam")
+            camera_stable_id: USB bus path or picam number
+            camera_dev_path: /dev/video* path for USB cameras
+            camera_hw_model: Hardware model
+            camera_location: USB port or CSI connector
+            display_name: Display name for the device
         """
         kwargs = {
             "device_id": device_id,
@@ -126,9 +153,35 @@ class CommandMessage:
             "port": port,
             "baudrate": baudrate,
             "is_wireless": is_wireless,
+            "is_network": is_network,
         }
         if session_dir:
             kwargs["session_dir"] = session_dir
+        if network_address:
+            kwargs["network_address"] = network_address
+        if network_port is not None:
+            kwargs["network_port"] = network_port
+        if sounddevice_index is not None:
+            kwargs["sounddevice_index"] = sounddevice_index
+        if audio_channels is not None:
+            kwargs["audio_channels"] = audio_channels
+        if audio_sample_rate is not None:
+            kwargs["audio_sample_rate"] = audio_sample_rate
+        # Camera fields
+        if is_camera:
+            kwargs["is_camera"] = is_camera
+        if camera_type:
+            kwargs["camera_type"] = camera_type
+        if camera_stable_id:
+            kwargs["camera_stable_id"] = camera_stable_id
+        if camera_dev_path:
+            kwargs["camera_dev_path"] = camera_dev_path
+        if camera_hw_model:
+            kwargs["camera_hw_model"] = camera_hw_model
+        if camera_location:
+            kwargs["camera_location"] = camera_location
+        if display_name:
+            kwargs["display_name"] = display_name
         return CommandMessage.create("assign_device", **kwargs)
 
     @staticmethod
@@ -145,6 +198,32 @@ class CommandMessage:
     def hide_window() -> str:
         """Hide the module window."""
         return CommandMessage.create("hide_window")
+
+    # =========================================================================
+    # XBee Wireless Communication (for proxying XBee data to modules)
+    # =========================================================================
+
+    @staticmethod
+    def xbee_data(node_id: str, data: str) -> str:
+        """
+        Forward XBee data from main logger to module.
+
+        Args:
+            node_id: Source device node ID (e.g., "wDRT_01")
+            data: Raw data string from the device
+        """
+        return CommandMessage.create("xbee_data", node_id=node_id, data=data)
+
+    @staticmethod
+    def xbee_send_result(node_id: str, success: bool) -> str:
+        """
+        Send result of XBee send operation back to module.
+
+        Args:
+            node_id: Target device node ID
+            success: Whether the send was successful
+        """
+        return CommandMessage.create("xbee_send_result", node_id=node_id, success=success)
 
 
 class StatusMessage:
@@ -189,6 +268,17 @@ class StatusMessage:
         payload["phase"] = phase_name
         payload["duration_ms"] = round(duration_ms, 1)
         StatusMessage.send("phase_complete", payload)
+
+    @staticmethod
+    def send_xbee_data(node_id: str, data: str) -> None:
+        """
+        Request main logger to send data to XBee device.
+
+        Args:
+            node_id: Target device node ID (e.g., "wDRT_01")
+            data: Data string to send
+        """
+        StatusMessage.send("xbee_send", {"node_id": node_id, "data": data})
 
     def _parse(self) -> None:
         try:
@@ -268,6 +358,10 @@ class StatusType:
     # Window visibility status
     WINDOW_SHOWN = "window_shown"
     WINDOW_HIDDEN = "window_hidden"
+
+    # XBee wireless communication status
+    XBEE_SEND = "xbee_send"              # Module requests to send data via XBee
+    XBEE_SEND_RESULT = "xbee_send_result"  # Result of XBee send operation
 
 
 if __name__ == "__main__":

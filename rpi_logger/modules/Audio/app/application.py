@@ -1,4 +1,8 @@
-"""Refactored audio application composed of small managers."""
+"""Refactored audio application composed of small managers.
+
+Device discovery is centralized in the main logger. This module waits for
+device assignments via assign_device commands from the main logger.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
 from ..config import AudioSettings
 from ..domain import AudioState
-from ..services import DeviceDiscoveryService, RecorderService, SessionService
+from ..services import RecorderService, SessionService
 from ..ui import AudioView
 from .command_router import CommandRouter
 from .device_manager import DeviceManager
@@ -46,7 +50,7 @@ class AudioApp:
         self.state = AudioState()
         self.task_manager = BackgroundTaskManager("AudioTasks", self.logger)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=settings.shutdown_timeout)
-        self.device_service = DeviceDiscoveryService(self.logger, settings.sample_rate)
+        # Device discovery is now centralized in the main logger
         self.recorder_service = RecorderService(
             self.logger,
             settings.sample_rate,
@@ -74,7 +78,6 @@ class AudioApp:
 
         self.device_manager = DeviceManager(
             self.state,
-            self.device_service,
             self.recorder_service,
             self.logger,
         )
@@ -101,28 +104,14 @@ class AudioApp:
     # Lifecycle
 
     async def start(self) -> None:
-        self.logger.debug(
-            "start() invoked (auto_start_recording=%s)",
-            self.settings.auto_start_recording,
-        )
-        devices, new_ids = await self.device_manager.discover_devices()
-        if devices:
-            self.logger.info(
-                "Discovered %d audio device(s) (%d new)",
-                len(devices),
-                len(new_ids),
-            )
-            await self.device_manager.auto_select(devices.keys())
-            self.logger.info("Auto-enabled %d USB audio device(s)", len(devices))
-        else:
-            self.logger.warning("No audio devices discovered")
+        """Start the audio module - wait for device assignments from main logger.
 
-        if self.settings.auto_start_recording:
-            self.logger.info("Auto-start recording enabled; starting trial %d", self._pending_trial)
-            await self.start_recording()
+        Device discovery is centralized in the main logger. This module will
+        receive device assignments via assign_device commands.
+        """
+        self.logger.info("Audio module started (waiting for device assignments from main logger)")
 
-        self.task_manager.create(self._device_poll_loop(), name="device_poll")
-        self.logger.debug("Device poll loop scheduled")
+        # Start meter refresh if view is enabled
         if self.view.enabled:
             self.task_manager.create(self._meter_refresh_loop(), name="meter_refresh")
             self.logger.debug("Meter refresh loop scheduled (view enabled)")
@@ -181,16 +170,6 @@ class AudioApp:
 
     def _submit_async(self, coro: Awaitable[None], name: str) -> asyncio.Task:
         return self.task_manager.create(coro, name=name)
-
-    async def _device_poll_loop(self) -> None:
-        interval = max(1.0, float(self.settings.discovery_retry or self.settings.device_scan_interval))
-        self.logger.debug("Device poll loop running every %.2fs", interval)
-        while not self._stop_event.is_set():
-            await asyncio.sleep(interval)
-            _, new_ids = await self.device_manager.discover_devices()
-            if new_ids:
-                self.logger.info("Auto-enabling %d newly detected device(s)", len(new_ids))
-                await self.device_manager.auto_select(new_ids)
 
     async def _meter_refresh_loop(self) -> None:
         interval = max(0.05, self.settings.meter_refresh_interval)

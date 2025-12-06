@@ -23,6 +23,7 @@ class ModuleInfo:
     display_name: str            # Human-readable name
     module_id: str = ""          # Lowercase identifier derived from entry name
     config_template_path: Optional[Path] = None  # Original config template path
+    is_internal: bool = False    # True for internal/software-only modules (no hardware)
 
     def __repr__(self) -> str:
         return f"ModuleInfo(name={self.name}, entry={self.entry_point.name})"
@@ -201,9 +202,11 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
         config = load_module_config(module_dir)
         display_name = module_name  # Default to module name
         is_visible = True
+        is_internal = False
         if config and isinstance(config, dict):
             display_name = config.get('display_name', display_name) or display_name
             is_visible = parse_bool(config.get('visible'), default=True)
+            is_internal = parse_bool(config.get('internal'), default=False)
 
         if not is_visible:
             logger.info("Module %s marked hidden via config, skipping", module_name)
@@ -217,6 +220,7 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
             display_name=display_name,
             module_id=module_id,
             config_template_path=config_template_path,
+            is_internal=is_internal,
         )
 
         discovered.append(info)

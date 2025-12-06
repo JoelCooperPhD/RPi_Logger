@@ -4,7 +4,7 @@ from rpi_logger.core.logging_utils import get_module_logger
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from .commands import CommandMessage, StatusMessage, StatusType
 from .module_discovery import ModuleInfo
@@ -59,6 +59,9 @@ class ModuleProcess:
 
         self.shutdown_event = asyncio.Event()
         self._was_forcefully_stopped = False
+
+        # XBee send callback (set by logger system for routing XBee sends)
+        self._xbee_send_callback: Optional[Callable[[str, bytes], Awaitable[bool]]] = None
 
     async def start(self) -> bool:
         if self.process is not None:
@@ -308,6 +311,9 @@ class ModuleProcess:
             self.window_visible = False
         elif status_type == "window_shown":
             self.window_visible = True
+        elif status_type == StatusType.XBEE_SEND:
+            # Module wants to send data via XBee
+            await self._handle_xbee_send(status.get_payload())
 
         if self.status_callback:
             try:
@@ -345,6 +351,38 @@ class ModuleProcess:
 
     async def take_snapshot(self) -> None:
         await self.send_command(CommandMessage.take_snapshot())
+
+    # =========================================================================
+    # XBee Wireless Communication
+    # =========================================================================
+
+    def set_xbee_send_callback(self, callback: Callable[[str, bytes], Awaitable[bool]]) -> None:
+        """Set callback for handling XBee send requests from this module."""
+        self._xbee_send_callback = callback
+
+    async def send_xbee_data(self, node_id: str, data: str) -> None:
+        """Forward XBee data to this module."""
+        await self.send_command(CommandMessage.xbee_data(node_id, data))
+
+    async def _handle_xbee_send(self, payload: dict) -> None:
+        """Handle xbee_send status from module - forward to XBee manager."""
+        node_id = payload.get("node_id")
+        data = payload.get("data")
+
+        if not node_id or not data:
+            self.logger.warning("Invalid xbee_send payload: %s", payload)
+            return
+
+        success = False
+        if self._xbee_send_callback:
+            try:
+                success = await self._xbee_send_callback(node_id, data.encode())
+            except Exception as e:
+                self.logger.error("XBee send callback error: %s", e)
+                success = False
+
+        # Send result back to module
+        await self.send_command(CommandMessage.xbee_send_result(node_id, success))
 
     async def stop(self, timeout: float = 10.0) -> None:
         if self.process is None:

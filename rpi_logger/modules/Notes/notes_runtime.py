@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
+import logging
 from rpi_logger.core.logging_utils import get_module_logger
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, List, Optional, Sequence
+from typing import Any, Awaitable, Callable, List, Optional, Sequence, TextIO
 
 try:
     import tkinter as tk
@@ -19,6 +22,18 @@ except Exception:  # pragma: no cover - defensive import for headless environmen
     ttk = None  # type: ignore
     scrolledtext = None  # type: ignore
     messagebox = None  # type: ignore
+
+# Theme imports for dark theme styling
+try:
+    from rpi_logger.core.ui.theme.styles import Theme
+    from rpi_logger.core.ui.theme.colors import Colors
+    from rpi_logger.core.ui.theme.widgets import RoundedButton
+    HAS_THEME = True
+except ImportError:
+    HAS_THEME = False
+    Theme = None
+    Colors = None
+    RoundedButton = None
 
 from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module_filename_prefix
@@ -45,9 +60,9 @@ class NoteRecord:
 
 
 class NotesArchive:
-    """Manage on-disk persistence for notes using the legacy format."""
+    """Manage on-disk persistence for notes using proper CSV format."""
 
-    HEADER = "Note,trial,Content,Timestamp"
+    HEADER = ["Note", "trial", "Content", "Timestamp"]
 
     def __init__(self, base_dir: Path, logger: logging.Logger, *, encoding: str = "utf-8") -> None:
         self.base_dir = base_dir
@@ -58,6 +73,8 @@ class NotesArchive:
         self._start_timestamp: Optional[float] = None
         self.file_path: Optional[Path] = None
         self._current_trial_number: Optional[int] = None
+        self._file_handle: Optional[TextIO] = None
+        self._csv_writer: Optional[csv.writer] = None
 
     async def start(self, trial_number: int) -> Path:
         """Prepare the notes file for the specified trial."""
@@ -81,6 +98,7 @@ class NotesArchive:
         exists = await asyncio.to_thread(target.exists)
         if exists:
             self.note_count = await asyncio.to_thread(self._count_existing_notes, target)
+            await asyncio.to_thread(self._open_for_append, target)
             self.logger.info(
                 "Appending to existing note file: %s (current notes: %d)",
                 target,
@@ -99,11 +117,22 @@ class NotesArchive:
         if not self.recording:
             return
         self.recording = False
+        await asyncio.to_thread(self._close_file)
         self.logger.info(
             "Notes archive closed with %d note(s) -> %s",
             self.note_count,
             self.file_path,
         )
+
+    def _close_file(self) -> None:
+        """Close the CSV file handle."""
+        if self._file_handle:
+            try:
+                self._file_handle.close()
+            except Exception:
+                self.logger.debug("Error closing notes file handle")
+        self._file_handle = None
+        self._csv_writer = None
 
     async def add_note(
         self,
@@ -120,31 +149,39 @@ class NotesArchive:
         if not cleaned:
             raise ValueError("Cannot add empty note")
 
-        sanitized = self._sanitize_note_text(cleaned)
-
+        # Preserve original text - CSV writer handles escaping
         timestamp = float(posted_at) if posted_at is not None else time.time()
         if self._start_timestamp is None:
             self._start_timestamp = timestamp
 
-        await asyncio.to_thread(self._append_row, sanitized, timestamp, trial_number)
+        await asyncio.to_thread(self._append_row, cleaned, timestamp, trial_number)
 
         self.note_count += 1
 
         modules_str = ";".join(sorted(modules)) if modules else ""
-        file_line = f"Note,{trial_number},{sanitized},{timestamp}"
+        # Generate CSV-formatted line for display
+        file_line = self._format_csv_line(["Note", trial_number, cleaned, timestamp])
         iso_stamp = datetime.fromtimestamp(timestamp).isoformat(timespec="seconds")
         elapsed_display = self.format_elapsed(timestamp - self._start_timestamp)
 
         return NoteRecord(
             index=self.note_count,
             trial_number=trial_number,
-            text=sanitized,
+            text=cleaned,
             timestamp=timestamp,
             timestamp_iso=iso_stamp,
             elapsed=elapsed_display,
             modules=modules_str,
             file_line=file_line,
         )
+
+    @staticmethod
+    def _format_csv_line(row: List[Any]) -> str:
+        """Format a row as a CSV line string for display purposes."""
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(row)
+        return output.getvalue().rstrip('\r\n')
 
     async def load_recent(self, limit: int) -> List[NoteRecord]:
         path = self.file_path
@@ -162,38 +199,46 @@ class NotesArchive:
 
     def _resolve_file_path(self, trial_number: int) -> Path:
         prefix = module_filename_prefix(self.base_dir, "Notes", trial_number, code="NOTES")
-        return self.base_dir / f"{prefix}.txt"
+        return self.base_dir / f"{prefix}.csv"
 
     def _write_header(self, path: Path) -> None:
-        with path.open("w", encoding=self.encoding) as handle:
-            handle.write(f"{self.HEADER}\n")
+        handle = path.open("w", encoding=self.encoding, newline="")
+        writer = csv.writer(handle)
+        writer.writerow(self.HEADER)
+        self._file_handle = handle
+        self._csv_writer = writer
+
+    def _open_for_append(self, path: Path) -> None:
+        """Open existing file in append mode."""
+        handle = path.open("a", encoding=self.encoding, newline="")
+        writer = csv.writer(handle)
+        self._file_handle = handle
+        self._csv_writer = writer
 
     def _count_existing_notes(self, path: Path) -> int:
         try:
-            with path.open("r", encoding=self.encoding) as handle:
-                lines = handle.readlines()
+            with path.open("r", encoding=self.encoding, newline="") as handle:
+                reader = csv.reader(handle)
+                rows = list(reader)
         except FileNotFoundError:
             return 0
 
-        if not lines:
+        if len(rows) <= 1:  # Only header or empty
             return 0
 
         first_timestamp: Optional[float] = None
         count = 0
-        for raw in lines[1:]:
-            stripped = raw.strip()
-            if not stripped:
+        for row in rows[1:]:  # Skip header
+            if len(row) < 4:
                 continue
             count += 1
             if first_timestamp is None:
-                parts = stripped.split(",", 3)
-                if len(parts) >= 4:
-                    try:
-                        ts_candidate = float(parts[3])
-                    except ValueError:
-                        ts_candidate = None
-                    if ts_candidate is not None:
-                        first_timestamp = ts_candidate
+                try:
+                    ts_candidate = float(row[3])
+                except (ValueError, IndexError):
+                    ts_candidate = None
+                if ts_candidate is not None:
+                    first_timestamp = ts_candidate
 
         if first_timestamp is not None:
             self._start_timestamp = first_timestamp
@@ -202,36 +247,39 @@ class NotesArchive:
     def _append_row(self, text: str, timestamp: float, trial_number: int) -> None:
         if not self.file_path:
             raise RuntimeError("Archive file path not set")
-        with self.file_path.open("a", encoding=self.encoding) as handle:
-            handle.write(f"Note,{trial_number},{text},{timestamp}\n")
+        if self._csv_writer and self._file_handle:
+            self._csv_writer.writerow(["Note", trial_number, text, timestamp])
+            self._file_handle.flush()
+        else:
+            # Fallback: open in append mode if writer not available
+            with self.file_path.open("a", encoding=self.encoding, newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["Note", trial_number, text, timestamp])
 
     def _read_records(self, limit: int, path: Path) -> List[NoteRecord]:
         try:
-            with path.open("r", encoding=self.encoding) as handle:
-                lines = handle.readlines()
+            with path.open("r", encoding=self.encoding, newline="") as handle:
+                reader = csv.reader(handle)
+                rows = list(reader)
         except FileNotFoundError:
             return []
 
-        if not lines:
+        if len(rows) <= 1:  # Only header or empty
             return []
 
-        note_lines = [line for line in lines[1:] if line.strip()]
-        total_notes = len(note_lines)
+        note_rows = [row for row in rows[1:] if len(row) >= 4]
+        total_notes = len(note_rows)
         start_index = max(0, total_notes - max(1, limit))
         records: List[NoteRecord] = []
-        for idx, line in enumerate(note_lines[start_index:], start=start_index + 1):
-            raw = line.rstrip("\n")
-            parts = raw.split(",", 3)
-            if len(parts) < 4:
-                continue
+        for idx, row in enumerate(note_rows[start_index:], start=start_index + 1):
             try:
-                trial_number = int(parts[1])
-            except ValueError:
+                trial_number = int(row[1])
+            except (ValueError, IndexError):
                 trial_number = 0
-            note_text = parts[2]
+            note_text = row[2] if len(row) > 2 else ""
             try:
-                timestamp = float(parts[3])
-            except ValueError:
+                timestamp = float(row[3])
+            except (ValueError, IndexError):
                 timestamp = 0.0
 
             if self._start_timestamp is None and timestamp:
@@ -239,6 +287,8 @@ class NotesArchive:
 
             iso_stamp = datetime.fromtimestamp(timestamp).isoformat(timespec="seconds") if timestamp else ""
             elapsed_display = self.format_elapsed(timestamp - (self._start_timestamp or timestamp))
+            # Reconstruct CSV line for display
+            file_line = self._format_csv_line(row)
             records.append(
                 NoteRecord(
                     index=idx,
@@ -248,7 +298,7 @@ class NotesArchive:
                     timestamp_iso=iso_stamp or "",
                     elapsed=elapsed_display,
                     modules="",
-                    file_line=raw,
+                    file_line=file_line,
                 )
             )
 
@@ -262,13 +312,6 @@ class NotesArchive:
         minutes = int((seconds % 3600) // 60)
         secs = int(seconds % 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-    @staticmethod
-    def _sanitize_note_text(text: str) -> str:
-        normalized = text.replace("\r", "\n")
-        segments = [segment.strip() for segment in normalized.split("\n")]
-        joined = " ".join(segment for segment in segments if segment)
-        return joined.replace(",", "-")
 
 
 class NotesRuntime(ModuleRuntime):
@@ -426,36 +469,106 @@ class NotesRuntime(ModuleRuntime):
         if not self.view or tk is None or ttk is None or scrolledtext is None:
             return
 
+        # Apply theme to the window if available
+        if HAS_THEME and Theme is not None:
+            root = getattr(self.view, 'root', None)
+            if root:
+                Theme.configure_toplevel(root)
+
         def builder(parent: tk.Widget) -> None:
             if isinstance(parent, ttk.LabelFrame):
                 parent.configure(text="Notes", padding="10")
 
             parent.grid_columnconfigure(0, weight=1)
-            parent.grid_columnconfigure(1, weight=0)
             parent.grid_rowconfigure(0, weight=1)
-            parent.grid_rowconfigure(1, weight=0)
 
+            # Create main container with visible border (matching VOG/DRT style)
+            if HAS_THEME and Colors is not None:
+                container = tk.Frame(
+                    parent,
+                    bg=Colors.BG_FRAME,
+                    highlightbackground=Colors.BORDER,
+                    highlightcolor=Colors.BORDER,
+                    highlightthickness=1,
+                )
+            else:
+                container = ttk.Frame(parent)
+            container.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+            container.grid_columnconfigure(0, weight=1)
+            container.grid_rowconfigure(0, weight=1)
+
+            # History section in a LabelFrame (matching VOG/DRT pattern)
+            history_lf = ttk.LabelFrame(container, text="History")
+            history_lf.grid(row=0, column=0, sticky="nsew", padx=4, pady=(4, 2))
+            history_lf.grid_columnconfigure(0, weight=1)
+            history_lf.grid_rowconfigure(0, weight=1)
+
+            # Create history widget with theme-aware colors
             self._history_widget = scrolledtext.ScrolledText(
-                parent,
+                history_lf,
                 height=12,
                 wrap=tk.WORD,
                 state=tk.DISABLED,
             )
-            self._history_widget.grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
-            self._history_widget.tag_config("timestamp", foreground="#1a237e")
-            self._history_widget.tag_config("elapsed", foreground="#1b5e20")
-            self._history_widget.tag_config("modules", foreground="#4a148c")
+            self._history_widget.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
 
-            self._note_entry = ttk.Entry(parent)
-            self._note_entry.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+            # Configure text colors based on theme availability
+            if HAS_THEME and Colors is not None:
+                # Dark theme colors - visible on dark background
+                timestamp_color = Colors.PRIMARY          # Blue (#3498db)
+                elapsed_color = Colors.SUCCESS            # Green (#2ecc71)
+                modules_color = Colors.WARNING            # Orange (#f39c12)
+                text_fg = Colors.FG_PRIMARY               # Light gray (#ecf0f1)
+                text_bg = Colors.BG_INPUT                 # Dark input bg (#3d3d3d)
+
+                # Apply ScrolledText theme styling
+                self._history_widget.configure(
+                    bg=text_bg,
+                    fg=text_fg,
+                    insertbackground=text_fg,
+                    selectbackground=Colors.PRIMARY,
+                    selectforeground=Colors.FG_PRIMARY,
+                )
+            else:
+                # Fallback colors for light theme
+                timestamp_color = "#1565c0"  # Material Blue 800
+                elapsed_color = "#2e7d32"    # Material Green 800
+                modules_color = "#7b1fa2"    # Material Purple 700
+
+            self._history_widget.tag_config("timestamp", foreground=timestamp_color)
+            self._history_widget.tag_config("elapsed", foreground=elapsed_color)
+            self._history_widget.tag_config("modules", foreground=modules_color)
+
+            # New Note section in a LabelFrame (matching VOG/DRT pattern)
+            input_lf = ttk.LabelFrame(container, text="New Note")
+            input_lf.grid(row=1, column=0, sticky="ew", padx=4, pady=(2, 4))
+            input_lf.grid_columnconfigure(0, weight=1)
+
+            # Entry widget - styled via ttk theme
+            self._note_entry = ttk.Entry(input_lf)
+            self._note_entry.grid(row=0, column=0, sticky="ew", padx=(4, 8), pady=4)
             self._note_entry.bind("<Return>", self._on_enter_pressed)
 
-            self._post_button = ttk.Button(
-                parent,
-                text="Post",
-                command=lambda: self._run_async(self._post_note_from_entry()),
-            )
-            self._post_button.grid(row=1, column=1, sticky="ew")
+            # Post button - use RoundedButton if available, else ttk.Button
+            # Using 'default' style and height=32 to match VOG/DRT
+            if HAS_THEME and RoundedButton is not None and Colors is not None:
+                self._post_button = RoundedButton(
+                    input_lf,
+                    text="Post",
+                    command=lambda: self._run_async(self._post_note_from_entry()),
+                    width=80,
+                    height=32,
+                    corner_radius=6,
+                    style='default',  # Match VOG/DRT button style
+                    bg=Colors.BG_FRAME,
+                )
+            else:
+                self._post_button = ttk.Button(
+                    input_lf,
+                    text="Post",
+                    command=lambda: self._run_async(self._post_note_from_entry()),
+                )
+            self._post_button.grid(row=0, column=1, padx=(0, 4), pady=4)
 
         self.view.build_stub_content(builder)
         self._render_history()

@@ -16,6 +16,11 @@ from rpi_logger.core.logging_utils import ensure_structured_logger
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
+class TrackerInitializationError(RuntimeError):
+    """Raised when eye tracker initialization fails."""
+    pass
+
+
 try:  # tracker_core dependencies (optional on dev hosts)
     from rpi_logger.modules.EyeTracker.tracker_core.config.tracker_config import TrackerConfig
     from rpi_logger.modules.EyeTracker.tracker_core.device_manager import DeviceManager
@@ -23,7 +28,6 @@ try:  # tracker_core dependencies (optional on dev hosts)
     from rpi_logger.modules.EyeTracker.tracker_core.frame_processor import FrameProcessor
     from rpi_logger.modules.EyeTracker.tracker_core.recording import RecordingManager
     from rpi_logger.modules.EyeTracker.tracker_core.tracker_handler import TrackerHandler
-    from rpi_logger.modules.EyeTracker.tracker_core.tracker_system import TrackerInitializationError
 except Exception as exc:  # pragma: no cover - defensive import guard
     TrackerConfig = None  # type: ignore[assignment]
     DeviceManager = None  # type: ignore[assignment]
@@ -31,7 +35,6 @@ except Exception as exc:  # pragma: no cover - defensive import guard
     FrameProcessor = None  # type: ignore[assignment]
     RecordingManager = None  # type: ignore[assignment]
     TrackerHandler = None  # type: ignore[assignment]
-    TrackerInitializationError = RuntimeError  # type: ignore[assignment]
     TRACKER_IMPORT_ERROR = exc
 else:
     TRACKER_IMPORT_ERROR = None
@@ -72,6 +75,11 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._import_error = TRACKER_IMPORT_ERROR
         self._auto_start_task: Optional[asyncio.Task] = None
 
+        # Assigned device from main UI (network address)
+        self._assigned_device_id: Optional[str] = None
+        self._assigned_network_address: Optional[str] = None
+        self._assigned_network_port: Optional[int] = None
+
         self.model.subscribe(self._on_model_change)
 
     # ------------------------------------------------------------------
@@ -90,7 +98,11 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._attach_view()
 
         self._device_ready_event = asyncio.Event()
-        self._start_device_monitor()
+
+        # Don't auto-start device discovery - wait for assign_device from main UI
+        # The main UI handles mDNS discovery and will assign devices via command
+        if self._view_adapter:
+            self._view_adapter.set_device_status("Waiting for device assignment...", connected=False)
 
         if getattr(self.args, "auto_start_recording", False):
             self._auto_start_task = self.task_manager.create(self._auto_start_recording())
@@ -138,6 +150,10 @@ class EyeTrackerRuntime(ModuleRuntime):
         if action in {"reconnect", "refresh_device", "eye_tracker_reconnect"}:
             await self.request_reconnect()
             return True
+        if action == "assign_device":
+            return await self._assign_device(command)
+        if action == "unassign_device":
+            return await self._unassign_device(command)
         return False
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
@@ -218,7 +234,10 @@ class EyeTrackerRuntime(ModuleRuntime):
             frame_provider=self._get_latest_frame,
             preview_hz=preview_hz,
             disabled_message=disabled_message,
+            runtime=self,
         )
+        # Bind runtime for button callbacks
+        self._view_adapter.bind_runtime(self)
 
     def _start_device_monitor(self, *, force: bool = False) -> None:
         if self._shutdown.is_set():
@@ -340,6 +359,173 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._start_device_monitor(force=True)
 
     # ------------------------------------------------------------------
+    # Device assignment (from main UI)
+
+    async def _assign_device(self, command: Dict[str, Any]) -> bool:
+        """Handle device assignment from main UI.
+
+        The main UI discovers eye trackers via mDNS and sends us the
+        network address to connect to directly (no discovery needed).
+        """
+        device_id = command.get("device_id", "")
+        network_address = command.get("network_address", "")
+        network_port = command.get("network_port", 8080)
+
+        if not network_address:
+            self.logger.error("assign_device: missing network_address")
+            StatusMessage.send(StatusType.DEVICE_ERROR, {
+                "device_id": device_id,
+                "message": "Missing network address",
+            })
+            return False
+
+        self.logger.info(
+            "Assigning device %s at %s:%s",
+            device_id, network_address, network_port
+        )
+
+        # Store assigned device info
+        self._assigned_device_id = device_id
+        self._assigned_network_address = network_address
+        self._assigned_network_port = int(network_port)
+
+        # Stop any existing tracker and reconnect with new address
+        await self._stop_tracker()
+
+        if self._device_manager:
+            with contextlib.suppress(Exception):
+                await self._device_manager.cleanup()
+
+        # Connect using the assigned address
+        if self._view_adapter:
+            self._view_adapter.set_device_status(f"Connecting to {network_address}...", connected=False)
+
+        success = await self._connect_to_assigned_device()
+
+        if success:
+            StatusMessage.send(StatusType.DEVICE_ASSIGNED, {
+                "device_id": device_id,
+                "device_type": "Pupil_Labs_Neon",
+            })
+            return True
+        else:
+            StatusMessage.send(StatusType.DEVICE_ERROR, {
+                "device_id": device_id,
+                "message": f"Failed to connect to {network_address}:{network_port}",
+            })
+            return False
+
+    async def _unassign_device(self, command: Dict[str, Any]) -> bool:
+        """Handle device unassignment from main UI."""
+        device_id = command.get("device_id", "")
+
+        if self._assigned_device_id and self._assigned_device_id != device_id:
+            self.logger.warning(
+                "Unassign request for %s but current device is %s",
+                device_id, self._assigned_device_id
+            )
+
+        self.logger.info("Unassigning device %s", device_id or self._assigned_device_id)
+
+        # Stop tracker
+        await self._stop_tracker()
+
+        if self._device_manager:
+            with contextlib.suppress(Exception):
+                await self._device_manager.cleanup()
+
+        # Clear assigned device info
+        old_device_id = self._assigned_device_id
+        self._assigned_device_id = None
+        self._assigned_network_address = None
+        self._assigned_network_port = None
+
+        if self._view_adapter:
+            self._view_adapter.set_device_status("No device assigned", connected=False)
+
+        StatusMessage.send(StatusType.DEVICE_UNASSIGNED, {
+            "device_id": old_device_id or device_id,
+        })
+
+        return True
+
+    async def _connect_to_assigned_device(self) -> bool:
+        """Connect to the assigned device using stored network address.
+
+        Uses rollback pattern: if connection fails at any point, all state
+        changes are reverted to maintain consistency.
+        """
+        if not self._assigned_network_address or not self._device_manager:
+            return False
+
+        address = self._assigned_network_address
+        port = self._assigned_network_port or 8080
+
+        # Store previous state for rollback
+        prev_device = getattr(self._device_manager, 'device', None)
+        prev_ip = getattr(self._device_manager, 'device_ip', None)
+        prev_port = getattr(self._device_manager, 'device_port', None)
+        prev_connected = self._device_connected
+
+        try:
+            # Use direct connection with known address instead of discovery
+            from pupil_labs.realtime_api.device import Device
+
+            self.logger.info("Connecting directly to %s:%s", address, port)
+
+            # Create device directly without discovery
+            device = Device(address=address, port=str(port))
+
+            # Store the device in the device manager
+            self._device_manager.device = device
+            self._device_manager.device_ip = address
+            self._device_manager.device_port = port
+
+            # Refresh status to verify connection
+            status = await self._device_manager.refresh_status()
+            if status is None:
+                raise ConnectionError("Failed to get device status - device may not be reachable")
+
+            self._device_connected = True
+            if self._device_ready_event:
+                self._device_ready_event.set()
+
+            self.logger.info("Connected to eye tracker at %s:%s", address, port)
+
+            # Update view with device info
+            if self._view_adapter:
+                self._view_adapter.set_device_status("Connected", connected=True)
+                device_name = f"Neon @ {address}"
+                self._view_adapter.set_device_info(device_name)
+
+            # Start the tracker background task
+            await self._start_tracker_background()
+            return True
+
+        except Exception as exc:
+            # Rollback all state changes on failure
+            self.logger.error("Failed to connect to assigned device: %s", exc)
+
+            # Restore previous device manager state
+            if self._device_manager:
+                self._device_manager.device = prev_device
+                self._device_manager.device_ip = prev_ip
+                self._device_manager.device_port = prev_port
+
+            # Restore connection state
+            self._device_connected = prev_connected
+            if self._device_ready_event and not prev_connected:
+                self._device_ready_event.clear()
+
+            # Update view
+            if self._view_adapter:
+                error_msg = str(exc)[:50] if len(str(exc)) > 50 else str(exc)
+                self._view_adapter.set_device_status(f"Failed: {error_msg}", connected=False)
+                self._view_adapter.set_device_info("None")
+
+            return False
+
+    # ------------------------------------------------------------------
     # Recording helpers
 
     async def _start_recording_flow(self, payload: Dict[str, Any]) -> bool:
@@ -384,7 +570,7 @@ class EyeTrackerRuntime(ModuleRuntime):
         except Exception as exc:
             self.logger.error("Failed to start recording: %s", exc, exc_info=exc)
             self.model.recording = False
-            if self.view_adapter:
+            if self._view_adapter:
                 self._view_adapter.set_recording_state(False)
             return False
 

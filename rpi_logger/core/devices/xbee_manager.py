@@ -76,6 +76,7 @@ DongleDisconnectCallback = Callable[[], Awaitable[None]]
 DeviceDiscoveredCallback = Callable[[WirelessDevice, Any], Awaitable[None]]  # device, remote_xbee
 DeviceLostCallback = Callable[[str], Awaitable[None]]
 StatusCallback = Callable[[str, str], Awaitable[None]]
+DataReceivedCallback = Callable[[str, str], Awaitable[None]]  # node_id, data
 
 
 class XBeeManager:
@@ -110,6 +111,7 @@ class XBeeManager:
         self.on_device_discovered: Optional[DeviceDiscoveredCallback] = None
         self.on_device_lost: Optional[DeviceLostCallback] = None
         self.on_status_change: Optional[StatusCallback] = None
+        self.on_data_received: Optional[DataReceivedCallback] = None
 
         # XBee state
         self._coordinator: Optional['XBeeDevice'] = None
@@ -126,6 +128,10 @@ class XBeeManager:
 
         # Event loop reference for thread-safe callbacks
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # Data handlers - maps node_id to callback that receives raw data
+        # These are called directly from the XBee thread (must be thread-safe)
+        self._data_handlers: Dict[str, Callable[[str], None]] = {}
 
     @property
     def is_connected(self) -> bool:
@@ -163,6 +169,40 @@ class XBeeManager:
     def get_remote_device(self, node_id: str) -> Optional['RemoteRaw802Device']:
         """Get the raw XBee remote device for a node ID."""
         return self._remote_devices.get(node_id)
+
+    @property
+    def coordinator(self) -> Optional['XBeeDevice']:
+        """Get the XBee coordinator device (read-only)."""
+        return self._coordinator
+
+    # =========================================================================
+    # Data Handler Registration
+    # =========================================================================
+
+    def register_data_handler(self, node_id: str, handler: Callable[[str], None]) -> None:
+        """
+        Register a callback to receive data for a specific wireless device.
+
+        The handler is called directly from the XBee library's thread when
+        messages arrive. The handler MUST be thread-safe (e.g., use a Queue).
+
+        Args:
+            node_id: The device's node ID (e.g., "wVOG_01", "wDRT_02")
+            handler: Callback function that receives data string
+        """
+        self._data_handlers[node_id] = handler
+        logger.debug(f"Registered data handler for {node_id}")
+
+    def unregister_data_handler(self, node_id: str) -> None:
+        """
+        Unregister the data handler for a wireless device.
+
+        Args:
+            node_id: The device's node ID
+        """
+        if node_id in self._data_handlers:
+            del self._data_handlers[node_id]
+            logger.debug(f"Unregistered data handler for {node_id}")
 
     # =========================================================================
     # Lifecycle
@@ -489,6 +529,9 @@ class XBeeManager:
 
     async def _handle_device_lost(self, node_id: str) -> None:
         """Handle a lost XBee device."""
+        # Unregister data handler first
+        self.unregister_data_handler(node_id)
+
         device = self._discovered_devices.pop(node_id, None)
         self._remote_devices.pop(node_id, None)
 
@@ -506,23 +549,38 @@ class XBeeManager:
         """
         Callback for received XBee messages.
 
-        Called from XBee library's thread. Messages are routed to the
-        connection manager which will forward them to the appropriate module.
+        Called from XBee library's thread. Routes messages to registered
+        handlers (synchronously, for thread-safe queue buffering) and
+        optionally to the async on_data_received callback.
         """
         try:
             remote = message.remote_device
             node_id = remote.get_node_id() if remote else None
 
             if not node_id:
-                logger.debug("Received message from unknown device")
+                logger.debug("Received message from unknown device (no node ID)")
                 return
 
-            # Log for debugging
+            # Decode data
             data = message.data.decode('utf-8', errors='replace')
             logger.debug(f"XBee received from {node_id}: '{data.strip()}'")
 
-            # TODO: Route message to appropriate handler
-            # This will be handled by the connection manager
+            # Route to registered handler (direct call - handler must be thread-safe)
+            handler = self._data_handlers.get(node_id)
+            if handler:
+                try:
+                    handler(data)
+                except Exception as e:
+                    logger.error(f"Error in data handler for {node_id}: {e}")
+            else:
+                logger.debug(f"No handler registered for {node_id}, message dropped")
+
+            # Also route to async callback if set (for legacy/monitoring purposes)
+            if self.on_data_received and self._loop:
+                def schedule_callback(n=node_id, d=data):
+                    if self._loop.is_running():
+                        self._loop.create_task(self.on_data_received(n, d))
+                self._loop.call_soon_threadsafe(schedule_callback)
 
         except Exception as e:
             logger.error(f"Error handling XBee message: {e}")

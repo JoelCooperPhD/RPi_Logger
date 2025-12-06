@@ -13,7 +13,7 @@ import logging
 
 from .base_handler import BaseDRTHandler
 from ..device_types import DRTDeviceType
-from ..transports import XBeeTransport
+from ..transports import XBeeProxyTransport
 from ..protocols import (
     WDRT_COMMANDS,
     WDRT_RESPONSES,
@@ -40,7 +40,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         self,
         device_id: str,
         output_dir: Path,
-        transport: XBeeTransport
+        transport: XBeeProxyTransport
     ):
         """
         Initialize the wDRT wireless handler.
@@ -48,7 +48,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         Args:
             device_id: Unique identifier (XBee node ID, e.g., "wDRT_01")
             output_dir: Directory for CSV data files
-            transport: XBee transport for device communication
+            transport: XBee proxy transport for device communication
         """
         super().__init__(device_id, output_dir, transport)
 
@@ -156,7 +156,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         Returns:
             Configuration dict, or None if failed/timeout
         """
-        self._config_future = asyncio.get_event_loop().create_future()
+        self._config_future = asyncio.get_running_loop().create_future()
 
         if not await self.send_command('get_config'):
             self._config_future = None
@@ -166,7 +166,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
             config = await asyncio.wait_for(self._config_future, timeout=2.0)
             return config
         except asyncio.TimeoutError:
-            logger.warning(f"Config request timed out for {self.device_id}")
+            logger.warning("Config request timed out for %s", self.device_id)
             return None
         finally:
             self._config_future = None
@@ -275,7 +275,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         """Handle click response."""
         try:
             self._click_count = int(value)
-            asyncio.create_task(self._dispatch_data_event('click', {
+            self._create_background_task(self._dispatch_data_event('click', {
                 'count': self._click_count
             }))
         except ValueError:
@@ -285,7 +285,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         """Handle trial number response."""
         try:
             self._trial_number = int(value)
-            asyncio.create_task(self._dispatch_data_event('trial', {
+            self._create_background_task(self._dispatch_data_event('trial', {
                 'trial_number': self._trial_number
             }))
         except ValueError:
@@ -295,7 +295,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         """Handle reaction time response."""
         try:
             reaction_time = int(value)
-            asyncio.create_task(self._dispatch_data_event('reaction_time', {
+            self._create_background_task(self._dispatch_data_event('reaction_time', {
                 'reaction_time': reaction_time
             }))
         except ValueError:
@@ -306,7 +306,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         try:
             state = int(value)
             self._stimulus_on = state == 1
-            asyncio.create_task(self._dispatch_data_event('stimulus', {
+            self._create_background_task(self._dispatch_data_event('stimulus', {
                 'state': self._stimulus_on
             }))
         except ValueError:
@@ -326,7 +326,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
             else:
                 config['raw'] = value
 
-            asyncio.create_task(self._dispatch_data_event('config', config))
+            self._create_background_task(self._dispatch_data_event('config', config))
 
             if self._config_future and not self._config_future.done():
                 self._config_future.set_result(config)
@@ -338,7 +338,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         """Handle battery percentage response."""
         try:
             self._battery_percent = int(value)
-            asyncio.create_task(self._dispatch_data_event('battery', {
+            self._create_background_task(self._dispatch_data_event('battery', {
                 'percent': self._battery_percent
             }))
         except ValueError:
@@ -349,7 +349,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
         try:
             state = int(value)
             self._recording = state == 1
-            asyncio.create_task(self._dispatch_data_event('experiment', {
+            self._create_background_task(self._dispatch_data_event('experiment', {
                 'running': self._recording
             }))
         except ValueError:
@@ -386,7 +386,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
 
                 self._log_trial_data(trial_data)
 
-                asyncio.create_task(self._dispatch_data_event('data', trial_data))
+                self._create_background_task(self._dispatch_data_event('data', trial_data))
 
         except (ValueError, IndexError) as e:
             logger.error(f"Error parsing data packet '{value}': {e}")
@@ -444,7 +444,7 @@ class WDRTWirelessHandler(BaseDRTHandler):
 
             logger.debug(f"Logged trial data to {filepath}")
 
-            asyncio.create_task(self._dispatch_data_event('trial_logged', {
+            self._create_background_task(self._dispatch_data_event('trial_logged', {
                 'filepath': str(filepath),
                 'trial_number': trial_number,
             }))

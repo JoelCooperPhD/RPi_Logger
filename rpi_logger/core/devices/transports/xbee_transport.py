@@ -1,16 +1,17 @@
 """
 XBee Wireless Transport
 
-Transport implementation for XBee wireless communication with wVOG devices.
-Wraps digi-xbee library with an interface compatible with BaseTransport.
+Transport implementation for XBee wireless communication with wVOG and wDRT devices.
+Wraps digi-xbee library with an interface compatible with module BaseTransport classes.
+
+This is the shared implementation used by all modules. The transport is created and
+managed by DeviceConnectionManager, and message routing is handled by XBeeManager.
 """
 
 import asyncio
 import queue
 from typing import Optional, TYPE_CHECKING
 import logging
-
-from .base_transport import BaseTransport
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +20,16 @@ if TYPE_CHECKING:
     from digi.xbee.devices import XBeeDevice, RemoteRaw802Device
 
 
-class XBeeTransport(BaseTransport):
+class XBeeTransport:
     """
-    XBee wireless transport for wVOG devices.
+    XBee wireless transport for wVOG and wDRT devices.
 
     Provides async read/write operations over XBee 802.15.4 network.
     Requires an XBee coordinator (dongle) to communicate with remote devices.
+
+    This transport is created by DeviceConnectionManager and registered with
+    XBeeManager for message routing. Modules receive a reference to use for
+    communication.
     """
 
     # Maximum buffer size to prevent memory exhaustion
@@ -42,9 +47,8 @@ class XBeeTransport(BaseTransport):
         Args:
             remote_device: The remote XBee device to communicate with
             coordinator: The local XBee coordinator (dongle)
-            node_id: The node ID of the remote device (e.g., "wVOG_01")
+            node_id: The node ID of the remote device (e.g., "wVOG_01", "wDRT_02")
         """
-        super().__init__()
         self._remote_device = remote_device
         self._coordinator = coordinator
         self.node_id = node_id
@@ -164,6 +168,20 @@ class XBeeTransport(BaseTransport):
             logger.error(f"XBee read error for {self.node_id}: {e}")
             return None
 
+    async def write_line(self, line: str, ending: str = '\n') -> bool:
+        """
+        Write a line of text to the device.
+
+        Args:
+            line: Text to write
+            ending: Line ending to append
+
+        Returns:
+            True if write was successful
+        """
+        data = f"{line}{ending}".encode('utf-8')
+        return await self.write(data)
+
     def handle_received_data(self, data: str) -> None:
         """
         Handle data received from the remote device.
@@ -207,3 +225,13 @@ class XBeeTransport(BaseTransport):
                 self._receive_buffer.get_nowait()
             except queue.Empty:
                 break
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.disconnect()
+        return False

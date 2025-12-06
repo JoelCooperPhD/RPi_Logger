@@ -8,7 +8,7 @@ import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional, Dict
+from typing import Optional
 
 from .theme.widgets import RoundedButton
 from ..logger_system import LoggerSystem
@@ -28,7 +28,6 @@ class MainController:
         self.timer_manager = timer_manager
 
         self.root: Optional[tk.Tk] = None
-        self.module_vars: Dict[str, tk.BooleanVar] = {}
 
         self.session_button: Optional[RoundedButton] = None
         self.trial_button: Optional[RoundedButton] = None
@@ -48,7 +47,6 @@ class MainController:
     def set_widgets(
         self,
         root: tk.Tk,
-        module_vars: Dict[str, tk.BooleanVar],
         session_button: RoundedButton,
         trial_button: RoundedButton,
         session_status_label: ttk.Label,
@@ -57,7 +55,6 @@ class MainController:
         trial_label_var: tk.StringVar
     ) -> None:
         self.root = root
-        self.module_vars = module_vars
         self.session_button = session_button
         self.trial_button = trial_button
         self.session_status_label = session_status_label
@@ -69,42 +66,6 @@ class MainController:
         task = asyncio.create_task(coro)
         self._pending_tasks.append(task)
         task.add_done_callback(lambda t: self._pending_tasks.remove(t) if t in self._pending_tasks else None)
-
-    async def on_module_menu_toggle(self, module_name: str) -> None:
-        desired_state = self.module_vars[module_name].get()
-
-        if self.logger_system.event_logger:
-            action = "enable" if desired_state else "disable"
-            await self.logger_system.event_logger.log_button_press(f"module_{module_name}", action)
-
-        await self.logger_system.toggle_module_enabled(module_name, desired_state)
-
-        self.logger.info("%s module: %s", "Starting" if desired_state else "Stopping", module_name)
-        self._schedule_task(self._handle_module_toggle(module_name, desired_state))
-
-    async def _handle_module_toggle(self, module_name: str, desired_state: bool) -> None:
-        try:
-            success = await self.logger_system.set_module_enabled(module_name, desired_state)
-
-            if not success:
-                self.module_vars[module_name].set(not desired_state)
-                action = "start" if desired_state else "stop"
-                messagebox.showerror(
-                    f"{action.capitalize()} Failed",
-                    f"Failed to {action} module: {module_name}\nCheck logs for details."
-                )
-            else:
-                self.logger.info("Module %s %s successfully", module_name, "started" if desired_state else "stopped")
-                if self.logger_system.event_logger:
-                    if desired_state:
-                        await self.logger_system.event_logger.log_module_started(module_name)
-                    else:
-                        await self.logger_system.event_logger.log_module_stopped(module_name)
-
-        except Exception as e:
-            self.logger.error("Error toggling module %s: %s", module_name, e, exc_info=True)
-            self.module_vars[module_name].set(not desired_state)
-            messagebox.showerror("Error", f"Failed to toggle {module_name}: {e}")
 
     def on_toggle_session(self) -> None:
         if self.session_active:
@@ -310,20 +271,8 @@ class MainController:
         self._schedule_task(shutdown_coordinator.initiate_shutdown("UI button"))
 
     async def _status_callback(self, module_name: str, state: ModuleState, status) -> None:
-        if module_name in self.module_vars:
-            var = self.module_vars[module_name]
-
-            if state == ModuleState.STARTING:
-                pass
-            elif state in (ModuleState.STOPPED, ModuleState.CRASHED, ModuleState.ERROR):
-                if var.get():
-                    self.logger.info("Unchecking %s (state: %s)", module_name, state.value)
-                    var.set(False)
-            elif state in (ModuleState.IDLE, ModuleState.RECORDING, ModuleState.INITIALIZING):
-                if not var.get():
-                    self.logger.info("Checking %s (state: %s)", module_name, state.value)
-                    var.set(True)
-
+        """Handle module state changes - log only, no UI checkboxes to update."""
+        self.logger.debug("Module %s state changed to %s", module_name, state.value)
 
     async def auto_start_modules(self) -> None:
         await asyncio.sleep(0.5)

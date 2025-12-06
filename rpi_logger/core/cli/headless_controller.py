@@ -47,6 +47,9 @@ class HeadlessController:
                 else:
                     self.logger.error("Failed to start module: %s", module_name)
 
+        # Signal that startup is complete (for state file cleanup)
+        await self.logger_system.on_startup_complete()
+
     async def start_module(self, module_name: str) -> bool:
         """Start a specific module."""
         if self.logger_system.event_logger:

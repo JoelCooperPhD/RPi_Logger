@@ -14,7 +14,9 @@ from collections import deque
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Deque, Optional, TextIO
+from queue import Queue, Empty
+import threading
+from typing import Any, Deque, List, Optional, TextIO
 
 from PIL import Image, ImageDraw
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module_filename_prefix
@@ -38,6 +40,15 @@ except Exception as exc:  # pragma: no cover - GUI-less host
     TK_IMPORT_ERROR = exc
 else:  # pragma: no cover - GUI path
     TK_IMPORT_ERROR = None
+
+try:
+    from rpi_logger.core.ui.theme.colors import Colors
+    from rpi_logger.core.ui.theme.widgets import RoundedButton
+    HAS_THEME = True
+except ImportError:
+    Colors = None
+    RoundedButton = None
+    HAS_THEME = False
 
 from rpi_logger.core.logging_utils import ensure_structured_logger
 from vmc import ModuleRuntime, RuntimeContext
@@ -199,8 +210,11 @@ class GPSPreviewRuntime(ModuleRuntime):
         self._data_dir: Optional[Path] = None
         self._active_trial_number: int = 1
 
-        self.serial_port = str(getattr(self.args, "serial_port", "/dev/serial0"))
-        self.baud_rate = int(getattr(self.args, "baud_rate", 9600))
+        # Device assignment state - serial params come from assign_device command
+        self._device_id: Optional[str] = None
+        self._device_assigned = False
+        self.serial_port: Optional[str] = None
+        self.baud_rate: int = 9600
         self.reconnect_delay = max(1.0, float(getattr(self.args, "reconnect_delay", 3.0)))
         history_limit = max(1, int(getattr(self.args, "nmea_history", 30)))
 
@@ -226,6 +240,11 @@ class GPSPreviewRuntime(ModuleRuntime):
         self._current_db: Optional[Path] = None
         self._telemetry_var: Optional[tk.StringVar] = None
 
+        # Telemetry UI state (initialized in _build_telemetry_panel)
+        self._status_vars: dict[str, tk.StringVar] = {}
+        self._signal_canvas: Optional[tk.Canvas] = None
+        self._zoom_label_var: Optional[tk.StringVar] = None
+
         pref_db = self.preferences.get("offline_db") if self.preferences else None
         self._offline_db = getattr(self.args, "offline_db", pref_db or DEFAULT_OFFLINE_DB)
         self._session_dir: Optional[Path] = None
@@ -233,39 +252,35 @@ class GPSPreviewRuntime(ModuleRuntime):
         self._record_path: Optional[Path] = None
         self._record_file: Optional[TextIO] = None
         self._record_writer: Optional[csv.writer] = None
+        # Buffered writing with queue
+        self._write_queue: Queue[Optional[List[Any]]] = Queue()
+        self._writer_thread: Optional[threading.Thread] = None
+        self._flush_threshold = 32  # Flush every N rows
+        self._pending_rows: List[List[Any]] = []
+        self._dropped_records = 0
 
     # ------------------------------------------------------------------
     # ModuleRuntime interface
 
     async def start(self) -> None:
+        # Bind runtime to view for bidirectional communication
         if self.view:
+            bind_runtime = getattr(self.view, "bind_runtime", None)
+            if callable(bind_runtime):
+                bind_runtime(self)
+
             if tk is None or ttk is None:
                 raise RuntimeError(f"tkinter unavailable: {TK_IMPORT_ERROR}")
-            self.view.set_preview_title(f"{self.display_name} Preview")
-            self.view.build_stub_content(self._build_preview_layout)
-            telemetry_builder = getattr(self.view, "build_telemetry_content", None)
-            if callable(telemetry_builder):
-                telemetry_builder(self._build_telemetry_panel)
-                configure_sidecar = getattr(self.view, "set_preview_sidecar_minsize", None)
-                if callable(configure_sidecar):
-                    min_width = int(GRID_SIZE * TILE_SIZE / 2)
-                    configure_sidecar(min_width)
 
         self._log_event(
             "runtime_start",
             mode="gui" if self.view else "headless",
-            port=self.serial_port,
-            baud=self.baud_rate,
-            reconnect_s=self.reconnect_delay,
-            offline_db=self._offline_db,
+            waiting_for_device=True,
         )
 
-        if SERIAL_IMPORT_ERROR:
-            self._log_event("serial_module_missing", level=logging.ERROR, error=str(SERIAL_IMPORT_ERROR))
-            self._set_connection_state(False, error=str(SERIAL_IMPORT_ERROR))
-            return
-
-        self._serial_task = self._task_manager.create(self._serial_worker(), name="GPSSerialWorker")
+        # Don't start serial connection yet - wait for assign_device command
+        # The device will be assigned by the main logger when the UART scanner
+        # finds the GPS device at /dev/serial0
 
     async def shutdown(self) -> None:
         if self._shutdown.is_set():
@@ -299,13 +314,130 @@ class GPSPreviewRuntime(ModuleRuntime):
 
     async def handle_command(self, command: dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
+
+        if action == "assign_device":
+            return await self._handle_assign_device(command)
+
+        if action == "unassign_device":
+            return await self._handle_unassign_device(command)
+
+        if action == "show_window":
+            self._handle_show_window()
+            return True
+
+        if action == "hide_window":
+            self._handle_hide_window()
+            return True
+
         if action == "start_recording":
             await self._start_recording()
             return True
+
         if action == "stop_recording":
             await self._stop_recording()
             return True
+
         return False
+
+    async def _handle_assign_device(self, command: dict[str, Any]) -> bool:
+        """Handle device assignment from main logger."""
+        device_id = command.get("device_id")
+        port = command.get("port")
+        baudrate = command.get("baudrate", 9600)
+
+        if self._device_assigned:
+            self.logger.warning(
+                "Device already assigned: %s, rejecting %s",
+                self._device_id, device_id
+            )
+            return False
+
+        self._device_id = device_id
+        self.serial_port = port
+        self.baud_rate = int(baudrate)
+        self._device_assigned = True
+
+        self._log_event(
+            "device_assigned",
+            device_id=device_id,
+            port=port,
+            baudrate=baudrate,
+        )
+
+        # Build the UI now that device is assigned
+        if self.view:
+            self.view.set_preview_title(f"{self.display_name} Preview")
+            self.view.build_stub_content(self._build_preview_layout)
+            telemetry_builder = getattr(self.view, "build_telemetry_content", None)
+            if callable(telemetry_builder):
+                telemetry_builder(self._build_telemetry_panel)
+                configure_sidecar = getattr(self.view, "set_preview_sidecar_minsize", None)
+                if callable(configure_sidecar):
+                    min_width = int(GRID_SIZE * TILE_SIZE / 2)
+                    configure_sidecar(min_width)
+
+            # Notify view of device connection
+            on_connected = getattr(self.view, "on_device_connected", None)
+            if callable(on_connected):
+                on_connected(device_id, port)
+
+        # Now start the serial connection
+        if SERIAL_IMPORT_ERROR:
+            self._log_event("serial_module_missing", level=logging.ERROR, error=str(SERIAL_IMPORT_ERROR))
+            self._set_connection_state(False, error=str(SERIAL_IMPORT_ERROR))
+            return True
+
+        self._serial_task = self._task_manager.create(self._serial_worker(), name="GPSSerialWorker")
+        return True
+
+    async def _handle_unassign_device(self, command: dict[str, Any]) -> bool:
+        """Handle device unassignment."""
+        device_id = command.get("device_id")
+
+        if not self._device_assigned or self._device_id != device_id:
+            self.logger.debug("Ignoring unassign for non-matching device: %s", device_id)
+            return True
+
+        self._log_event("device_unassigned", device_id=device_id)
+
+        # Stop serial task
+        if self._serial_task and not self._serial_task.done():
+            self._serial_task.cancel()
+            try:
+                await asyncio.wait_for(self._serial_task, timeout=3.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                pass
+            self._serial_task = None
+
+        await self._close_serial_writer()
+
+        # Notify view
+        if self.view:
+            on_disconnected = getattr(self.view, "on_device_disconnected", None)
+            if callable(on_disconnected):
+                on_disconnected(device_id)
+
+        # Reset state
+        self._device_id = None
+        self._device_assigned = False
+        self.serial_port = None
+        self._set_connection_state(False)
+
+        return True
+
+    def _handle_show_window(self) -> None:
+        """Show the module window."""
+        if self.view:
+            show_window = getattr(self.view, "show_window", None)
+            if callable(show_window):
+                show_window()
+
+    def _handle_hide_window(self) -> None:
+        """Hide the module window."""
+        if self.view:
+            hide_window = getattr(self.view, "hide_window", None)
+            if callable(hide_window):
+                hide_window()
 
     async def on_session_dir_available(self, path: Path) -> None:
         if self._recording:
@@ -419,22 +551,52 @@ class GPSPreviewRuntime(ModuleRuntime):
         self._record_file = handle
         self._record_writer = writer
         self._record_path = path
+        self._dropped_records = 0
+        self._pending_rows.clear()
+        # Clear queue and start writer thread
+        while not self._write_queue.empty():
+            try:
+                self._write_queue.get_nowait()
+            except Empty:
+                break
+        self._writer_thread = threading.Thread(
+            target=self._writer_loop,
+            name="GPSWriterThread",
+            daemon=True,
+        )
+        self._writer_thread.start()
         return path
 
     def _close_recording_file(self) -> None:
+        # Signal writer thread to stop
+        if self._writer_thread and self._writer_thread.is_alive():
+            self._write_queue.put(None)  # Sentinel to stop
+            self._writer_thread.join(timeout=5.0)
+            if self._writer_thread.is_alive():
+                self._log_event("writer_thread_timeout", level=logging.WARNING)
+        self._writer_thread = None
+
         handle = self._record_file
         if handle:
             try:
                 handle.close()
             except Exception:
                 self._log_event("recording_close_error", level=logging.DEBUG)
+
+        if self._dropped_records > 0:
+            self._log_event(
+                "recording_dropped_records",
+                level=logging.WARNING,
+                dropped=self._dropped_records,
+            )
+
         self._record_file = None
         self._record_writer = None
         self._record_path = None
+        self._pending_rows.clear()
 
     def _emit_record(self, update: dict[str, Any]) -> None:
-        writer = self._record_writer
-        if not writer:
+        if not self._recording or not self._record_writer:
             return
         fix = self._fix
         recorded_at_unix = time.time()
@@ -448,42 +610,90 @@ class GPSPreviewRuntime(ModuleRuntime):
             speed_mps = fix.speed_knots * MPS_PER_KNOT
         elif fix.speed_kmh is not None:
             speed_mps = fix.speed_kmh / 3.6
+
+        row = [
+            trial_number,
+            recorded_at_unix,
+            fix_timestamp,
+            lat,
+            lon,
+            altitude,
+            speed_mps,
+            fix.speed_kmh,
+            fix.speed_knots,
+            fix.speed_mph,
+            fix.course_deg,
+            fix.fix_quality,
+            fix.fix_mode or "",
+            1 if fix.fix_valid else 0,
+            fix.satellites_in_use,
+            fix.satellites_in_view,
+            fix.hdop,
+            fix.pdop,
+            fix.vdop,
+            update.get("sentence_type"),
+            update.get("raw_sentence", ""),
+        ]
+
+        # Queue the row for async writing
         try:
-            writer.writerow(
-                [
-                    trial_number,
-                    recorded_at_unix,
-                    fix_timestamp,
-                    lat,
-                    lon,
-                    altitude,
-                    speed_mps,
-                    fix.speed_kmh,
-                    fix.speed_knots,
-                    fix.speed_mph,
-                    fix.course_deg,
-                    fix.fix_quality,
-                    fix.fix_mode or "",
-                    1 if fix.fix_valid else 0,
-                    fix.satellites_in_use,
-                    fix.satellites_in_view,
-                    fix.hdop,
-                    fix.pdop,
-                    fix.vdop,
-                    update.get("sentence_type"),
-                    update.get("raw_sentence", ""),
-                ]
-            )
-            if self._record_file:
-                self._record_file.flush()
+            self._write_queue.put_nowait(row)
+        except Exception:
+            self._dropped_records += 1
+            if self._dropped_records % 50 == 1:
+                self._log_event(
+                    "record_queue_full",
+                    level=logging.WARNING,
+                    dropped=self._dropped_records,
+                )
+
+    def _writer_loop(self) -> None:
+        """Background thread that writes queued records to disk."""
+        writer = self._record_writer
+        handle = self._record_file
+        if not writer or not handle:
+            return
+
+        buffer: List[List[Any]] = []
+        while True:
+            try:
+                row = self._write_queue.get(timeout=0.5)
+            except Empty:
+                # Flush pending buffer on timeout
+                if buffer:
+                    self._flush_buffer(writer, handle, buffer)
+                    buffer.clear()
+                continue
+
+            if row is None:
+                # Sentinel - flush and exit
+                if buffer:
+                    self._flush_buffer(writer, handle, buffer)
+                break
+
+            buffer.append(row)
+            if len(buffer) >= self._flush_threshold:
+                self._flush_buffer(writer, handle, buffer)
+                buffer.clear()
+
+    def _flush_buffer(
+        self,
+        writer: csv.writer,
+        handle: TextIO,
+        buffer: List[List[Any]],
+    ) -> None:
+        """Write buffered rows to disk."""
+        try:
+            for row in buffer:
+                writer.writerow(row)
+            handle.flush()
         except Exception:
             self._log_event(
-                "record_row_failed",
+                "buffer_flush_failed",
                 level=logging.ERROR,
-                sentence=update.get("sentence_type"),
-                error="write_failed",
+                rows=len(buffer),
             )
-            self.logger.exception("record_row_failed")
+            self.logger.exception("buffer_flush_failed")
 
 
     # ------------------------------------------------------------------
@@ -832,25 +1042,292 @@ class GPSPreviewRuntime(ModuleRuntime):
     def _build_telemetry_panel(self, container) -> None:
         assert tk is not None and ttk is not None
 
-        body = ttk.Frame(container, padding="6")
-        body.grid(row=0, column=0, sticky="nsew")
-        body.columnconfigure(0, weight=1)
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
 
-        font = ("TkFixedFont", 10)
-        self._telemetry_var = tk.StringVar(value=self._format_telemetry_text())
-        ttk.Label(
-            body,
-            textvariable=self._telemetry_var,
-            font=font,
-            justify="left",
-            anchor="nw",
-        ).grid(row=0, column=0, sticky="nsew")
+        # Create themed outer frame
+        if HAS_THEME and Colors is not None:
+            outer = tk.Frame(
+                container,
+                bg=Colors.BG_FRAME,
+                highlightbackground=Colors.BORDER,
+                highlightcolor=Colors.BORDER,
+                highlightthickness=1
+            )
+        else:
+            outer = ttk.Frame(container)
+        outer.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        outer.columnconfigure(0, weight=1)
+
+        # GPS Status section
+        status_lf = ttk.LabelFrame(outer, text="GPS Status")
+        status_lf.grid(row=0, column=0, sticky="new", padx=4, pady=(4, 2))
+        status_lf.columnconfigure(1, weight=1)
+
+        # Status variables
+        self._status_vars = {}
+
+        status_fields = [
+            ("Connection", "conn"),
+            ("Fix Type", "fix"),
+            ("Satellites", "sats"),
+        ]
+        for i, (label, key) in enumerate(status_fields):
+            ttk.Label(status_lf, text=f"{label}:", style='Inframe.TLabel').grid(
+                row=i, column=0, sticky="w", padx=5, pady=1
+            )
+            var = tk.StringVar(value="—")
+            self._status_vars[key] = var
+            ttk.Label(status_lf, textvariable=var, style='Inframe.TLabel').grid(
+                row=i, column=1, sticky="e", padx=5, pady=1
+            )
+
+        # Position section
+        pos_lf = ttk.LabelFrame(outer, text="Position")
+        pos_lf.grid(row=1, column=0, sticky="new", padx=4, pady=2)
+        pos_lf.columnconfigure(1, weight=1)
+
+        pos_fields = [
+            ("Latitude", "lat"),
+            ("Longitude", "lon"),
+            ("Altitude", "alt"),
+        ]
+        for i, (label, key) in enumerate(pos_fields):
+            ttk.Label(pos_lf, text=f"{label}:", style='Inframe.TLabel').grid(
+                row=i, column=0, sticky="w", padx=5, pady=1
+            )
+            var = tk.StringVar(value="—")
+            self._status_vars[key] = var
+            ttk.Label(pos_lf, textvariable=var, style='Inframe.TLabel').grid(
+                row=i, column=1, sticky="e", padx=5, pady=1
+            )
+
+        # Movement section
+        move_lf = ttk.LabelFrame(outer, text="Movement")
+        move_lf.grid(row=2, column=0, sticky="new", padx=4, pady=2)
+        move_lf.columnconfigure(1, weight=1)
+
+        move_fields = [
+            ("Speed", "speed"),
+            ("Heading", "heading"),
+        ]
+        for i, (label, key) in enumerate(move_fields):
+            ttk.Label(move_lf, text=f"{label}:", style='Inframe.TLabel').grid(
+                row=i, column=0, sticky="w", padx=5, pady=1
+            )
+            var = tk.StringVar(value="—")
+            self._status_vars[key] = var
+            ttk.Label(move_lf, textvariable=var, style='Inframe.TLabel').grid(
+                row=i, column=1, sticky="e", padx=5, pady=1
+            )
+
+        # Quality section
+        qual_lf = ttk.LabelFrame(outer, text="Signal Quality")
+        qual_lf.grid(row=3, column=0, sticky="new", padx=4, pady=2)
+        qual_lf.columnconfigure(1, weight=1)
+
+        qual_fields = [
+            ("HDOP", "hdop"),
+            ("PDOP", "pdop"),
+            ("UTC Time", "utc"),
+        ]
+        for i, (label, key) in enumerate(qual_fields):
+            ttk.Label(qual_lf, text=f"{label}:", style='Inframe.TLabel').grid(
+                row=i, column=0, sticky="w", padx=5, pady=1
+            )
+            var = tk.StringVar(value="—")
+            self._status_vars[key] = var
+            ttk.Label(qual_lf, textvariable=var, style='Inframe.TLabel').grid(
+                row=i, column=1, sticky="e", padx=5, pady=1
+            )
+
+        # Signal strength indicator (visual bar)
+        sig_lf = ttk.LabelFrame(outer, text="Signal Strength")
+        sig_lf.grid(row=4, column=0, sticky="new", padx=4, pady=(2, 4))
+        sig_lf.columnconfigure(0, weight=1)
+
+        # Create a canvas for signal strength visualization
+        canvas_bg = Colors.BG_DARKER if HAS_THEME and Colors else "#1e1e1e"
+        self._signal_canvas = tk.Canvas(
+            sig_lf, height=24, bg=canvas_bg, highlightthickness=0
+        )
+        self._signal_canvas.grid(row=0, column=0, sticky="ew", padx=4, pady=4)
+
+        # Keep legacy telemetry var for compatibility
+        self._telemetry_var = tk.StringVar(value="")
         self._update_info_panel()
 
     def _update_info_panel(self) -> None:
-        if not self._telemetry_var:
+        # Update structured telemetry display
+        if hasattr(self, '_status_vars') and self._status_vars:
+            self._update_structured_telemetry()
+
+        # Update signal strength visualization
+        if hasattr(self, '_signal_canvas') and self._signal_canvas:
+            self._update_signal_strength_display()
+
+        # Keep legacy telemetry var updated for compatibility
+        if self._telemetry_var:
+            self._telemetry_var.set(self._format_telemetry_text())
+
+    def _update_structured_telemetry(self) -> None:
+        """Update the structured telemetry display fields."""
+        fix = self._fix
+        vars_ = self._status_vars
+
+        # Connection status
+        if "conn" in vars_:
+            if self._connection_state:
+                port_short = self.serial_port.split('/')[-1] if self.serial_port else "?"
+                vars_["conn"].set(f"Connected ({port_short})")
+            else:
+                error = self._serial_error or "Disconnected"
+                vars_["conn"].set(error[:20])
+
+        # Fix type
+        if "fix" in vars_:
+            if fix.fix_valid:
+                quality = FIX_QUALITY_DESCRIPTIONS.get(fix.fix_quality or 0, "Unknown")
+                mode = fix.fix_mode or ""
+                if mode:
+                    vars_["fix"].set(f"{mode} - {quality}")
+                else:
+                    vars_["fix"].set(quality)
+            else:
+                vars_["fix"].set("Searching...")
+
+        # Satellites
+        if "sats" in vars_:
+            sats_use = fix.satellites_in_use if fix.satellites_in_use is not None else 0
+            sats_view = fix.satellites_in_view if fix.satellites_in_view is not None else "?"
+            vars_["sats"].set(f"{sats_use} / {sats_view}")
+
+        # Position
+        if "lat" in vars_:
+            vars_["lat"].set(self._format_coordinate(fix.latitude, "N", "S"))
+        if "lon" in vars_:
+            vars_["lon"].set(self._format_coordinate(fix.longitude, "E", "W"))
+        if "alt" in vars_:
+            if fix.altitude_m is not None:
+                vars_["alt"].set(f"{fix.altitude_m:.1f} m")
+            else:
+                vars_["alt"].set("—")
+
+        # Movement
+        if "speed" in vars_:
+            if fix.speed_kmh is not None:
+                vars_["speed"].set(f"{fix.speed_kmh:.1f} km/h")
+            else:
+                vars_["speed"].set("—")
+        if "heading" in vars_:
+            if fix.course_deg is not None:
+                # Add compass direction
+                direction = self._bearing_to_compass(fix.course_deg)
+                vars_["heading"].set(f"{fix.course_deg:.0f}° {direction}")
+            else:
+                vars_["heading"].set("—")
+
+        # Quality
+        if "hdop" in vars_:
+            if fix.hdop is not None:
+                vars_["hdop"].set(f"{fix.hdop:.1f}")
+            else:
+                vars_["hdop"].set("—")
+        if "pdop" in vars_:
+            if fix.pdop is not None:
+                vars_["pdop"].set(f"{fix.pdop:.1f}")
+            else:
+                vars_["pdop"].set("—")
+        if "utc" in vars_:
+            if fix.timestamp:
+                vars_["utc"].set(f"{fix.timestamp:%H:%M:%S} UTC")
+            else:
+                vars_["utc"].set("—")
+
+    def _bearing_to_compass(self, bearing: float) -> str:
+        """Convert bearing in degrees to compass direction."""
+        directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        index = round(bearing / 45) % 8
+        return directions[index]
+
+    def _update_signal_strength_display(self) -> None:
+        """Update the signal strength visualization canvas."""
+        canvas = self._signal_canvas
+        if not canvas or not tk:
             return
-        self._telemetry_var.set(self._format_telemetry_text())
+
+        canvas.delete("all")
+        fix = self._fix
+
+        # Calculate signal strength based on satellites and HDOP
+        sats = fix.satellites_in_use or 0
+        hdop = fix.hdop
+
+        # Normalize to 0-100 score
+        # Good: 8+ sats, HDOP < 2
+        # Fair: 5-7 sats, HDOP 2-5
+        # Poor: <5 sats, HDOP > 5
+        if not fix.fix_valid or sats == 0:
+            strength = 0
+        else:
+            # Satellite contribution (0-60 points)
+            sat_score = min(60, sats * 7.5)
+            # HDOP contribution (0-40 points, lower is better)
+            if hdop is not None:
+                hdop_score = max(0, 40 - (hdop - 1) * 10)
+            else:
+                hdop_score = 20  # Unknown HDOP gets medium score
+            strength = int(sat_score + hdop_score)
+
+        # Draw background
+        try:
+            width = canvas.winfo_width()
+            if width < 10:
+                width = 200  # Default width before widget is sized
+        except Exception:
+            width = 200
+
+        height = 20
+        padding = 2
+
+        # Background bar
+        bg_color = Colors.BG_INPUT if HAS_THEME and Colors else "#3d3d3d"
+        canvas.create_rectangle(padding, padding, width - padding, height, fill=bg_color, outline="")
+
+        # Strength bar with color gradient
+        if strength > 0:
+            bar_width = int((width - 2 * padding) * strength / 100)
+            if strength >= 70:
+                color = Colors.SUCCESS if HAS_THEME and Colors else "#2ecc71"
+            elif strength >= 40:
+                color = Colors.WARNING if HAS_THEME and Colors else "#f39c12"
+            else:
+                color = Colors.ERROR if HAS_THEME and Colors else "#e74c3c"
+
+            canvas.create_rectangle(
+                padding, padding, padding + bar_width, height,
+                fill=color, outline=""
+            )
+
+        # Draw satellite icons (small rectangles representing satellite bars)
+        num_bars = 5
+        bar_spacing = (width - 20) // num_bars
+        active_bars = min(num_bars, sats // 2) if sats else 0
+
+        for i in range(num_bars):
+            bar_x = 10 + i * bar_spacing
+            bar_height = 6 + i * 3  # Increasing heights
+            bar_y = height - bar_height
+
+            if i < active_bars:
+                bar_color = Colors.SUCCESS if HAS_THEME and Colors else "#2ecc71"
+            else:
+                bar_color = Colors.FG_MUTED if HAS_THEME and Colors else "#6c7a89"
+
+            canvas.create_rectangle(
+                bar_x, bar_y, bar_x + 8, height - 2,
+                fill=bar_color, outline=""
+            )
 
     def _format_telemetry_text(self) -> str:
         conn_label = "DOWN"
@@ -1075,14 +1552,144 @@ class GPSPreviewRuntime(ModuleRuntime):
 
     def _draw_center_marker(self, image: Image.Image, x: float, y: float) -> None:
         draw = ImageDraw.Draw(image)
+        fix = self._fix
+
+        # Draw crosshair/marker at GPS position
         radius = 8
+        marker_color = "#2ecc71" if fix.fix_valid else "#ff4d4f"  # Green if valid, red if searching
+
+        # Outer ring
         draw.ellipse(
             (x - radius, y - radius, x + radius, y + radius),
-            outline="#ff4d4f",
+            outline=marker_color,
             width=3,
         )
-        draw.line((x - 12, y, x + 12, y), fill="#ff4d4f", width=2)
-        draw.line((x, y - 12, x, y + 12), fill="#ff4d4f", width=2)
+
+        # Inner dot
+        inner_radius = 3
+        draw.ellipse(
+            (x - inner_radius, y - inner_radius, x + inner_radius, y + inner_radius),
+            fill=marker_color,
+        )
+
+        # Direction arrow (if we have heading data)
+        if fix.course_deg is not None and fix.speed_kmh and fix.speed_kmh > 1.0:
+            import math
+            angle_rad = math.radians(fix.course_deg - 90)  # Convert to math angle
+            arrow_len = 20
+            end_x = x + arrow_len * math.cos(angle_rad)
+            end_y = y + arrow_len * math.sin(angle_rad)
+
+            # Draw direction line
+            draw.line((x, y, end_x, end_y), fill=marker_color, width=2)
+
+            # Draw arrowhead
+            arrow_size = 6
+            left_angle = angle_rad + math.pi * 0.8
+            right_angle = angle_rad - math.pi * 0.8
+            left_x = end_x + arrow_size * math.cos(left_angle)
+            left_y = end_y + arrow_size * math.sin(left_angle)
+            right_x = end_x + arrow_size * math.cos(right_angle)
+            right_y = end_y + arrow_size * math.sin(right_angle)
+            draw.polygon([(end_x, end_y), (left_x, left_y), (right_x, right_y)], fill=marker_color)
+
+        # Draw compass rose in corner
+        self._draw_compass_rose(draw, image.width - 40, 40)
+
+        # Draw scale bar
+        self._draw_scale_bar(draw, image.width, image.height, int(round(self._current_zoom)))
+
+    def _draw_compass_rose(self, draw: ImageDraw.Draw, cx: float, cy: float) -> None:
+        """Draw a compass rose at the given center position."""
+        # Colors
+        bg_color = "#2b2b2b"
+        border_color = "#404055"
+        north_color = "#e74c3c"  # Red for North
+        text_color = "#ecf0f1"
+
+        radius = 28
+
+        # Background circle
+        draw.ellipse(
+            (cx - radius, cy - radius, cx + radius, cy + radius),
+            fill=bg_color,
+            outline=border_color,
+            width=2,
+        )
+
+        # Cardinal direction markers
+        directions = [
+            ("N", 0, north_color),
+            ("E", 90, text_color),
+            ("S", 180, text_color),
+            ("W", 270, text_color),
+        ]
+
+        for label, angle, color in directions:
+            angle_rad = math.radians(angle - 90)  # 0 is up
+            # Line from center
+            inner_r = 10
+            outer_r = radius - 4
+            x1 = cx + inner_r * math.cos(angle_rad)
+            y1 = cy + inner_r * math.sin(angle_rad)
+            x2 = cx + outer_r * math.cos(angle_rad)
+            y2 = cy + outer_r * math.sin(angle_rad)
+            draw.line((x1, y1, x2, y2), fill=color, width=2 if label == "N" else 1)
+
+        # North indicator arrow
+        arrow_len = radius - 6
+        arrow_end_y = cy - arrow_len
+        draw.polygon(
+            [(cx, arrow_end_y), (cx - 5, cy - arrow_len + 10), (cx + 5, cy - arrow_len + 10)],
+            fill=north_color,
+        )
+
+    def _draw_scale_bar(self, draw: ImageDraw.Draw, image_width: int, image_height: int, zoom: int) -> None:
+        """Draw a scale bar in the bottom-left corner of the map."""
+        # Calculate meters per pixel at current zoom level
+        # At zoom 0, the whole world (40075 km) fits in 256 pixels
+        # Each zoom level doubles the resolution
+        lat = self._current_center[0]
+        meters_per_pixel = 40075016.686 * math.cos(math.radians(lat)) / (256 * (2 ** zoom))
+
+        # Choose a nice round distance for the scale bar
+        target_pixels = 100  # Target scale bar width
+        target_meters = meters_per_pixel * target_pixels
+
+        # Find the nearest nice round number
+        nice_distances = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
+        scale_meters = min(nice_distances, key=lambda d: abs(d - target_meters))
+        scale_pixels = int(scale_meters / meters_per_pixel)
+
+        # Position in bottom-left
+        x = 10
+        y = image_height - 20
+
+        # Colors
+        bg_color = "#2b2b2b"
+        bar_color = "#ecf0f1"
+
+        # Background
+        draw.rectangle(
+            (x - 4, y - 16, x + scale_pixels + 10, y + 6),
+            fill=bg_color,
+        )
+
+        # Scale bar
+        draw.rectangle((x, y - 4, x + scale_pixels, y), fill=bar_color)
+
+        # End caps
+        draw.rectangle((x, y - 8, x + 2, y), fill=bar_color)
+        draw.rectangle((x + scale_pixels - 2, y - 8, x + scale_pixels, y), fill=bar_color)
+
+        # Label
+        if scale_meters >= 1000:
+            label = f"{scale_meters // 1000} km"
+        else:
+            label = f"{scale_meters} m"
+
+        # Draw text (simple, no font loading needed)
+        draw.text((x + scale_pixels // 2, y - 12), label, fill=bar_color, anchor="mm")
 
     def _offline_db_candidates(self, raw_value: Optional[str]) -> list[tuple[str, Path]]:
         candidates: list[tuple[str, Path]] = []
@@ -1116,6 +1723,9 @@ class GPSPreviewRuntime(ModuleRuntime):
         if new_zoom == self._current_zoom:
             return
         self._current_zoom = new_zoom
+        # Update zoom level indicator
+        if hasattr(self, '_zoom_label_var') and self._zoom_label_var:
+            self._zoom_label_var.set(f"z{int(new_zoom)}")
         self._refresh_preview()
 
     def _refresh_preview(self) -> None:
@@ -1142,11 +1752,75 @@ class GPSPreviewRuntime(ModuleRuntime):
             return
         if self._controls_overlay:
             self._controls_overlay.destroy()
-        overlay = ttk.Frame(parent)
+
+        # Create themed overlay frame
+        if HAS_THEME and Colors is not None:
+            overlay = tk.Frame(
+                parent,
+                bg=Colors.BG_FRAME,
+                highlightbackground=Colors.BORDER,
+                highlightcolor=Colors.BORDER,
+                highlightthickness=1
+            )
+        else:
+            overlay = ttk.Frame(parent)
         overlay.place(x=8, y=8)
-        ttk.Button(overlay, text="-", width=3, command=lambda: self._adjust_zoom(-1)).pack(side="left")
-        ttk.Button(overlay, text="+", width=3, command=lambda: self._adjust_zoom(1)).pack(side="left", padx=(4, 0))
+
+        # Use RoundedButton if available for consistent styling
+        if RoundedButton is not None:
+            btn_bg = Colors.BG_FRAME if Colors is not None else None
+            zoom_out = RoundedButton(
+                overlay, text="−", command=lambda: self._adjust_zoom(-1),
+                width=36, height=36, style='default', bg=btn_bg
+            )
+            zoom_out.pack(side="left", padx=2, pady=2)
+
+            zoom_in = RoundedButton(
+                overlay, text="+", command=lambda: self._adjust_zoom(1),
+                width=36, height=36, style='default', bg=btn_bg
+            )
+            zoom_in.pack(side="left", padx=(0, 2), pady=2)
+
+            # Add separator
+            if HAS_THEME and Colors is not None:
+                sep = tk.Frame(overlay, width=1, height=24, bg=Colors.BORDER)
+                sep.pack(side="left", padx=4, pady=4)
+
+            # Configure button
+            config_btn = RoundedButton(
+                overlay, text="⚙", command=self._on_configure_clicked,
+                width=36, height=36, style='default', bg=btn_bg
+            )
+            config_btn.pack(side="left", padx=(0, 2), pady=2)
+        else:
+            # Fallback to ttk.Button
+            ttk.Button(overlay, text="−", width=3, command=lambda: self._adjust_zoom(-1)).pack(side="left", padx=2, pady=2)
+            ttk.Button(overlay, text="+", width=3, command=lambda: self._adjust_zoom(1)).pack(side="left", padx=(0, 2), pady=2)
+            ttk.Button(overlay, text="⚙", width=3, command=self._on_configure_clicked).pack(side="left", padx=(4, 2), pady=2)
+
+        # Add zoom level indicator
+        self._zoom_label_var = tk.StringVar(value=f"z{int(self._current_zoom)}")
+        if HAS_THEME and Colors is not None:
+            zoom_label = tk.Label(
+                overlay,
+                textvariable=self._zoom_label_var,
+                bg=Colors.BG_FRAME,
+                fg=Colors.FG_SECONDARY,
+                font=("TkDefaultFont", 9),
+                padx=4
+            )
+        else:
+            zoom_label = ttk.Label(overlay, textvariable=self._zoom_label_var, font=("TkDefaultFont", 9))
+        zoom_label.pack(side="left", padx=(4, 2))
+
         self._controls_overlay = overlay
+
+    def _on_configure_clicked(self) -> None:
+        """Handle configure button click - delegate to view."""
+        if self.view and hasattr(self.view, 'gui') and self.view.gui:
+            gui = self.view.gui
+            if hasattr(gui, '_on_configure_clicked'):
+                gui._on_configure_clicked()
 
     # ------------------------------------------------------------------
     # Logging helpers

@@ -14,6 +14,15 @@ except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
 
+try:
+    from rpi_logger.core.ui.theme.widgets import RoundedButton
+    from rpi_logger.core.ui.theme.colors import Colors
+    HAS_THEME = True
+except ImportError:
+    HAS_THEME = False
+    RoundedButton = None
+    Colors = None
+
 
 class ConfigDialog:
     """Stores pending configs and presents a Tk pop-out dialog."""
@@ -77,10 +86,24 @@ class ConfigDialog:
         self._settings_panel = SettingsPanel(self._window, logger=self._logger)
         self._settings_panel.frame.grid(row=0, column=0, sticky="nsew")
 
-        button_row = ttk.Frame(self._window)
-        button_row.grid(row=1, column=0, sticky="e", pady=(8, 0), padx=(0, 6))
-        ttk.Button(button_row, text="Apply", command=self._apply_clicked).grid(row=0, column=0, padx=4)
-        ttk.Button(button_row, text="Close", command=self.close).grid(row=0, column=1, padx=4)
+        # Use RoundedButton if available, otherwise fall back to ttk.Button
+        if HAS_THEME and RoundedButton is not None:
+            btn_bg = Colors.BG_FRAME if Colors is not None else None
+            button_row = tk.Frame(self._window, bg=btn_bg) if btn_bg else tk.Frame(self._window)
+            button_row.grid(row=1, column=0, sticky="e", pady=(8, 0), padx=(0, 6))
+            RoundedButton(
+                button_row, text="Apply", command=self._apply_clicked,
+                width=80, height=32, style='default', bg=btn_bg
+            ).grid(row=0, column=0, padx=4)
+            RoundedButton(
+                button_row, text="Close", command=self.close,
+                width=80, height=32, style='default', bg=btn_bg
+            ).grid(row=0, column=1, padx=4)
+        else:
+            button_row = ttk.Frame(self._window)
+            button_row.grid(row=1, column=0, sticky="e", pady=(8, 0), padx=(0, 6))
+            ttk.Button(button_row, text="Apply", command=self._apply_clicked).grid(row=0, column=0, padx=4)
+            ttk.Button(button_row, text="Close", command=self.close).grid(row=0, column=1, padx=4)
 
     def _apply_clicked(self) -> None:
         if not self._settings_panel or not self._target_camera:

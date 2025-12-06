@@ -24,12 +24,8 @@ class AudioSettings:
     enable_commands: bool = False
     window_geometry: str | None = None
     sample_rate: int = 48_000
-    discovery_timeout: float = 5.0
-    discovery_retry: float = 3.0
-    auto_start_recording: bool = False
     console_output: bool = False
     meter_refresh_interval: float = 0.08
-    device_scan_interval: float = 3.0
     recorder_start_timeout: float = 3.0
     recorder_stop_timeout: float = 2.0
     shutdown_timeout: float = 15.0
@@ -60,17 +56,9 @@ class AudioSettings:
             enable_commands=_to_bool(getattr(args, "enable_commands", defaults.enable_commands)),
             window_geometry=getattr(args, "window_geometry", None),
             sample_rate=int(getattr(args, "sample_rate", defaults.sample_rate)),
-            discovery_timeout=float(getattr(args, "discovery_timeout", defaults.discovery_timeout)),
-            discovery_retry=float(getattr(args, "discovery_retry", defaults.discovery_retry)),
-            auto_start_recording=_to_bool(
-                getattr(args, "auto_start_recording", defaults.auto_start_recording)
-            ),
             console_output=_to_bool(getattr(args, "console_output", defaults.console_output)),
             meter_refresh_interval=float(
                 getattr(args, "meter_refresh_interval", defaults.meter_refresh_interval)
-            ),
-            device_scan_interval=float(
-                getattr(args, "device_scan_interval", defaults.device_scan_interval)
             ),
             recorder_start_timeout=float(
                 getattr(args, "recorder_start_timeout", defaults.recorder_start_timeout)
@@ -101,9 +89,6 @@ class AudioSettings:
         _maybe_update("log_level", str)
         _maybe_update("window_geometry", str)
         _maybe_update("sample_rate", int)
-        _maybe_update("discovery_timeout", float)
-        _maybe_update("discovery_retry", float)
-        _maybe_update("auto_start_recording", bool)
         _maybe_update("console_output", bool)
         _maybe_update("output_dir", lambda value: Path(value))
 
@@ -211,33 +196,6 @@ def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
         type=int,
         default=_config_value(config, "sample_rate", defaults.sample_rate),
         help="Sample rate (Hz) for input streams",
-    )
-    parser.add_argument(
-        "--discovery-timeout",
-        type=float,
-        default=_config_value(config, "discovery_timeout", defaults.discovery_timeout),
-        help="Device discovery timeout (seconds)",
-    )
-    parser.add_argument(
-        "--discovery-retry",
-        type=float,
-        default=_config_value(config, "discovery_retry", defaults.discovery_retry),
-        help="Device rediscovery interval (seconds)",
-    )
-
-    auto_start = parser.add_mutually_exclusive_group()
-    auto_start.add_argument(
-        "--auto-start-recording",
-        dest="auto_start_recording",
-        action="store_true",
-        default=_config_value(config, "auto_start_recording", defaults.auto_start_recording),
-        help="Begin recording automatically when the module starts",
-    )
-    auto_start.add_argument(
-        "--no-auto-start-recording",
-        dest="auto_start_recording",
-        action="store_false",
-        help="Disable automatic recording on startup",
     )
 
     console_group = parser.add_mutually_exclusive_group()

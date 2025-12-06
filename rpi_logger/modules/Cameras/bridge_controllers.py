@@ -46,62 +46,17 @@ class CameraWorkerState:
 
 
 class DiscoveryController:
-    """Discovers cameras and triggers worker spawning."""
+    """
+    Handles worker spawning for cameras.
+
+    Note: Discovery is now handled by the main logger's DeviceConnectionManager.
+    This controller only spawns workers when cameras are assigned via the
+    assign_device command.
+    """
 
     def __init__(self, runtime: "CamerasRuntime", *, logger: LoggerLike = None) -> None:
         self._runtime = runtime
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
-
-    async def start(self) -> None:
-        self._logger.info("[DISCOVERY] Starting camera discovery...")
-        await self.refresh()
-
-    async def refresh(self) -> None:
-        """Discover cameras and spawn/remove workers as needed."""
-        self._logger.info("[DISCOVERY] Refreshing camera list...")
-        runtime = self._runtime
-
-        self._logger.debug("[DISCOVERY] Probing for Pi cameras...")
-        picam_desc = runtime.discover_picam(logger=self._logger)
-        self._logger.info("[DISCOVERY] Found %d Pi camera(s)", len(picam_desc))
-        for d in picam_desc:
-            self._logger.debug("[DISCOVERY]   Pi camera: %s", d.camera_id.key)
-
-        self._logger.debug("[DISCOVERY] Probing for USB cameras...")
-        usb_desc = runtime.discover_usb_devices(logger=self._logger)
-        self._logger.info("[DISCOVERY] Found %d USB camera(s)", len(usb_desc))
-        for d in usb_desc:
-            self._logger.debug("[DISCOVERY]   USB camera: %s (path=%s)", d.camera_id.key, d.location_hint)
-
-        descriptors = picam_desc + usb_desc
-        self._logger.info("[DISCOVERY] Total cameras found: %d", len(descriptors))
-
-        # Track current vs new cameras
-        current_keys = set(runtime.worker_manager.workers.keys())
-        new_keys = set()
-
-        for desc in descriptors:
-            key = desc.camera_id.key
-            new_keys.add(key)
-
-            if key not in current_keys:
-                self._logger.info("[DISCOVERY] New camera detected: %s - spawning worker...", key)
-                await self._spawn_worker_for(desc)
-            else:
-                self._logger.debug("[DISCOVERY] Camera %s already has a worker", key)
-
-        # Remove workers for cameras that disappeared
-        removed = current_keys - new_keys
-        if removed:
-            self._logger.info("[DISCOVERY] Cameras removed: %s", removed)
-        for key in removed:
-            self._logger.info("[DISCOVERY] Shutting down worker for removed camera: %s", key)
-            await runtime.worker_manager.shutdown_worker(key)
-            runtime.camera_states.pop(key, None)
-            runtime.view.remove_camera(key)
-
-        runtime.view.set_status(f"Found {len(new_keys)} camera(s)")
-        self._logger.info("[DISCOVERY] Complete - %d camera(s) active", len(new_keys))
 
     async def _spawn_worker_for(self, desc: CameraDescriptor) -> None:
         """Spawn a worker process for a camera."""
@@ -152,8 +107,12 @@ class DiscoveryController:
 
             self._logger.info("[SPAWN] Worker spawn complete for %s - waiting for READY signal", key)
 
+        except asyncio.CancelledError:
+            raise  # Don't catch cancellation
+        except (OSError, ValueError, RuntimeError) as e:
+            self._logger.error("[SPAWN] FAILED to spawn worker for %s: %s", key, e)
         except Exception as e:
-            self._logger.error("[SPAWN] FAILED to spawn worker for %s: %s", key, e, exc_info=True)
+            self._logger.error("[SPAWN] Unexpected error spawning worker for %s: %s", key, e, exc_info=True)
 
     async def _probe_capabilities(self, desc: CameraDescriptor) -> Optional[Any]:
         """Probe camera capabilities (non-blocking)."""
@@ -323,8 +282,12 @@ class RecordingController:
         for key, state in self._runtime.camera_states.items():
             try:
                 await self._start_camera_recording(key, state)
-            except Exception as e:
+            except asyncio.CancelledError:
+                raise
+            except (OSError, ValueError, RuntimeError) as e:
                 self._logger.error("Failed to start recording for %s: %s", key, e)
+            except Exception as e:
+                self._logger.error("Unexpected error starting recording for %s: %s", key, e, exc_info=True)
 
         self._runtime.view.set_status("Recording...")
 
@@ -420,8 +383,12 @@ class RecordingController:
                 try:
                     await self._runtime.worker_manager.stop_recording(state.worker_key)
                     state.is_recording = False
-                except Exception as e:
+                except asyncio.CancelledError:
+                    raise
+                except (OSError, RuntimeError) as e:
                     self._logger.error("Failed to stop recording for %s: %s", key, e)
+                except Exception as e:
+                    self._logger.error("Unexpected error stopping recording for %s: %s", key, e, exc_info=True)
 
         self._runtime.view.set_status("Recording stopped")
 

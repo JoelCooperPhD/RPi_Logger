@@ -169,7 +169,7 @@ class WDRTUSBHandler(BaseDRTHandler):
             Configuration dict, or None if failed/timeout
         """
         # Create a future to wait for config response
-        self._config_future = asyncio.get_event_loop().create_future()
+        self._config_future = asyncio.get_running_loop().create_future()
 
         # Send config request
         if not await self.send_command('get_config'):
@@ -181,7 +181,7 @@ class WDRTUSBHandler(BaseDRTHandler):
             config = await asyncio.wait_for(self._config_future, timeout=2.0)
             return config
         except asyncio.TimeoutError:
-            logger.warning(f"Config request timed out for {self.device_id}")
+            logger.warning("Config request timed out for %s", self.device_id)
             return None
         finally:
             self._config_future = None
@@ -299,7 +299,7 @@ class WDRTUSBHandler(BaseDRTHandler):
             self._click_count = int(value)
             logger.debug(f"Click count: {self._click_count}")
 
-            asyncio.create_task(self._dispatch_data_event('click', {
+            self._create_background_task(self._dispatch_data_event('click', {
                 'count': self._click_count
             }))
         except ValueError:
@@ -311,7 +311,7 @@ class WDRTUSBHandler(BaseDRTHandler):
             self._trial_number = int(value)
             logger.debug(f"Trial number: {self._trial_number}")
 
-            asyncio.create_task(self._dispatch_data_event('trial', {
+            self._create_background_task(self._dispatch_data_event('trial', {
                 'trial_number': self._trial_number
             }))
         except ValueError:
@@ -323,7 +323,7 @@ class WDRTUSBHandler(BaseDRTHandler):
             reaction_time = int(value)
             logger.debug(f"Reaction time: {reaction_time}")
 
-            asyncio.create_task(self._dispatch_data_event('reaction_time', {
+            self._create_background_task(self._dispatch_data_event('reaction_time', {
                 'reaction_time': reaction_time
             }))
         except ValueError:
@@ -337,7 +337,7 @@ class WDRTUSBHandler(BaseDRTHandler):
 
             logger.debug(f"Stimulus state: {'ON' if self._stimulus_on else 'OFF'}")
 
-            asyncio.create_task(self._dispatch_data_event('stimulus', {
+            self._create_background_task(self._dispatch_data_event('stimulus', {
                 'state': self._stimulus_on
             }))
         except ValueError:
@@ -367,7 +367,7 @@ class WDRTUSBHandler(BaseDRTHandler):
 
             logger.debug(f"Config received: {config}")
 
-            asyncio.create_task(self._dispatch_data_event('config', config))
+            self._create_background_task(self._dispatch_data_event('config', config))
 
             # Complete config future if waiting
             if self._config_future and not self._config_future.done():
@@ -382,7 +382,7 @@ class WDRTUSBHandler(BaseDRTHandler):
             self._battery_percent = int(value)
             logger.debug(f"Battery: {self._battery_percent}%")
 
-            asyncio.create_task(self._dispatch_data_event('battery', {
+            self._create_background_task(self._dispatch_data_event('battery', {
                 'percent': self._battery_percent
             }))
         except ValueError:
@@ -395,7 +395,7 @@ class WDRTUSBHandler(BaseDRTHandler):
             self._recording = state == 1
             logger.debug(f"Experiment state: {'RUNNING' if self._recording else 'STOPPED'}")
 
-            asyncio.create_task(self._dispatch_data_event('experiment', {
+            self._create_background_task(self._dispatch_data_event('experiment', {
                 'running': self._recording
             }))
         except ValueError:
@@ -437,7 +437,7 @@ class WDRTUSBHandler(BaseDRTHandler):
 
                 logger.debug(f"Data packet: {trial_data}")
 
-                asyncio.create_task(self._dispatch_data_event('data', trial_data))
+                self._create_background_task(self._dispatch_data_event('data', trial_data))
 
         except (ValueError, IndexError) as e:
             logger.error(f"Error parsing data packet '{value}': {e}")
@@ -505,7 +505,7 @@ class WDRTUSBHandler(BaseDRTHandler):
             logger.debug(f"Logged trial data to {filepath}")
 
             # Dispatch logged event
-            asyncio.create_task(self._dispatch_data_event('trial_logged', {
+            self._create_background_task(self._dispatch_data_event('trial_logged', {
                 'filepath': str(filepath),
                 'trial_number': trial_number,
             }))

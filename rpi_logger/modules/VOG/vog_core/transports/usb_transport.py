@@ -8,19 +8,20 @@ Wraps pyserial with an async interface compatible with BaseTransport.
 import asyncio
 import threading
 from typing import Optional
-import logging
 
 import serial
 
 from .base_transport import BaseTransport
-
-logger = logging.getLogger(__name__)
+from rpi_logger.core.utils.logging import get_module_logger
 
 # Default timeout values
 # Note: Read timeout should be short enough to not block the event loop,
 # but we use a line buffer to accumulate partial reads
 DEFAULT_READ_TIMEOUT = 0.1
 DEFAULT_WRITE_TIMEOUT = 1.0
+
+# Maximum buffer size to prevent memory exhaustion from malformed devices
+MAX_READ_BUFFER_SIZE = 65536  # 64KB
 
 
 class USBTransport(BaseTransport):
@@ -54,6 +55,7 @@ class USBTransport(BaseTransport):
         self._serial: Optional[serial.Serial] = None
         self._lock = threading.Lock()  # Serialize access to serial port
         self._read_buffer = b''  # Buffer for accumulating partial reads
+        self.logger = get_module_logger("USBTransport")
 
     @property
     def is_connected(self) -> bool:
@@ -68,7 +70,7 @@ class USBTransport(BaseTransport):
             True if connection was successful
         """
         if self.is_connected:
-            logger.warning(f"Already connected to {self.port}")
+            self.logger.warning(f"Already connected to {self.port}")
             return True
 
         try:
@@ -86,11 +88,11 @@ class USBTransport(BaseTransport):
             await asyncio.to_thread(self._serial.reset_output_buffer)
 
             self._connected = True
-            logger.info(f"Connected to {self.port} at {self.baudrate} baud")
+            self.logger.info(f"Connected to {self.port} at {self.baudrate} baud")
             return True
 
         except serial.SerialException as e:
-            logger.error(f"Failed to connect to {self.port}: {e}")
+            self.logger.error(f"Failed to connect to {self.port}: {e}")
             self._serial = None
             self._connected = False
             return False
@@ -100,9 +102,9 @@ class USBTransport(BaseTransport):
         if self._serial:
             try:
                 await asyncio.to_thread(self._serial.close)
-                logger.info(f"Disconnected from {self.port}")
+                self.logger.info(f"Disconnected from {self.port}")
             except Exception as e:
-                logger.error(f"Error disconnecting from {self.port}: {e}")
+                self.logger.error(f"Error disconnecting from {self.port}: {e}")
             finally:
                 self._serial = None
                 self._connected = False
@@ -118,7 +120,7 @@ class USBTransport(BaseTransport):
             True if write was successful
         """
         if not self.is_connected:
-            logger.error(f"Cannot write to {self.port}: not connected")
+            self.logger.error(f"Cannot write to {self.port}: not connected")
             return False
 
         def _write_with_lock():
@@ -129,10 +131,10 @@ class USBTransport(BaseTransport):
 
         try:
             await asyncio.to_thread(_write_with_lock)
-            logger.debug(f"Wrote to {self.port}: {data}")
+            self.logger.debug(f"Wrote to {self.port}: {data}")
             return True
         except serial.SerialException as e:
-            logger.error(f"Write error on {self.port}: {e}")
+            self.logger.error(f"Write error on {self.port}: {e}")
             return False
 
     async def read_line(self) -> Optional[str]:
@@ -163,6 +165,11 @@ class USBTransport(BaseTransport):
                 if new_data:
                     self._read_buffer += new_data
 
+                # Prevent buffer overflow from malformed devices
+                if len(self._read_buffer) > MAX_READ_BUFFER_SIZE:
+                    # Keep most recent data, drop oldest
+                    self._read_buffer = self._read_buffer[-MAX_READ_BUFFER_SIZE:]
+
                 # Check if we have a complete line in the buffer
                 newline_pos = self._read_buffer.find(b'\n')
                 if newline_pos >= 0:
@@ -177,15 +184,15 @@ class USBTransport(BaseTransport):
             if line_bytes:
                 line = line_bytes.decode('utf-8', errors='replace').strip()
                 if line:  # Only log non-empty lines
-                    logger.debug(f"Read from {self.port}: {line}")
+                    self.logger.debug(f"Read from {self.port}: {line}")
                 return line if line else None
             return None
 
         except serial.SerialException as e:
-            logger.error(f"Read error on {self.port}: {e}")
+            self.logger.error(f"Read error on {self.port}: {e}")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error reading from {self.port}: {e}")
+            self.logger.error(f"Unexpected error reading from {self.port}: {e}")
             return None
 
     async def read_bytes(self, size: int) -> Optional[bytes]:
@@ -205,7 +212,7 @@ class USBTransport(BaseTransport):
             data = await asyncio.to_thread(self._serial.read, size)
             return data if data else None
         except serial.SerialException as e:
-            logger.error(f"Read error on {self.port}: {e}")
+            self.logger.error(f"Read error on {self.port}: {e}")
             return None
 
     @property

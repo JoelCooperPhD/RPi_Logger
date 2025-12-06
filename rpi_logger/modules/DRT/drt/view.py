@@ -218,7 +218,7 @@ class DRTTkinterGUI:
         # Add plotter (left side)
         if HAS_MATPLOTLIB and DRTPlotter is not None:
             try:
-                self._plotter = DRTPlotter(self._content_frame, title=f"{type_str} - Detection Response Task")
+                self._plotter = DRTPlotter(self._content_frame, title="DRT - Detection Response Task")
                 if port:
                     self._plotter.add_device(port)
                 self.logger.info("Created plotter for %s", port or "pending device")
@@ -648,17 +648,33 @@ class DRTTkinterGUI:
         """Upload config to sDRT device using individual commands."""
         try:
             if 'lowerISI' in params:
-                await handler.set_lower_isi(params['lowerISI'])
+                value = params['lowerISI']
+                if value < 0:
+                    self.logger.warning("Invalid lowerISI value: %d, skipping", value)
+                else:
+                    await handler.set_lower_isi(value)
             if 'upperISI' in params:
-                await handler.set_upper_isi(params['upperISI'])
+                value = params['upperISI']
+                if value < 0:
+                    self.logger.warning("Invalid upperISI value: %d, skipping", value)
+                else:
+                    await handler.set_upper_isi(value)
             if 'stimDur' in params:
-                await handler.set_stimulus_duration(params['stimDur'])
+                value = params['stimDur']
+                if value < 0:
+                    self.logger.warning("Invalid stimDur value: %d, skipping", value)
+                else:
+                    await handler.set_stim_duration(value)
             if 'intensity' in params:
-                intensity = int(params['intensity'] * 2.55)
-                await handler.set_intensity(intensity)
+                value = params['intensity']
+                if not (0 <= value <= 100):
+                    self.logger.warning("Invalid intensity value: %d, must be 0-100, skipping", value)
+                else:
+                    intensity = int(value * 2.55)
+                    await handler.set_intensity(intensity)
             self.logger.info("sDRT config uploaded successfully")
         except Exception as e:
-            self.logger.error("Failed to upload sDRT config: %s", e)
+            self.logger.error("Failed to upload sDRT config: %s", e, exc_info=True)
 
     def _on_config_iso(self):
         """Handle ISO preset."""
@@ -673,7 +689,7 @@ class DRTTkinterGUI:
         """Handle get config."""
         handler = self.system.get_device_handler(self._port)
         if handler and self.async_bridge:
-            self.async_bridge.run_coroutine(handler.get_device_config())
+            self.async_bridge.run_coroutine(handler.get_config())
 
     # ------------------------------------------------------------------
     # UI helpers

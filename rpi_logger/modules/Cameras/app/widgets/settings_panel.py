@@ -347,3 +347,33 @@ class SettingsWindow:
             preview_fps_values=opts.get("preview_fps_values"),
             record_fps_values=opts.get("record_fps_values"),
         )
+
+    # ------------------------------------------------------------------ Public accessors
+
+    def has_panel(self) -> bool:
+        """Return True if the settings panel is currently active."""
+        return self._panel is not None
+
+    def get_panel(self) -> Optional[SettingsPanel]:
+        """Return the active settings panel, or None if not available."""
+        return self._panel
+
+    def get_latest_settings(self, camera_id: str) -> Dict[str, str]:
+        """Return the latest cached settings for a camera."""
+        return self._latest.get(camera_id, dict(DEFAULT_SETTINGS))
+
+    def set_latest_settings(self, camera_id: str, settings: Dict[str, str]) -> None:
+        """Update the cached settings for a camera."""
+        self._latest.setdefault(camera_id, dict(DEFAULT_SETTINGS))
+        self._latest[camera_id].update(settings)
+
+    def apply_to_panel(self, settings: Dict[str, str]) -> bool:
+        """Apply settings to the active panel. Returns True if successful."""
+        if not self._panel:
+            return False
+        try:
+            self._panel.apply(settings)
+            return True
+        except Exception:
+            self._logger.debug("Settings panel apply failed", exc_info=True)
+            return False

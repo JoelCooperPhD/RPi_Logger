@@ -190,7 +190,7 @@ class VOGTkinterGUI:
         # Add plotter (left side)
         if HAS_MATPLOTLIB and VOGPlotter is not None:
             try:
-                title = f"{device_type.upper()} - Visual Occlusion Glasses"
+                title = "VOG - Visual Occlusion Glasses"
                 self._plotter = VOGPlotter(self._content_frame, title=title)
                 self.logger.info("Created plotter for %s", port or "pending device")
             except Exception as e:

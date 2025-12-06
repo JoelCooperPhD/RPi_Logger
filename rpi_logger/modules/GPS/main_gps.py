@@ -23,6 +23,7 @@ from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
 from vmc import StubCodexSupervisor  # noqa: E402
 
 from runtime import GPSPreviewRuntime  # noqa: E402
+from view import GPSView  # noqa: E402
 from rpi_logger.modules.base.config_paths import resolve_module_config_path
 
 DISPLAY_NAME = "GPS"
@@ -126,6 +127,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
         MODULE_DIR,
         logger,
         runtime_factory=build_runtime,
+        view_factory=GPSView,
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
         config_path=config_context.writable_path,

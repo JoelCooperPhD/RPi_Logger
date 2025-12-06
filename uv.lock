@@ -746,6 +746,18 @@ wheels = [
 ]
 
 [[package]]
+name = "digi-xbee"
+version = "1.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyserial" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f4/d8/62cc4cfaffcf087bb1dbbc7ba9bb3f65c8963da6793b4e9cc9e3bb791ee4/digi_xbee-1.5.0.tar.gz", hash = "sha256:6a652b8472297911ee4a10f47316f6b1b6d14e925067dfdbf28b6c6b5068f9b2", size = 386215, upload-time = "2024-08-27T14:32:01.036Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2f/9b/eccb9feaecdfda48a19884cd57f373d8d55a1e2888c6d5c5a91374d2ec3c/digi_xbee-1.5.0-py3-none-any.whl", hash = "sha256:2a4dcabcdeb9914f89f154ad938943091b7359d2ab31fc5b79d50ec06b0ce4a8", size = 378271, upload-time = "2024-08-27T14:31:58.79Z" },
+]
+
+[[package]]
 name = "docker"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2303,6 +2315,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
     { name = "async-tkinter-loop" },
+    { name = "digi-xbee" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "opencv-python" },
@@ -2314,6 +2327,7 @@ dependencies = [
     { name = "sounddevice" },
     { name = "soundfile" },
     { name = "tkintermapview" },
+    { name = "zeroconf" },
 ]
 
 [package.optional-dependencies]
@@ -2321,12 +2335,17 @@ dev = [
     { name = "appimage-builder", marker = "sys_platform == 'linux'" },
     { name = "pyinstaller" },
 ]
+xbee = [
+    { name = "digi-xbee" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = ">=23.0.0" },
     { name = "appimage-builder", marker = "sys_platform == 'linux' and extra == 'dev'", specifier = ">=1.0.0" },
     { name = "async-tkinter-loop", specifier = ">=0.10.2" },
+    { name = "digi-xbee", specifier = ">=1.5.0" },
+    { name = "digi-xbee", marker = "extra == 'xbee'", specifier = ">=1.4.1" },
     { name = "matplotlib", specifier = ">=3.7.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "opencv-python", specifier = ">=4.8.0" },
@@ -2339,8 +2358,9 @@ requires-dist = [
     { name = "sounddevice", specifier = ">=0.4.6" },
     { name = "soundfile", specifier = ">=0.13.1" },
     { name = "tkintermapview", specifier = ">=1.29" },
+    { name = "zeroconf", specifier = ">=0.131.0" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "xbee"]
 
 [[package]]
 name = "ruamel-yaml"

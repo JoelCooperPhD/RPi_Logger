@@ -21,7 +21,8 @@ from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_fil
 from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler
 from rpi_logger.modules.VOG.vog_core.device_types import VOGDeviceType
 from rpi_logger.modules.VOG.vog_core.protocols import SVOGProtocol, WVOGProtocol
-from rpi_logger.modules.VOG.vog_core.transports import USBTransport
+from rpi_logger.modules.VOG.vog_core.transports import USBTransport, XBeeProxyTransport, BaseTransport
+from rpi_logger.core.commands import StatusMessage
 
 
 class VOGModuleRuntime(ModuleRuntime):
@@ -61,7 +62,10 @@ class VOGModuleRuntime(ModuleRuntime):
         # Device management - devices are assigned by main logger
         self.handlers: Dict[str, VOGHandler] = {}
         self.device_types: Dict[str, VOGDeviceType] = {}
-        self._transports: Dict[str, USBTransport] = {}
+        self._transports: Dict[str, BaseTransport] = {}
+
+        # XBee proxy transports for wireless devices (separate from USB transports)
+        self._proxy_transports: Dict[str, XBeeProxyTransport] = {}
 
         # Background tasks
         self.task_manager = BackgroundTaskManager(name="VOGRuntimeTasks", logger=self.logger)
@@ -157,9 +161,17 @@ class VOGModuleRuntime(ModuleRuntime):
                 vog_device_type = VOGDeviceType.SVOG
 
             if is_wireless:
-                # Wireless device - TODO: handle XBee transport
-                self.logger.warning("Wireless device assignment not yet implemented")
-                return False
+                # Wireless device - use proxy transport for XBee communication
+                transport = XBeeProxyTransport(
+                    node_id=device_id,
+                    send_callback=self._request_xbee_send
+                )
+                if not await transport.connect():
+                    self.logger.error("Failed to initialize proxy transport for %s", device_id)
+                    return False
+                self._proxy_transports[device_id] = transport
+                self._transports[device_id] = transport  # Also store in main dict for handler access
+                self.logger.info("Created XBee proxy transport for %s", device_id)
             else:
                 # USB device - create transport
                 transport = USBTransport(port, baudrate)
@@ -171,50 +183,53 @@ class VOGModuleRuntime(ModuleRuntime):
 
                 self._transports[device_id] = transport
 
-                # Create handler
-                handler = VOGHandler(
-                    transport,
-                    port,
-                    self.module_data_dir,
-                    system=self,
-                    protocol=protocol
-                )
-                handler.set_data_callback(self._on_device_data)
+            # Create handler (same for both USB and wireless)
+            handler = VOGHandler(
+                transport,
+                device_id,  # Use device_id for consistency (works for both port and node_id)
+                self.module_data_dir,
+                system=self,
+                protocol=protocol
+            )
+            handler.set_data_callback(self._on_device_data)
 
-                await handler.initialize_device()
-                await handler.start()
+            await handler.initialize_device()
+            await handler.start()
 
-                self.handlers[device_id] = handler
-                self.device_types[device_id] = vog_device_type
-                self.logger.info("Device %s assigned and started (%s)", device_id, vog_device_type.value)
+            self.handlers[device_id] = handler
+            self.device_types[device_id] = vog_device_type
+            self.logger.info("Device %s assigned and started (%s)", device_id, vog_device_type.value)
 
-                # Notify view
-                if self.view:
-                    self.view.on_device_connected(device_id, vog_device_type)
+            # Notify view
+            if self.view:
+                self.view.on_device_connected(device_id, vog_device_type)
 
-                # If session is active, start experiment on new device
-                if self._session_active:
-                    try:
-                        await handler.start_experiment()
-                        self.logger.info("Started experiment on newly connected device %s", device_id)
-                    except Exception as exc:
-                        self.logger.error("Failed to start experiment on new device %s: %s", device_id, exc)
+            # If session is active, start experiment on new device
+            if self._session_active:
+                try:
+                    await handler.start_experiment()
+                    self.logger.info("Started experiment on newly connected device %s", device_id)
+                except Exception as exc:
+                    self.logger.error("Failed to start experiment on new device %s: %s", device_id, exc)
 
-                # If recording is active, also start trial
-                if self._recording_active:
-                    try:
-                        await handler.start_trial()
-                        self.logger.info("Started trial on newly connected device %s", device_id)
-                    except Exception as exc:
-                        self.logger.error("Failed to start trial on new device %s: %s", device_id, exc)
+            # If recording is active, also start trial
+            if self._recording_active:
+                try:
+                    await handler.start_trial()
+                    self.logger.info("Started trial on newly connected device %s", device_id)
+                except Exception as exc:
+                    self.logger.error("Failed to start trial on new device %s: %s", device_id, exc)
 
-                return True
+            return True
 
         except Exception as e:
             self.logger.error("Failed to assign device %s: %s", device_id, e, exc_info=True)
             # Clean up on failure
             if device_id in self._transports:
                 transport = self._transports.pop(device_id)
+                await transport.disconnect()
+            if device_id in self._proxy_transports:
+                transport = self._proxy_transports.pop(device_id)
                 await transport.disconnect()
             return False
 
@@ -241,6 +256,9 @@ class VOGModuleRuntime(ModuleRuntime):
             if device_id in self._transports:
                 transport = self._transports.pop(device_id)
                 await transport.disconnect()
+            if device_id in self._proxy_transports:
+                self._proxy_transports.pop(device_id)
+                # Note: transport already disconnected via _transports
 
             # Notify view
             if self.view and device_type:
@@ -298,6 +316,13 @@ class VOGModuleRuntime(ModuleRuntime):
 
         if action == "hide_window":
             self._hide_window()
+            return True
+
+        if action == "xbee_data":
+            # Incoming XBee data from main logger - push to proxy transport
+            node_id = command.get("node_id", "")
+            data = command.get("data", "")
+            await self._on_xbee_data(node_id, data)
             return True
 
         return False
@@ -633,3 +658,27 @@ class VOGModuleRuntime(ModuleRuntime):
             candidate = 1
 
         return candidate
+
+    # ------------------------------------------------------------------
+    # XBee Wireless Communication
+    # ------------------------------------------------------------------
+
+    async def _on_xbee_data(self, node_id: str, data: str) -> None:
+        """Handle incoming XBee data from main logger."""
+        transport = self._proxy_transports.get(node_id)
+        if transport:
+            transport.push_data(data)
+        else:
+            self.logger.debug("Received XBee data for unknown device: %s", node_id)
+
+    async def _request_xbee_send(self, node_id: str, data: str) -> bool:
+        """
+        Request main logger to send data via XBee.
+
+        This is called by the XBeeProxyTransport when the handler wants
+        to send data to the device.
+        """
+        self.logger.debug("Requesting XBee send to %s: %s", node_id, data[:50] if len(data) > 50 else data)
+        StatusMessage.send_xbee_data(node_id, data)
+        # Can't know result immediately - it's async through the command protocol
+        return True

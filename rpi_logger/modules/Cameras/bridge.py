@@ -22,9 +22,8 @@ from rpi_logger.modules.Cameras.bridge_controllers import (
 )
 from rpi_logger.modules.Cameras.config import load_config
 from rpi_logger.modules.Cameras.runtime.coordinator import WorkerManager, PreviewReceiver
-from rpi_logger.modules.Cameras.runtime.discovery.picam import discover_picam
-from rpi_logger.modules.Cameras.runtime.discovery.usb import discover_usb_devices
 from rpi_logger.modules.Cameras.runtime.registry import Registry
+from rpi_logger.modules.Cameras.runtime import CameraDescriptor, CameraId
 from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
 from rpi_logger.modules.Cameras.worker.protocol import (
     RespPreviewFrame,
@@ -77,16 +76,14 @@ class CamerasRuntime(ModuleRuntime):
         # Camera state tracking (key -> CameraWorkerState)
         self.camera_states: Dict[str, CameraWorkerState] = {}
 
-        # Discovery helpers (can be overridden in tests)
-        self.discover_picam = discover_picam
-        self.discover_usb_devices = discover_usb_devices
-
         # Controllers
         self.discovery = DiscoveryController(self, logger=self.logger)
         self.recording = RecordingController(self, logger=self.logger)
 
         self._telemetry_task: Optional[asyncio.Task] = None
         self._preview_frame_counts: Dict[str, int] = {}
+        self._preview_tasks: Dict[str, asyncio.Task] = {}
+        self._settings_tasks: Dict[str, asyncio.Task] = {}
 
     # ------------------------------------------------------------------ Lifecycle
 
@@ -107,18 +104,16 @@ class CamerasRuntime(ModuleRuntime):
 
         self.logger.debug("[STARTUP] Binding UI handlers...")
         self.view.bind_handlers(
-            refresh=lambda: asyncio.create_task(self.discovery.refresh()),
+            refresh=self._handle_refresh_request,
             apply_config=self._handle_apply_config,
             activate_camera=self._handle_active_camera_changed,
         )
 
         self.logger.debug("[STARTUP] Attaching view...")
         self.view.attach()
-        self.view.set_status("Scanning for cameras...")
+        self.view.set_status("Waiting for cameras...")
 
-        self.logger.info("[STARTUP] Starting discovery controller - will spawn workers...")
-        await self.discovery.start()
-        self.logger.info("[STARTUP] Discovery complete, workers spawned")
+        self.logger.info("[STARTUP] Cameras module ready - waiting for device assignments from main logger")
 
         self._telemetry_task = asyncio.create_task(self._telemetry_loop(), name="cameras_telemetry")
         self.logger.info("[STARTUP] Telemetry loop started")
@@ -135,6 +130,22 @@ class CamerasRuntime(ModuleRuntime):
                 await self._telemetry_task
             self._telemetry_task = None
 
+        # Cancel preview tasks
+        for key, task in list(self._preview_tasks.items()):
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._preview_tasks.clear()
+
+        # Cancel settings tasks
+        for key, task in list(self._settings_tasks.items()):
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._settings_tasks.clear()
+
         # Stop recordings first
         if self.recording.is_recording:
             await self.recording.stop_recording()
@@ -149,6 +160,12 @@ class CamerasRuntime(ModuleRuntime):
 
     async def handle_command(self, command: Dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
+
+        if action == "assign_device":
+            return await self._assign_camera(command)
+
+        if action == "unassign_device":
+            return await self._unassign_camera(command)
 
         if action in {"start_recording", "record"}:
             session_dir = command.get("session_dir")
@@ -203,8 +220,83 @@ class CamerasRuntime(ModuleRuntime):
         with contextlib.suppress(Exception):
             self.recording.update_session_dir(path)
 
-    async def refresh_cameras(self) -> None:
-        await self.discovery.refresh()
+    # ------------------------------------------------------------------ Device Assignment
+
+    async def _assign_camera(self, command: Dict[str, Any]) -> bool:
+        """Handle camera assignment from main logger."""
+        device_id = command.get("device_id")
+        camera_type = command.get("camera_type")  # "usb" or "picam"
+        stable_id = command.get("camera_stable_id")
+        dev_path = command.get("camera_dev_path")
+        hw_model = command.get("camera_hw_model")
+        location = command.get("camera_location")
+        display_name = command.get("display_name", "")
+
+        self.logger.info("[ASSIGN] Received camera assignment: %s (type=%s)", device_id, camera_type)
+
+        # Build CameraDescriptor from assignment data
+        camera_id = CameraId(
+            backend=camera_type,
+            stable_id=stable_id,
+            friendly_name=display_name,
+            dev_path=dev_path,
+        )
+        descriptor = CameraDescriptor(
+            camera_id=camera_id,
+            hw_model=hw_model,
+            location_hint=location,
+        )
+
+        # Check if already assigned
+        key = camera_id.key
+        if key in self.camera_states:
+            self.logger.warning("[ASSIGN] Camera %s already assigned", key)
+            return True
+
+        # Spawn worker for this camera
+        try:
+            await self.discovery._spawn_worker_for(descriptor)
+            self.view.set_status(f"{len(self.camera_states)} camera(s) connected")
+            return True
+        except Exception as e:
+            self.logger.error("[ASSIGN] Failed to spawn worker for %s: %s", key, e)
+            return False
+
+    async def _unassign_camera(self, command: Dict[str, Any]) -> bool:
+        """Handle camera unassignment from main logger."""
+        device_id = command.get("device_id")
+        self.logger.info("[UNASSIGN] Received camera unassignment: %s", device_id)
+
+        # Find the key for this device_id
+        key = self._find_key_for_device(device_id)
+        if not key:
+            self.logger.warning("[UNASSIGN] Camera %s not found in states", device_id)
+            return True
+
+        # Stop recording if active
+        state = self.camera_states.get(key)
+        if state and state.is_recording:
+            await self.worker_manager.stop_recording(key)
+
+        # Shutdown worker
+        await self.worker_manager.shutdown_worker(key)
+        self.camera_states.pop(key, None)
+        self.view.remove_camera(key)
+        self.view.set_status(f"{len(self.camera_states)} camera(s) connected")
+        return True
+
+    def _find_key_for_device(self, device_id: str) -> Optional[str]:
+        """Find camera state key matching device_id."""
+        # device_id format is "usb:stable_id" or "picam:stable_id"
+        # camera_states key format is "backend:stable_id"
+        # They should match directly
+        if device_id in self.camera_states:
+            return device_id
+        # Fallback: search by matching stable_id part
+        for key in self.camera_states:
+            if key == device_id or key.endswith(device_id.split(":")[-1] if ":" in device_id else device_id):
+                return key
+        return None
 
     # ------------------------------------------------------------------ Worker Callbacks
 
@@ -233,7 +325,9 @@ class CamerasRuntime(ModuleRuntime):
 
         # Start preview automatically
         self.logger.info("[WORKER READY] Starting preview for %s...", key)
-        asyncio.create_task(self._start_preview(key))
+        self._preview_tasks[key] = asyncio.create_task(
+            self._start_preview(key), name=f"preview_{key}"
+        )
 
     def _on_preview_frame(self, key: str, msg: RespPreviewFrame) -> None:
         self._preview_frame_counts[key] = self._preview_frame_counts.get(key, 0) + 1
@@ -348,11 +442,24 @@ class CamerasRuntime(ModuleRuntime):
         """Handle UI tab switch - all workers preview simultaneously."""
         self.logger.debug("Active camera: %s", camera_id)
 
+    def _handle_refresh_request(self) -> None:
+        """Handle refresh request from UI."""
+        # Create task with tracking (fire-and-forget but tracked for shutdown)
+        task = asyncio.create_task(self.discovery.refresh(), name="refresh_cameras")
+        # Don't store - refresh is quick and can be orphaned on shutdown
+
     def _handle_apply_config(self, camera_id: str, settings: Dict[str, Any]) -> None:
         """Handle configuration changes from UI - persist and apply settings."""
         self.logger.info("[CONFIG] Applying settings for %s: %s", camera_id, settings)
         # Persist and restart preview with new settings
-        asyncio.create_task(self._apply_camera_settings(camera_id, settings))
+        # Cancel any existing settings task for this camera
+        if camera_id in self._settings_tasks:
+            old_task = self._settings_tasks[camera_id]
+            if not old_task.done():
+                old_task.cancel()
+        self._settings_tasks[camera_id] = asyncio.create_task(
+            self._apply_camera_settings(camera_id, settings), name=f"settings_{camera_id}"
+        )
 
     async def _apply_camera_settings(self, camera_id: str, settings: Dict[str, Any]) -> None:
         """Persist per-camera settings and restart preview/worker as needed."""
@@ -380,8 +487,12 @@ class CamerasRuntime(ModuleRuntime):
                     self.logger.info("[CONFIG] Restarting preview for %s with new settings", camera_id)
                     await self.worker_manager.stop_preview(camera_id)
                     await self._start_preview(camera_id)
-        except Exception as e:
+        except asyncio.CancelledError:
+            raise  # Don't catch cancellation
+        except (OSError, ValueError, KeyError) as e:
             self.logger.warning("[CONFIG] Failed to apply settings for %s: %s", camera_id, e)
+        except Exception as e:
+            self.logger.warning("[CONFIG] Unexpected error applying settings for %s: %s", camera_id, e, exc_info=True)
 
     async def _respawn_worker(self, camera_id: str) -> None:
         """Shutdown and respawn a worker to apply new capture settings."""
@@ -405,8 +516,14 @@ class CamerasRuntime(ModuleRuntime):
 
     def _push_config_to_settings(self, camera_id: str) -> None:
         """Push config values to settings window for a camera (loads from cache if available)."""
-        # Schedule async load from cache
-        asyncio.create_task(self._load_and_push_settings(camera_id))
+        # Schedule async load from cache - track task for graceful shutdown
+        if camera_id in self._settings_tasks:
+            old_task = self._settings_tasks[camera_id]
+            if not old_task.done():
+                old_task.cancel()
+        self._settings_tasks[camera_id] = asyncio.create_task(
+            self._load_and_push_settings(camera_id), name=f"load_settings_{camera_id}"
+        )
 
     async def _load_and_push_settings(self, camera_id: str) -> None:
         """Load per-camera settings from cache, falling back to global config."""

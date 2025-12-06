@@ -18,6 +18,8 @@ dependencies = [
     "soundfile>=0.13.1",
     "async-tkinter-loop>=0.10.2",
     "matplotlib>=3.7.0",
+    "digi-xbee>=1.5.0",
+    "zeroconf>=0.131.0",
 ]
 
 [project.optional-dependencies]

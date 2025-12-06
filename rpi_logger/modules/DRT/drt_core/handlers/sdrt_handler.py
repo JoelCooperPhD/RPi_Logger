@@ -137,7 +137,7 @@ class SDRTHandler(BaseDRTHandler):
             Configuration dict, or None if failed/timeout
         """
         # Create a future to wait for config response
-        self._config_future = asyncio.get_event_loop().create_future()
+        self._config_future = asyncio.get_running_loop().create_future()
 
         # Send config request
         if not await self.send_command('get_config'):
@@ -149,7 +149,7 @@ class SDRTHandler(BaseDRTHandler):
             config = await asyncio.wait_for(self._config_future, timeout=2.0)
             return config
         except asyncio.TimeoutError:
-            logger.warning(f"Config request timed out for {self.device_id}")
+            logger.warning("Config request timed out for %s", self.device_id)
             return None
         finally:
             self._config_future = None
@@ -235,7 +235,7 @@ class SDRTHandler(BaseDRTHandler):
             logger.debug(f"Click count: {self._click_count}")
 
             # Dispatch click event
-            asyncio.create_task(self._dispatch_data_event('click', {
+            self._create_background_task(self._dispatch_data_event('click', {
                 'count': self._click_count
             }))
         except ValueError:
@@ -264,7 +264,7 @@ class SDRTHandler(BaseDRTHandler):
                 logger.debug(f"Trial data: {self._buffered_trial_data}")
 
                 # Dispatch trial event
-                asyncio.create_task(self._dispatch_data_event('trial', {
+                self._create_background_task(self._dispatch_data_event('trial', {
                     'timestamp': timestamp,
                     'trial_number': trial_number,
                     'reaction_time': reaction_time,
@@ -281,7 +281,7 @@ class SDRTHandler(BaseDRTHandler):
             self._buffered_trial_data = None
 
         # Dispatch end event
-        asyncio.create_task(self._dispatch_data_event('end', {}))
+        self._create_background_task(self._dispatch_data_event('end', {}))
 
     def _handle_stimulus(self, value: str) -> None:
         """Handle stimulus state change."""
@@ -297,7 +297,7 @@ class SDRTHandler(BaseDRTHandler):
             logger.debug(f"Stimulus state: {'ON' if self._stimulus_on else 'OFF'}")
 
             # Dispatch stimulus event
-            asyncio.create_task(self._dispatch_data_event('stimulus', {
+            self._create_background_task(self._dispatch_data_event('stimulus', {
                 'state': self._stimulus_on
             }))
 
@@ -321,7 +321,7 @@ class SDRTHandler(BaseDRTHandler):
             logger.debug(f"Config received: {config}")
 
             # Dispatch config event
-            asyncio.create_task(self._dispatch_data_event('config', config))
+            self._create_background_task(self._dispatch_data_event('config', config))
 
             # Complete config future if waiting
             if self._config_future and not self._config_future.done():
@@ -389,7 +389,7 @@ class SDRTHandler(BaseDRTHandler):
             self._click_count = 0
 
             # Dispatch logged event
-            asyncio.create_task(self._dispatch_data_event('trial_logged', {
+            self._create_background_task(self._dispatch_data_event('trial_logged', {
                 'filepath': str(filepath),
                 'trial_number': trial_number,
             }))

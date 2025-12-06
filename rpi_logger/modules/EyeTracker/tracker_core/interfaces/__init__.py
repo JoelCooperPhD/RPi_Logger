@@ -1,6 +1,1 @@
-
-from .gui import TkinterGUI
-
-__all__ = [
-    'TkinterGUI',
-]
+# EyeTracker interfaces package

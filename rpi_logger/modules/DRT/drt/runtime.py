@@ -1,4 +1,8 @@
-"""Runtime that hosts the legacy DRT hardware stack inside the stub framework."""
+"""Runtime that hosts the legacy DRT hardware stack inside the stub framework.
+
+Device discovery is centralized in the main logger. This runtime waits for
+device assignments via assign_device commands.
+"""
 
 from __future__ import annotations
 
@@ -12,13 +16,27 @@ from vmc.runtime import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from rpi_logger.modules.DRT.drt_core.config import load_config_file
-from rpi_logger.modules.DRT.drt_core.connection_manager import ConnectionManager
 from rpi_logger.modules.DRT.drt_core.device_types import DRTDeviceType
-from rpi_logger.modules.DRT.drt_core.handlers import BaseDRTHandler
+from rpi_logger.modules.DRT.drt_core.handlers import (
+    BaseDRTHandler,
+    SDRTHandler,
+    WDRTUSBHandler,
+    WDRTWirelessHandler,
+)
+from rpi_logger.modules.DRT.drt_core.transports import USBTransport, XBeeProxyTransport
+from rpi_logger.core.commands import StatusMessage
 
 
 class DRTModuleRuntime(ModuleRuntime):
-    """Owns USB device management and orchestrates the GUI updates."""
+    """VMC-compatible runtime for DRT module.
+
+    This runtime manages device handlers and provides the bridge between
+    the DRT core functionality and the VMC framework (model binding, view binding,
+    command dispatch).
+
+    Device discovery is handled by the main logger. This runtime receives
+    device assignments via assign_device commands.
+    """
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
@@ -43,9 +61,14 @@ class DRTModuleRuntime(ModuleRuntime):
         self.session_dir: Path = self.output_root
         self.module_subdir: str = "DRT"
         self.module_data_dir: Path = self.session_dir
+
+        # Device management - devices are assigned by main logger
         self.handlers: Dict[str, BaseDRTHandler] = {}
         self.device_types: Dict[str, DRTDeviceType] = {}
-        self.connection_manager: Optional[ConnectionManager] = None
+        self._transports: Dict[str, USBTransport] = {}
+        self._proxy_transports: Dict[str, XBeeProxyTransport] = {}
+
+        # Background tasks
         self.task_manager = BackgroundTaskManager(name="DRTRuntimeTasks", logger=self.logger)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._suppress_recording_event = False
@@ -55,10 +78,11 @@ class DRTModuleRuntime(ModuleRuntime):
         self.active_trial_number: int = 1
 
     # ------------------------------------------------------------------
-    # Lifecycle hooks
+    # Lifecycle hooks (VMC ModuleRuntime interface)
 
     async def start(self) -> None:
-        self.logger.info("Starting DRT runtime (all device types: sDRT, wDRT USB, wDRT wireless)")
+        """Start the runtime - bind to view/model and wait for device assignments."""
+        self.logger.info("Starting DRT runtime (waiting for device assignments)")
         self._loop = asyncio.get_running_loop()
 
         if self.view:
@@ -68,23 +92,41 @@ class DRTModuleRuntime(ModuleRuntime):
 
         self.model.subscribe(self._on_model_change)
 
-        await self._start_connection_manager()
-        self.logger.info("DRT runtime ready; scanning for devices")
+        self.logger.info("DRT runtime ready; waiting for device assignments")
 
     async def shutdown(self) -> None:
+        """Shutdown the runtime - stop recording and disconnect all devices."""
         self.logger.info("Shutting down DRT runtime")
         await self._stop_recording()
-        await self._stop_connection_manager()
+
+        # Disconnect all devices
+        for device_id in list(self.handlers.keys()):
+            await self.unassign_device(device_id)
 
     async def cleanup(self) -> None:
         await self.task_manager.shutdown()
         self.logger.info("DRT runtime cleanup complete")
 
     # ------------------------------------------------------------------
-    # Command and action handling
+    # Command and action handling (VMC ModuleRuntime interface)
 
     async def handle_command(self, command: Dict[str, Any]) -> bool:
+        """Handle VMC commands."""
         action = (command.get("command") or "").lower()
+
+        if action == "assign_device":
+            return await self.assign_device(
+                device_id=command.get("device_id", ""),
+                device_type=command.get("device_type", ""),
+                port=command.get("port", ""),
+                baudrate=command.get("baudrate", 0),
+                is_wireless=command.get("is_wireless", False),
+            )
+
+        if action == "unassign_device":
+            await self.unassign_device(command.get("device_id", ""))
+            return True
+
         if action == "start_recording":
             self.active_trial_number = self._coerce_trial_number(command.get("trial_number"))
             self.trial_label = str(command.get("trial_label", "") or "")
@@ -92,9 +134,33 @@ class DRTModuleRuntime(ModuleRuntime):
             if session_dir:
                 await self._ensure_session_dir(Path(session_dir), update_model=False)
             return True
+
         if action == "stop_recording":
             self.trial_label = ""
             return True
+
+        if action == "show_window":
+            self._show_window()
+            return True
+
+        if action == "hide_window":
+            self._hide_window()
+            return True
+
+        if action == "xbee_data":
+            # Forward XBee data to the appropriate proxy transport
+            node_id = command.get("node_id", "")
+            data = command.get("data", "")
+            await self._on_xbee_data(node_id, data)
+            return True
+
+        if action == "xbee_send_result":
+            # Acknowledgment of XBee send - currently just logged
+            node_id = command.get("node_id", "")
+            success = command.get("success", False)
+            self.logger.debug("XBee send result for %s: %s", node_id, success)
+            return True
+
         return False
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
@@ -131,66 +197,197 @@ class DRTModuleRuntime(ModuleRuntime):
             await self._stop_recording()
 
     # ------------------------------------------------------------------
-    # Connection manager
+    # Device Assignment (from main logger)
 
-    async def _start_connection_manager(self) -> None:
-        self.connection_manager = ConnectionManager(
-            output_dir=self.module_data_dir,
-            scan_interval=1.0,
-            enable_xbee=True
-        )
-        self.connection_manager.on_device_connected = self._on_device_connected
-        self.connection_manager.on_device_disconnected = self._on_device_disconnected
-        self.connection_manager.on_xbee_status_change = self._on_xbee_status_change
-        await self.connection_manager.start()
-
-        # Sync XBee dongle state after start (in case already connected)
-        if self.connection_manager.xbee_connected:
-            port = self.connection_manager.xbee_port or ""
-            self.logger.info("XBee dongle already connected on %s, syncing view", port)
-            await self._on_xbee_status_change('connected', port)
-
-    async def _stop_connection_manager(self) -> None:
-        manager = self.connection_manager
-        self.connection_manager = None
-        if manager:
-            await manager.stop()
-
-    # ------------------------------------------------------------------
-    # Device events
-
-    async def _on_device_connected(
+    async def assign_device(
         self,
         device_id: str,
+        device_type: str,
+        port: str,
+        baudrate: int,
+        is_wireless: bool = False,
+    ) -> bool:
+        """
+        Assign a device to this module (called by main logger).
+
+        Args:
+            device_id: Unique device identifier
+            device_type: Device type string (e.g., "sDRT", "wDRT_USB", "wDRT_Wireless")
+            port: Serial port path
+            baudrate: Serial baudrate
+            is_wireless: Whether this is a wireless device
+
+        Returns:
+            True if device was successfully assigned
+        """
+        if device_id in self.handlers:
+            self.logger.warning("Device %s already assigned", device_id)
+            return True
+
+        self.logger.info(
+            "Assigning device: id=%s, type=%s, port=%s, baudrate=%d, wireless=%s",
+            device_id, device_type, port, baudrate, is_wireless
+        )
+
+        try:
+            # Parse device type string to enum
+            drt_device_type = self._parse_device_type(device_type, is_wireless)
+
+            if is_wireless:
+                # Wireless device - create proxy transport for XBee communication
+                transport = XBeeProxyTransport(
+                    node_id=device_id,
+                    send_callback=self._request_xbee_send
+                )
+                if not await transport.connect():
+                    self.logger.error("Failed to initialize proxy transport for %s", device_id)
+                    return False
+
+                self._proxy_transports[device_id] = transport
+
+                # Create wireless handler
+                handler = self._create_handler(drt_device_type, device_id, transport)
+                if not handler:
+                    await transport.disconnect()
+                    self.logger.error("Failed to create wireless handler for %s", device_type)
+                    return False
+            else:
+                # USB device - create transport
+                transport = USBTransport(port=port, baudrate=baudrate)
+                if not await transport.connect():
+                    self.logger.error("Failed to connect to device %s on %s", device_id, port)
+                    return False
+
+                self._transports[device_id] = transport
+
+                # Create appropriate handler based on device type
+                handler = self._create_handler(drt_device_type, device_id, transport)
+                if not handler:
+                    await transport.disconnect()
+                    self.logger.error("Failed to create handler for %s", device_type)
+                    return False
+
+            # Set up data callback
+            handler.data_callback = self._on_device_data
+
+            # Start handler
+            await handler.start()
+
+            # Store handler and type
+            self.handlers[device_id] = handler
+            self.device_types[device_id] = drt_device_type
+
+            self.logger.info("Device %s assigned and started (%s)", device_id, drt_device_type.value)
+
+            # Notify view
+            if self.view:
+                self.view.on_device_connected(device_id, drt_device_type)
+
+            # If recording is active, start experiment on new device
+            if self._recording_active:
+                handler._trial_label = self.trial_label
+                try:
+                    await handler.start_experiment()
+                    self.logger.info("Started experiment on newly connected device %s", device_id)
+                except Exception as exc:  # pragma: no cover - defensive
+                    self.logger.error("Failed to start experiment on new device %s: %s", device_id, exc)
+
+            return True
+
+        except Exception as e:
+            self.logger.error("Failed to assign device %s: %s", device_id, e, exc_info=True)
+            # Clean up on failure
+            if device_id in self._transports:
+                transport = self._transports.pop(device_id)
+                await transport.disconnect()
+            if device_id in self._proxy_transports:
+                transport = self._proxy_transports.pop(device_id)
+                await transport.disconnect()
+            return False
+
+    async def unassign_device(self, device_id: str) -> None:
+        """
+        Unassign a device from this module.
+
+        Args:
+            device_id: The device to unassign
+        """
+        if device_id not in self.handlers:
+            self.logger.warning("Device %s not assigned", device_id)
+            return
+
+        self.logger.info("Unassigning device: %s", device_id)
+        device_type = self.device_types.get(device_id)
+
+        try:
+            handler = self.handlers.pop(device_id)
+            self.device_types.pop(device_id, None)
+            await handler.stop()
+
+            # Clean up transport (USB or proxy)
+            if device_id in self._transports:
+                transport = self._transports.pop(device_id)
+                await transport.disconnect()
+            elif device_id in self._proxy_transports:
+                transport = self._proxy_transports.pop(device_id)
+                await transport.disconnect()
+            elif handler.transport:
+                # Fallback: disconnect via handler's transport reference
+                await handler.transport.disconnect()
+
+            # Notify view
+            if self.view and device_type:
+                self.view.on_device_disconnected(device_id, device_type)
+
+            self.logger.info("Device %s unassigned", device_id)
+
+        except Exception as e:
+            self.logger.error("Error unassigning device %s: %s", device_id, e, exc_info=True)
+
+    def _parse_device_type(self, device_type: str, is_wireless: bool = False) -> DRTDeviceType:
+        """Parse device type string to DRTDeviceType enum."""
+        device_type_lower = device_type.lower()
+
+        if 'sdrt' in device_type_lower:
+            return DRTDeviceType.SDRT
+        elif 'wdrt' in device_type_lower:
+            if is_wireless or 'wireless' in device_type_lower:
+                return DRTDeviceType.WDRT_WIRELESS
+            else:
+                return DRTDeviceType.WDRT_USB
+        else:
+            # Default to sDRT for unknown types
+            self.logger.warning("Unknown device type '%s', defaulting to sDRT", device_type)
+            return DRTDeviceType.SDRT
+
+    def _create_handler(
+        self,
         device_type: DRTDeviceType,
-        handler: BaseDRTHandler
-    ) -> None:
-        self.logger.info("%s connected: %s", device_type.value, device_id)
-
-        # Set up data callback
-        handler.data_callback = self._on_device_data
-
-        # Store handler and type
-        self.handlers[device_id] = handler
-        self.device_types[device_id] = device_type
-
-        if self.view:
-            self.view.on_device_connected(device_id, device_type)
-
-        if self._recording_active:
-            # Set trial label for device joining mid-recording
-            handler._trial_label = self.trial_label
-            try:
-                await handler.start_experiment()
-            except Exception as exc:  # pragma: no cover - defensive
-                self.logger.error("Failed to start experiment on new device %s: %s", device_id, exc)
-
-    async def _on_device_disconnected(self, device_id: str, device_type: DRTDeviceType) -> None:
-        self.logger.info("%s disconnected: %s", device_type.value, device_id)
-        self.handlers.pop(device_id, None)
-        self.device_types.pop(device_id, None)
-        if self.view:
-            self.view.on_device_disconnected(device_id, device_type)
+        device_id: str,
+        transport: USBTransport,
+    ) -> Optional[BaseDRTHandler]:
+        """Create the appropriate handler for a device type."""
+        if device_type == DRTDeviceType.SDRT:
+            return SDRTHandler(
+                device_id=device_id,
+                output_dir=self.module_data_dir,
+                transport=transport
+            )
+        elif device_type == DRTDeviceType.WDRT_USB:
+            return WDRTUSBHandler(
+                device_id=device_id,
+                output_dir=self.module_data_dir,
+                transport=transport
+            )
+        elif device_type == DRTDeviceType.WDRT_WIRELESS:
+            return WDRTWirelessHandler(
+                device_id=device_id,
+                output_dir=self.module_data_dir,
+                transport=transport
+            )
+        else:
+            self.logger.warning("Unknown device type: %s", device_type)
+            return None
 
     async def _on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if self.view:
@@ -201,6 +398,29 @@ class DRTModuleRuntime(ModuleRuntime):
         self.logger.info("XBee dongle status change: %s %s", status, detail)
         if self.view:
             self.view.on_xbee_dongle_status_change(status, detail)
+
+    # ------------------------------------------------------------------
+    # XBee Wireless Communication
+
+    async def _on_xbee_data(self, node_id: str, data: str) -> None:
+        """Handle incoming XBee data from main logger."""
+        transport = self._proxy_transports.get(node_id)
+        if transport:
+            transport.push_data(data)
+        else:
+            self.logger.debug("Received XBee data for unknown device: %s", node_id)
+
+    async def _request_xbee_send(self, node_id: str, data: str) -> bool:
+        """
+        Request main logger to send data via XBee.
+
+        This is called by the XBeeProxyTransport when the handler wants
+        to send data to the device.
+        """
+        self.logger.debug("Requesting XBee send to %s: %s", node_id, data[:50])
+        StatusMessage.send_xbee_data(node_id, data)
+        # Can't know result immediately - it's async through the command protocol
+        return True
 
     # ------------------------------------------------------------------
     # Recording control
@@ -269,6 +489,7 @@ class DRTModuleRuntime(ModuleRuntime):
     # Session helpers
 
     async def _ensure_session_dir(self, new_dir: Optional[Path], update_model: bool = True) -> None:
+        """Ensure session directory exists and update handlers."""
         if new_dir is None:
             self.output_root.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -278,13 +499,11 @@ class DRTModuleRuntime(ModuleRuntime):
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.module_data_dir = ensure_module_data_dir(self.session_dir, self.module_subdir)
 
+        # Update all handler output directories
         for handler in self.handlers.values():
             handler.update_output_dir(self.module_data_dir)
 
-        # Also update connection manager
-        if self.connection_manager:
-            self.connection_manager.update_output_dir(self.module_data_dir)
-
+        # Sync to model if requested
         if update_model:
             self._suppress_session_event = True
             self.model.session_dir = self.session_dir
@@ -294,32 +513,39 @@ class DRTModuleRuntime(ModuleRuntime):
     # GUI-facing helpers
 
     def get_device_handler(self, device_id: str) -> Optional[BaseDRTHandler]:
+        """Get handler for a specific device."""
         return self.handlers.get(device_id)
 
     def get_device_type(self, device_id: str) -> Optional[DRTDeviceType]:
+        """Get device type for a specific device."""
         return self.device_types.get(device_id)
 
     @property
     def recording(self) -> bool:
+        """Whether recording is active."""
         return self._recording_active
 
-    @property
-    def xbee_connected(self) -> bool:
-        """Check if XBee dongle is connected."""
-        return self.connection_manager is not None and self.connection_manager.xbee_connected
+    # ------------------------------------------------------------------
+    # Window visibility control
 
-    @property
-    def xbee_port(self) -> Optional[str]:
-        """Return the XBee dongle port if connected."""
-        if self.connection_manager:
-            return self.connection_manager.xbee_port
-        return None
+    def _show_window(self) -> None:
+        """Show the DRT window (called when main logger sends show_window command)."""
+        if self.view and hasattr(self.view, '_stub_view'):
+            stub_view = self.view._stub_view
+            if hasattr(stub_view, 'show_window'):
+                stub_view.show_window()
+                self.logger.info("DRT window shown")
 
-    async def rescan_xbee_network(self) -> None:
-        """Trigger a rescan of the XBee network."""
-        if self.connection_manager:
-            self.logger.info("Triggering XBee network rescan...")
-            await self.connection_manager.rescan_xbee_network()
+    def _hide_window(self) -> None:
+        """Hide the DRT window (called when main logger sends hide_window command)."""
+        if self.view and hasattr(self.view, '_stub_view'):
+            stub_view = self.view._stub_view
+            if hasattr(stub_view, 'hide_window'):
+                stub_view.hide_window()
+                self.logger.info("DRT window hidden")
+
+    # ------------------------------------------------------------------
+    # Utility methods
 
     @staticmethod
     def _coerce_int(value: Any, default: int) -> int:

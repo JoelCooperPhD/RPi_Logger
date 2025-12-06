@@ -8,9 +8,12 @@ from typing import Awaitable, Callable, Optional
 try:  # pragma: no cover - Tk unavailable on display-less hosts
     import tkinter as tk
     from tkinter import ttk
+
+    from rpi_logger.core.ui.theme.colors import Colors
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
+    Colors = None  # type: ignore
 
 from ..domain import AudioSnapshot, AudioState
 from .meter_panel import MeterPanel
