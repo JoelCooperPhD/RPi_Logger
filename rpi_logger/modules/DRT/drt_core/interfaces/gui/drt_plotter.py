@@ -105,6 +105,34 @@ class DRTPlotter:
         self._session_active = False
         self._recording = False
 
+        # Initialize default plot lines for display before any device connects
+        self._init_default_lines()
+
+        # Start animation immediately so chart is visible
+        self._start_animation()
+
+    def _init_default_lines(self):
+        """Initialize default plot lines for display before any device connects."""
+        # Create empty stimulus state line
+        self._default_state_line, = self._ax_state.plot(
+            self._time_array, np.full(len(self._time_array), np.nan),
+            linewidth=1.5
+        )
+
+        # Create empty RT lines (hit and miss markers)
+        self._default_rt_hit, = self._ax_rt.plot(
+            self._time_array, np.full(len(self._time_array), np.nan),
+            marker='o', linestyle='', markersize=3
+        )
+        c = self._default_rt_hit.get_color()
+        self._default_rt_miss, = self._ax_rt.plot(
+            self._time_array, np.full(len(self._time_array), np.nan),
+            marker='x', linestyle='', markersize=3, color=c
+        )
+
+        # Add to plot lines for animation
+        self._plot_lines = [self._default_state_line, self._default_rt_hit, self._default_rt_miss]
+
     def _setup_plots(self):
         """Configure plot axes with dark theme styling."""
         # Top plot: Stimulus state
@@ -134,6 +162,23 @@ class DRTPlotter:
         # Style spines
         for spine in self._ax_rt.spines.values():
             spine.set_color(Colors.BORDER)
+
+    def _start_animation(self):
+        """Start the animation loop for the chart."""
+        if self._ani is not None:
+            return  # Already started
+        self._ani = animation.FuncAnimation(
+            self._fig,
+            self._animate,
+            init_func=self._init_animation,
+            interval=10,
+            blit=True,
+            cache_frame_data=False
+        )
+
+    def _init_animation(self):
+        """Initialize animation - return empty list if no devices yet."""
+        return self._plot_lines
 
     def add_device(self, port: str):
         """Add a device to track in the plotter."""
@@ -173,36 +218,17 @@ class DRTPlotter:
         self._unit_ids.add(port)
         self._rebuild_plot_lines()
 
-        if self._ani is None:
-            self._ani = animation.FuncAnimation(
-                self._fig,
-                self._animate,
-                init_func=lambda: self._init_animation(port),
-                interval=10,
-                blit=True,
-                cache_frame_data=False
-            )
-
     def _rebuild_plot_lines(self):
         """Rebuild the list of plot lines for animation."""
-        self._plot_lines = []
+        # Always include default lines
+        self._plot_lines = [self._default_state_line, self._default_rt_hit, self._default_rt_miss]
+        # Add device-specific lines
         for port in self._unit_ids:
             if port in self._state_xy:
                 self._plot_lines.extend(self._state_xy[port])
             if port in self._rt_xy:
                 self._plot_lines.extend(self._rt_xy[port]['hit'])
                 self._plot_lines.extend(self._rt_xy[port]['miss'])
-
-    def _init_animation(self, port):
-        """Initialize animation with current data."""
-        if port in self._state_xy:
-            self._state_xy[port][0].set_data(self._time_array, self._state_array[port])
-
-        if port in self._rt_xy:
-            self._rt_xy[port]['hit'][0].set_data(self._time_array, self._rt_array[port]['hit'])
-            self._rt_xy[port]['miss'][0].set_data(self._time_array, self._rt_array[port]['miss'])
-
-        return self._plot_lines
 
     def _ready_to_update(self) -> bool:
         """Check if enough time has passed for next update."""

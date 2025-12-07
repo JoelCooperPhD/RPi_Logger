@@ -12,7 +12,7 @@ from typing import Optional
 import serial
 
 from .base_transport import BaseTransport
-from rpi_logger.core.utils.logging import get_module_logger
+from rpi_logger.core.logging_utils import get_module_logger
 
 # Default timeout values
 # Note: Read timeout should be short enough to not block the event loop,

@@ -62,10 +62,10 @@ console_output = false        # Also print to console (true/false)
 ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 
 # Window position and size (saved automatically on window close)
-window_x = 443
-window_y = 499
-window_width = 1
-window_height = 1
+window_x = 733
+window_y = 576
+window_width = 800
+window_height = 600
 
 
 ################################################################################
@@ -127,3 +127,4 @@ window_height = 1
 gui_logger_visible = true
 camera_1_alias = Camera 1
 camera_2_alias = Camera 2
+enabled_connections = UART:GPS,USB:Audio,USB:DRT,USB:VOG,XBee:VOG

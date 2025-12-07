@@ -59,3 +59,15 @@ rpi_logger/modules/GPS (stub)/offline_tiles.db
 # Development notes
 AGENTS.md
 debug_*.py
+
+# Runtime state
+running_modules.json
+
+# Logs directory
+/logs/
+
+# Empty audio directory placeholder
+/audio/
+
+# Temporary video test directory
+/tmpvid/

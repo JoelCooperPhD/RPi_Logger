@@ -1,9 +1,9 @@
 display_name = VOG
-window_geometry = 320x200+115+131
+window_geometry = 798x404+1305+395
 preview_resolution = auto
 view.show_io_panel = false
 view.show_logger = true
-enabled = false
+enabled = true
 device_connected = true
 
 # Auto-generated settings (do not edit unless you know what you are doing)

@@ -551,27 +551,13 @@ class StubCodexView:
         self.request_quit()
 
     def _on_close(self) -> None:
-        """Handle window close (X button) - hide window instead of quitting.
+        """Handle window close (X button) - quit the module.
 
-        The module process should continue running when the window is hidden.
-        Use request_quit() to actually terminate the process.
+        When the user clicks X, the module should terminate and notify
+        the main logger so the UI toggle can be updated.
         """
-        self.logger.info("Window close requested - hiding window")
-        self._cancel_geometry_save_handle(flush=True)
-        try:
-            self.root.withdraw()
-        except tk.TclError:
-            pass
-        # Notify main logger that window was hidden via status message
-        from rpi_logger.core.commands.command_protocol import StatusMessage
-        StatusMessage.send("window_hidden")
-        # Notify runtime that window was hidden (not quit)
-        if self.action_callback:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self.action_callback("hide"))
-            except RuntimeError:
-                pass
+        self.logger.info("Window close requested - quitting module")
+        self.request_quit()
 
     def show_window(self) -> None:
         """Show the window if it was hidden."""
