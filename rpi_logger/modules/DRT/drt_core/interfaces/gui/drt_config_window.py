@@ -233,8 +233,7 @@ class DRTConfigWindow:
                 'intensity': intensity,
             }
 
-        except ValueError as e:
-            messagebox.showerror("Validation Error", str(e), parent=self.dialog)
+        except ValueError:
             return None
 
     def _filter_value(

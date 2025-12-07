@@ -45,6 +45,7 @@ class DeviceCatalog:
     """
 
     # Canonical family definitions with ordering
+    # Display names match module config.txt display_name values for consistency
     FAMILIES: ClassVar[tuple[FamilyMetadata, ...]] = (
         FamilyMetadata(
             DeviceFamily.VOG,
@@ -60,19 +61,19 @@ class DeviceCatalog:
         ),
         FamilyMetadata(
             DeviceFamily.CAMERA,
-            "Camera",
+            "Cameras",
             2,
             "Camera devices (USB and CSI)"
         ),
         FamilyMetadata(
             DeviceFamily.EYE_TRACKER,
-            "Eye Tracker",
+            "EyeTracker",
             3,
             "Network eye trackers"
         ),
         FamilyMetadata(
             DeviceFamily.AUDIO,
-            "Microphone",
+            "Audio",
             4,
             "Audio input devices"
         ),
@@ -264,11 +265,64 @@ class DeviceCatalog:
     # =========================================================================
 
     @classmethod
+    def extract_short_device_id(cls, device_id: str, interface: InterfaceType) -> str:
+        """
+        Extract a short, human-readable device identifier.
+
+        Args:
+            device_id: Full device identifier (e.g., /dev/ttyACM0, node_id, etc.)
+            interface: Interface type to determine extraction method
+
+        Returns:
+            Short identifier like "ACM0", "video0", etc.
+        """
+        if not device_id:
+            return ""
+
+        # For USB serial devices: extract "ACM0" from "/dev/ttyACM0"
+        if interface == InterfaceType.USB and "/" in device_id:
+            short = device_id.split("/")[-1]
+            if short.startswith("tty"):
+                return short[3:]  # Remove "tty" prefix
+            return short
+
+        # For UART devices: extract "serial0" from "/dev/serial0"
+        if interface == InterfaceType.UART and "/" in device_id:
+            return device_id.split("/")[-1]
+
+        # For CSI cameras: extract "0" from "csi_0"
+        if interface == InterfaceType.CSI and device_id.startswith("csi_"):
+            return device_id[4:]
+
+        # For network devices: use as-is if short, truncate if long
+        if interface == InterfaceType.NETWORK:
+            if len(device_id) > 12:
+                return device_id[:12]
+            return device_id
+
+        # For XBee wireless: use first 8 chars of node_id if long
+        if interface == InterfaceType.XBEE:
+            if len(device_id) > 8:
+                return device_id[:8]
+            return device_id
+
+        # For internal devices: use as-is
+        if interface == InterfaceType.INTERNAL:
+            return device_id.replace("internal_", "")
+
+        # Default: use last part if path-like, otherwise full id
+        if "/" in device_id:
+            return device_id.split("/")[-1]
+
+        return device_id
+
+    @classmethod
     def build_device_display_name(
         cls,
         raw_name: str | None,
         family: DeviceFamily,
         interface: InterfaceType,
+        device_id: str = "",
         include_interface: bool = True,
     ) -> str:
         """
@@ -278,16 +332,20 @@ class DeviceCatalog:
             raw_name: Raw name from scanner (e.g., camera name, audio device name)
             family: Device family
             interface: Interface type
+            device_id: Full device identifier for extracting short ID
             include_interface: Whether to append interface hint
 
         Returns:
-            Formatted display name like "VOG (USB)" or "My Camera (CSI)"
+            Formatted display name like "VOG(USB):ACM0" or "Camera(CSI):0"
         """
         base_name = raw_name or cls.get_family_display_name(family)
 
         if include_interface:
             interface_hint = cls.get_interface_display_name(interface)
-            return f"{base_name} ({interface_hint})"
+            short_id = cls.extract_short_device_id(device_id, interface) if device_id else ""
+            if short_id:
+                return f"{base_name}({interface_hint}):{short_id}"
+            return f"{base_name}({interface_hint})"
 
         return base_name
 
@@ -306,3 +364,35 @@ class DeviceCatalog:
         """Get the interface for a device type."""
         spec = DEVICE_REGISTRY.get(device_type)
         return spec.interface_type if spec else None
+
+    # =========================================================================
+    # Module Mapping
+    # =========================================================================
+
+    @classmethod
+    def get_module_connection_map(cls) -> dict[str, tuple[InterfaceType, DeviceFamily]]:
+        """
+        Build mapping from module names to their primary (interface, family).
+
+        This is derived from the device registry's module_id fields,
+        providing a single source of truth for which modules handle which
+        connection types.
+
+        Returns:
+            Dict mapping module_id to (InterfaceType, DeviceFamily).
+            Each module appears only once with its primary interface.
+        """
+        module_map: dict[str, tuple[InterfaceType, DeviceFamily]] = {}
+
+        for spec in DEVICE_REGISTRY.values():
+            if spec.is_coordinator or not spec.module_id:
+                continue
+
+            module_id = spec.module_id
+            # Skip if we already have this module (use first occurrence)
+            if module_id in module_map:
+                continue
+
+            module_map[module_id] = (spec.interface_type, spec.family)
+
+        return module_map

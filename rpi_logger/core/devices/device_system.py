@@ -18,12 +18,10 @@ Usage:
     await system.start_scanning()
     await system.stop_scanning()
 
-    # Get UI components
-    menu = ConnectionsMenu(menubar, system.ui_controller)
+    # Get UI component
     panel = DevicesPanel(parent, system.ui_controller)
 
-    # Handle connection changes
-    system.set_on_connection_changed(handle_connection_change)
+    # Handle device events
     system.set_on_connect_device(handle_connect)
     system.set_on_disconnect_device(handle_disconnect)
 
@@ -163,6 +161,11 @@ class DeviceSystem:
             on_device_lost=self._adapter.on_uart_device_lost,
         )
 
+        # Scanner registry: maps (interface, family) to the scanner that handles it
+        # This enables generic reannouncement when connections are enabled
+        self._scanner_registry: dict[tuple[InterfaceType, DeviceFamily], Any] = {}
+        self._build_scanner_registry()
+
         # Scanning state
         self._scanning_enabled = False
 
@@ -174,6 +177,10 @@ class DeviceSystem:
         self._on_xbee_dongle_connected: Callable[[str], Awaitable[None] | None] | None = None
         self._on_xbee_dongle_disconnected: Callable[[str], Awaitable[None] | None] | None = None
 
+        # Track pending device operations to prevent duplicate concurrent requests
+        # (e.g., rapid clicks creating multiple connect tasks for the same device)
+        self._pending_device_ops: set[str] = set()
+
         # Wire internal callbacks
         self._selection.add_connection_observer(self._on_selection_changed)
         self._lifecycle.add_change_observer(self._on_lifecycle_changed)
@@ -183,6 +190,39 @@ class DeviceSystem:
             self._ui_controller.set_connection_changed_callback(self._handle_ui_connection_toggle)
             self._ui_controller.set_connect_device_callback(self._handle_ui_connect)
             self._ui_controller.set_disconnect_device_callback(self._handle_ui_disconnect)
+
+    def _build_scanner_registry(self) -> None:
+        """Build the scanner registry mapping (interface, family) to scanners.
+
+        This registry enables generic device reannouncement when connections
+        are enabled, eliminating the need for if/elif chains.
+        """
+        # USB devices by family
+        if self._usb_scanner:
+            self._scanner_registry[(InterfaceType.USB, DeviceFamily.DRT)] = self._usb_scanner
+            self._scanner_registry[(InterfaceType.USB, DeviceFamily.VOG)] = self._usb_scanner
+
+        if self._audio_scanner:
+            self._scanner_registry[(InterfaceType.USB, DeviceFamily.AUDIO)] = self._audio_scanner
+
+        if self._usb_camera_scanner:
+            self._scanner_registry[(InterfaceType.USB, DeviceFamily.CAMERA)] = self._usb_camera_scanner
+
+        # Network devices
+        if self._network_scanner:
+            self._scanner_registry[(InterfaceType.NETWORK, DeviceFamily.EYE_TRACKER)] = self._network_scanner
+
+        # UART devices
+        if self._uart_scanner:
+            self._scanner_registry[(InterfaceType.UART, DeviceFamily.GPS)] = self._uart_scanner
+
+        # Internal/virtual devices
+        if self._internal_scanner:
+            self._scanner_registry[(InterfaceType.INTERNAL, DeviceFamily.INTERNAL)] = self._internal_scanner
+
+        # CSI cameras (if available)
+        if self._csi_scanner:
+            self._scanner_registry[(InterfaceType.CSI, DeviceFamily.CAMERA)] = self._csi_scanner
 
     # =========================================================================
     # Properties
@@ -387,15 +427,10 @@ class DeviceSystem:
         This ensures devices discovered before the connection was enabled
         get properly added to the lifecycle manager.
         """
-        if interface == InterfaceType.USB and family == DeviceFamily.AUDIO:
-            if self._audio_scanner:
-                logger.info("Reannouncing audio devices after enabling USB:AUDIO")
-                await self._audio_scanner.reannounce_devices()
-        elif interface == InterfaceType.USB and family == DeviceFamily.CAMERA:
-            if self._usb_camera_scanner:
-                logger.info("Reannouncing camera devices after enabling USB:CAMERA")
-                # USB camera scanner may need similar method
-                pass
+        scanner = self._scanner_registry.get((interface, family))
+        if scanner:
+            logger.info(f"Reannouncing devices after enabling {interface.value}:{family.value}")
+            await scanner.reannounce_devices()
 
     def get_enabled_connections(self) -> set[ConnectionKey]:
         """Get all enabled connection keys."""
@@ -424,6 +459,10 @@ class DeviceSystem:
     def is_device_connected(self, device_id: str) -> bool:
         """Check if a device is connected."""
         return self._selection.is_device_connected(device_id)
+
+    def get_devices_for_module(self, module_id: str) -> list[DeviceInfo]:
+        """Get all devices that belong to a specific module."""
+        return self._lifecycle.get_devices_for_module(module_id)
 
     # =========================================================================
     # Device State Management
@@ -499,18 +538,52 @@ class DeviceSystem:
                 asyncio.create_task(result)
 
     def _handle_ui_connect(self, device_id: str) -> None:
-        """Handle device connect request from UI controller."""
+        """Handle device connect request from UI controller.
+
+        Uses pending operations tracking to prevent duplicate concurrent
+        connect attempts when user clicks rapidly.
+        """
+        # Prevent duplicate operations for the same device
+        if device_id in self._pending_device_ops:
+            logger.debug(f"Ignoring connect request - operation already pending: {device_id}")
+            return
+
         if self._on_connect_device:
+            self._pending_device_ops.add(device_id)
             result = self._on_connect_device(device_id)
             if asyncio.iscoroutine(result):
-                asyncio.create_task(result)
+                task = asyncio.create_task(result)
+                # Remove from pending when task completes
+                task.add_done_callback(
+                    lambda t, did=device_id: self._pending_device_ops.discard(did)
+                )
+            else:
+                # Synchronous callback - operation is complete
+                self._pending_device_ops.discard(device_id)
 
     def _handle_ui_disconnect(self, device_id: str) -> None:
-        """Handle device disconnect request from UI controller."""
+        """Handle device disconnect request from UI controller.
+
+        Uses pending operations tracking to prevent duplicate concurrent
+        disconnect attempts when user clicks rapidly.
+        """
+        # Prevent duplicate operations for the same device
+        if device_id in self._pending_device_ops:
+            logger.debug(f"Ignoring disconnect request - operation already pending: {device_id}")
+            return
+
         if self._on_disconnect_device:
+            self._pending_device_ops.add(device_id)
             result = self._on_disconnect_device(device_id)
             if asyncio.iscoroutine(result):
-                asyncio.create_task(result)
+                task = asyncio.create_task(result)
+                # Remove from pending when task completes
+                task.add_done_callback(
+                    lambda t, did=device_id: self._pending_device_ops.discard(did)
+                )
+            else:
+                # Synchronous callback - operation is complete
+                self._pending_device_ops.discard(device_id)
 
     # =========================================================================
     # XBee Callbacks

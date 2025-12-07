@@ -60,11 +60,10 @@ class USBTransport(BaseTransport):
             True if connection was successful
         """
         if self.is_connected:
-            logger.warning(f"Already connected to {self.port}")
+            logger.warning("Already connected to %s", self.port)
             return True
 
         try:
-            # Run serial open in thread pool to avoid blocking
             self._serial = await asyncio.to_thread(
                 serial.Serial,
                 port=self.port,
@@ -72,17 +71,15 @@ class USBTransport(BaseTransport):
                 timeout=self.read_timeout,
                 write_timeout=self.write_timeout
             )
-
-            # Clear any stale data in buffers
             await asyncio.to_thread(self._serial.reset_input_buffer)
             await asyncio.to_thread(self._serial.reset_output_buffer)
 
             self._connected = True
-            logger.info(f"Connected to {self.port} at {self.baudrate} baud")
+            logger.info("Connected to %s at %d baud", self.port, self.baudrate)
             return True
 
         except serial.SerialException as e:
-            logger.error(f"Failed to connect to {self.port}: {e}")
+            logger.error("Failed to connect to %s: %s", self.port, e)
             self._serial = None
             self._connected = False
             return False
@@ -92,9 +89,9 @@ class USBTransport(BaseTransport):
         if self._serial:
             try:
                 await asyncio.to_thread(self._serial.close)
-                logger.info(f"Disconnected from {self.port}")
+                logger.info("Disconnected from %s", self.port)
             except Exception as e:
-                logger.error(f"Error disconnecting from {self.port}: {e}")
+                logger.error("Error disconnecting from %s: %s", self.port, e)
             finally:
                 self._serial = None
                 self._connected = False
@@ -110,16 +107,16 @@ class USBTransport(BaseTransport):
             True if write was successful
         """
         if not self.is_connected:
-            logger.error(f"Cannot write to {self.port}: not connected")
+            logger.error("Cannot write to %s: not connected", self.port)
             return False
 
         try:
             await asyncio.to_thread(self._serial.write, data)
             await asyncio.to_thread(self._serial.flush)
-            logger.debug(f"Wrote to {self.port}: {data}")
+            logger.debug("Wrote to %s: %s", self.port, data)
             return True
         except serial.SerialException as e:
-            logger.error(f"Write error on {self.port}: {e}")
+            logger.error("Write error on %s: %s", self.port, e)
             return False
 
     async def read_line(self) -> Optional[str]:
@@ -139,19 +136,18 @@ class USBTransport(BaseTransport):
                 await asyncio.sleep(0.01)
                 return None
 
-            # Read a line
             line_bytes = await asyncio.to_thread(self._serial.readline)
             if line_bytes:
                 line = line_bytes.decode('utf-8', errors='replace').strip()
-                logger.debug(f"Read from {self.port}: {line}")
+                logger.debug("Read from %s: %s", self.port, line)
                 return line
             return None
 
         except serial.SerialException as e:
-            logger.error(f"Read error on {self.port}: {e}")
+            logger.error("Read error on %s: %s", self.port, e)
             return None
         except Exception as e:
-            logger.error(f"Unexpected error reading from {self.port}: {e}")
+            logger.error("Unexpected error reading from %s: %s", self.port, e)
             return None
 
     async def read_bytes(self, size: int) -> Optional[bytes]:
@@ -171,7 +167,7 @@ class USBTransport(BaseTransport):
             data = await asyncio.to_thread(self._serial.read, size)
             return data if data else None
         except serial.SerialException as e:
-            logger.error(f"Read error on {self.port}: {e}")
+            logger.error("Read error on %s: %s", self.port, e)
             return None
 
     @property

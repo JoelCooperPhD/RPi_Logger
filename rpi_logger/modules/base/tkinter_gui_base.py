@@ -285,6 +285,8 @@ class TkinterGUIBase:
             def __init__(self, text_widget):
                 super().__init__()
                 self.text_widget = text_widget
+                self._closed = False
+                self._pending_after_ids: list[str] = []
                 self.setFormatter(
                     logging.Formatter(
                         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -293,15 +295,25 @@ class TkinterGUIBase:
                 )
 
             def emit(self, record):
+                if self._closed:
+                    return
                 msg = self.format(record) + '\n'
                 try:
-                    self.text_widget.after(0, self._append_log, msg)
+                    after_id = self.text_widget.after(0, self._append_log, msg)
+                    self._pending_after_ids.append(after_id)
                 except (tk.TclError, RuntimeError):
                     # Widget is gone / Tk main loop already shut down
+                    self._closed = True
                     return
 
             def _append_log(self, msg):
+                if self._closed:
+                    return
                 try:
+                    # Check if widget still exists
+                    if not self.text_widget.winfo_exists():
+                        self._closed = True
+                        return
                     self.text_widget.config(state='normal')
                     self.text_widget.insert(tk.END, msg)
                     self.text_widget.see(tk.END)  # Auto-scroll
@@ -310,13 +322,32 @@ class TkinterGUIBase:
                         self.text_widget.delete('1.0', f'{lines-500}.0')
                     self.text_widget.config(state='disabled')
                 except (tk.TclError, RuntimeError):
-                    # Widget destroyed or Tk shutting down; nothing to do
+                    # Widget destroyed or Tk shutting down
+                    self._closed = True
                     return
+
+            def close(self):
+                self._closed = True
+                # Cancel any pending after callbacks
+                for after_id in self._pending_after_ids:
+                    try:
+                        self.text_widget.after_cancel(after_id)
+                    except Exception:
+                        pass
+                self._pending_after_ids.clear()
+                super().close()
 
         text_handler = TextHandler(self.log_text)
         text_handler.setLevel(logging.INFO)
         logging.getLogger().addHandler(text_handler)
         self.log_handler = text_handler
+
+    def cleanup_log_handler(self):
+        """Clean up the log handler and remove it from the root logger."""
+        if hasattr(self, 'log_handler') and self.log_handler:
+            self.log_handler.close()
+            logging.getLogger().removeHandler(self.log_handler)
+            self.log_handler = None
 
     def save_window_geometry_to_config(self):
         raise NotImplementedError(
@@ -354,6 +385,9 @@ class TkinterGUIBase:
     def destroy_window(self):
         if not hasattr(self, 'root'):
             return
+
+        # Clean up log handler before destroying window to prevent orphaned after callbacks
+        self.cleanup_log_handler()
 
         try:
             self.root.destroy()

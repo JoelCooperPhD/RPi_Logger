@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, List
 
 from ..domain import AudioDeviceInfo, LevelMeter
 from .device_recorder import AudioDeviceRecorder, RecordingHandle
@@ -25,7 +24,7 @@ class RecorderService:
         self._default_sample_rate = max(1, int(sample_rate))
         self.start_timeout = start_timeout
         self.stop_timeout = stop_timeout
-        self.recorders: Dict[int, AudioDeviceRecorder] = {}
+        self.recorders: dict[int, AudioDeviceRecorder] = {}
 
     async def enable_device(self, device: AudioDeviceInfo, meter: LevelMeter) -> bool:
         effective_rate = self._resolve_sample_rate(device)
@@ -66,7 +65,7 @@ class RecorderService:
 
     async def begin_recording(
         self,
-        device_ids: List[int],
+        device_ids: list[int],
         session_dir: Path,
         trial_number: int,
     ) -> int:
@@ -87,14 +86,14 @@ class RecorderService:
                 self.logger.error("Failed to prepare recorder %d: %s", device_id, exc)
         return started
 
-    async def finish_recording(self) -> List[RecordingHandle]:
+    async def finish_recording(self) -> list[RecordingHandle]:
         tasks = []
         for recorder in self.recorders.values():
             tasks.append(asyncio.to_thread(recorder.finish_recording))
         if not tasks:
             return []
         finished = await asyncio.gather(*tasks, return_exceptions=True)
-        results: List[RecordingHandle] = []
+        results: list[RecordingHandle] = []
         for maybe_path in finished:
             if isinstance(maybe_path, Exception) or maybe_path is None:
                 continue

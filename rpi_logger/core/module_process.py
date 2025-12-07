@@ -306,7 +306,9 @@ class ModuleProcess:
             # This prevents _process_monitor() from marking it as CRASHED
             self.shutdown_event.set()
             self._was_forcefully_stopped = False
-            await self._update_enabled_state(False)
+            # Note: Do NOT update enabled state here - the module type stays enabled
+            # The user just closed the window, they can click the device tile to reopen
+            # The device section remains visible and device scanning continues
         elif status_type == "window_hidden":
             self.window_visible = False
         elif status_type == "window_shown":

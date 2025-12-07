@@ -5,12 +5,15 @@ import sys
 import traceback
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, List, Optional, TYPE_CHECKING
 
 from rpi_logger.core.logging_utils import ensure_structured_logger
 
 from .lifecycle_metrics import LifecycleTimer
 from .task_manager import AsyncTaskManager
+
+if TYPE_CHECKING:
+    from .preferences import ModulePreferences, StatePersistence
 
 
 class ModuleInitializationError(RuntimeError):
@@ -47,6 +50,12 @@ class BaseSystem(ABC):
         self.config = getattr(args, "config", {})
         self.config_file_path = getattr(args, "config_file_path", None)
 
+        # Preferences wrapper for config file (lazy-initialized)
+        self._preferences: Optional["ModulePreferences"] = None
+
+        # State objects to persist/restore (register via register_persistable_state)
+        self._persistable_states: List["StatePersistence"] = []
+
         self.session_dir: Optional[Path] = getattr(args, "session_dir", None)
         if self.session_dir:
             self.session_label = self.session_dir.name
@@ -69,10 +78,97 @@ class BaseSystem(ABC):
     def _create_mode_instance(self, mode_name: str) -> Any:
         pass
 
+    # ------------------------------------------------------------------
+    # State persistence
+
+    @property
+    def preferences(self) -> "ModulePreferences":
+        """Get or create the ModulePreferences wrapper for this system's config."""
+        if self._preferences is None:
+            from .preferences import ModulePreferences
+            if self.config_file_path:
+                self._preferences = ModulePreferences(
+                    self.config_file_path,
+                    initial_data=self.config if isinstance(self.config, dict) else None,
+                )
+            else:
+                # Create a dummy preferences that won't persist
+                self.logger.warning("No config_file_path set; state persistence disabled")
+                from pathlib import Path
+                self._preferences = ModulePreferences(
+                    Path("/dev/null"),
+                    initial_data=self.config if isinstance(self.config, dict) else {},
+                )
+        return self._preferences
+
+    def register_persistable_state(self, state_obj: "StatePersistence") -> None:
+        """Register a state object for automatic save/restore.
+
+        Registered objects will have their state:
+        - Restored when _restore_state() is called (after device init)
+        - Saved when _save_state() is called (during cleanup)
+
+        Args:
+            state_obj: Object implementing the StatePersistence protocol.
+        """
+        from .preferences import StatePersistence
+        if not isinstance(state_obj, StatePersistence):
+            self.logger.warning(
+                "Object %s does not implement StatePersistence protocol",
+                type(state_obj).__name__
+            )
+            return
+        if state_obj not in self._persistable_states:
+            self._persistable_states.append(state_obj)
+            self.logger.debug("Registered persistable state: %s", state_obj.state_prefix())
+
+    async def _restore_state(self) -> None:
+        """Restore operational state from config after device initialization.
+
+        Override in subclasses to add module-specific restoration logic.
+        Call super()._restore_state() to restore registered StatePersistence objects.
+        """
+        if not self._persistable_states:
+            return
+
+        for state_obj in self._persistable_states:
+            try:
+                self.preferences.restore_state(state_obj)
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to restore state for %s: %s",
+                    state_obj.state_prefix(),
+                    exc
+                )
+
+    async def _save_state(self) -> None:
+        """Save operational state to config before shutdown.
+
+        Override in subclasses to add module-specific save logic.
+        Call super()._save_state() to save registered StatePersistence objects.
+        """
+        if not self._persistable_states:
+            return
+
+        for state_obj in self._persistable_states:
+            try:
+                await self.preferences.save_state_async(state_obj)
+                self.logger.debug("Saved state for %s", state_obj.state_prefix())
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to save state for %s: %s",
+                    state_obj.state_prefix(),
+                    exc
+                )
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+
     async def run(self) -> None:
         try:
             if not (self.DEFER_DEVICE_INIT_IN_GUI and self.gui_mode):
                 await self._initialize_devices()
+                await self._restore_state()
 
             self.mode_instance = self._create_mode_instance(self.mode)
             await self.mode_instance.run()
@@ -182,6 +278,12 @@ class BaseSystem(ABC):
                     )
                 except Exception as e:
                     self.logger.error("Error stopping recording during cleanup: %s", e)
+
+        # Save operational state before cleanup
+        try:
+            await self._save_state()
+        except Exception as e:
+            self.logger.error("Error saving state during cleanup: %s", e, exc_info=True)
 
         try:
             await self.cleanup()

@@ -16,6 +16,7 @@ from rpi_logger.modules.Cameras.defaults import (
     DEFAULT_PREVIEW_SIZE,
     DEFAULT_PREVIEW_FPS as _DEFAULT_PREVIEW_FPS,
 )
+from rpi_logger.modules.Cameras.utils import parse_resolution as _parse_resolution_util
 
 Resolution = Tuple[int, int]
 
@@ -389,17 +390,12 @@ def _coerce_resolution(
         return default
 
 
-def _parse_resolution(raw: Any) -> Resolution:
-    if isinstance(raw, (list, tuple)) and len(raw) == 2:
-        return int(raw[0]), int(raw[1])
-    if isinstance(raw, str) and "x" in raw.lower():
-        width, height = raw.lower().split("x", 1)
-        return int(width.strip()), int(height.strip())
-    # Allow comma separated
-    if isinstance(raw, str) and "," in raw:
-        width, height = raw.split(",", 1)
-        return int(width.strip()), int(height.strip())
-    raise ValueError(f"Unsupported resolution value: {raw!r}")
+def _parse_resolution(raw: Any, default: Resolution = (0, 0)) -> Resolution:
+    """Parse resolution - delegates to shared utility."""
+    result = _parse_resolution_util(raw, default)
+    if result == default and raw is not None and raw != "":
+        raise ValueError(f"Unsupported resolution value: {raw!r}")
+    return result
 
 
 def _coerce_path(data: Dict[str, Any], keys: Tuple[str, ...], default: Path) -> Path:

@@ -1,6 +1,6 @@
-window_geometry = 660x368+1994+712
-enabled = true
-view.show_io_panel = true
+window_geometry = 320x200
+enabled = false
+view.show_io_panel = false
 view.show_logger = false
 display_name = Cameras
 preview_resolution = auto

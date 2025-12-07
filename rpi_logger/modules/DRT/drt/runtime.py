@@ -426,7 +426,7 @@ class DRTModuleRuntime(ModuleRuntime):
     # Recording control
 
     async def _start_recording(self) -> bool:
-        self.logger.debug(f"_start_recording called, handlers: {list(self.handlers.keys())}")
+        self.logger.debug("_start_recording called, handlers: %s", list(self.handlers.keys()))
         if not self.handlers:
             self.logger.error("Cannot start recording - no devices connected")
             return False
@@ -434,12 +434,11 @@ class DRTModuleRuntime(ModuleRuntime):
         successes = []
         failures = []
         for port, handler in self.handlers.items():
-            self.logger.debug(f"Calling start_experiment on handler for {port}")
-            # Set trial label before starting experiment
+            self.logger.debug("Calling start_experiment on handler for %s", port)
             handler._trial_label = self.trial_label
             try:
                 started = await handler.start_experiment()
-                self.logger.debug(f"start_experiment returned {started} for {port}")
+                self.logger.debug("start_experiment returned %s for %s", started, port)
             except Exception as exc:  # pragma: no cover - defensive
                 self.logger.error("start_experiment failed on %s: %s", port, exc)
                 started = False
@@ -546,17 +545,6 @@ class DRTModuleRuntime(ModuleRuntime):
 
     # ------------------------------------------------------------------
     # Utility methods
-
-    @staticmethod
-    def _coerce_int(value: Any, default: int) -> int:
-        if isinstance(value, int):
-            return value
-        if value is None:
-            return default
-        try:
-            return int(str(value), 0)
-        except (TypeError, ValueError):
-            return default
 
     def _coerce_trial_number(self, value: Any) -> int:
         try:

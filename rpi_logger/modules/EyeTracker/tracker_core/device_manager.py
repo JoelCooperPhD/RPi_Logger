@@ -1,9 +1,12 @@
+"""Eye Tracker Device Manager.
 
-import asyncio
+Device discovery is centralized in the main logger via network_scanner.py.
+This manager handles device connection and stream URLs after assignment.
+"""
+
 import logging
 from typing import Optional
 
-from pupil_labs.realtime_api.discovery import discover_devices
 from pupil_labs.realtime_api.device import Device
 from pupil_labs.realtime_api.models import ConnectionType, SensorName, Status
 from rpi_logger.core.logging_utils import get_module_logger
@@ -19,32 +22,6 @@ class DeviceManager:
         self.device_port: Optional[int] = None
         self.device_status: Optional[Status] = None
         self.audio_stream_param: str = "audio=scene"
-
-    async def connect(self) -> bool:
-        logger.info("Searching for eye tracker device...")
-
-        try:
-            async for device_info in discover_devices(timeout_seconds=5.0):
-                logger.info(f"Found device: {device_info.name}")
-
-                self.device_ip = device_info.addresses[0]
-                self.device_port = device_info.port
-
-                self.device = Device.from_discovered_device(device_info)
-
-                await self.refresh_status()
-                logger.info(f"Connected to device at {self.device_ip}:{self.device_port}")
-                return True
-
-            logger.error("No devices found")
-            return False
-
-        except asyncio.CancelledError:
-            logger.debug("Device discovery cancelled")
-            return False
-        except Exception as e:
-            logger.error(f"Connection failed: {e}")
-            return False
 
     def get_stream_urls(self) -> dict[str, str]:
         if not self.device_ip:
@@ -116,8 +93,8 @@ class DeviceManager:
         if self.device:
             try:
                 await self.device.close()
-            except:
-                pass
+            except Exception as e:
+                logger.debug("Device close error: %s", e)
             finally:
                 self.device = None
                 self.device_ip = None

@@ -51,10 +51,6 @@ class GazeTracker:
         self.stream_handler.set_imu_listener(self.recording_manager.write_imu_sample)
         self.stream_handler.set_event_listener(self.recording_manager.write_event_sample)
 
-
-    async def connect(self) -> bool:
-        return await self.device_manager.connect()
-
     # Phase 1.4: Pause/resume methods
     async def pause(self):
         """
@@ -188,11 +184,11 @@ class GazeTracker:
                     self.dropped_frames += new_camera_frames - 1
                 self.last_camera_frame_count = current_camera_frames
 
-                # Use sync processing in GUI mode to avoid cv2/Tkinter threading conflicts
+                # OpenCV mode (display_enabled): can use async processing in background thread
+                # GUI mode (!display_enabled): run synchronously to avoid Tkinter threading conflicts
                 if self.display_enabled:
                     processed_frame = await self.frame_processor.process_frame_async(raw_frame)
                 else:
-                    # GUI mode: run synchronously in main thread to avoid Tkinter conflicts
                     processed_frame = self.frame_processor.process_frame(raw_frame)
                     await asyncio.sleep(0)  # Yield to event loop
 

@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.Cameras.app.view import CamerasView
 from rpi_logger.modules.Cameras.defaults import DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_FPS
+from rpi_logger.modules.Cameras.utils import parse_resolution, parse_fps, CameraMetrics
 from rpi_logger.modules.Cameras.bridge_controllers import (
     CameraWorkerState,
     DiscoveryController,
@@ -22,7 +22,6 @@ from rpi_logger.modules.Cameras.bridge_controllers import (
 )
 from rpi_logger.modules.Cameras.config import load_config
 from rpi_logger.modules.Cameras.runtime.coordinator import WorkerManager, PreviewReceiver
-from rpi_logger.modules.Cameras.runtime.registry import Registry
 from rpi_logger.modules.Cameras.runtime import CameraDescriptor, CameraId
 from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
 from rpi_logger.modules.Cameras.worker.protocol import (
@@ -47,8 +46,9 @@ class CamerasRuntime(ModuleRuntime):
     """
     Multiprocess ModuleRuntime for Cameras.
 
-    Each camera runs in a separate process with its own GIL,
-    eliminating GIL contention when recording multiple cameras.
+    Each camera instance runs in its own module window. The camera
+    worker runs in a separate process with its own GIL for optimal
+    performance during recording.
     """
 
     def __init__(self, ctx: RuntimeContext, config_path: Optional[Path] = None) -> None:
@@ -57,7 +57,6 @@ class CamerasRuntime(ModuleRuntime):
         self.module_dir = ctx.module_dir
         self.config = load_config(ctx.model.preferences, overrides=None, logger=self.logger)
         self.cache = KnownCamerasCache(self.module_dir / "storage" / "known_cameras.json", logger=self.logger)
-        self.registry = Registry(cache=self.cache, logger=self.logger)
         self.disk_guard = DiskGuard(threshold_gb=self.config.guard.disk_free_gb_min, logger=self.logger)
         self.view = CamerasView(ctx.view, logger=self.logger)
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -87,12 +86,14 @@ class CamerasRuntime(ModuleRuntime):
 
     # ------------------------------------------------------------------ Helpers
 
-    def _cancel_task(self, tasks: Dict[str, asyncio.Task], key: str) -> None:
-        """Cancel an existing task for key if running."""
+    async def _cancel_task(self, tasks: Dict[str, asyncio.Task], key: str) -> None:
+        """Cancel and await an existing task for key if running."""
         if key in tasks:
-            old_task = tasks[key]
+            old_task = tasks.pop(key)
             if not old_task.done():
                 old_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await old_task
 
     # ------------------------------------------------------------------ Lifecycle
 
@@ -113,14 +114,13 @@ class CamerasRuntime(ModuleRuntime):
 
         self.logger.debug("[STARTUP] Binding UI handlers...")
         self.view.bind_handlers(
-            refresh=self._handle_refresh_request,
             apply_config=self._handle_apply_config,
             activate_camera=self._handle_active_camera_changed,
         )
 
         self.logger.debug("[STARTUP] Attaching view...")
         self.view.attach()
-        self.view.set_status("Waiting for cameras...")
+        self.view.set_status("Waiting for camera assignment...")
 
         self.logger.info("[STARTUP] Cameras module ready - waiting for device assignments from main logger")
 
@@ -265,7 +265,26 @@ class CamerasRuntime(ModuleRuntime):
         # Spawn worker for this camera
         try:
             await self.discovery._spawn_worker_for(descriptor)
-            self.view.set_status(f"{len(self.camera_states)} camera(s) connected")
+            self.view.set_status("Camera connected")
+
+            # Update window title to show device info: Cameras(USB):video0 or Cameras(CSI):0
+            if self.ctx.view:
+                conn_type = "CSI" if camera_type == "picam" else "USB"
+                # Extract short device ID from dev_path or stable_id
+                short_id = ""
+                if dev_path:
+                    short_id = dev_path.split("/")[-1]
+                elif stable_id:
+                    short_id = stable_id.split(":")[-1] if ":" in stable_id else stable_id
+
+                if short_id:
+                    title = f"Cameras({conn_type}):{short_id}"
+                else:
+                    title = f"Cameras({conn_type})"
+
+                with contextlib.suppress(Exception):
+                    self.ctx.view.set_window_title(title)
+
             return True
         except Exception as e:
             self.logger.error("[ASSIGN] Failed to spawn worker for %s: %s", key, e)
@@ -291,7 +310,7 @@ class CamerasRuntime(ModuleRuntime):
         await self.worker_manager.shutdown_worker(key)
         self.camera_states.pop(key, None)
         self.view.remove_camera(key)
-        self.view.set_status(f"{len(self.camera_states)} camera(s) connected")
+        self.view.set_status("Camera disconnected")
         return True
 
     def _find_key_for_device(self, device_id: str) -> Optional[str]:
@@ -350,25 +369,19 @@ class CamerasRuntime(ModuleRuntime):
         self.logger.debug("[STATE] %s: state=%s recording=%s preview=%s fps_cap=%.1f fps_enc=%.1f frames=%d/%d",
                          key, msg.state.name, msg.is_recording, msg.is_previewing,
                          msg.fps_capture, msg.fps_encode, msg.frames_captured, msg.frames_recorded)
-        metrics = {
-            # Raw worker metrics
-            "fps_capture": msg.fps_capture,
-            "fps_encode": msg.fps_encode,
-            "frames_captured": msg.frames_captured,
-            "frames_recorded": msg.frames_recorded,
-            "is_recording": msg.is_recording,
-            "state": msg.state.name,
-            # UI-expected field names
-            "ingress_fps_avg": msg.fps_capture,
-            "record_fps_avg": msg.fps_encode,
-            "target_record_fps": msg.target_record_fps,
-            "preview_fps_avg": msg.fps_preview,
-            "preview_queue": 0,  # Not tracked yet
-            "record_queue": 0,  # Not tracked yet
-            "ingress_wait_ms": msg.capture_wait_ms,
-        }
+        metrics = CameraMetrics(
+            state=msg.state.name,
+            is_recording=msg.is_recording,
+            fps_capture=msg.fps_capture,
+            fps_encode=msg.fps_encode,
+            fps_preview=msg.fps_preview,
+            frames_captured=msg.frames_captured,
+            frames_recorded=msg.frames_recorded,
+            target_record_fps=msg.target_record_fps,
+            capture_wait_ms=msg.capture_wait_ms,
+        )
         with contextlib.suppress(Exception):
-            self.view.update_metrics(key, metrics)
+            self.view.update_metrics(key, metrics.to_dict())
 
     def _on_recording_started(self, key: str, msg: RespRecordingStarted) -> None:
         self.logger.info("[RECORDING STARTED] %s -> %s", key, msg.video_path)
@@ -423,27 +436,14 @@ class CamerasRuntime(ModuleRuntime):
         """Get preview size and fps for a camera from saved settings or defaults."""
         saved = await self.cache.get_settings(key)
 
-        if not saved:
-            return DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_FPS
-
-        # Parse resolution
-        res_str = saved.get("preview_resolution", "")
-        preview_size = DEFAULT_PREVIEW_SIZE
-        if res_str and "x" in res_str.lower():
-            try:
-                w, h = res_str.lower().split("x")
-                preview_size = (int(w.strip()), int(h.strip()))
-            except (ValueError, AttributeError):
-                pass
-
-        # Parse FPS
-        fps_str = saved.get("preview_fps", "")
-        target_fps = DEFAULT_PREVIEW_FPS
-        if fps_str:
-            try:
-                target_fps = float(fps_str)
-            except (ValueError, TypeError):
-                pass
+        preview_size = parse_resolution(
+            saved.get("preview_resolution") if saved else None,
+            DEFAULT_PREVIEW_SIZE
+        )
+        target_fps = parse_fps(
+            saved.get("preview_fps") if saved else None,
+            DEFAULT_PREVIEW_FPS
+        )
 
         return preview_size, target_fps
 
@@ -451,20 +451,19 @@ class CamerasRuntime(ModuleRuntime):
         """Handle UI tab switch - all workers preview simultaneously."""
         self.logger.debug("Active camera: %s", camera_id)
 
-    def _handle_refresh_request(self) -> None:
-        """Handle refresh request from UI."""
-        # Create task with tracking (fire-and-forget but tracked for shutdown)
-        task = asyncio.create_task(self.discovery.refresh(), name="refresh_cameras")
-        # Don't store - refresh is quick and can be orphaned on shutdown
-
     def _handle_apply_config(self, camera_id: str, settings: Dict[str, Any]) -> None:
         """Handle configuration changes from UI - persist and apply settings."""
         self.logger.info("[CONFIG] Applying settings for %s: %s", camera_id, settings)
-        # Persist and restart preview with new settings
-        self._cancel_task(self._settings_tasks, camera_id)
+        # Cancel existing settings task if any, then apply new settings
         self._settings_tasks[camera_id] = asyncio.create_task(
-            self._apply_camera_settings(camera_id, settings), name=f"settings_{camera_id}"
+            self._cancel_and_apply_settings(camera_id, settings),
+            name=f"settings_{camera_id}"
         )
+
+    async def _cancel_and_apply_settings(self, camera_id: str, settings: Dict[str, Any]) -> None:
+        """Cancel existing settings task and apply new settings."""
+        await self._cancel_task(self._settings_tasks, camera_id)
+        await self._apply_camera_settings(camera_id, settings)
 
     async def _apply_camera_settings(self, camera_id: str, settings: Dict[str, Any]) -> None:
         """Persist per-camera settings and restart preview/worker as needed."""
@@ -522,10 +521,15 @@ class CamerasRuntime(ModuleRuntime):
     def _push_config_to_settings(self, camera_id: str) -> None:
         """Push config values to settings window for a camera (loads from cache if available)."""
         # Schedule async load from cache - track task for graceful shutdown
-        self._cancel_task(self._settings_tasks, camera_id)
         self._settings_tasks[camera_id] = asyncio.create_task(
-            self._load_and_push_settings(camera_id), name=f"load_settings_{camera_id}"
+            self._cancel_and_load_settings(camera_id),
+            name=f"load_settings_{camera_id}"
         )
+
+    async def _cancel_and_load_settings(self, camera_id: str) -> None:
+        """Cancel existing settings task and load settings."""
+        await self._cancel_task(self._settings_tasks, camera_id)
+        await self._load_and_push_settings(camera_id)
 
     async def _load_and_push_settings(self, camera_id: str) -> None:
         """Load per-camera settings from cache, falling back to global config."""

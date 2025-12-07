@@ -140,6 +140,7 @@ class DeviceLifecycleManager:
             raw_name=event.raw_name,
             family=event.family,
             interface=event.interface,
+            device_id=event.device_id,
             include_interface=True,
         )
 
@@ -230,6 +231,10 @@ class DeviceLifecycleManager:
     def get_devices_by_interface(self, interface: InterfaceType) -> list[DeviceInfo]:
         """Get all devices of a specific interface type."""
         return [d for d in self._devices.values() if d.interface_type == interface]
+
+    def get_devices_for_module(self, module_id: str) -> list[DeviceInfo]:
+        """Get all devices that belong to a specific module."""
+        return [d for d in self._devices.values() if d.module_id == module_id]
 
     def get_devices_grouped_by_family(self) -> dict[DeviceFamily, list[DeviceInfo]]:
         """

@@ -1,10 +1,10 @@
 display_name = VOG
-window_geometry = 798x404+1305+395
+window_geometry = 761x333+1244+531
 preview_resolution = auto
-view.show_io_panel = false
-view.show_logger = true
-enabled = false
-device_connected = false
+view.show_io_panel = true
+view.show_logger = false
+enabled = true
+device_connected = true
 
 # Auto-generated settings (do not edit unless you know what you are doing)
 config_dialog_geometry = +1874+158

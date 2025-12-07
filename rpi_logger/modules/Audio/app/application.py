@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable
 
 from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import ensure_structured_logger
@@ -35,7 +35,7 @@ class AudioApp:
         context: RuntimeContext,
         settings: AudioSettings,
         *,
-        status_callback: Callable[[StatusType, Dict[str, Any]], None] | None = None,
+        status_callback: Callable[[StatusType, dict[str, Any]], None] | None = None,
     ) -> None:
         self.context = context
         self.settings = settings
@@ -100,6 +100,44 @@ class AudioApp:
 
         self.command_router = CommandRouter(self.logger, self)
 
+        # Restore state from config (marks devices for auto-selection when assigned)
+        self._restore_state_from_config()
+
+    def _restore_state_from_config(self) -> None:
+        """Restore audio state from the module's config file."""
+        try:
+            prefs = getattr(self.module_model, "preferences", None)
+            if prefs is None:
+                return
+
+            # Use the audio-scoped preferences
+            audio_prefs = prefs.scope("audio")
+            state_data = audio_prefs.snapshot()
+            if state_data:
+                self.state.restore_from_state(state_data)
+                self.logger.debug("Restored audio state from config")
+        except Exception as e:
+            self.logger.warning("Failed to restore audio state: %s", e)
+
+    async def _save_state_to_config(self) -> None:
+        """Save audio state to the module's config file."""
+        try:
+            prefs = getattr(self.module_model, "preferences", None)
+            if prefs is None:
+                return
+
+            # Get persistable state from AudioState
+            state_data = self.state.get_persistable_state()
+            if not state_data:
+                return
+
+            # Prefix all keys with "audio."
+            prefixed = {f"audio.{k}": v for k, v in state_data.items()}
+            await prefs.write_async(prefixed)
+            self.logger.debug("Saved audio state to config: %s", state_data)
+        except Exception as e:
+            self.logger.warning("Failed to save audio state: %s", e)
+
     # ------------------------------------------------------------------
     # Lifecycle
 
@@ -120,6 +158,10 @@ class AudioApp:
         self.logger.debug("Shutdown requested")
         await self.shutdown_guard.start()
         await self.stop_recording()
+
+        # Save state before cleanup
+        await self._save_state_to_config()
+
         self._stop_event.set()
         await self.task_manager.shutdown()
         await self.recorder_service.stop_all()
@@ -129,7 +171,7 @@ class AudioApp:
     # ------------------------------------------------------------------
     # Command/user handling
 
-    async def handle_command(self, command: Dict[str, Any]) -> bool:
+    async def handle_command(self, command: dict[str, Any]) -> bool:
         return await self.command_router.handle_command(command)
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
@@ -146,7 +188,7 @@ class AudioApp:
     async def toggle_device(self, device_id: int, enabled: bool) -> None:
         await self.device_manager.toggle_device(device_id, enabled)
 
-    async def start_recording(self, trial_number: Optional[int] = None) -> bool:
+    async def start_recording(self, trial_number: int | None = None) -> bool:
         if trial_number is None:
             trial_number = self._pending_trial
         selected_ids = list(self.state.selected_devices.keys())
@@ -204,7 +246,7 @@ class AudioApp:
         self.state.set_session_dir(path)
         self.logger.debug("Bridge session directory updated to %s", path)
 
-    def _emit_status(self, status_type: StatusType, payload: Dict[str, Any]) -> None:
+    def _emit_status(self, status_type: StatusType, payload: dict[str, Any]) -> None:
         try:
             self.status_callback(status_type, payload)
         except Exception:

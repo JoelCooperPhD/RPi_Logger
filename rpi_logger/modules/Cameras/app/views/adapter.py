@@ -1,4 +1,9 @@
-"""View adapter that owns the camera view and dispatches preview frames."""
+"""View adapter that owns the camera view and dispatches preview frames.
+
+Each Cameras module instance displays a single camera. The ViewAdapter
+manages the camera view widget and dispatches preview frames from the
+worker process to the UI.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,12 @@ from rpi_logger.modules.Cameras.app.widgets.camera_tab import CameraView
 
 
 class ViewAdapter:
-    """Maintains a single camera view and accepts preview frames."""
+    """Manages the camera view for this module instance.
+
+    Each Cameras module instance handles one camera. The adapter creates
+    a CameraView widget when a camera is assigned and routes preview
+    frames from the camera worker to the UI.
+    """
 
     def __init__(self, *, logger: LoggerLike = None) -> None:
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
@@ -23,8 +33,8 @@ class ViewAdapter:
         self._frame_counts: Dict[str, int] = {}
 
     @property
-    def tabs(self) -> Dict[str, CameraView]:
-        """Backward compatibility alias for _views."""
+    def views(self) -> Dict[str, CameraView]:
+        """Access the camera views (typically just one per instance)."""
         return self._views
 
     def set_root(self, root) -> None:
@@ -40,7 +50,6 @@ class ViewAdapter:
         camera_id: str,
         *,
         title: Optional[str] = None,
-        refresh_cb: Optional[Callable[[], None]] = None,
         apply_config_cb: Optional[Callable[[str, Dict[str, str]], None]] = None,
     ) -> Optional[CameraView]:
         self._logger.info("[ADAPTER] add_camera called: camera_id=%s title=%s", camera_id, title)
@@ -58,7 +67,6 @@ class ViewAdapter:
             parent=self._container,
             root=self._root,
             logger=self._logger,
-            on_refresh=refresh_cb,
             on_apply_config=apply_config_cb,
         )
         if view.frame is None:
@@ -141,8 +149,8 @@ class ViewAdapter:
             return
         self._dispatch(view.update_metrics, metrics)
 
-    def camera_id_for_tab(self, tab_id: Any) -> Optional[str]:
-        """Backward compatibility - returns active camera."""
+    def get_active_camera_id(self) -> Optional[str]:
+        """Get the currently active camera ID."""
         return self._active_camera_id
 
     def first_camera_id(self) -> Optional[str]:

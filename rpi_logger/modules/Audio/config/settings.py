@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 
 from rpi_logger.modules.base.preferences import ScopedPreferences
 
@@ -217,7 +217,7 @@ def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
 
 
 def parse_cli_args(
-    argv: Optional[list[str]] = None,
+    argv: list[str] | None = None,
     *,
     config_path: Path,
 ) -> argparse.Namespace:

@@ -63,9 +63,9 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 
 # Window position and size (saved automatically on window close)
 window_x = 210
-window_y = 144
-window_width = 914
-window_height = 624
+window_y = 497
+window_width = 802
+window_height = 510
 
 
 ################################################################################
@@ -124,7 +124,8 @@ window_height = 624
 #    - Master launches modules with: --mode gui --output-dir {session_dir}/ModuleName/ --enable-commands
 #    - JSON protocol over stdin/stdout for commands and status
 #    - Each module runs independently and can be stopped individually
-gui_logger_visible = true
+gui_logger_visible = false
 camera_1_alias = Camera 1
 camera_2_alias = Camera 2
-enabled_connections = Network:EyeTracker,UART:GPS,USB:Camera,USB:DRT
+enabled_connections = CSI:Camera,Network:EyeTracker,UART:GPS,USB:Camera,USB:DRT,USB:VOG
+last_trial_label = 

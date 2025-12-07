@@ -272,6 +272,13 @@ class StubCodexView:
         """No-op since stub_frame is now a plain Frame without a label."""
         pass
 
+    def set_window_title(self, title: str) -> None:
+        """Update the main window title."""
+        try:
+            self.root.title(title)
+        except tk.TclError:
+            pass
+
     def _create_menu_bar(self) -> None:
         menubar = tk.Menu(self.root)
         Theme.configure_menu(menubar)

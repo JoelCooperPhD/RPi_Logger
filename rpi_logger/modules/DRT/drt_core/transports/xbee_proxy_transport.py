@@ -68,32 +68,31 @@ class XBeeProxyTransport(BaseTransport):
     async def connect(self) -> bool:
         """Mark transport as connected."""
         self._connected = True
-        logger.info(f"XBee proxy transport ready for {self.node_id}")
+        logger.info("XBee proxy transport ready for %s", self.node_id)
         return True
 
     async def disconnect(self) -> None:
         """Mark transport as disconnected and clear buffer."""
         self._connected = False
-        # Clear buffer
         while not self._receive_buffer.empty():
             try:
                 self._receive_buffer.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        logger.info(f"XBee proxy transport disconnected for {self.node_id}")
+        logger.info("XBee proxy transport disconnected for %s", self.node_id)
 
     async def write(self, data: bytes) -> bool:
         """Send data via the proxy callback."""
         if not self._connected:
-            logger.error(f"Cannot write to {self.node_id}: not connected")
+            logger.error("Cannot write to %s: not connected", self.node_id)
             return False
 
         try:
             data_str = data.decode('utf-8', errors='replace').strip()
-            logger.debug(f"XBee proxy sending to {self.node_id}: '{data_str}'")
+            logger.debug("XBee proxy sending to %s: '%s'", self.node_id, data_str)
             return await self._send_callback(self.node_id, data_str)
         except Exception as e:
-            logger.error(f"XBee proxy write error to {self.node_id}: {e}")
+            logger.error("XBee proxy write error to %s: %s", self.node_id, e)
             return False
 
     async def read_line(self) -> Optional[str]:
@@ -117,17 +116,16 @@ class XBeeProxyTransport(BaseTransport):
         try:
             self._receive_buffer.put_nowait(stripped)
             logger.debug(
-                f"XBee proxy buffered for {self.node_id}: '{stripped}' "
-                f"(queue size: {self._receive_buffer.qsize()})"
+                "XBee proxy buffered for %s: '%s' (queue size: %d)",
+                self.node_id, stripped, self._receive_buffer.qsize()
             )
         except asyncio.QueueFull:
-            # Buffer full - drop oldest to make room (ring buffer behavior)
             try:
                 dropped = self._receive_buffer.get_nowait()
                 self._dropped_messages += 1
                 logger.warning(
-                    f"Receive buffer full for {self.node_id}, dropped: "
-                    f"'{dropped[:50]}...' (total dropped: {self._dropped_messages})"
+                    "Receive buffer full for %s, dropped: '%s...' (total dropped: %d)",
+                    self.node_id, dropped[:50], self._dropped_messages
                 )
                 self._receive_buffer.put_nowait(stripped)
             except asyncio.QueueEmpty:

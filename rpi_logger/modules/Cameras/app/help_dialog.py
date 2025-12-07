@@ -1,0 +1,204 @@
+"""
+Cameras Module Quick Start Guide dialog.
+"""
+
+import tkinter as tk
+from tkinter import ttk, scrolledtext
+
+from rpi_logger.core.ui.theme.styles import Theme
+
+
+CAMERAS_HELP_TEXT = """
+═══════════════════════════════════════════════════════════════════
+                 CAMERAS MODULE QUICK START GUIDE
+═══════════════════════════════════════════════════════════════════
+
+OVERVIEW
+
+The Cameras module captures synchronized video from Raspberry Pi
+camera modules (IMX296, etc.) and USB cameras. Each camera runs
+in its own module instance with configurable resolution and frame
+rate.
+
+Cameras are discovered by the main logger and appear in the
+Devices panel. Click Connect to launch a camera window.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. GETTING STARTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+   1. Connect your camera (CSI ribbon cable or USB)
+   2. Enable "Cameras" in the Connections menu (USB or CSI)
+   3. The camera appears in the Devices panel when detected
+   4. Click Connect to launch this camera's window
+   5. Adjust settings if needed via the Controls menu
+   6. Start a session to begin recording
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. USER INTERFACE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preview Display
+   Shows a live feed from this camera instance:
+   • Preview runs at reduced resolution for performance
+   • Each camera has its own dedicated window
+
+Settings Window
+   Access via Controls > Show Settings Window:
+   • Preview Resolution: Display size (320x240 to 640x480)
+   • Preview FPS: Live view frame rate (1-15)
+   • Record Resolution: Capture size (up to sensor max)
+   • Record FPS: Recording frame rate (1-60+)
+
+IO Metrics Bar
+   Shows real-time performance data:
+   • Cam: Active camera ID
+   • In: Input frame rate (from sensor)
+   • Rec: Recording output rate
+   • Tgt: Target recording FPS
+   • Prv: Preview output rate
+   • Q: Queue depths (preview/record)
+   • Wait: Frame wait time (ms)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. RECORDING SESSIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Starting a Session
+   When you start a recording session:
+   • Recording begins at configured resolution and FPS
+   • Frame timing data is captured for synchronization
+   • Status shows "RECORDING"
+
+During Recording
+   Each trial captures:
+   • MP4 video file with H.264 encoding
+   • CSV timing file with per-frame timestamps
+   • Metadata for post-processing
+
+Data Output
+   Video files are saved as:
+   {session_dir}/Cameras/{timestamp}_CAM_trial{N}_{camera}_{res}_{fps}fps.mp4
+
+   Timing data for synchronization:
+   {session_dir}/Cameras/{timestamp}_CAMTIMING_trial{N}_{camera}.csv
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. CONFIGURATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preview Settings (for live display)
+   • Resolution: Lower = smoother preview (320x240 recommended)
+   • FPS: 5-10 is usually sufficient for monitoring
+
+Record Settings (for saved video)
+   • Resolution: Use native sensor resolution for best quality
+   • FPS: Match your experiment requirements (30 or 60 typical)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. CAMERA TYPES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Raspberry Pi Camera Modules (CSI)
+   • IMX296: Global shutter, ideal for motion studies
+   • IMX219/IMX477: Rolling shutter, general purpose
+   • Connected via ribbon cable to CSI port
+
+USB Cameras
+   • UVC-compatible webcams
+   • Lower latency than network cameras
+   • May have limited resolution/FPS options
+
+
+═══════════════════════════════════════════════════════════════════
+                        TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════
+
+Camera not appearing in Devices panel:
+   1. Check ribbon cable connection (CSI cameras)
+   2. Verify USB connection (USB cameras)
+   3. Enable the connection type in Connections menu
+   4. Run 'libcamera-hello' or 'v4l2-ctl --list-devices'
+   5. Check camera is enabled in raspi-config
+
+Preview is laggy:
+   1. Lower preview resolution (320x240)
+   2. Reduce preview FPS (5 fps)
+   3. Check CPU usage on the system
+   4. Close other applications
+
+Recording drops frames:
+   1. Lower record FPS or resolution
+   2. Use a faster SD card or SSD
+   3. Check available disk space
+   4. Monitor the Q (queue) metrics
+
+Black or corrupted video:
+   1. Check camera ribbon cable for damage
+   2. Verify camera module is seated properly
+   3. Test with 'libcamera-still -o test.jpg'
+   4. Check permissions on video devices
+
+
+"""
+
+
+class CamerasHelpDialog:
+    """Dialog showing Cameras quick start guide."""
+
+    def __init__(self, parent):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Cameras Quick Start Guide")
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        Theme.configure_toplevel(self.dialog)
+
+        self.dialog.geometry("700x600")
+
+        main_frame = ttk.Frame(self.dialog, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        title_label = ttk.Label(
+            main_frame,
+            text="Cameras Quick Start Guide"
+        )
+        title_label.pack(pady=(0, 10))
+
+        text_frame = ttk.Frame(main_frame)
+        text_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.text_widget = scrolledtext.ScrolledText(
+            text_frame,
+            wrap=tk.WORD,
+            state='disabled'
+        )
+        Theme.configure_scrolled_text(self.text_widget, readonly=True)
+        self.text_widget.pack(fill=tk.BOTH, expand=True)
+
+        self._populate_help()
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=(10, 0))
+
+        close_button = ttk.Button(
+            button_frame,
+            text="Close",
+            command=self.dialog.destroy
+        )
+        close_button.pack()
+
+        self.dialog.protocol("WM_DELETE_WINDOW", self.dialog.destroy)
+
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - 350
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 300
+        self.dialog.geometry(f"+{x}+{y}")
+
+    def _populate_help(self):
+        self.text_widget.config(state='normal')
+        self.text_widget.insert('1.0', CAMERAS_HELP_TEXT)
+        self.text_widget.config(state='disabled')

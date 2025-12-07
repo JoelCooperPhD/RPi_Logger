@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable
 
 try:  # pragma: no cover - Tk unavailable on display-less hosts
     import tkinter as tk
@@ -38,7 +38,7 @@ class AudioView:
         self._submit_callback = submit_async
         self.logger = logger.getChild("View")
         self.mode = mode
-        self._snapshot: Optional[AudioSnapshot] = None
+        self._snapshot: AudioSnapshot | None = None
         self.enabled = bool(vmc_view and tk and ttk and mode == "gui")
         self._meter_panel: MeterPanel | None = None
         self._device_label: ttk.Label | None = None

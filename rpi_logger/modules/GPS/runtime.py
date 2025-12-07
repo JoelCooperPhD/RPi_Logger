@@ -63,6 +63,7 @@ MIN_ZOOM_LEVEL = 10.0
 MAX_ZOOM_LEVEL = 15.0
 KMH_PER_KNOT = 1.852
 MPH_PER_KNOT = 1.15077945
+MPS_PER_KNOT = 0.514444
 FIX_QUALITY_DESCRIPTIONS = {
     0: "Invalid",
     1: "GPS fix",
@@ -1574,7 +1575,6 @@ class GPSPreviewRuntime(ModuleRuntime):
 
         # Direction arrow (if we have heading data)
         if fix.course_deg is not None and fix.speed_kmh and fix.speed_kmh > 1.0:
-            import math
             angle_rad = math.radians(fix.course_deg - 90)  # Convert to math angle
             arrow_len = 20
             end_x = x + arrow_len * math.cos(angle_rad)
@@ -1854,4 +1854,3 @@ class GPSPreviewRuntime(ModuleRuntime):
                 except (TypeError, ValueError):
                     self.logger.debug("Invalid stored value for %s: %s", key, raw)
         return float(default)
-MPS_PER_KNOT = 0.514444

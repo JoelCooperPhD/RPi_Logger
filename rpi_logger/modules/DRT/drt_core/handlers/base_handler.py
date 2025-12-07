@@ -115,12 +115,12 @@ class BaseDRTHandler(ABC):
         This begins monitoring the device for incoming data.
         """
         if self._running:
-            logger.warning(f"Handler {self.device_id} already running")
+            logger.warning("Handler %s already running", self.device_id)
             return
 
         self._running = True
         self._read_task = asyncio.create_task(self._read_loop())
-        logger.info(f"Handler started for {self.device_id}")
+        logger.info("Handler started for %s", self.device_id)
 
     async def stop(self) -> None:
         """
@@ -144,7 +144,7 @@ class BaseDRTHandler(ABC):
                 task.cancel()
         self._pending_tasks.clear()
 
-        logger.info(f"Handler stopped for {self.device_id}")
+        logger.info("Handler stopped for %s", self.device_id)
 
     # =========================================================================
     # Command Methods (Abstract)
@@ -256,7 +256,7 @@ class BaseDRTHandler(ABC):
         Continuously reads from the transport and processes responses.
         Implements circuit breaker pattern - exits after too many consecutive errors.
         """
-        logger.debug(f"Read loop started for {self.device_id}")
+        logger.debug("Read loop started for %s", self.device_id)
         self._consecutive_errors = 0
 
         while self._running and self.is_connected:
@@ -266,7 +266,7 @@ class BaseDRTHandler(ABC):
                 while lines_processed < 50:  # Limit to prevent infinite loop
                     line = await self.transport.read_line()
                     if line:
-                        logger.debug(f"Processing line from {self.device_id}: {line.strip()}")
+                        logger.debug("Processing line from %s: %s", self.device_id, line.strip())
                         self._process_response(line.strip())
                         lines_processed += 1
                     else:
@@ -287,25 +287,23 @@ class BaseDRTHandler(ABC):
                     self._max_error_backoff
                 )
                 logger.error(
-                    f"Error in read loop for {self.device_id} "
-                    f"({self._consecutive_errors}/{self._max_consecutive_errors}): {e}"
+                    "Error in read loop for %s (%d/%d): %s",
+                    self.device_id, self._consecutive_errors, self._max_consecutive_errors, e
                 )
 
                 # Circuit breaker: exit if too many consecutive errors
                 if self._consecutive_errors >= self._max_consecutive_errors:
                     logger.error(
-                        f"Circuit breaker triggered for {self.device_id}: "
-                        f"{self._consecutive_errors} consecutive errors. "
-                        f"Handler will be marked as disconnected."
+                        "Circuit breaker triggered for %s: %d consecutive errors",
+                        self.device_id, self._consecutive_errors
                     )
                     break
 
                 await asyncio.sleep(backoff)
 
         logger.debug(
-            f"Read loop ended for {self.device_id} "
-            f"(running={self._running}, connected={self.is_connected}, "
-            f"errors={self._consecutive_errors})"
+            "Read loop ended for %s (running=%s, connected=%s, errors=%d)",
+            self.device_id, self._running, self.is_connected, self._consecutive_errors
         )
 
     def _create_background_task(self, coro) -> asyncio.Task:
@@ -344,7 +342,7 @@ class BaseDRTHandler(ABC):
             try:
                 await self.data_callback(self.device_id, data_type, data)
             except Exception as e:
-                logger.error(f"Error in data callback: {e}")
+                logger.error("Error in data callback: %s", e)
 
     def set_recording_state(self, recording: bool, trial_label: str = "") -> None:
         """

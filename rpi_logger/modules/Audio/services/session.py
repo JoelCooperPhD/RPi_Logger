@@ -6,7 +6,6 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 
 class SessionService:
@@ -15,10 +14,10 @@ class SessionService:
     def __init__(self, base_output_dir: Path, session_prefix: str, logger: logging.Logger) -> None:
         self.base_output_dir = base_output_dir
         self.session_prefix = session_prefix
-        self._cached_current: Optional[Path] = None
+        self._cached_current: Path | None = None
         self.logger = logger.getChild("SessionService")
 
-    async def ensure_session_dir(self, current: Optional[Path]) -> Path:
+    async def ensure_session_dir(self, current: Path | None) -> Path:
         target = current or self._cached_current
 
         if target is None:

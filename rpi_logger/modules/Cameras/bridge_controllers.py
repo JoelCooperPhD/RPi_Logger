@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.defaults import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
+from rpi_logger.modules.Cameras.utils import parse_resolution, parse_fps, parse_bool
 from rpi_logger.modules.Cameras.runtime import (
     CameraCapabilities,
     CameraDescriptor,
@@ -137,37 +138,20 @@ class DiscoveryController:
         If capabilities are provided, validates and adjusts resolution to match
         a supported mode.
         """
-        # Try per-camera settings first
         saved = await self._runtime.cache.get_settings(key)
-
-        # Fall back to global config
         record_cfg = self._runtime.config.record
         default_resolution = record_cfg.resolution or DEFAULT_CAPTURE_RESOLUTION
         default_fps = record_cfg.fps_cap or DEFAULT_CAPTURE_FPS
 
-        if not saved:
-            resolution, fps = default_resolution, default_fps
-        else:
-            # Parse resolution from record_resolution (capture uses same as record)
-            res_str = saved.get("record_resolution", "")
-            resolution = default_resolution
-            if res_str and "x" in res_str.lower():
-                try:
-                    w, h = res_str.lower().split("x")
-                    resolution = (int(w.strip()), int(h.strip()))
-                except (ValueError, AttributeError):
-                    pass
+        resolution = parse_resolution(
+            saved.get("record_resolution") if saved else None,
+            default_resolution
+        )
+        fps = parse_fps(
+            saved.get("record_fps") if saved else None,
+            default_fps
+        )
 
-            # Parse FPS from record_fps
-            fps_str = saved.get("record_fps", "")
-            fps = default_fps
-            if fps_str:
-                try:
-                    fps = float(fps_str)
-                except (ValueError, TypeError):
-                    pass
-
-        # Validate against capabilities if available
         if capabilities and capabilities.modes:
             resolution, fps = self._validate_against_capabilities(
                 resolution, fps, capabilities, key
@@ -332,42 +316,24 @@ class RecordingController:
 
     async def _get_record_settings(self, key: str) -> tuple[tuple[int, int], float, bool]:
         """Get record resolution, fps, and overlay setting for a camera."""
-        # Try per-camera settings first
         saved = await self._runtime.cache.get_settings(key)
-
-        # Fall back to global config
         record_cfg = self._runtime.config.record
         default_resolution = record_cfg.resolution or DEFAULT_CAPTURE_RESOLUTION
         default_fps = record_cfg.fps_cap or DEFAULT_CAPTURE_FPS
         default_overlay = record_cfg.overlay
 
-        if not saved:
-            return default_resolution, default_fps, default_overlay
-
-        # Parse resolution
-        res_str = saved.get("record_resolution", "")
-        resolution = default_resolution
-        if res_str and "x" in res_str.lower():
-            try:
-                w, h = res_str.lower().split("x")
-                resolution = (int(w.strip()), int(h.strip()))
-            except (ValueError, AttributeError):
-                pass
-
-        # Parse FPS
-        fps_str = saved.get("record_fps", "")
-        fps = default_fps
-        if fps_str:
-            try:
-                fps = float(fps_str)
-            except (ValueError, TypeError):
-                pass
-
-        # Parse overlay
-        overlay_str = saved.get("overlay", "")
-        overlay = default_overlay
-        if overlay_str:
-            overlay = overlay_str.lower() in ("true", "1", "yes", "on")
+        resolution = parse_resolution(
+            saved.get("record_resolution") if saved else None,
+            default_resolution
+        )
+        fps = parse_fps(
+            saved.get("record_fps") if saved else None,
+            default_fps
+        )
+        overlay = parse_bool(
+            saved.get("overlay") if saved else None,
+            default_overlay
+        )
 
         return resolution, fps, overlay
 

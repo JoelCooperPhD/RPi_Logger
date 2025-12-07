@@ -48,7 +48,6 @@ from vog.runtime import VOGModuleRuntime
 from vog.view import VOGView
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_file
-from rpi_logger.modules.VOG.vog_core.constants import SVOG_VID, SVOG_PID, SVOG_BAUD
 from rpi_logger.modules.base.config_paths import resolve_module_config_path
 from rpi_logger.cli.common import install_signal_handlers
 
@@ -130,25 +129,6 @@ def parse_args(argv: Optional[list[str]] = None):
         help="Disable console logging",
     )
     parser.set_defaults(console_output=default_console)
-
-    parser.add_argument(
-        "--device-vid",
-        type=lambda value: int(value, 0),
-        default=int(config.get('device_vid', SVOG_VID)),
-        help="USB vendor ID for the sVOG device",
-    )
-    parser.add_argument(
-        "--device-pid",
-        type=lambda value: int(value, 0),
-        default=int(config.get('device_pid', SVOG_PID)),
-        help="USB product ID for the sVOG device",
-    )
-    parser.add_argument(
-        "--baudrate",
-        type=int,
-        default=int(config.get('baudrate', SVOG_BAUD)),
-        help="Serial baudrate for the sVOG device",
-    )
 
     args = parser.parse_args(argv)
     args.config = config

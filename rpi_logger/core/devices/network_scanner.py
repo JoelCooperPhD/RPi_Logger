@@ -147,6 +147,16 @@ class NetworkScanner:
         if self._running:
             logger.debug("Network scanner uses mDNS events - no manual scan needed")
 
+    async def reannounce_devices(self) -> None:
+        """Re-emit discovery events for all known devices."""
+        logger.debug(f"Re-announcing {len(self._known_devices)} network devices")
+        for device in self._known_devices.values():
+            if self._on_device_found:
+                try:
+                    await self._on_device_found(device)
+                except Exception as e:
+                    logger.error(f"Error re-announcing network device: {e}")
+
     def _on_service_state_change(
         self,
         zeroconf: Zeroconf,

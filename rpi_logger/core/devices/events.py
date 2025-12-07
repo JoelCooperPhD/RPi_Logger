@@ -80,6 +80,14 @@ class ScannerProtocol(Protocol):
         """Stop the scanner."""
         ...
 
+    async def reannounce_devices(self) -> None:
+        """Re-emit discovery events for all known devices.
+
+        Call this when a connection type gets enabled to re-announce
+        devices that were previously discovered but ignored.
+        """
+        ...
+
     def set_event_handler(self, handler: DeviceEventHandler) -> None:
         """Set the handler for device events."""
         ...

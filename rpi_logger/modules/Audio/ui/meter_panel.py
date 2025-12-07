@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Tuple
 
 try:  # pragma: no cover - Tk unavailable on headless hosts
     import tkinter as tk
@@ -61,9 +60,9 @@ class MeterPanel:
     def __init__(self, logger: logging.Logger) -> None:
         self.logger = logger.getChild("MeterPanel")
         self._container: "ttk.Frame | None" = None  # type: ignore[assignment]
-        self._meter_canvases: Dict[int, "tk.Canvas"] = {}
-        self._canvas_items: Dict[int, Dict[str, int]] = {}
-        self._rendered_devices: Tuple[int, ...] = ()
+        self._meter_canvases: dict[int, "tk.Canvas"] = {}
+        self._canvas_items: dict[int, dict[str, int]] = {}
+        self._rendered_devices: tuple[int, ...] = ()
 
     def attach(self, parent) -> None:
         if tk is None or ttk is None:
@@ -100,14 +99,6 @@ class MeterPanel:
             device_frame = ttk.Frame(self._container)
             device_frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 6))
             device_frame.columnconfigure(0, weight=1)
-
-            # Device Label
-            device_info = snapshot.selected_devices.get(device_id)
-            device_name = device_info.name if device_info else f"Device {device_id}"
-            label = ttk.Label(
-                device_frame, text=device_name, anchor="w", font=("TkDefaultFont", 9)
-            )
-            label.grid(row=0, column=0, sticky="ew", pady=(0, 2))
 
             # Meter Canvas
             canvas = tk.Canvas(

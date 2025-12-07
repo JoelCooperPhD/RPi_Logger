@@ -134,8 +134,10 @@ class FrameProcessor:
                     else:
                         gaze_x = int(raw_x * w)
                         gaze_y = int(raw_y * h)
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as e:
+                    if not self._logged_gaze_error:
+                        logger.debug("Gaze coordinate conversion error: %s", e)
+                        self._logged_gaze_error = True
 
             if gaze_x is not None and gaze_y is not None:
                 gaze_x = max(0, min(gaze_x, w - 1))
@@ -214,8 +216,10 @@ class FrameProcessor:
                     else:
                         gaze_x = int(raw_x * w)
                         gaze_y = int(raw_y * h)
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as e:
+                    if not self._logged_gaze_error:
+                        logger.debug("Gaze coordinate conversion error: %s", e)
+                        self._logged_gaze_error = True
 
             if gaze_x is not None and gaze_y is not None:
                 gaze_x = max(0, min(gaze_x, w - 1))

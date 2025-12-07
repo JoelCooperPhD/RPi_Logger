@@ -64,12 +64,10 @@ class AboutDialog:
         version_label.pack(pady=(5, 20))
 
         info_text = (
-            "Professional multi-modal data collection system\n"
-            "for automotive research on Raspberry Pi 5.\n\n"
-            "Synchronized recording across cameras, microphones,\n"
-            "eye tracking, behavioral tasks, and annotations.\n\n"
-            "© 2025 RED Scientific\n"
-            "All rights reserved."
+            "Multi-modal data collection for human factors research.\n\n"
+            "Synchronized recording of video, audio, eye tracking,\n"
+            "GPS, visual occlusion, and behavioral response tasks.\n\n"
+            "© 2025 RED Scientific"
         )
 
         info_label = ttk.Label(

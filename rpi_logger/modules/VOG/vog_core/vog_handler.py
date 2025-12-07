@@ -8,9 +8,9 @@ from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.commands import StatusMessage
 from .transports import BaseTransport
 
-from .protocols import BaseVOGProtocol, SVOGProtocol, WVOGProtocol, VOGDataPacket, VOGResponse
+from .protocols import BaseVOGProtocol, VOGDataPacket, VOGResponse
 from .protocols.base_protocol import ResponseType
-from .constants import SVOG_VID, SVOG_PID, WVOG_VID, WVOG_PID, COMMAND_DELAY
+from .constants import COMMAND_DELAY
 from .data_logger import VOGDataLogger
 from .device_types import VOGDeviceType, device_type_from_string
 
@@ -19,7 +19,7 @@ class VOGHandler:
     """Per-device handler for VOG serial communication.
 
     Uses protocol abstraction to support both sVOG (wired) and wVOG (wireless) devices.
-    The protocol is automatically detected based on device VID/PID.
+    Protocol is provided by the runtime based on device type from main logger.
     """
 
     def __init__(
@@ -28,22 +28,20 @@ class VOGHandler:
         port: str,
         output_dir: Path,
         system: Optional[Any] = None,
-        protocol: Optional[BaseVOGProtocol] = None
+        protocol: BaseVOGProtocol = None
     ):
+        if protocol is None:
+            raise ValueError("Protocol must be provided")
+
         self.device = device
         self.port = port
-        self.output_dir = output_dir
+        self._output_dir = output_dir
         self.system = system
+        self.protocol = protocol
         self._read_task: Optional[asyncio.Task] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._running = False
         self._data_callback: Optional[Callable[[str, str, Dict[str, Any]], None]] = None
-
-        # Auto-detect protocol if not provided
-        if protocol is None:
-            self.protocol = self._detect_protocol()
-        else:
-            self.protocol = protocol
 
         # Device state
         self._config: Dict[str, Any] = {}
@@ -54,28 +52,22 @@ class VOGHandler:
 
         # Data logger for CSV output
         self._data_logger = VOGDataLogger(
-            output_dir=output_dir,
+            output_dir=self._output_dir,
             port=port,
             protocol=self.protocol,
             event_callback=self._on_data_logged,
         )
 
-    def _detect_protocol(self) -> BaseVOGProtocol:
-        """Detect protocol based on device VID/PID."""
-        # Check device config for VID/PID (USBSerialDevice stores these in config)
-        config = getattr(self.device, 'config', None)
-        if config:
-            vid = getattr(config, 'vid', None)
-            pid = getattr(config, 'pid', None)
-        else:
-            vid = getattr(self.device, 'vid', None)
-            pid = getattr(self.device, 'pid', None)
+    @property
+    def output_dir(self) -> Path:
+        """Return the current output directory."""
+        return self._output_dir
 
-        if vid == WVOG_VID and pid == WVOG_PID:
-            return WVOGProtocol()
-
-        # Default to sVOG
-        return SVOGProtocol()
+    @output_dir.setter
+    def output_dir(self, value: Path) -> None:
+        """Update output directory for both handler and data logger."""
+        self._output_dir = value
+        self._data_logger.output_dir = value
 
     @property
     def device_type(self) -> str:

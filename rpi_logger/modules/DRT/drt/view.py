@@ -1,7 +1,6 @@
 """DRT view factory for VMC integration.
 
-Implements the modern DRT GUI pattern with real-time matplotlib plotting
-for single-device support, following the VOG module architecture.
+Implements the DRT GUI with real-time matplotlib plotting for single-device support.
 """
 
 from __future__ import annotations
@@ -11,52 +10,16 @@ import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
+import tkinter as tk
+from tkinter import ttk
+
 from rpi_logger.core.logging_utils import ensure_structured_logger, get_module_logger
+from rpi_logger.core.ui.theme.styles import Theme
 from vmc import LegacyTkViewBridge, StubCodexView
 
-try:
-    import tkinter as tk
-    from tkinter import ttk
-    HAS_TK = True
-except ImportError:
-    HAS_TK = False
-    tk = None
-    ttk = None
-
-try:
-    from rpi_logger.core.ui.theme.styles import Theme
-    from rpi_logger.core.ui.theme.widgets import RoundedButton
-    from rpi_logger.core.ui.theme.colors import Colors
-    HAS_THEME = True
-except ImportError:
-    HAS_THEME = False
-    Theme = None
-    RoundedButton = None
-    Colors = None
-
-try:
-    from ..drt_core.interfaces.gui.drt_plotter import DRTPlotter
-    HAS_MATPLOTLIB = True
-except ImportError:
-    try:
-        from rpi_logger.modules.DRT.drt_core.interfaces.gui.drt_plotter import DRTPlotter
-        HAS_MATPLOTLIB = True
-    except ImportError:
-        DRTPlotter = None
-        HAS_MATPLOTLIB = False
-
-try:
-    from ..drt_core.interfaces.gui.drt_config_window import DRTConfigWindow
-except ImportError:
-    try:
-        from rpi_logger.modules.DRT.drt_core.interfaces.gui.drt_config_window import DRTConfigWindow
-    except ImportError:
-        DRTConfigWindow = None
-
-try:
-    from ..drt_core.device_types import DRTDeviceType
-except ImportError:
-    from rpi_logger.modules.DRT.drt_core.device_types import DRTDeviceType
+from rpi_logger.modules.DRT.drt_core.interfaces.gui.drt_plotter import DRTPlotter
+from rpi_logger.modules.DRT.drt_core.interfaces.gui.drt_config_window import DRTConfigWindow
+from rpi_logger.modules.DRT.drt_core.device_types import DRTDeviceType
 
 ActionCallback = Optional[Callable[..., Awaitable[None]]]
 
@@ -86,9 +49,6 @@ class _SystemPlaceholder:
     @property
     def xbee_connected(self) -> bool:
         return False
-
-    async def rescan_xbee_network(self) -> None:
-        pass
 
 
 class _LoopAsyncBridge:
@@ -147,16 +107,12 @@ class DRTTkinterGUI:
         self._device_type: DRTDeviceType = DRTDeviceType.SDRT
         self._plotter: Optional[DRTPlotter] = None
 
-        # Results display variables
+        # Results display variables - initialized when root is available
         self._trial_n: Optional[tk.StringVar] = None
         self._rt_var: Optional[tk.StringVar] = None
         self._click_count: Optional[tk.StringVar] = None
         self._battery_var: Optional[tk.StringVar] = None
-
-        # Control buttons
-        self._stm_on: Optional[Any] = None
-        self._stm_off: Optional[Any] = None
-        self._configure_btn: Optional[Any] = None
+        self._stats_initialized = False
 
         # Session and recording state
         self._session_active = False
@@ -170,7 +126,7 @@ class DRTTkinterGUI:
         self.root = embedded_parent
         self._frame: Optional[tk.Frame] = None
         self._content_frame: Optional[tk.Frame] = None
-        self._controls_panel: Optional[tk.Frame] = None
+        self._config_window: Optional[DRTConfigWindow] = None
 
         # Create UI
         if embedded_parent:
@@ -213,132 +169,41 @@ class DRTTkinterGUI:
             return
 
         self._device_type = device_type
-        type_str = device_type.value if hasattr(device_type, 'value') else str(device_type)
 
-        # Add plotter (left side)
-        if HAS_MATPLOTLIB and DRTPlotter is not None:
-            try:
-                self._plotter = DRTPlotter(self._content_frame, title="DRT - Detection Response Task")
-                if port:
-                    self._plotter.add_device(port)
-                self.logger.info("Created plotter for %s", port or "pending device")
-            except Exception as e:
-                self.logger.warning("Could not create plotter: %s", e)
-                self._plotter = None
-        else:
+        # Add plotter (fills entire content area)
+        try:
+            self._plotter = DRTPlotter(self._content_frame, title="DRT - Detection Response Task")
+            if port:
+                self._plotter.add_device(port)
+            self.logger.info("Created plotter for %s", port or "pending device")
+        except Exception as e:
+            self.logger.warning("Could not create plotter: %s", e)
             self._plotter = None
 
-        # Create right-side controls panel with visible border
-        if HAS_THEME and Colors is not None:
-            self._controls_panel = tk.Frame(
-                self._content_frame,
-                bg=Colors.BG_FRAME,
-                highlightbackground=Colors.BORDER,
-                highlightcolor=Colors.BORDER,
-                highlightthickness=1
-            )
-        else:
-            self._controls_panel = ttk.Frame(self._content_frame)
-        self._controls_panel.grid(row=0, column=1, sticky="NS", padx=(4, 2), pady=2)
-        self._controls_panel.grid_rowconfigure(1, weight=1)
+        # Initialize stats variables (displayed in Capture Stats panel by DRTView)
+        self._init_stats_vars(device_type)
 
-        # Add manual controls
-        self._add_manual_controls(self._controls_panel, device_type)
+    def _init_stats_vars(self, device_type: DRTDeviceType):
+        """Initialize stats StringVars (UI built by DRTView in Capture Stats panel)."""
+        if self._stats_initialized:
+            return
 
-        # Add results display
-        self._add_results(self._controls_panel, device_type)
-
-        # Add configure button
-        self._add_configure_button(self._controls_panel)
-
-        # Disable configure button if no device connected yet
-        if port is None and self._configure_btn:
-            self._configure_btn.configure(state='disabled')
-
-    def _add_manual_controls(self, parent: tk.Widget, device_type: DRTDeviceType):
-        """Add stimulus control buttons."""
-        lf = ttk.LabelFrame(parent, text="Stimulus")
-        lf.grid(row=0, column=0, sticky="NEW", padx=4, pady=(4, 2))
-        lf.grid_columnconfigure(0, weight=1)
-        lf.grid_columnconfigure(1, weight=1)
-
-        # Use RoundedButton if available, otherwise fall back to ttk.Button
-        if RoundedButton is not None:
-            btn_bg = Colors.BG_FRAME if Colors is not None else None
-            self._stm_on = RoundedButton(lf, text="ON", command=self._on_stimulus_on,
-                                         width=80, height=32, style='default', bg=btn_bg)
-            self._stm_on.grid(row=0, column=0, padx=2, pady=2)
-
-            self._stm_off = RoundedButton(lf, text="OFF", command=self._on_stimulus_off,
-                                          width=80, height=32, style='default', bg=btn_bg)
-            self._stm_off.grid(row=0, column=1, padx=2, pady=2)
-        else:
-            self._stm_on = ttk.Button(lf, text="ON", command=self._on_stimulus_on)
-            self._stm_on.grid(row=0, column=0, sticky="NEWS", padx=2, pady=2)
-
-            self._stm_off = ttk.Button(lf, text="OFF", command=self._on_stimulus_off)
-            self._stm_off.grid(row=0, column=1, sticky="NEWS", padx=2, pady=2)
-
-    def _add_results(self, parent: tk.Widget, device_type: DRTDeviceType):
-        """Add results display (trial number, reaction time, click count)."""
-        lf = ttk.LabelFrame(parent, text="Results")
-        lf.grid(row=2, column=0, sticky="NEW", padx=4, pady=2)
-        lf.grid_columnconfigure(1, weight=1)
-
-        # Trial Number
         self._trial_n = tk.StringVar(value="0")
-        ttk.Label(lf, text="Trial Number:", style='Inframe.TLabel').grid(row=0, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=self._trial_n, style='Inframe.TLabel').grid(row=0, column=1, sticky="E", padx=5)
-
-        # Reaction Time
         self._rt_var = tk.StringVar(value="-")
-        ttk.Label(lf, text="Reaction Time:", style='Inframe.TLabel').grid(row=1, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=self._rt_var, style='Inframe.TLabel').grid(row=1, column=1, sticky="E", padx=5)
-
-        # Response Count
         self._click_count = tk.StringVar(value="0")
-        ttk.Label(lf, text="Response Count:", style='Inframe.TLabel').grid(row=2, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=self._click_count, style='Inframe.TLabel').grid(row=2, column=1, sticky="E", padx=5)
 
-        # Battery display for wDRT devices
+        # Battery var for wDRT devices
         if device_type in (DRTDeviceType.WDRT_USB, DRTDeviceType.WDRT_WIRELESS):
             self._battery_var = tk.StringVar(value="---%")
-            ttk.Label(lf, text="Battery:", style='Inframe.TLabel').grid(row=3, column=0, sticky="W", padx=5)
-            ttk.Label(lf, textvariable=self._battery_var, style='Inframe.TLabel').grid(row=3, column=1, sticky="E", padx=5)
 
-    def _add_configure_button(self, parent: tk.Widget):
-        """Add device configuration button."""
-        f = ttk.Frame(parent, style='Inframe.TFrame')
-        f.grid(row=3, column=0, sticky="NEW", padx=4, pady=(2, 4))
-        f.grid_columnconfigure(0, weight=1)
-
-        # Use RoundedButton if available, otherwise fall back to ttk.Button
-        if RoundedButton is not None:
-            btn_bg = Colors.BG_FRAME if Colors is not None else None
-            self._configure_btn = RoundedButton(
-                f, text="Configure Unit",
-                command=self._on_configure_clicked,
-                width=120, height=32, style='default',
-                bg=btn_bg
-            )
-            self._configure_btn.grid(row=0, column=0, pady=2)
-        else:
-            self._configure_btn = ttk.Button(
-                f, text="Configure Unit",
-                command=self._on_configure_clicked
-            )
-            self._configure_btn.grid(row=0, column=0, sticky="NEWS")
+        self._stats_initialized = True
 
     # ------------------------------------------------------------------
     # Device connection/disconnection
 
-    def on_device_connected(self, port: str, device_type: DRTDeviceType = None):
-        """Handle device connection - update port and enable configure button."""
-        if device_type is None:
-            device_type = DRTDeviceType.SDRT
-
-        type_str = device_type.value if hasattr(device_type, 'value') else str(device_type)
-        self.logger.info("%s device connected: %s", type_str, port)
+    def on_device_connected(self, port: str, device_type: DRTDeviceType = DRTDeviceType.SDRT):
+        """Handle device connection - update port and window title."""
+        self.logger.info("%s device connected: %s", device_type.value, port)
 
         if self._port is not None:
             self.logger.warning("Device already connected at %s, ignoring new connection at %s", self._port, port)
@@ -353,10 +218,6 @@ class DRTTkinterGUI:
         # Add device to plotter if it exists
         if self._plotter:
             self._plotter.add_device(port)
-
-        # Enable configure button now that device is connected
-        if self._configure_btn:
-            self._configure_btn.configure(state='normal')
 
     def on_device_disconnected(self, port: str, device_type: DRTDeviceType = None):
         """Handle device disconnection - clean up UI."""
@@ -375,10 +236,6 @@ class DRTTkinterGUI:
         # Reset state
         self._port = None
         self._device_type = None
-
-        # Disable configure button
-        if self._configure_btn:
-            self._configure_btn.configure(state='disabled')
 
         # Reset window title
         self._update_window_title()
@@ -401,23 +258,12 @@ class DRTTkinterGUI:
         try:
             toplevel = self.root.winfo_toplevel()
             if self._port and self._device_type:
-                # Format: "DRT - USB:ACM0" or "DRT - Wireless:ACM0"
                 # Extract short port name (e.g., "ACM0" from "/dev/ttyACM0")
-                port_short = self._port
-                if '/' in port_short:
-                    port_short = port_short.split('/')[-1]
-                if port_short.startswith('tty'):
-                    port_short = port_short[3:]
+                port_short = self._port.split('/')[-1].removeprefix('tty')
 
                 # Determine connection type from device_type
-                device_type_str = self._device_type.value if hasattr(self._device_type, 'value') else str(self._device_type)
-                device_type_lower = device_type_str.lower()
-                if 'wireless' in device_type_lower:
-                    conn_type = "Wireless"
-                else:
-                    conn_type = "USB"
-
-                title = f"DRT - {conn_type}:{port_short}"
+                conn_type = "XBee" if 'wireless' in self._device_type.value.lower() else "USB"
+                title = f"DRT({conn_type}):{port_short}"
             else:
                 title = "DRT"
 
@@ -524,16 +370,11 @@ class DRTTkinterGUI:
                 self._plotter.stop_recording()
 
     def _sync_control_states(self):
-        """Enable/disable controls based on recording state."""
-        recording = getattr(self.system, 'recording', False)
-        state = 'disabled' if recording else 'normal'
+        """Enable/disable controls based on recording state.
 
-        if self._stm_on:
-            self._stm_on.configure(state=state)
-        if self._stm_off:
-            self._stm_off.configure(state=state)
-        if self._configure_btn:
-            self._configure_btn.configure(state=state)
+        Note: Device menu state is managed by DRTView._update_device_menu_state()
+        """
+        pass
 
     def handle_session_started(self) -> None:
         """Handle session start (Start button) - clear and start plotter."""
@@ -589,10 +430,6 @@ class DRTTkinterGUI:
             self.logger.warning("No device connected - cannot configure")
             return
 
-        if DRTConfigWindow is None:
-            self.logger.warning("Configuration dialog not available (import failed)")
-            return
-
         # Check if runtime is properly bound (not placeholder)
         if isinstance(self.system, _SystemPlaceholder):
             self.logger.warning("Runtime not yet bound - cannot configure device")
@@ -624,7 +461,7 @@ class DRTTkinterGUI:
             return
 
         try:
-            DRTConfigWindow(
+            self._config_window = DRTConfigWindow(
                 root,
                 self._port,
                 device_type=self._device_type,
@@ -642,7 +479,17 @@ class DRTTkinterGUI:
             if self._device_type == DRTDeviceType.SDRT:
                 self.async_bridge.run_coroutine(self._upload_sdrt_config(handler, params))
             else:
-                self.async_bridge.run_coroutine(handler.send_command('set', params))
+                self.async_bridge.run_coroutine(self._upload_wdrt_config(handler, params))
+
+    async def _upload_wdrt_config(self, handler, params: Dict[str, int]) -> None:
+        """Upload config to wDRT device and fetch updated config."""
+        try:
+            await handler.send_command('set', params)
+            self.logger.info("wDRT config uploaded successfully")
+            # Fetch the new config from the device and update the window
+            await self._fetch_and_update_config(handler)
+        except Exception as e:
+            self.logger.error("Failed to upload wDRT config: %s", e, exc_info=True)
 
     async def _upload_sdrt_config(self, handler, params: Dict[str, int]) -> None:
         """Upload config to sDRT device using individual commands."""
@@ -673,6 +520,8 @@ class DRTTkinterGUI:
                     intensity = int(value * 2.55)
                     await handler.set_intensity(intensity)
             self.logger.info("sDRT config uploaded successfully")
+            # Fetch the new config from the device and update the window
+            await self._fetch_and_update_config(handler)
         except Exception as e:
             self.logger.error("Failed to upload sDRT config: %s", e, exc_info=True)
 
@@ -681,15 +530,53 @@ class DRTTkinterGUI:
         handler = self.system.get_device_handler(self._port)
         if handler and self.async_bridge:
             if self._device_type == DRTDeviceType.SDRT:
-                self.async_bridge.run_coroutine(handler.set_iso_params())
+                self.async_bridge.run_coroutine(self._set_sdrt_iso_and_fetch(handler))
             else:
-                self.async_bridge.run_coroutine(handler.send_command('iso'))
+                self.async_bridge.run_coroutine(self._set_wdrt_iso_and_fetch(handler))
+
+    async def _set_sdrt_iso_and_fetch(self, handler) -> None:
+        """Set ISO params on sDRT and fetch updated config."""
+        try:
+            await handler.set_iso_params()
+            self.logger.info("sDRT ISO preset applied successfully")
+            await self._fetch_and_update_config(handler)
+        except Exception as e:
+            self.logger.error("Failed to set sDRT ISO preset: %s", e, exc_info=True)
+
+    async def _set_wdrt_iso_and_fetch(self, handler) -> None:
+        """Set ISO params on wDRT and fetch updated config."""
+        try:
+            await handler.send_command('iso')
+            self.logger.info("wDRT ISO preset applied successfully")
+            await self._fetch_and_update_config(handler)
+        except Exception as e:
+            self.logger.error("Failed to set wDRT ISO preset: %s", e, exc_info=True)
 
     def _on_config_get(self):
         """Handle get config."""
         handler = self.system.get_device_handler(self._port)
         if handler and self.async_bridge:
-            self.async_bridge.run_coroutine(handler.get_config())
+            self.async_bridge.run_coroutine(self._fetch_and_update_config(handler))
+
+    async def _fetch_and_update_config(self, handler) -> None:
+        """Fetch config from device and update the config window."""
+        try:
+            config = await handler.get_config()
+            if config and self._config_window:
+                # Schedule UI update on the main thread
+                if self._frame:
+                    self._frame.after(0, lambda: self._update_config_window(config))
+        except Exception as e:
+            self.logger.error("Failed to fetch config: %s", e, exc_info=True)
+
+    def _update_config_window(self, config: Dict[str, Any]) -> None:
+        """Update the config window with fetched config (must be called from main thread)."""
+        if self._config_window:
+            try:
+                self._config_window.update_config(config)
+            except tk.TclError:
+                # Window was closed
+                self._config_window = None
 
     # ------------------------------------------------------------------
     # UI helpers
@@ -744,6 +631,7 @@ class DRTView:
         self._initial_session_dir: Optional[Path] = None
         self._active_session_dir: Optional[Path] = None
         self._session_visual_active = False
+        self._device_menu: Optional[tk.Menu] = None
 
         self._bridge.mount(self._build_embedded_gui)
         self._stub_view.set_preview_title("DRT Controls")
@@ -751,21 +639,14 @@ class DRTView:
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
         self.logger.info("=== DRTView._build_embedded_gui STARTING ===")
-        self.logger.info("HAS_TK=%s, HAS_THEME=%s, HAS_MATPLOTLIB=%s", HAS_TK, HAS_THEME, HAS_MATPLOTLIB)
 
-        if not HAS_TK:
-            self.logger.warning("Tkinter unavailable; cannot mount DRT GUI")
-            return None
+        # Apply theme to root window
+        try:
+            root = parent.winfo_toplevel()
+            Theme.apply(root)
+        except Exception as e:
+            self.logger.debug("Could not apply theme: %s", e)
 
-        # Apply theme to root window if available
-        if HAS_THEME and Theme is not None:
-            try:
-                root = parent.winfo_toplevel()
-                Theme.apply(root)
-            except Exception as e:
-                self.logger.debug("Could not apply theme: %s", e)
-
-        frame_cls = ttk.Frame if ttk is not None else tk.Frame
         if hasattr(parent, "columnconfigure"):
             try:
                 parent.columnconfigure(0, weight=1)
@@ -773,7 +654,7 @@ class DRTView:
             except Exception:
                 pass
 
-        container = frame_cls(parent)
+        container = ttk.Frame(parent)
         container.grid(row=0, column=0, sticky="nsew")
         container.columnconfigure(0, weight=1)
         container.rowconfigure(0, weight=1)
@@ -795,8 +676,119 @@ class DRTView:
             gui.system = self._runtime
             self.logger.info("Applied pending runtime binding to GUI (system=%s)", type(self._runtime).__name__)
 
+        # Build capture stats content with DRT results
+        self._build_capture_stats()
+
+        # Add Device menu
+        self._build_device_menu()
+
         self.logger.info("=== DRTView._build_embedded_gui COMPLETED ===")
         return container
+
+    def _build_capture_stats(self) -> None:
+        """Build the Capture Stats panel content with DRT results in a single row."""
+        if not self.gui:
+            return
+
+        def builder(parent: tk.Widget) -> None:
+            # Create a frame for the stats row
+            row_frame = ttk.Frame(parent)
+            row_frame.pack(fill=tk.X, expand=True, padx=4, pady=2)
+
+            # Configure equal column weights for spacing
+            num_cols = 4 if self.gui._battery_var else 3
+            for i in range(num_cols):
+                row_frame.columnconfigure(i, weight=1)
+
+            # Trial Number
+            trial_frame = ttk.Frame(row_frame)
+            trial_frame.grid(row=0, column=0, sticky="nsew", padx=4)
+            ttk.Label(trial_frame, text="Trial:", style='TLabel').pack(side=tk.LEFT)
+            ttk.Label(trial_frame, textvariable=self.gui._trial_n, style='TLabel', width=6).pack(side=tk.LEFT, padx=(4, 0))
+
+            # Reaction Time
+            rt_frame = ttk.Frame(row_frame)
+            rt_frame.grid(row=0, column=1, sticky="nsew", padx=4)
+            ttk.Label(rt_frame, text="RT:", style='TLabel').pack(side=tk.LEFT)
+            ttk.Label(rt_frame, textvariable=self.gui._rt_var, style='TLabel', width=6).pack(side=tk.LEFT, padx=(4, 0))
+
+            # Response Count
+            resp_frame = ttk.Frame(row_frame)
+            resp_frame.grid(row=0, column=2, sticky="nsew", padx=4)
+            ttk.Label(resp_frame, text="Responses:", style='TLabel').pack(side=tk.LEFT)
+            ttk.Label(resp_frame, textvariable=self.gui._click_count, style='TLabel', width=4).pack(side=tk.LEFT, padx=(4, 0))
+
+            # Battery (for wDRT devices)
+            if self.gui._battery_var:
+                batt_frame = ttk.Frame(row_frame)
+                batt_frame.grid(row=0, column=3, sticky="nsew", padx=4)
+                ttk.Label(batt_frame, text="Battery:", style='TLabel').pack(side=tk.LEFT)
+                ttk.Label(batt_frame, textvariable=self.gui._battery_var, style='TLabel', width=5).pack(side=tk.LEFT, padx=(4, 0))
+
+        self._stub_view.build_io_stub_content(builder)
+
+    def _build_device_menu(self) -> None:
+        """Build the Device menu with Lens and Configure commands."""
+        self._device_menu = self._stub_view.add_menu("Device")
+        if not self._device_menu:
+            self.logger.warning("Failed to create Device menu")
+            return
+
+        self._device_menu.add_command(
+            label="Stimulus: ON",
+            command=self._on_lens_on,
+        )
+        self._device_menu.add_command(
+            label="Stimulus: OFF",
+            command=self._on_lens_off,
+        )
+        self._device_menu.add_separator()
+        self._device_menu.add_command(
+            label="Configure...",
+            command=self._on_configure,
+        )
+
+        # Initially disable menu items until device is connected
+        self._update_device_menu_state()
+
+    def _update_device_menu_state(self) -> None:
+        """Enable/disable Device menu items based on device connection and recording state."""
+        if not self._device_menu:
+            return
+
+        # Determine if device is connected
+        has_device = self.gui and self.gui._port is not None
+
+        # Determine if recording
+        recording = self.model.recording if hasattr(self.model, 'recording') else False
+
+        # Menu items should be enabled if device connected and not recording
+        state = 'normal' if (has_device and not recording) else 'disabled'
+
+        try:
+            self._device_menu.entryconfigure("Stimulus: ON", state=state)
+            self._device_menu.entryconfigure("Stimulus: OFF", state=state)
+            self._device_menu.entryconfigure("Configure...", state=state)
+        except tk.TclError as e:
+            self.logger.debug("Failed to update device menu state: %s", e)
+
+    def _on_lens_on(self) -> None:
+        """Handle Lens: ON menu command."""
+        if not self.gui or not self.gui._port:
+            return
+        self.gui._on_stimulus_on()
+
+    def _on_lens_off(self) -> None:
+        """Handle Lens: OFF menu command."""
+        if not self.gui or not self.gui._port:
+            return
+        self.gui._on_stimulus_off()
+
+    def _on_configure(self) -> None:
+        """Handle Configure menu command."""
+        if not self.gui or not self.gui._port:
+            return
+        self.gui._on_configure_clicked()
 
     def bind_runtime(self, runtime) -> None:
         """Allow the runtime to expose its API to the GUI once ready."""
@@ -815,8 +807,6 @@ class DRTView:
         self._stub_view.attach_logging_handler()
 
     def call_in_gui(self, func, *args, **kwargs) -> None:
-        if not HAS_TK:
-            return
         root = getattr(self._stub_view, "root", None)
         if not root:
             return
@@ -832,11 +822,13 @@ class DRTView:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_connected, device_id, device_type)
+        self.call_in_gui(self._update_device_menu_state)
 
     def on_device_disconnected(self, device_id: str, device_type: DRTDeviceType = None) -> None:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_disconnected, device_id, device_type)
+        self.call_in_gui(self._update_device_menu_state)
 
     def on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if not self.gui:
@@ -854,6 +846,7 @@ class DRTView:
         if not self.gui:
             return
         self.call_in_gui(self.gui.sync_recording_state)
+        self.call_in_gui(self._update_device_menu_state)
 
     # ------------------------------------------------------------------
     # Lifecycle controls

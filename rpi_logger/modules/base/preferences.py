@@ -1,16 +1,82 @@
-"""Shared preference helpers for module configs."""
+"""Shared preference helpers for module configs.
+
+This module provides:
+- ModulePreferences: wrapper around ConfigManager for per-module config files
+- ScopedPreferences: namespaced view into preferences (e.g., "view.show_logger")
+- StatePersistence: protocol for runtime state that should survive restarts
+"""
 
 from __future__ import annotations
 
 import asyncio
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Optional, Set
+from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Set, runtime_checkable
 
 from rpi_logger.core.config_manager import ConfigManager, get_config_manager
 from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# State Persistence Protocol
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class StatePersistence(Protocol):
+    """Protocol for runtime state classes that support persistence.
+
+    Implement this protocol to enable automatic state save/restore:
+
+        class MyState(StatePersistence):
+            def __init__(self):
+                self.selected_ids: List[int] = []
+                self.last_value: str = ""
+
+            def get_persistable_state(self) -> Dict[str, Any]:
+                return {
+                    "selected_ids": ",".join(str(i) for i in self.selected_ids),
+                    "last_value": self.last_value,
+                }
+
+            def restore_from_state(self, data: Dict[str, Any]) -> None:
+                ids_str = data.get("selected_ids", "")
+                self.selected_ids = [int(x) for x in ids_str.split(",") if x]
+                self.last_value = data.get("last_value", "")
+
+            @classmethod
+            def state_prefix(cls) -> str:
+                return "mystate"  # Keys stored as mystate.selected_ids, etc.
+    """
+
+    def get_persistable_state(self) -> Dict[str, Any]:
+        """Return state that should be persisted across restarts.
+
+        Returns:
+            Dict of key-value pairs. Values should be primitives (str, int, float, bool)
+            or simple comma-separated lists that can be stored in config files.
+        """
+        ...
+
+    def restore_from_state(self, data: Dict[str, Any]) -> None:
+        """Restore state from previously persisted data.
+
+        Args:
+            data: Dict loaded from config, may be empty or partial.
+        """
+        ...
+
+    @classmethod
+    def state_prefix(cls) -> str:
+        """Return the config key prefix for this state class.
+
+        Returns:
+            Prefix string (e.g., "audio" -> keys stored as "audio.selected_ids")
+        """
+        ...
 
 
 @dataclass(slots=True)
@@ -62,10 +128,59 @@ class ModulePreferences:
             self._cache = {}
         return self.snapshot()
 
+    @property
+    def config_path(self) -> Path:
+        """Return the config file path for external use."""
+        return self._config_path
+
     def scope(self, prefix: str, *, separator: str = ".") -> "ScopedPreferences":
         """Return a scoped view that automatically prefixes keys."""
 
         return ScopedPreferences(self, prefix, separator=separator)
+
+    # ------------------------------------------------------------------
+    # State persistence helpers
+
+    def save_state(self, state_obj: StatePersistence) -> bool:
+        """Persist a StatePersistence object's state to config.
+
+        Args:
+            state_obj: Object implementing StatePersistence protocol.
+
+        Returns:
+            True if save succeeded.
+        """
+        prefix = state_obj.state_prefix()
+        state_data = state_obj.get_persistable_state()
+        if not state_data:
+            return True
+
+        # Prefix all keys
+        prefixed = {f"{prefix}.{k}": v for k, v in state_data.items()}
+        return self.write_sync(prefixed)
+
+    async def save_state_async(self, state_obj: StatePersistence) -> bool:
+        """Async version of save_state."""
+        prefix = state_obj.state_prefix()
+        state_data = state_obj.get_persistable_state()
+        if not state_data:
+            return True
+
+        prefixed = {f"{prefix}.{k}": v for k, v in state_data.items()}
+        return await self.write_async(prefixed)
+
+    def restore_state(self, state_obj: StatePersistence) -> None:
+        """Restore a StatePersistence object's state from config.
+
+        Args:
+            state_obj: Object implementing StatePersistence protocol.
+        """
+        prefix = state_obj.state_prefix()
+        scoped = self.scope(prefix)
+        state_data = scoped.snapshot()
+        if state_data:
+            state_obj.restore_from_state(state_data)
+            logger.debug("Restored state for %s: %d keys", prefix, len(state_data))
 
     # ------------------------------------------------------------------
     # Mutation helpers
@@ -223,4 +338,5 @@ __all__ = [
     "ModulePreferences",
     "PreferenceChange",
     "ScopedPreferences",
+    "StatePersistence",
 ]

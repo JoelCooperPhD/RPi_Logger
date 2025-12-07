@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import sys
-from typing import Optional
 
 MODULE_DIR = Path(__file__).resolve().parent
 
@@ -64,7 +63,7 @@ def _resolve_log_level(value: str | None) -> tuple[str, bool]:
         return normalized, False
     return _DEFAULT_LOG_LEVEL, True
 
-def parse_args(argv: Optional[list[str]] = None):
+def parse_args(argv: list[str] | None = None):
     return parse_cli_args(argv, config_path=CONFIG_PATH)
 
 
@@ -72,7 +71,7 @@ def build_runtime(context):
     return AudioRuntime(context)
 
 
-async def main(argv: Optional[list[str]] = None) -> None:
+async def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
 
     requested_level = str(getattr(args, "log_level", "") or "")

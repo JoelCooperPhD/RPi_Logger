@@ -123,8 +123,8 @@ class EyeTrackerViewAdapter:
         if hasattr(self.view, "set_preview_title"):
             try:
                 self.view.set_preview_title("Preview")
-            except Exception:
-                pass
+            except AttributeError:
+                pass  # Method exists but may not be callable
         self._build_status_panel()
         if not self._disabled_message:
             self._schedule_preview()
@@ -306,8 +306,8 @@ class EyeTrackerViewAdapter:
             state = 'normal' if connected else 'disabled'
             try:
                 self._configure_btn.configure(state=state)
-            except Exception:
-                pass
+            except tk.TclError:
+                pass  # Widget may be destroyed
 
     def set_device_info(self, device_name: str) -> None:
         """Update device name display."""
@@ -333,6 +333,6 @@ class EyeTrackerViewAdapter:
             return
         try:
             self.view.root.after_cancel(self._preview_after_handle)
-        except Exception:
-            pass
+        except tk.TclError:
+            pass  # Widget may be destroyed
         self._preview_after_handle = None

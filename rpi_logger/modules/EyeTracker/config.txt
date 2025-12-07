@@ -82,7 +82,7 @@ discovery_retry = 3.0     # Seconds between retries
 ################################################################################
 # MASTER LOGGER WINDOW STATE (AUTOSAVED)
 ################################################################################
-enabled = false
+enabled = true
 window_x = 1010
 window_y = 349
 window_width = 1419
@@ -91,6 +91,5 @@ window_height = 699
 window_geometry = 320x200
 preview_resolution = auto
 gui_io_stub_visible = false
-gui_logger_visible = false
 view.show_io_panel = false
 view.show_logger = false

@@ -28,7 +28,7 @@ try:  # tracker_core dependencies (optional on dev hosts)
     from rpi_logger.modules.EyeTracker.tracker_core.frame_processor import FrameProcessor
     from rpi_logger.modules.EyeTracker.tracker_core.recording import RecordingManager
     from rpi_logger.modules.EyeTracker.tracker_core.tracker_handler import TrackerHandler
-except Exception as exc:  # pragma: no cover - defensive import guard
+except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - missing dependencies
     TrackerConfig = None  # type: ignore[assignment]
     DeviceManager = None  # type: ignore[assignment]
     StreamHandler = None  # type: ignore[assignment]
@@ -239,7 +239,17 @@ class EyeTrackerRuntime(ModuleRuntime):
         # Bind runtime for button callbacks
         self._view_adapter.bind_runtime(self)
 
-    def _start_device_monitor(self, *, force: bool = False) -> None:
+    def _clear_device_task(self, completed_task: asyncio.Task) -> None:
+        """Clear device task reference only if it matches the completed task."""
+        if self._device_task is completed_task:
+            self._device_task = None
+
+    def _attempt_reconnect_to_assigned(self) -> None:
+        """Attempt to reconnect to the previously assigned device.
+
+        Device discovery is centralized in the main logger. This method
+        only attempts to reconnect if we have an assigned device address.
+        """
         if self._shutdown.is_set():
             return
 
@@ -248,9 +258,12 @@ class EyeTrackerRuntime(ModuleRuntime):
                 self._device_ready_event.set()
             return
 
-        if force and self._device_task and not self._device_task.done():
-            self._device_task.cancel()
-            self._device_task = None
+        # Only reconnect if we have an assigned device
+        if not self._assigned_network_address:
+            self.logger.debug("No assigned device to reconnect to")
+            if self._view_adapter:
+                self._view_adapter.set_device_status("Waiting for device assignment...", connected=False)
+            return
 
         if self._device_task and not self._device_task.done():
             return
@@ -258,49 +271,31 @@ class EyeTrackerRuntime(ModuleRuntime):
         if self._device_ready_event:
             self._device_ready_event.clear()
 
-        self._device_task = self.task_manager.create(
-            self._ensure_tracker_ready(),
-            name="EyeTrackerDeviceConnect",
+        task = self.task_manager.create(
+            self._reconnect_to_assigned(),
+            name="EyeTrackerReconnect",
         )
-        self._device_task.add_done_callback(lambda _: setattr(self, "_device_task", None))
+        self._device_task = task
+        task.add_done_callback(lambda t: self._clear_device_task(t))
 
-    async def _ensure_tracker_ready(self) -> None:
-        if self._tracker_handler is None or self._device_manager is None:
-            return
-        if self._tracker_task and not self._tracker_task.done():
-            return
-        if self._shutdown.is_set():
+    async def _reconnect_to_assigned(self) -> None:
+        """Reconnect to the assigned device address."""
+        if not self._assigned_network_address or self._shutdown.is_set():
             return
 
-        timeout = max(1.0, float(getattr(self.args, "discovery_timeout", 5.0)))
-        retry_interval = max(1.0, float(getattr(self.args, "discovery_retry", 3.0)))
+        if self._view_adapter:
+            self._view_adapter.set_device_status(
+                f"Reconnecting to {self._assigned_network_address}...", connected=False
+            )
 
-        while not self._shutdown.is_set():
-            try:
-                connected = await asyncio.wait_for(self._device_manager.connect(), timeout=timeout)
-            except (asyncio.TimeoutError, Exception) as exc:
-                connected = False
-                self.logger.debug("Device discovery attempt failed: %s", exc)
+        success = await self._connect_to_assigned_device()
 
-            if connected:
-                self._device_connected = True
-                if self._device_ready_event:
-                    self._device_ready_event.set()
-                self.logger.info("Eye tracker connected")
-                if self._view_adapter:
-                    self._view_adapter.set_device_status("Connected", connected=True)
-                await self._start_tracker_background()
-                return
-
+        if success:
+            self.logger.info("Reconnected to eye tracker")
+        else:
+            self.logger.warning("Failed to reconnect to assigned device")
             if self._view_adapter:
-                self._view_adapter.set_device_status("Searching for device...", connected=False)
-
-            self.logger.info("Eye tracker not found; retrying in %.1fs", retry_interval)
-            try:
-                await asyncio.wait_for(self._shutdown.wait(), timeout=retry_interval)
-                return
-            except asyncio.TimeoutError:
-                continue
+                self._view_adapter.set_device_status("Reconnect failed", connected=False)
 
     async def _start_tracker_background(self) -> None:
         if not self._tracker_handler:
@@ -329,7 +324,7 @@ class EyeTrackerRuntime(ModuleRuntime):
         if self._view_adapter:
             self._view_adapter.set_device_status("Disconnected", connected=False)
         if not self._shutdown.is_set():
-            self._start_device_monitor()
+            self._attempt_reconnect_to_assigned()
 
     async def _stop_tracker(self) -> None:
         if self._tracker_handler:
@@ -343,6 +338,7 @@ class EyeTrackerRuntime(ModuleRuntime):
             self._view_adapter.set_device_status("Stopped", connected=False)
 
     async def request_reconnect(self) -> None:
+        """Request reconnection to the assigned device."""
         if self._shutdown.is_set():
             return
 
@@ -353,10 +349,20 @@ class EyeTrackerRuntime(ModuleRuntime):
             with contextlib.suppress(Exception):
                 await self._device_manager.cleanup()
 
-        if self._view_adapter:
-            self._view_adapter.set_device_status("Searching for device...", connected=False)
+        # Cancel any pending reconnect task
+        if self._device_task and not self._device_task.done():
+            self._device_task.cancel()
+            self._device_task = None
 
-        self._start_device_monitor(force=True)
+        if self._assigned_network_address:
+            if self._view_adapter:
+                self._view_adapter.set_device_status(
+                    f"Reconnecting to {self._assigned_network_address}...", connected=False
+                )
+            self._attempt_reconnect_to_assigned()
+        else:
+            if self._view_adapter:
+                self._view_adapter.set_device_status("Waiting for device assignment...", connected=False)
 
     # ------------------------------------------------------------------
     # Device assignment (from main UI)
@@ -403,6 +409,17 @@ class EyeTrackerRuntime(ModuleRuntime):
         success = await self._connect_to_assigned_device()
 
         if success:
+            # Update window title: EyeTracker(Network):address
+            if self.view:
+                short_addr = network_address
+                if len(short_addr) > 15:
+                    short_addr = short_addr[:12] + "..."
+                title = f"EyeTracker(Network):{short_addr}"
+                try:
+                    self.view.set_window_title(title)
+                except Exception:
+                    pass
+
             StatusMessage.send(StatusType.DEVICE_ASSIGNED, {
                 "device_id": device_id,
                 "device_type": "Pupil_Labs_Neon",
@@ -535,17 +552,19 @@ class EyeTrackerRuntime(ModuleRuntime):
             return False
 
         if not self._device_connected:
-            self._start_device_monitor()
-            wait_timeout = max(1.0, float(getattr(self.args, "discovery_timeout", 5.0)))
-            ready_event = self._device_ready_event
-            if ready_event is not None:
-                self.logger.info("Waiting up to %.1fs for eye tracker connection", wait_timeout)
-                try:
-                    await asyncio.wait_for(ready_event.wait(), timeout=wait_timeout)
-                except asyncio.TimeoutError:
-                    pass
+            # Try to reconnect to assigned device if we have one
+            if self._assigned_network_address:
+                self._attempt_reconnect_to_assigned()
+                wait_timeout = max(1.0, float(getattr(self.args, "discovery_timeout", 5.0)))
+                ready_event = self._device_ready_event
+                if ready_event is not None:
+                    self.logger.info("Waiting up to %.1fs for eye tracker reconnection", wait_timeout)
+                    try:
+                        await asyncio.wait_for(ready_event.wait(), timeout=wait_timeout)
+                    except asyncio.TimeoutError:
+                        pass
             if not self._device_connected:
-                self.logger.warning("Cannot start recording: device not connected")
+                self.logger.warning("Cannot start recording: device not connected (assign device first)")
                 self.model.recording = False
                 return False
 

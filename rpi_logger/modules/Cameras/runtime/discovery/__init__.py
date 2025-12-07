@@ -1,11 +1,13 @@
-"""Discovery utilities for Cameras."""
+"""Discovery utilities for Cameras.
+
+Device discovery is centralized in the main logger via usb_camera_scanner.py
+and csi_scanner.py. This module only contains capability-building utilities
+used by backends after a device is assigned.
+"""
 
 from .cache import DiscoveryCache
 from .capabilities import build_capabilities, normalize_modes, select_default_preview, select_default_record
-from .combine import merge_descriptors
-from .picam import discover_picam, probe_picam_capabilities
 from .policy import DiscoveryPolicy
-from .usb import discover_usb_devices, probe_usb_capabilities
 
 __all__ = [
     "DiscoveryCache",
@@ -14,9 +16,4 @@ __all__ = [
     "normalize_modes",
     "select_default_preview",
     "select_default_record",
-    "merge_descriptors",
-    "discover_usb_devices",
-    "probe_usb_capabilities",
-    "discover_picam",
-    "probe_picam_capabilities",
 ]

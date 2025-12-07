@@ -36,7 +36,6 @@ class CamerasView:
         self._has_ui = False
         self._activate_handler: Optional[Callable[[Optional[str]], None]] = None
         self._active_camera_id: Optional[str] = None
-        self._refresh_handler: Optional[Callable[[], None]] = None
         self._config_handler: Optional[Callable[[str, Dict[str, str]], None]] = None
         self._settings_window: Optional[SettingsWindow] = None
         self._settings_toggle_var: Optional[Any] = None
@@ -175,11 +174,9 @@ class CamerasView:
     def bind_handlers(
         self,
         *,
-        refresh: Optional[Callable[[], None]] = None,
         apply_config: Optional[Callable[[str, Dict[str, str]], None]] = None,
         activate_camera: Optional[Callable[[Optional[str]], None]] = None,
     ) -> None:
-        self._refresh_handler = refresh
         self._config_handler = apply_config
         self._activate_handler = activate_camera
 
@@ -192,7 +189,6 @@ class CamerasView:
         self._adapter.add_camera(
             camera_id,
             title=title,
-            refresh_cb=self._handle_refresh_clicked,
             apply_config_cb=self._apply_config_from_tab,
         )
         previous_active = self._active_camera_id
@@ -228,7 +224,7 @@ class CamerasView:
             self._settings_window.remove_camera(camera_id)
         if self._active_camera_id == camera_id:
             self._active_camera_id = self._adapter.first_camera_id()
-        if not self._adapter.tabs:
+        if not self._adapter.views:
             self._restore_placeholder()
         if self._active_camera_id != previous_active:
             self._emit_active_camera_changed()
@@ -299,13 +295,6 @@ class CamerasView:
     def _apply_config_from_tab(self, camera_id: str, settings: Dict[str, str]) -> None:
         self._apply_config(camera_id, settings)
 
-    def _handle_refresh_clicked(self) -> None:
-        self.set_status("Refreshing camera list...")
-        if self._refresh_handler:
-            try:
-                self._refresh_handler()
-            except Exception:
-                self._logger.debug("Refresh handler failed", exc_info=True)
 
     def _apply_metrics_update(self, camera_id: str) -> None:
         self._update_io_stub_line()
@@ -374,12 +363,12 @@ class CamerasView:
 
         values = {
             "cam": cam_id,
-            "in": _fmt_num(payload.get("ingress_fps_avg") if "ingress_fps_avg" in payload else payload.get("record_ingest_fps_avg")),
-            "rec": _fmt_num(payload.get("record_fps_avg")),
+            "in": _fmt_num(payload.get("fps_capture")),
+            "rec": _fmt_num(payload.get("fps_encode")),
             "tgt": _fmt_num(payload.get("target_record_fps")),
-            "prv": _fmt_num(payload.get("preview_fps_avg")),
+            "prv": _fmt_num(payload.get("fps_preview")),
             "q": f"{_fmt_int(payload.get('preview_queue'))}/{_fmt_int(payload.get('record_queue'))}",
-            "wait": _fmt_num(payload.get("ingress_wait_ms")),
+            "wait": _fmt_num(payload.get("capture_wait_ms")),
         }
         history = self._io_stub_history.setdefault(cam_id, {})
 
@@ -429,8 +418,6 @@ class CamerasView:
                 variable=self._settings_toggle_var,
                 command=self._toggle_settings_window,
             )
-        menu.add_separator()
-        menu.add_command(label="Refresh Cameras", command=self._handle_refresh_clicked)
 
     def _apply_config(self, camera_id: Optional[str], settings: Dict[str, str]) -> None:
         if not camera_id:

@@ -296,30 +296,8 @@ class WVOGProtocol(BaseVOGProtocol):
         """Return command mapping."""
         return self.COMMANDS.copy()
 
-    def to_extended_csv_row(
-        self,
-        packet: VOGDataPacket,
-        label: str,
-        unix_time: int,
-        ms_since_record: int
-    ) -> str:
-        """Format wVOG data as extended CSV row.
-
-        Args:
-            packet: Data packet
-            label: Trial label
-            unix_time: Host system unix timestamp
-            ms_since_record: Milliseconds since recording started
-
-        Returns:
-            CSV formatted string (no newline)
-        """
-        return (f"{packet.device_id}, {label}, {unix_time}, {ms_since_record}, "
-                f"{packet.trial_number}, {packet.shutter_open}, {packet.shutter_closed}, "
-                f"{packet.shutter_total}, {packet.lens}, {packet.battery_percent}")
-
     # ------------------------------------------------------------------
-    # Polymorphic methods (Phase 7 cleanup)
+    # Polymorphic methods
     # ------------------------------------------------------------------
 
     def get_config_commands(self) -> list:
@@ -350,4 +328,6 @@ class WVOGProtocol(BaseVOGProtocol):
 
     def format_csv_row(self, packet, label: str, unix_time: int, ms_since_record: int) -> str:
         """Format wVOG packet as CSV row (extended format)."""
-        return self.to_extended_csv_row(packet, label, unix_time, ms_since_record)
+        return (f"{packet.device_id}, {label}, {unix_time}, {ms_since_record}, "
+                f"{packet.trial_number}, {packet.shutter_open}, {packet.shutter_closed}, "
+                f"{packet.shutter_total}, {packet.lens}, {packet.battery_percent}")

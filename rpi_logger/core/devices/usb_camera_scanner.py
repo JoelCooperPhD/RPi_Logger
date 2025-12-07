@@ -127,6 +127,16 @@ class USBCameraScanner:
         if self._running:
             await self._scan_devices()
 
+    async def reannounce_devices(self) -> None:
+        """Re-emit discovery events for all known devices."""
+        logger.debug(f"Re-announcing {len(self._known_devices)} USB cameras")
+        for camera in self._known_devices.values():
+            if self._on_device_found:
+                try:
+                    await self._on_device_found(camera)
+                except Exception as e:
+                    logger.error(f"Error re-announcing USB camera: {e}")
+
     async def _scan_loop(self) -> None:
         """Main scanning loop."""
         while self._running:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from rpi_logger.core.commands import StatusType
 
@@ -18,7 +18,7 @@ class CommandRouter:
         self.logger = logger.getChild("CommandRouter")
         self.app = app
 
-    async def handle_command(self, command: Dict[str, Any]) -> bool:
+    async def handle_command(self, command: dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
         self.logger.debug("Handling command: %s", action)
         if action == "start_recording":

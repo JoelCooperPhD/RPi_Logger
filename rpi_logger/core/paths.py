@@ -56,6 +56,7 @@ USER_MODULE_LOGS_DIR = USER_STATE_DIR / "module_logs"
 # UI assets
 UI_DIR = Path(__file__).parent / "ui"
 LOGO_PATH = UI_DIR / "logo_100.png"
+ICON_PATH = UI_DIR / "icon.png"  # Network graph icon for system tray
 
 
 def ensure_directories() -> None:
@@ -82,6 +83,7 @@ __all__ = [
     'USER_MODULE_LOGS_DIR',
     'UI_DIR',
     'LOGO_PATH',
+    'ICON_PATH',
     'ensure_directories',
     '_is_frozen',
 ]

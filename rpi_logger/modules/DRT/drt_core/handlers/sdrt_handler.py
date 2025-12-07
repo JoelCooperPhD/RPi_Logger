@@ -78,7 +78,7 @@ class SDRTHandler(BaseDRTHandler):
             True if command was sent successfully
         """
         if command not in SDRT_COMMANDS:
-            logger.error(f"Unknown sDRT command: {command}")
+            logger.error("Unknown sDRT command: %s", command)
             return False
 
         cmd_string = SDRT_COMMANDS[command]
@@ -210,7 +210,7 @@ class SDRTHandler(BaseDRTHandler):
             # Route to appropriate handler
             response_type = SDRT_RESPONSES.get(key)
             if response_type is None:
-                logger.debug(f"Unknown sDRT response: {key}")
+                logger.debug("Unknown sDRT response: %s", key)
                 return
 
             if response_type == 'click':
@@ -225,21 +225,18 @@ class SDRTHandler(BaseDRTHandler):
                 self._handle_config(value)
 
         except Exception as e:
-            logger.error(f"Error processing sDRT response '{line}': {e}")
+            logger.error("Error processing sDRT response '%s': %s", line, e)
 
     def _handle_click(self, value: str) -> None:
         """Handle click response."""
         try:
-            click_value = int(value)
-            self._click_count = click_value
-            logger.debug(f"Click count: {self._click_count}")
-
-            # Dispatch click event
+            self._click_count = int(value)
+            logger.debug("Click count: %d", self._click_count)
             self._create_background_task(self._dispatch_data_event('click', {
                 'count': self._click_count
             }))
         except ValueError:
-            logger.error(f"Invalid click value: {value}")
+            logger.error("Invalid click value: %s", value)
 
     def _handle_trial(self, value: str) -> None:
         """
@@ -261,9 +258,7 @@ class SDRTHandler(BaseDRTHandler):
                     'clicks': self._click_count,
                 }
 
-                logger.debug(f"Trial data: {self._buffered_trial_data}")
-
-                # Dispatch trial event
+                logger.debug("Trial data: %s", self._buffered_trial_data)
                 self._create_background_task(self._dispatch_data_event('trial', {
                     'timestamp': timestamp,
                     'trial_number': trial_number,
@@ -271,7 +266,7 @@ class SDRTHandler(BaseDRTHandler):
                 }))
 
         except (ValueError, IndexError) as e:
-            logger.error(f"Error parsing trial data '{value}': {e}")
+            logger.error("Error parsing trial data '%s': %s", value, e)
 
     def _handle_end(self) -> None:
         """Handle experiment end response."""
@@ -294,15 +289,13 @@ class SDRTHandler(BaseDRTHandler):
                 self._log_trial_data(self._buffered_trial_data)
                 self._buffered_trial_data = None
 
-            logger.debug(f"Stimulus state: {'ON' if self._stimulus_on else 'OFF'}")
-
-            # Dispatch stimulus event
+            logger.debug("Stimulus state: %s", "ON" if self._stimulus_on else "OFF")
             self._create_background_task(self._dispatch_data_event('stimulus', {
                 'state': self._stimulus_on
             }))
 
         except ValueError:
-            logger.error(f"Invalid stimulus value: {value}")
+            logger.error("Invalid stimulus value: %s", value)
 
     def _handle_config(self, value: str) -> None:
         """
@@ -318,17 +311,14 @@ class SDRTHandler(BaseDRTHandler):
                     k, v = pair.split(':', 1)
                     config[k.strip()] = v.strip()
 
-            logger.debug(f"Config received: {config}")
-
-            # Dispatch config event
+            logger.debug("Config received: %s", config)
             self._create_background_task(self._dispatch_data_event('config', config))
 
-            # Complete config future if waiting
             if self._config_future and not self._config_future.done():
                 self._config_future.set_result(config)
 
         except Exception as e:
-            logger.error(f"Error parsing config '{value}': {e}")
+            logger.error("Error parsing config '%s': %s", value, e)
 
     # =========================================================================
     # Data Logging
@@ -383,16 +373,12 @@ class SDRTHandler(BaseDRTHandler):
                     f.write(self._get_csv_header() + '\n')
                 f.write(csv_line + '\n')
 
-            logger.debug(f"Logged trial data to {filepath}")
-
-            # Reset click count after logging
+            logger.debug("Logged trial data to %s", filepath)
             self._click_count = 0
-
-            # Dispatch logged event
             self._create_background_task(self._dispatch_data_event('trial_logged', {
                 'filepath': str(filepath),
                 'trial_number': trial_number,
             }))
 
         except Exception as e:
-            logger.error(f"Error logging trial data: {e}")
+            logger.error("Error logging trial data: %s", e)

@@ -9,8 +9,7 @@ state management and uses observers for state synchronization.
 """
 
 import asyncio
-import datetime
-import json
+import time
 from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Set, TYPE_CHECKING
@@ -38,8 +37,8 @@ from .paths import STATE_FILE
 from .module_manager import ModuleManager
 from .session_manager import SessionManager
 from .devices import (
-    DeviceConnectionManager, DeviceInfo, XBeeDongleInfo, ConnectionState,
-    DeviceSystem,
+    DeviceConnectionManager, DeviceInfo,
+    DeviceSystem, InterfaceType, DeviceFamily,
 )
 
 if TYPE_CHECKING:
@@ -118,24 +117,17 @@ class LoggerSystem:
             }
         )
 
-        # New device system (replaces DeviceConnectionManager for scanning/UI)
+        # Device system for scanning and UI
         self.device_system = DeviceSystem()
-        self.device_system.set_on_devices_changed(self._on_devices_changed)
         self.device_system.set_xbee_data_callback(self._route_xbee_to_module)
 
-        # Legacy device manager (kept for compatibility during migration)
-        # TODO: Remove once all code migrated to DeviceSystem
+        # Device connection manager for connection lifecycle
         self.device_manager = DeviceConnectionManager()
-        self.device_manager.set_devices_changed_callback(self._on_devices_changed)
         self.device_manager.set_device_connected_callback(self._on_device_connected)
         self.device_manager.set_device_disconnected_callback(self._on_device_disconnected)
         self.device_manager.set_save_connection_state_callback(self._save_device_connection_state)
         self.device_manager.set_load_connection_state_callback(self._load_device_connection_state)
         self.device_manager.set_xbee_data_router(self._route_xbee_to_module)
-
-        # UI callbacks
-        self.device_connected_callback: Optional[Callable[[str, bool], None]] = None
-        self.devices_ui_callback: Optional[Callable] = None
 
         # State
         self.shutdown_event = asyncio.Event()
@@ -258,8 +250,8 @@ class LoggerSystem:
                 self.logger.info("=== MODULE QUITTING: %s ===", module_name)
                 self._gracefully_quitting_modules.add(module_name)
                 self.module_manager.cleanup_stopped_process(module_name)
-                if not self.module_manager.is_module_state_changing(module_name):
-                    await self.state_manager.set_desired_state(module_name, False)
+                # Note: Do NOT change desired state here - the module type is still enabled
+                # The user just closed the window, they can click the device tile to reopen
                 # Notify UI that all devices for this module are now disconnected
                 self.logger.info("Calling _notify_device_connected_for_module for %s", module_name)
                 self._notify_device_connected_for_module(module_name, False)
@@ -280,10 +272,11 @@ class LoggerSystem:
 
         if not process.is_running() and self.state_manager.is_module_enabled(module_name):
             if module_name not in self._gracefully_quitting_modules:
-                self.logger.warning("Module %s crashed/stopped unexpectedly - unchecking", module_name)
+                self.logger.warning("Module %s crashed/stopped unexpectedly", module_name)
                 self.module_manager.cleanup_stopped_process(module_name)
                 await self.state_manager.set_actual_state(module_name, ActualState.CRASHED)
-                await self.state_manager.set_desired_state(module_name, False, reconcile=False)
+                # Note: Do NOT change desired state - module type stays enabled
+                # The device section stays visible so user can reconnect
                 # Notify UI that all devices for this module are now disconnected
                 self._notify_device_connected_for_module(module_name, False)
 
@@ -297,37 +290,38 @@ class LoggerSystem:
                 self.logger.error("UI callback error: %s", e)
 
     def _notify_device_connected(self, device_id: str, connected: bool) -> None:
-        """Notify UI about device connection state change."""
-        if not self.device_connected_callback:
-            return
-
+        """Update device connection state in device_system."""
         self.logger.debug("Device %s connected=%s", device_id, connected)
-        try:
-            self.device_connected_callback(device_id, connected)
-        except Exception as e:
-            self.logger.error("Device connected callback error: %s", e)
+        self.device_system.set_device_connected(device_id, connected)
 
     def _notify_device_connected_for_module(self, module_name: str, connected: bool) -> None:
         """Notify UI about connection state change for all devices of a module."""
-        self.logger.info(
-            "_notify_device_connected_for_module called: module=%s connected=%s callback=%s",
-            module_name, connected, self.device_connected_callback is not None
+        self.logger.debug(
+            "Updating device state for module %s: connected=%s",
+            module_name, connected
         )
-        if not self.device_connected_callback:
-            self.logger.warning("No device_connected_callback registered!")
-            return
 
-        devices = self.device_manager.get_devices_for_module(module_name)
-        self.logger.info(
-            "Module %s connected=%s, found %d devices to update",
-            module_name, connected, len(devices)
-        )
+        # Get devices from device_system (single source of truth)
+        devices = self.device_system.get_devices_for_module(module_name)
+        self.logger.debug("Found %d devices for module %s", len(devices), module_name)
+
         for device in devices:
-            self.logger.info("Updating device %s connected=%s", device.device_id, connected)
-            try:
-                self.device_connected_callback(device.device_id, connected)
-            except Exception as e:
-                self.logger.error("Device connected callback error: %s", e)
+            # Update device_system directly
+            self.device_system.set_device_connected(device.device_id, connected)
+
+    def notify_devices_changed(self) -> None:
+        """Notify UI observers that the device list/state has changed.
+
+        This triggers a UI refresh for the Devices panel. Called when:
+        - A connection type is enabled/disabled (module checkbox toggled)
+        - Device sections need to be shown/hidden based on module state
+
+        The DeviceUIController observes model changes automatically, but this
+        method provides an explicit trigger for cases where the observer chain
+        may not fire (e.g., bulk state changes during startup).
+        """
+        if self.device_system.ui_controller:
+            self.device_system.ui_controller._notify_ui_observers()
 
     # =========================================================================
     # UI Observer Access
@@ -511,26 +505,14 @@ class LoggerSystem:
     # Cleanup and State Management
     # =========================================================================
 
-    async def stop_all(self, request_geometry: bool = True) -> None:
-        """
-        Stop all modules.
-
-        Args:
-            request_geometry: If True, request geometry from modules before stopping.
-                             Set to False during final shutdown to speed up exit.
-        """
-        import time
-        self.logger.info("Stopping all modules (request_geometry=%s)", request_geometry)
+    async def stop_all(self) -> None:
+        """Stop all modules."""
+        self.logger.info("Stopping all modules")
 
         if self.session_manager.recording:
             pause_start = time.time()
             await self.pause_all()
             self.logger.info("Paused all modules in %.3fs", time.time() - pause_start)
-
-        if request_geometry:
-            self.logger.debug(
-                "Skipping legacy geometry requests; module views persist their own layout."
-            )
 
         stop_start = time.time()
         await self.module_manager.stop_all()
@@ -563,23 +545,15 @@ class LoggerSystem:
 
         return await self._session_recovery_observer.finalize_shutdown_state(running_modules)
 
-    async def cleanup(self, request_geometry: bool = True) -> None:
-        """
-        Cleanup all resources.
+    async def cleanup(self, request_geometry: bool = False) -> None:
+        """Cleanup all resources.
 
         Args:
-            request_geometry: If True, request geometry from modules before stopping.
-                             Default is True to ensure geometry is always saved (safe default).
-                             Can be set to False for faster shutdown if modules save their own.
+            request_geometry: Unused, geometry is saved by modules during quit.
         """
         self.logger.info("Cleaning up logger system")
-
-        # Stop health check
         await self.module_manager.stop_health_check()
-
-        # Stop all modules
-        await self.stop_all(request_geometry=request_geometry)
-
+        await self.stop_all()
         self.shutdown_event.set()
 
     def get_session_info(self) -> dict:
@@ -596,27 +570,6 @@ class LoggerSystem:
     # =========================================================================
     # Device Management
     # =========================================================================
-
-    def set_devices_ui_callback(
-        self,
-        callback: Callable[[List[DeviceInfo], List[XBeeDongleInfo], List[DeviceInfo], List[DeviceInfo], List[DeviceInfo], List[DeviceInfo]], None]
-    ) -> None:
-        """Set callback for updating device panel UI.
-
-        Args:
-            callback: Function receiving (usb_devices, dongles, network_devices, audio_devices, internal_devices, camera_devices)
-        """
-        self.devices_ui_callback = callback
-
-    def set_device_connected_callback(
-        self,
-        callback: Callable[[str, bool], None]
-    ) -> None:
-        """Set callback for device connection state changes.
-
-        The callback receives (device_id, connected) when connection state changes.
-        """
-        self.device_connected_callback = callback
 
     async def start_device_scanning(self) -> None:
         """Start USB and XBee device scanning."""
@@ -642,134 +595,31 @@ class LoggerSystem:
         await self.device_manager.stop_scanning()
         self.logger.info("Device scanning stopped")
 
-    def _on_devices_changed(self) -> None:
-        """Callback when device list changes - update UI."""
-        if self.devices_ui_callback:
-            devices = self.device_manager.get_all_devices()
-            dongles = self.device_manager.get_xbee_dongles()
-            network_devices = self.device_manager.get_network_devices()
-            audio_devices = self.device_manager.get_audio_devices()
-            internal_devices = self.device_manager.get_internal_devices()
-            camera_devices = self.device_manager.get_camera_devices()
-            self.devices_ui_callback(devices, dongles, network_devices, audio_devices, internal_devices, camera_devices)
+    def set_connection_enabled(
+        self,
+        interface: InterfaceType,
+        family: DeviceFamily,
+        enabled: bool
+    ) -> None:
+        """Enable or disable a connection type.
 
-    def notify_devices_changed(self) -> None:
-        """Notify the UI that the device list should be refreshed.
+        Updates device_system for UI state and scanning, and device_manager
+        for connection management (XBee transports, device state persistence).
 
-        Call this when enabled connections change to update section visibility.
+        Args:
+            interface: The interface type (USB, UART, Network, etc.)
+            family: The device family (DRT, VOG, Audio, etc.)
+            enabled: Whether to enable or disable the connection
         """
-        self._on_devices_changed()
+        # device_system handles UI state and device discovery/reannouncement
+        self.device_system.set_connection_enabled(interface, family, enabled)
+        # device_manager handles connection management and state persistence
+        self.device_manager.set_connection_enabled(interface, family, enabled)
 
-    async def _on_device_connected(self, device: DeviceInfo) -> None:
-        """
-        Callback when a device is connected.
-
-        This auto-starts the appropriate module and assigns the device to it.
-        The module window will be visible after this.
-
-        For internal devices (like Notes), no hardware assignment is needed -
-        the module just starts up.
-
-        For wireless devices, we create the XBee transport before assigning,
-        so the module can retrieve it via get_wireless_transport().
-        """
-        module_id = device.module_id
-        if not module_id:
-            self.logger.warning("Device %s has no module_id", device.device_id)
-            return
-
-        self.logger.info(
-            "Device connected: %s -> module %s",
-            device.device_id, module_id
-        )
-
-        # For wireless devices, create transport before assigning to module
-        if device.is_wireless:
-            transport = await self.device_manager.create_wireless_transport(device.device_id)
-            if not transport:
-                self.logger.error("Failed to create wireless transport for %s", device.device_id)
-                return
-
-        # Auto-start module if not running
-        if not self.is_module_running(module_id):
-            self.logger.info("Auto-starting module %s for device %s", module_id, device.device_id)
-            success = await self.set_module_enabled(module_id, True)
-            if not success:
-                self.logger.error("Failed to start module %s", module_id)
-                # Clean up transport on failure
-                if device.is_wireless:
-                    await self.device_manager.destroy_wireless_transport(device.device_id)
-                return
-
-        # For internal devices, no hardware assignment is needed - just start the module
-        if device.is_internal:
-            self.logger.debug("Internal device %s - skipping assign_device", device.device_id)
-        else:
-            # Send assign_device command to module (for hardware devices)
-            session_dir_str = str(self.session_dir) if self.session_dir else None
-            command = CommandMessage.assign_device(
-                device_id=device.device_id,
-                device_type=device.device_type.value,
-                port=device.port or "",
-                baudrate=device.baudrate,
-                session_dir=session_dir_str,
-                is_wireless=device.is_wireless,
-                is_network=device.is_network,
-                network_address=device.network_address,
-                network_port=device.network_port,
-                sounddevice_index=device.sounddevice_index,
-                audio_channels=device.audio_channels,
-                audio_sample_rate=device.audio_sample_rate,
-                # Camera fields
-                is_camera=device.is_camera,
-                camera_type=device.camera_type,
-                camera_stable_id=device.camera_stable_id,
-                camera_dev_path=device.camera_dev_path,
-                camera_hw_model=device.camera_hw_model,
-                camera_location=device.camera_location,
-                display_name=device.display_name,
-            )
-            success = await self.module_manager.send_command(module_id, command)
-            if not success:
-                self.logger.error("Failed to send assign_device to module %s", module_id)
-                # Clean up transport on failure
-                if device.is_wireless:
-                    await self.device_manager.destroy_wireless_transport(device.device_id)
-                return
-
-        # Module started with window visible - update UI
-        self._notify_device_connected(device.device_id, True)
-
-    async def _on_device_disconnected(self, device_id: str) -> None:
-        """Callback when a device is disconnected."""
-        self.logger.info("Device disconnected: %s", device_id)
-
-        # Find which module had this device
-        # For now, we'll iterate through running modules and send unassign
-        for module_name in self.module_manager.get_running_modules():
-            command = CommandMessage.unassign_device(device_id)
-            await self.module_manager.send_command(module_name, command)
-
-    async def _send_assign_device(self, device: DeviceInfo) -> bool:
-        """Send assign_device command to the appropriate module.
-
-        Used when reconnecting to a device after module restart.
-
-        Returns:
-            True if command was sent successfully.
-        """
-        module_id = device.module_id
-        if not module_id:
-            self.logger.warning("Device %s has no module_id", device.device_id)
-            return False
-
-        # Internal devices don't need hardware assignment
-        if device.is_internal:
-            self.logger.debug("Internal device %s - skipping assign_device", device.device_id)
-            return True
-
+    def _build_assign_device_command(self, device: DeviceInfo) -> CommandMessage:
+        """Build an assign_device command for the given device."""
         session_dir_str = str(self.session_dir) if self.session_dir else None
-        command = CommandMessage.assign_device(
+        return CommandMessage.assign_device(
             device_id=device.device_id,
             device_type=device.device_type.value,
             port=device.port or "",
@@ -790,6 +640,64 @@ class LoggerSystem:
             camera_location=device.camera_location,
             display_name=device.display_name,
         )
+
+    async def _on_device_connected(self, device: DeviceInfo) -> None:
+        """Callback when a device is connected.
+
+        Auto-starts the module and assigns the device. For wireless devices,
+        creates XBee transport first. Internal devices skip hardware assignment.
+        """
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device %s has no module_id", device.device_id)
+            return
+
+        self.logger.info("Device connected: %s -> module %s", device.device_id, module_id)
+
+        if device.is_wireless:
+            transport = await self.device_manager.create_wireless_transport(device.device_id)
+            if not transport:
+                self.logger.error("Failed to create wireless transport for %s", device.device_id)
+                return
+
+        if not self.is_module_running(module_id):
+            self.logger.info("Auto-starting module %s for device %s", module_id, device.device_id)
+            success = await self.set_module_enabled(module_id, True)
+            if not success:
+                self.logger.error("Failed to start module %s", module_id)
+                if device.is_wireless:
+                    await self.device_manager.destroy_wireless_transport(device.device_id)
+                return
+
+        if not device.is_internal:
+            command = self._build_assign_device_command(device)
+            success = await self.module_manager.send_command(module_id, command)
+            if not success:
+                self.logger.error("Failed to send assign_device to module %s", module_id)
+                if device.is_wireless:
+                    await self.device_manager.destroy_wireless_transport(device.device_id)
+                return
+
+        self._notify_device_connected(device.device_id, True)
+
+    async def _on_device_disconnected(self, device_id: str) -> None:
+        """Callback when a device is disconnected."""
+        self.logger.info("Device disconnected: %s", device_id)
+        for module_name in self.module_manager.get_running_modules():
+            command = CommandMessage.unassign_device(device_id)
+            await self.module_manager.send_command(module_name, command)
+
+    async def _send_assign_device(self, device: DeviceInfo) -> bool:
+        """Send assign_device command to the appropriate module."""
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device %s has no module_id", device.device_id)
+            return False
+
+        if device.is_internal:
+            return True
+
+        command = self._build_assign_device_command(device)
         success = await self.module_manager.send_command(module_id, command)
         if not success:
             self.logger.error("Failed to send assign_device to module %s", module_id)
@@ -838,11 +746,20 @@ class LoggerSystem:
         return self.config_manager.get_bool(config, 'device_connected', default=False)
 
     async def _load_pending_auto_connects(self) -> None:
-        """Load device connection states and mark modules for auto-connect."""
+        """Load device connection states and mark modules for auto-connect.
+
+        Only marks modules for auto-connect if they are enabled (checked in
+        Modules menu). This ensures disabled modules don't auto-connect their
+        devices on startup.
+        """
         modules = self.module_manager.get_available_modules()
 
         for module_info in modules:
             if not module_info.config_path:
+                continue
+
+            # Only auto-connect if the module is enabled
+            if not self.is_module_enabled(module_info.name):
                 continue
 
             config = await self.config_manager.read_config_async(module_info.config_path)
@@ -867,7 +784,7 @@ class LoggerSystem:
         """
         self.logger.info("connect_and_start_device: %s", device_id)
 
-        device = self.device_manager.get_device(device_id)
+        device = self.device_system.get_device(device_id)
         if not device:
             self.logger.warning("Device not found: %s", device_id)
             return False
@@ -878,7 +795,7 @@ class LoggerSystem:
             return False
 
         # Step 1: Connect device if not connected
-        if device.state != ConnectionState.CONNECTED:
+        if not self.device_system.is_device_connected(device_id):
             self.logger.info("Connecting device %s", device_id)
             connected = await self.connect_device(device_id)
             if not connected:
@@ -914,7 +831,7 @@ class LoggerSystem:
         """
         self.logger.info("stop_and_disconnect_device: %s", device_id)
 
-        device = self.device_manager.get_device(device_id)
+        device = self.device_system.get_device(device_id)
         if not device:
             self.logger.warning("Device not found: %s", device_id)
             self._notify_device_connected(device_id, False)
@@ -934,6 +851,11 @@ class LoggerSystem:
         # Step 2: Disconnect device (saves state to config)
         await self.device_manager.disconnect_device(device_id)
 
+        # Step 3: Notify UI that device is disconnected
+        # This ensures the green dot is updated even if the module
+        # quit notification doesn't reach us in time
+        self._notify_device_connected(device_id, False)
+
         return True
 
     # =========================================================================
@@ -952,7 +874,7 @@ class LoggerSystem:
         that directly receives data via the registered handler.
         """
         # Find which module owns this device
-        device = self.device_manager.get_device(node_id)
+        device = self.device_system.get_device(node_id)
         if not device:
             self.logger.debug("XBee data for unknown device: %s", node_id)
             return

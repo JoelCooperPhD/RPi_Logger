@@ -236,7 +236,11 @@ class TkinterMenuBase:
                 else:
                     setattr(config, config_key, visible)
 
-                if hasattr(self.system, 'config_file_path'):
+                # Prefer using preferences API if available (routes through ConfigManager)
+                if hasattr(self.system, 'preferences'):
+                    self.system.preferences.write_sync({config_key: visible})
+                    logger.debug("Saved view state %s=%s via preferences", config_key, visible)
+                elif hasattr(self.system, 'config_file_path'):
                     from rpi_logger.modules.base import ConfigLoader
                     ConfigLoader.update_config_values(
                         self.system.config_file_path,

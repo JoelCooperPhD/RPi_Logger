@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Iterable, Tuple
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -53,7 +53,7 @@ class LevelMeter:
 
         self.dirty = True
 
-    def get_db_levels(self) -> Tuple[float, float]:
+    def get_db_levels(self) -> tuple[float, float]:
         return self._rms_db, self._peak_db
 
     def clear_dirty(self) -> None:

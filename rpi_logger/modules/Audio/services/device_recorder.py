@@ -11,7 +11,6 @@ import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import sounddevice as sd
@@ -30,8 +29,8 @@ class RecordingHandle:
     trial_number: int
     device_id: int
     device_name: str
-    start_time_unix: Optional[float] = None
-    start_time_monotonic: Optional[float] = None
+    start_time_unix: float | None = None
+    start_time_monotonic: float | None = None
 
 
 @dataclass(slots=True)
@@ -41,7 +40,7 @@ class AudioChunk:
     chunk_index: int
     unix_time: float
     monotonic_time: float
-    adc_timestamp: Optional[float]
+    adc_timestamp: float | None
     total_frames: int
 
 
@@ -59,16 +58,17 @@ class AudioDeviceRecorder:
         self.sample_rate = max(1, int(sample_rate))
         self.level_meter = level_meter
         self.logger = logger.getChild(f"Dev{device.device_id}")
-        self.stream: Optional[sd.InputStream] = None
+        self.stream: sd.InputStream | None = None
         self.recording = False
-        self._last_status: Optional[str] = None
-        self._writer_thread: Optional[threading.Thread] = None
+        self._last_status: str | None = None
+        self._writer_thread: threading.Thread | None = None
         self._writer_stop = threading.Event()
         self._write_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=64)
-        self._active_handle: Optional[RecordingHandle] = None
+        self._active_handle: RecordingHandle | None = None
         self._dropped_blocks = 0
         self._chunk_counter = 0
         self._total_frames = 0
+        self._meter_errors = 0
 
     # ------------------------------------------------------------------
     # Stream lifecycle
@@ -165,7 +165,7 @@ class AudioDeviceRecorder:
         self.recording = True
         self.logger.info("Recording to %s (timing -> %s)", file_path.name, timing_csv.name)
 
-    def finish_recording(self) -> Optional[RecordingHandle]:
+    def finish_recording(self) -> RecordingHandle | None:
         if not self.recording:
             return None
         self.recording = False
@@ -195,7 +195,9 @@ class AudioDeviceRecorder:
         try:
             self.level_meter.add_samples(mono, now_unix)
         except Exception:
-            pass
+            self._meter_errors += 1
+            if self._meter_errors == 1:
+                self.logger.warning("Level meter error (suppressing further)", exc_info=True)
 
         if self.recording and self._active_handle:
             chunk_bytes = self._to_pcm_bytes(mono)
@@ -311,7 +313,7 @@ class AudioDeviceRecorder:
             csv_stem = f"{stem}_timing"
         return audio_path.with_name(f"{csv_stem}.csv")
 
-    def _extract_time_info(self, time_info) -> Optional[float]:
+    def _extract_time_info(self, time_info) -> float | None:
         if not time_info:
             return None
         for attr in ("input_buffer_adc_time", "current_time", "output_buffer_dac_time"):

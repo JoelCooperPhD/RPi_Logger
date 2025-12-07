@@ -266,7 +266,7 @@ class SVOGProtocol(BaseVOGProtocol):
         return self.COMMANDS.copy()
 
     # ------------------------------------------------------------------
-    # Polymorphic methods (Phase 7 cleanup)
+    # Polymorphic methods
     # ------------------------------------------------------------------
 
     def get_config_commands(self) -> list:

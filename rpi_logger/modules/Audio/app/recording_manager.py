@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable
 
 from rpi_logger.core.commands import StatusType
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
@@ -25,7 +25,7 @@ class RecordingManager:
         session_service: SessionService,
         module_bridge: ModuleBridge,
         logger: logging.Logger,
-        status_callback: Callable[[StatusType, Dict[str, object]], None],
+        status_callback: Callable[[StatusType, dict[str, object]], None],
     ) -> None:
         self.state = state
         self.recorder_service = recorder_service
@@ -37,7 +37,7 @@ class RecordingManager:
         self._module_subdir = "Audio"
         self._start_lock = asyncio.Lock()
 
-    async def ensure_session_dir(self, current: Optional[Path]) -> Path:
+    async def ensure_session_dir(self, current: Path | None) -> Path:
         session_dir = await self.session_service.ensure_session_dir(current)
         self._active_session_dir = session_dir
         self.module_bridge.set_session_dir(session_dir)

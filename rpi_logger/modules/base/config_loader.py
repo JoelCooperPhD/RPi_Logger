@@ -4,12 +4,19 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 
 
 class ConfigLoader:
+    """Config file loader for modules.
+
+    Note: Write operations delegate to ConfigManager for consistency.
+    This ensures all config writes go through the same code path with
+    proper locking and override file handling.
+    """
 
     @staticmethod
     async def load_async(
@@ -167,72 +174,17 @@ class ConfigLoader:
 
     @staticmethod
     async def update_config_values_async(config_path: Path, updates: Dict[str, Any]) -> bool:
-        """Async version of update_config_values() using asyncio.to_thread for file I/O."""
-        return await asyncio.to_thread(ConfigLoader.update_config_values, config_path, updates)
+        """Async version of update_config_values() delegating to ConfigManager."""
+        return await get_config_manager().write_config_async(config_path, updates)
 
     @staticmethod
     def update_config_values(config_path: Path, updates: Dict[str, Any]) -> bool:
-        if not config_path.exists():
-            logger.warning("Config file not found at %s, cannot update", config_path)
-            return False
+        """Update config values, delegating to ConfigManager for consistency.
 
-        try:
-            with open(config_path, 'r') as f:
-                lines = f.readlines()
-
-            updated_keys = set()
-
-            for i, line in enumerate(lines):
-                stripped = line.strip()
-
-                if not stripped or stripped.startswith('#'):
-                    continue
-
-                if '=' in stripped:
-                    key = stripped.split('=', 1)[0].strip()
-                    if key in updates:
-                        indent = len(line) - len(line.lstrip())
-                        value_str = ConfigLoader._format_config_value(updates[key])
-
-                        if '#' in stripped.split('=', 1)[1]:
-                            comment = '#' + stripped.split('#', 1)[1]
-                            lines[i] = f"{' ' * indent}{key} = {value_str} {comment}\n"
-                        else:
-                            lines[i] = f"{' ' * indent}{key} = {value_str}\n"
-
-                        updated_keys.add(key)
-
-            missing_items = [
-                (key, ConfigLoader._format_config_value(updates[key]))
-                for key in updates
-                if key not in updated_keys
-            ]
-
-            if missing_items:
-                if lines and not lines[-1].endswith('\n'):
-                    lines[-1] = f"{lines[-1]}\n"
-
-                comment_text = '# Auto-generated settings (do not edit unless you know what you are doing)'
-                comment_line = f"{comment_text}\n"
-                has_comment = any(line.strip() == comment_text for line in lines)
-
-                if not has_comment:
-                    if lines and lines[-1].strip():
-                        lines.append('\n')
-                    lines.append(comment_line)
-
-                for key, value_str in missing_items:
-                    lines.append(f"{key} = {value_str}\n")
-
-            with open(config_path, 'w') as f:
-                f.writelines(lines)
-
-            logger.info("Updated config file: %s (keys: %s)", config_path, updated_keys or {key for key, _ in missing_items})
-            return True
-
-        except Exception as e:
-            logger.error("Failed to update config file: %s", e, exc_info=True)
-            return False
+        This ensures all config writes go through a single code path with
+        proper locking and override file handling for read-only installations.
+        """
+        return get_config_manager().write_config(config_path, updates)
 
     @staticmethod
     def _format_config_value(value: Any) -> str:

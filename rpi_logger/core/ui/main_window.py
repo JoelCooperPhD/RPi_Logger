@@ -12,13 +12,11 @@ import io
 
 from ..logger_system import LoggerSystem
 from ..config_manager import get_config_manager
-from ..paths import CONFIG_PATH, LOGO_PATH
-from ..devices import InterfaceType, DeviceFamily
+from ..paths import CONFIG_PATH, LOGO_PATH, ICON_PATH
 from .main_controller import MainController
 from .timer_manager import TimerManager
 from .device_controller import DeviceUIController
 from .devices_panel import DevicesPanel
-from .connections_menu import ConnectionsMenu
 from .theme.colors import Colors
 from .theme.styles import Theme
 from .theme.widgets import RoundedButton
@@ -122,7 +120,6 @@ class MainWindow:
 
         # Device UI components
         self.devices_panel: Optional[DevicesPanel] = None
-        self.connections_menu: Optional[ConnectionsMenu] = None
         self._main_frame: Optional[ttk.Frame] = None
 
         self._pending_tasks: list[asyncio.Task] = []
@@ -130,11 +127,25 @@ class MainWindow:
 
     def build_ui(self) -> None:
         self.root = tk.Tk()
-        self.root.title("RED Scientific - Data Logger")
+        self.root.title("Controller")
 
         # Apply theme styles immediately after creating root window
         # This must happen before any ttk widgets are created
         Theme.apply(self.root)
+
+        # Set window icon for taskbar (use 64x64 version for X11 compatibility)
+        try:
+            icon_64_path = ICON_PATH.parent / "icon_64.png"
+            if icon_64_path.exists():
+                icon_photo = tk.PhotoImage(file=str(icon_64_path))
+                self.root.iconphoto(True, icon_photo)
+                self.logger.debug("Set window icon from %s", icon_64_path)
+            elif ICON_PATH.exists():
+                icon_photo = tk.PhotoImage(file=str(ICON_PATH))
+                self.root.iconphoto(True, icon_photo)
+                self.logger.debug("Set window icon from %s", ICON_PATH)
+        except Exception as e:
+            self.logger.warning("Could not set window icon: %s", e)
 
         config_manager = get_config_manager()
 
@@ -167,9 +178,6 @@ class MainWindow:
         self.root.rowconfigure(0, weight=0)  # Header
         self.root.rowconfigure(1, weight=1)  # Main content (2-column: left controls, right devices)
         self.root.rowconfigure(2, weight=0)  # Logger frame
-
-        # Load enabled connections from config before building menu
-        self._load_enabled_connections()
 
         self._build_menubar()
         self._build_header()
@@ -213,9 +221,6 @@ class MainWindow:
         # Build Modules menu for enabling/disabling data logging modules
         self._build_modules_menu(menubar)
 
-        # Build Connections menu with interface > device structure
-        self._build_connections_menu(menubar)
-
         config_manager = get_config_manager()
         logger_visible_default = True
         if CONFIG_PATH.exists():
@@ -242,42 +247,14 @@ class MainWindow:
             command=self.controller.show_help
         )
 
-        help_menu.add_separator()
-
-        help_menu.add_command(
-            label="About RED Scientific",
-            command=self.controller.show_about
-        )
-
-        help_menu.add_command(
-            label="System Information",
-            command=self.controller.show_system_info
-        )
-
-        help_menu.add_separator()
-
-        help_menu.add_command(
-            label="Open Logs Directory",
-            command=self.controller.open_logs_directory
-        )
-
-        help_menu.add_separator()
-
-        help_menu.add_command(
-            label="View Config File",
-            command=self.controller.open_config_file
-        )
-
-        help_menu.add_command(
-            label="Reset Settings",
-            command=self.controller.reset_settings
-        )
-
-        help_menu.add_separator()
-
         help_menu.add_command(
             label="Report Issue",
             command=self.controller.report_issue
+        )
+
+        help_menu.add_command(
+            label="About",
+            command=self.controller.show_about
         )
 
     def _build_modules_menu(self, menubar: tk.Menu) -> None:
@@ -299,49 +276,8 @@ class MainWindow:
                 )
             )
 
-    def _build_connections_menu(self, menubar: tk.Menu) -> None:
-        """Build the Connections menu using the new architecture."""
-        if self.device_system.ui_controller:
-            self.connections_menu = ConnectionsMenu(menubar, self.device_system.ui_controller)
-        else:
-            # Fallback: create empty menu if UI controller not available
-            connections_menu = tk.Menu(menubar, tearoff=0)
-            Theme.configure_menu(connections_menu)
-            menubar.add_cascade(label="Connections", menu=connections_menu)
-
     def _wire_device_system(self) -> None:
         """Wire the device system to application callbacks."""
-        # Connection toggle callback - when user enables/disables a connection type
-        async def on_connection_changed(interface: InterfaceType, family: DeviceFamily, enabled: bool):
-            self.logger.info(
-                "Connection %s > %s %s",
-                interface.value, family.value,
-                "enabled" if enabled else "disabled"
-            )
-
-            # Sync to legacy device_manager
-            self.logger_system.device_manager.set_connection_enabled(interface, family, enabled)
-
-            # Get devices to disconnect if disabling
-            if not enabled:
-                devices = self.device_system.set_connection_enabled(interface, family, enabled)
-                for device in devices:
-                    self.logger.info(
-                        "Disconnecting %s due to connection type disabled",
-                        device.display_name
-                    )
-                    await self.logger_system.stop_and_disconnect_device(device.device_id)
-            else:
-                self.device_system.set_connection_enabled(interface, family, enabled)
-
-            # Save to config
-            self._save_enabled_connections()
-
-            # Trigger UI refresh
-            self.logger_system.notify_devices_changed()
-
-        self.device_system.set_on_connection_changed(on_connection_changed)
-
         # Device connect callback
         async def on_connect_device(device_id: str):
             self.logger.info("Connect request for device: %s", device_id)
@@ -355,30 +291,6 @@ class MainWindow:
             await self.logger_system.stop_and_disconnect_device(device_id)
 
         self.device_system.set_on_disconnect_device(on_disconnect_device)
-
-        # Wire up device state callback for UI updates
-        self.logger_system.set_device_connected_callback(self.on_device_connected_changed)
-
-    def _save_enabled_connections(self) -> None:
-        """Save enabled connections to config file."""
-        config_manager = get_config_manager()
-        connections_str = self.device_system.save_enabled_connections()
-        config_manager.write_config(CONFIG_PATH, {'enabled_connections': connections_str})
-        self.logger.debug("Saved enabled connections: %s", connections_str)
-
-    def _load_enabled_connections(self) -> None:
-        """Load enabled connections from config file."""
-        config_manager = get_config_manager()
-
-        if not CONFIG_PATH.exists():
-            return  # Use defaults
-
-        config = config_manager.read_config(CONFIG_PATH)
-        connections_str = config_manager.get_str(config, 'enabled_connections', default='')
-
-        if connections_str:
-            self.device_system.load_enabled_connections(connections_str)
-            self.logger.info("Loaded enabled connections from config")
 
     def _build_header(self) -> None:
         header_frame = ttk.Frame(self.root, height=80)
@@ -394,8 +306,8 @@ class MainWindow:
             logo_image.save(ppm_data, format="PPM")
             logo_photo = tk.PhotoImage(data=ppm_data.getvalue())
 
-            # Create a gray banner frame that matches the logo's background color exactly
-            logo_bg_color = '#dcdad5'  # Exact color from logo background pixels
+            # Create a banner frame that matches the logo's background color exactly
+            logo_bg_color = '#fcfdf8'  # Exact color from logo background pixels
             banner_frame = tk.Frame(header_frame, bg=logo_bg_color)
             banner_frame.pack(expand=True, fill=tk.X, pady=5)
 
@@ -476,7 +388,12 @@ class MainWindow:
         trial_label_text = ttk.Label(trial_label_frame, text="Trial Label", font=('TkDefaultFont', 10, 'bold'))
         trial_label_text.grid(row=0, column=0, sticky=tk.W, padx=(0, 8))
 
-        self.trial_label_var = tk.StringVar()
+        # Load saved trial label from config
+        config_manager = get_config_manager()
+        config = config_manager.read_config(CONFIG_PATH)
+        saved_label = config_manager.get_str(config, 'last_trial_label', default='')
+
+        self.trial_label_var = tk.StringVar(value=saved_label)
         self.trial_label_entry = ttk.Entry(
             trial_label_frame,
             textvariable=self.trial_label_var,
@@ -604,15 +521,6 @@ class MainWindow:
         else:
             self.logger.warning("DeviceUIController not available, devices panel disabled")
 
-    def on_device_connected_changed(self, device_id: str, connected: bool) -> None:
-        """Handle device connection state change (from LoggerSystem).
-
-        Syncs to the new DeviceSystem architecture.
-        """
-        self.logger.debug("on_device_connected_changed: device=%s connected=%s", device_id, connected)
-        # Sync connection state to DeviceSystem
-        self.device_system.set_device_connected(device_id, connected)
-
     def _build_logger_frame(self) -> None:
         self.logger_frame = ttk.LabelFrame(self.root, text="System Log", padding="3")
         self.logger_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=5, pady=(0, 5))
@@ -692,6 +600,11 @@ class MainWindow:
                     'window_width': width,
                     'window_height': height,
                 }
+
+                # Save trial label if set
+                if self.trial_label_var:
+                    trial_label = self.trial_label_var.get()
+                    updates['last_trial_label'] = trial_label
 
                 if config_manager.write_config(CONFIG_PATH, updates):
                     self.logger.info("Saved main logger window geometry: %dx%d+%d+%d", width, height, x, y)

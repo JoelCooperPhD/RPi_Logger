@@ -95,6 +95,16 @@ class InternalDeviceScanner:
         """Check if scanner is running."""
         return self._running
 
+    async def reannounce_devices(self) -> None:
+        """Re-emit discovery events for all known devices."""
+        logger.debug(f"Re-announcing {len(self._active_devices)} internal devices")
+        for device in self._active_devices.values():
+            if self._on_device_found:
+                try:
+                    await self._on_device_found(device)
+                except Exception as e:
+                    logger.error(f"Error re-announcing internal device: {e}")
+
     def get_devices(self) -> List[DiscoveredInternalDevice]:
         """Get all currently discovered internal devices."""
         return list(self._active_devices.values())

@@ -1,15 +1,11 @@
-"""
-Base Transport
+"""Base Transport.
 
 Abstract base class defining the transport interface for VOG device communication.
-Implementations include USB Serial and XBee wireless transports.
+Implementations include USB Serial and XBee proxy transports.
 """
 
 from abc import ABC, abstractmethod
 from typing import Optional
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class BaseTransport(ABC):

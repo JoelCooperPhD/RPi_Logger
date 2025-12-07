@@ -128,15 +128,10 @@ class VOGTkinterGUI:
         self._device_type: str = 'svog'
         self._plotter: Optional[VOGPlotter] = None
 
-        # Results display variables
+        # Results display variables - initialized when root is available
         self._trl_n: Optional[tk.StringVar] = None
         self._tsot: Optional[tk.StringVar] = None
         self._tsct: Optional[tk.StringVar] = None
-
-        # Control buttons
-        self._stm_on: Optional[Any] = None
-        self._stm_off: Optional[Any] = None
-        self._configure_btn: Optional[Any] = None
 
         # Session and recording state
         # _session_active: True when Start pressed, False when Stop pressed
@@ -149,7 +144,6 @@ class VOGTkinterGUI:
         self.root = embedded_parent
         self._frame: Optional[tk.Frame] = None
         self._content_frame: Optional[tk.Frame] = None
-        self._controls_panel: Optional[tk.Frame] = None
 
         # Create UI
         if embedded_parent:
@@ -187,7 +181,10 @@ class VOGTkinterGUI:
         device_type = device_type.value if hasattr(device_type, 'value') else str(device_type)
         self._device_type = device_type
 
-        # Add plotter (left side)
+        # Initialize results display variables (displayed in Capture Stats panel by VOGView)
+        self._init_stats_vars()
+
+        # Add plotter (fills the content area)
         if HAS_MATPLOTLIB and VOGPlotter is not None:
             try:
                 title = "VOG - Visual Occlusion Glasses"
@@ -199,114 +196,18 @@ class VOGTkinterGUI:
         else:
             self._plotter = None
 
-        # Create right-side controls panel with visible border
-        if HAS_THEME and Colors is not None:
-            self._controls_panel = tk.Frame(
-                self._content_frame,
-                bg=Colors.BG_FRAME,
-                highlightbackground=Colors.BORDER,
-                highlightcolor=Colors.BORDER,
-                highlightthickness=1
-            )
-        else:
-            self._controls_panel = ttk.Frame(self._content_frame)
-        self._controls_panel.grid(row=0, column=1, sticky="NS", padx=(4, 2), pady=2)
-        self._controls_panel.grid_rowconfigure(1, weight=1)
-
-        # Add manual controls
-        self._add_manual_controls(self._controls_panel, device_type)
-
-        # Add results display
-        self._add_results(self._controls_panel)
-
-        # Add configure button
-        self._add_configure_button(self._controls_panel)
-
-        # Disable configure button if no device connected yet
-        if port is None and self._configure_btn:
-            self._configure_btn.configure(state='disabled')
-
-    def _add_manual_controls(self, parent: tk.Widget, device_type: str):
-        """Add lens control buttons."""
-        lf = ttk.LabelFrame(parent, text="Lens State")
-        lf.grid(row=0, column=0, sticky="NEW", padx=4, pady=(4, 2))
-        lf.grid_columnconfigure(0, weight=1)
-        lf.grid_columnconfigure(1, weight=1)
-
-        # Button labels differ by device type
-        if device_type == 'wvog':
-            open_text = "Open"
-            close_text = "Close"
-        else:
-            open_text = "Clear"
-            close_text = "Opaque"
-
-        # Use RoundedButton if available, otherwise fall back to ttk.Button
-        if RoundedButton is not None:
-            btn_bg = Colors.BG_FRAME if Colors is not None else None
-            self._stm_on = RoundedButton(lf, text=open_text, command=self._on_lens_clear,
-                                         width=80, height=32, style='default', bg=btn_bg)
-            self._stm_on.grid(row=0, column=0, padx=2, pady=2)
-
-            self._stm_off = RoundedButton(lf, text=close_text, command=self._on_lens_opaque,
-                                          width=80, height=32, style='default', bg=btn_bg)
-            self._stm_off.grid(row=0, column=1, padx=2, pady=2)
-        else:
-            self._stm_on = ttk.Button(lf, text=open_text, command=self._on_lens_clear)
-            self._stm_on.grid(row=0, column=0, sticky="NEWS", padx=2, pady=2)
-
-            self._stm_off = ttk.Button(lf, text=close_text, command=self._on_lens_opaque)
-            self._stm_off.grid(row=0, column=1, sticky="NEWS", padx=2, pady=2)
-
-    def _add_results(self, parent: tk.Widget):
-        """Add results display (trial number, TSOT, TSCT)."""
-        lf = ttk.LabelFrame(parent, text="Results")
-        lf.grid(row=2, column=0, sticky="NEW", padx=4, pady=2)
-        lf.grid_columnconfigure(1, weight=1)
-
-        # Trial Number
-        self._trl_n = tk.StringVar(value="0")
-        ttk.Label(lf, text="Trial Number:", style='Inframe.TLabel').grid(row=0, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=self._trl_n, style='Inframe.TLabel').grid(row=0, column=1, sticky="E", padx=5)
-
-        # TSOT - Total Shutter Open Time
-        self._tsot = tk.StringVar(value="0")
-        ttk.Label(lf, text="TSOT (ms):", style='Inframe.TLabel').grid(row=1, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=self._tsot, style='Inframe.TLabel').grid(row=1, column=1, sticky="E", padx=5)
-
-        # TSCT - Total Shutter Close Time
-        self._tsct = tk.StringVar(value="0")
-        ttk.Label(lf, text="TSCT (ms):", style='Inframe.TLabel').grid(row=2, column=0, sticky="W", padx=5)
-        ttk.Label(lf, textvariable=self._tsct, style='Inframe.TLabel').grid(row=2, column=1, sticky="E", padx=5)
-
-    def _add_configure_button(self, parent: tk.Widget):
-        """Add device configuration button."""
-        f = ttk.Frame(parent, style='Inframe.TFrame')
-        f.grid(row=3, column=0, sticky="NEW", padx=4, pady=(2, 4))
-        f.grid_columnconfigure(0, weight=1)
-
-        # Use RoundedButton if available, otherwise fall back to ttk.Button
-        if RoundedButton is not None:
-            btn_bg = Colors.BG_FRAME if Colors is not None else None
-            self._configure_btn = RoundedButton(
-                f, text="Configure Unit",
-                command=self._on_configure_clicked,
-                width=120, height=32, style='default',
-                bg=btn_bg
-            )
-            self._configure_btn.grid(row=0, column=0, pady=2)
-        else:
-            self._configure_btn = ttk.Button(
-                f, text="Configure Unit",
-                command=self._on_configure_clicked
-            )
-            self._configure_btn.grid(row=0, column=0, sticky="NEWS")
+    def _init_stats_vars(self):
+        """Initialize stats StringVars (UI built by VOGView in Capture Stats panel)."""
+        if self._content_frame:
+            self._trl_n = tk.StringVar(value="0")
+            self._tsot = tk.StringVar(value="0")
+            self._tsct = tk.StringVar(value="0")
 
     # ------------------------------------------------------------------
     # Device connection/disconnection
 
     def on_device_connected(self, port: str, device_type: str = 'svog'):
-        """Handle device connection - update port and enable configure button."""
+        """Handle device connection - update port."""
         type_str = device_type.value if hasattr(device_type, 'value') else str(device_type)
         self.logger.info("%s device connected: %s", type_str.upper(), port)
 
@@ -319,10 +220,6 @@ class VOGTkinterGUI:
 
         # Update window title with device info
         self._update_window_title()
-
-        # Enable configure button now that device is connected
-        if self._configure_btn:
-            self._configure_btn.configure(state='normal')
 
     def on_device_disconnected(self, port: str, device_type: str = None):
         """Handle device disconnection - clean up UI."""
@@ -339,23 +236,9 @@ class VOGTkinterGUI:
                 pass
             self._plotter = None
 
-        # Clear controls panel
-        if self._controls_panel:
-            try:
-                self._controls_panel.destroy()
-            except Exception:
-                pass
-            self._controls_panel = None
-
         # Reset state
         self._port = None
         self._device_type = None
-        self._stm_on = None
-        self._stm_off = None
-        self._configure_btn = None
-        self._trl_n = None
-        self._tsot = None
-        self._tsct = None
 
         # Reset window title
         self._update_window_title()
@@ -368,7 +251,7 @@ class VOGTkinterGUI:
         try:
             toplevel = self.root.winfo_toplevel()
             if self._port and self._device_type:
-                # Format: "VOG - USB:ACM0" or "VOG - Wireless:ACM0"
+                # Format: "VOG(USB):ACM0" or "VOG(XBee):ACM0"
                 # Extract short port name (e.g., "ACM0" from "/dev/ttyACM0")
                 port_short = self._port
                 if '/' in port_short:
@@ -379,11 +262,11 @@ class VOGTkinterGUI:
                 # Determine connection type from device_type
                 device_type_lower = self._device_type.lower()
                 if 'wireless' in device_type_lower:
-                    conn_type = "Wireless"
+                    conn_type = "XBee"
                 else:
                     conn_type = "USB"
 
-                title = f"VOG - {conn_type}:{port_short}"
+                title = f"VOG({conn_type}):{port_short}"
             else:
                 title = "VOG"
 
@@ -433,11 +316,10 @@ class VOGTkinterGUI:
     # Recording state management
 
     def sync_recording_state(self):
-        """Sync recording state with system - enable/disable controls."""
+        """Sync recording state with system."""
         recording = getattr(self.system, 'recording', False)
         self._running = recording
         self._sync_plotter_recording_state()
-        self._sync_control_states()
 
     def _sync_plotter_recording_state(self) -> None:
         """Sync plotter recording state with system recording state."""
@@ -451,18 +333,6 @@ class VOGTkinterGUI:
                 self._plotter.start_recording()
             else:
                 self._plotter.stop_recording()
-
-    def _sync_control_states(self):
-        """Enable/disable controls based on recording state."""
-        recording = getattr(self.system, 'recording', False)
-        state = 'disabled' if recording else 'normal'
-
-        if self._stm_on:
-            self._stm_on.configure(state=state)
-        if self._stm_off:
-            self._stm_off.configure(state=state)
-        if self._configure_btn:
-            self._configure_btn.configure(state=state)
 
     def handle_session_started(self) -> None:
         """Handle session start (Start button) - clear and start plotter."""
@@ -603,6 +473,8 @@ class VOGView:
         self._stub_view.set_preview_title("VOG Controls")
         self.model.subscribe(self._on_model_change)
         self._override_help_menu()
+        self._device_menu: Optional[tk.Menu] = None
+        self._build_device_menu()
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
         if not HAS_TK:
@@ -641,6 +513,9 @@ class VOGView:
         if loop and isinstance(gui.async_bridge, _LoopAsyncBridge):
             gui.async_bridge.bind_loop(loop)
         self.gui = gui
+
+        # Build the Capture Stats panel content
+        self._build_capture_stats()
 
         # Apply pending runtime binding if bind_runtime was called before GUI was created
         if self._runtime:
@@ -683,11 +558,13 @@ class VOGView:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_connected, port, device_type)
+        self.call_in_gui(self._update_device_menu_state)
 
     def on_device_disconnected(self, port: str, device_type: str = None) -> None:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_disconnected, port, device_type)
+        self.call_in_gui(self._update_device_menu_state)
 
     def on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if not self.gui:
@@ -698,6 +575,7 @@ class VOGView:
         if not self.gui:
             return
         self.call_in_gui(self.gui.sync_recording_state)
+        self.call_in_gui(self._update_device_menu_state)
 
     # ------------------------------------------------------------------
     # Lifecycle controls
@@ -780,3 +658,106 @@ class VOGView:
                 VOGHelpDialog(root)
         except Exception as e:
             self.logger.error("Failed to show VOG help dialog: %s", e)
+
+    # ------------------------------------------------------------------
+    # Capture Stats panel
+
+    def _build_capture_stats(self) -> None:
+        """Build the Capture Stats panel content with VOG results in a single row."""
+        if not self.gui:
+            return
+
+        def builder(parent: tk.Widget) -> None:
+            # Create a frame for the stats row
+            row_frame = ttk.Frame(parent)
+            row_frame.pack(fill=tk.X, expand=True, padx=4, pady=2)
+
+            # Configure equal column weights for spacing
+            for i in range(3):
+                row_frame.columnconfigure(i, weight=1)
+
+            # Trial Number
+            trial_frame = ttk.Frame(row_frame)
+            trial_frame.grid(row=0, column=0, sticky="nsew", padx=4)
+            ttk.Label(trial_frame, text="Trial:", style='TLabel').pack(side=tk.LEFT)
+            ttk.Label(trial_frame, textvariable=self.gui._trl_n, style='TLabel', width=6).pack(side=tk.LEFT, padx=(4, 0))
+
+            # TSOT - Total Shutter Open Time
+            tsot_frame = ttk.Frame(row_frame)
+            tsot_frame.grid(row=0, column=1, sticky="nsew", padx=4)
+            ttk.Label(tsot_frame, text="TSOT:", style='TLabel').pack(side=tk.LEFT)
+            ttk.Label(tsot_frame, textvariable=self.gui._tsot, style='TLabel', width=6).pack(side=tk.LEFT, padx=(4, 0))
+
+            # TSCT - Total Shutter Close Time
+            tsct_frame = ttk.Frame(row_frame)
+            tsct_frame.grid(row=0, column=2, sticky="nsew", padx=4)
+            ttk.Label(tsct_frame, text="TSCT:", style='TLabel').pack(side=tk.LEFT)
+            ttk.Label(tsct_frame, textvariable=self.gui._tsct, style='TLabel', width=6).pack(side=tk.LEFT, padx=(4, 0))
+
+        self._stub_view.build_io_stub_content(builder)
+
+    # ------------------------------------------------------------------
+    # Device menu
+
+    def _build_device_menu(self) -> None:
+        """Build the Device menu with Lens and Configure commands."""
+        self._device_menu = self._stub_view.add_menu("Device")
+        if not self._device_menu:
+            self.logger.warning("Failed to create Device menu")
+            return
+
+        self._device_menu.add_command(
+            label="Lens: ON",
+            command=self._on_lens_on,
+        )
+        self._device_menu.add_command(
+            label="Lens: OFF",
+            command=self._on_lens_off,
+        )
+        self._device_menu.add_separator()
+        self._device_menu.add_command(
+            label="Configure...",
+            command=self._on_configure,
+        )
+
+        # Initially disable menu items until device is connected
+        self._update_device_menu_state()
+
+    def _update_device_menu_state(self) -> None:
+        """Enable/disable Device menu items based on device connection and recording state."""
+        if not self._device_menu:
+            return
+
+        # Determine if device is connected
+        has_device = self.gui and self.gui._port is not None
+
+        # Determine if recording
+        recording = self.model.recording if hasattr(self.model, 'recording') else False
+
+        # Menu items should be enabled if device connected and not recording
+        state = 'normal' if (has_device and not recording) else 'disabled'
+
+        try:
+            self._device_menu.entryconfigure("Lens: ON", state=state)
+            self._device_menu.entryconfigure("Lens: OFF", state=state)
+            self._device_menu.entryconfigure("Configure...", state=state)
+        except tk.TclError as e:
+            self.logger.debug("Failed to update device menu state: %s", e)
+
+    def _on_lens_on(self) -> None:
+        """Handle Lens: ON menu command."""
+        if not self.gui or not self.gui._port:
+            return
+        self.gui._on_lens_clear()
+
+    def _on_lens_off(self) -> None:
+        """Handle Lens: OFF menu command."""
+        if not self.gui or not self.gui._port:
+            return
+        self.gui._on_lens_opaque()
+
+    def _on_configure(self) -> None:
+        """Handle Configure menu command."""
+        if not self.gui or not self.gui._port:
+            return
+        self.gui._on_configure_clicked()

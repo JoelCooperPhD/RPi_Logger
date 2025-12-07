@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 
 class ModuleBridge:
@@ -30,7 +30,7 @@ class ModuleBridge:
         if hasattr(self.module_model, "subscribe"):
             self.module_model.subscribe(self._handle_bridge_event)
 
-    def set_recording(self, active: bool, trial: Optional[int] = None) -> None:
+    def set_recording(self, active: bool, trial: int | None = None) -> None:
         self._suppress_recording = True
         try:
             self.module_model.recording = active

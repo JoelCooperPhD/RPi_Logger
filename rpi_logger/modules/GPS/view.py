@@ -48,8 +48,8 @@ class _SystemPlaceholder:
     recording: bool = False
     trial_label: str = ""
 
-    def __init__(self, args=None):
-        self.config = getattr(args, 'config', {})
+    def __init__(self):
+        self.config = {}
 
     def get_fix(self):
         """Return placeholder fix data."""
@@ -95,7 +95,7 @@ class GPSTkinterGUI:
         embedded_parent: Optional["tk.Widget"] = None,
     ):
         self._action_callback = action_callback
-        self.system = _SystemPlaceholder(args)
+        self.system = _SystemPlaceholder()
         self.args = args
         self.logger = ensure_structured_logger(logger, fallback_name="GPSTkinterGUI") if logger else get_module_logger("GPSTkinterGUI")
         self.async_bridge: Optional[_LoopAsyncBridge] = None
@@ -211,7 +211,7 @@ class GPSTkinterGUI:
         try:
             toplevel = self.root.winfo_toplevel()
             if self._connected and self._port:
-                # Format: "GPS - UART:serial0" (matching VOG/DRT pattern)
+                # Format: "GPS(UART):serial0" (matching VOG/DRT pattern)
                 port_short = self._port
                 if '/' in port_short:
                     port_short = port_short.split('/')[-1]
@@ -219,7 +219,7 @@ class GPSTkinterGUI:
                 if port_short.startswith('tty'):
                     port_short = port_short[3:]
 
-                title = f"GPS - {self._connection_type}:{port_short}"
+                title = f"GPS({self._connection_type}):{port_short}"
             else:
                 title = "GPS"
 

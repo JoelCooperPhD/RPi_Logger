@@ -16,15 +16,21 @@ from ..module_process import ModuleState
 from ..config_manager import get_config_manager
 from ..paths import CONFIG_PATH
 from ..shutdown_coordinator import get_shutdown_coordinator
-from ..devices import InterfaceType, DeviceFamily
+from ..devices import InterfaceType, DeviceFamily, DeviceCatalog
 from .timer_manager import TimerManager
 
-# Mapping from module name to (interface, family) for device-based modules
-# These modules don't auto-launch - they show devices in the panel instead
-DEVICE_BASED_MODULES = {
-    "Audio": (InterfaceType.USB, DeviceFamily.AUDIO),
-    "Cameras": (InterfaceType.USB, DeviceFamily.CAMERA),
-}
+
+def _get_device_based_modules() -> dict[str, tuple[InterfaceType, DeviceFamily]]:
+    """Get the module-to-connection mapping from the device catalog.
+
+    All modules are device-based - they show devices in the panel
+    instead of auto-launching when their checkbox is toggled.
+    """
+    return DeviceCatalog.get_module_connection_map()
+
+
+# Cached module connection map (derived from device registry)
+DEVICE_BASED_MODULES = _get_device_based_modules()
 
 
 class MainController:
@@ -340,20 +346,27 @@ class MainController:
         family: DeviceFamily,
         enabled: bool
     ) -> None:
-        """Handle toggle for device-based modules (Audio, Cameras).
+        """Handle toggle for device-based modules.
 
-        These modules don't auto-launch. Instead, they:
-        1. Enable/disable the connection type (shows/hides device section)
+        When enabling:
+        1. Enable the connection type (shows device section in panel)
         2. Save the enabled state to config
         3. Wait for user to connect to a specific device
+
+        When disabling:
+        1. Stop the module if it's running
+        2. Disable the connection type (hides device section)
+        3. Save the disabled state to config
         """
         try:
-            # Enable/disable the connection type in DeviceSystem
-            # This controls visibility of the device section in the panel
-            self.logger_system.device_system.set_connection_enabled(interface, family, enabled)
+            if not enabled:
+                # Stop the module if it's running
+                if self.logger_system.is_module_running(module_name):
+                    self.logger.info("Stopping module %s before disabling", module_name)
+                    await self.logger_system.set_module_enabled(module_name, False)
 
-            # Also sync to legacy device_manager
-            self.logger_system.device_manager.set_connection_enabled(interface, family, enabled)
+            # Enable/disable the connection type (updates both device_system and device_manager)
+            self.logger_system.set_connection_enabled(interface, family, enabled)
 
             # Save enabled state to module config
             await self.logger_system.toggle_module_enabled(module_name, enabled)
@@ -380,8 +393,7 @@ class MainController:
                     interface, family = DEVICE_BASED_MODULES[module_name]
                     self.logger.info("Auto-enabling device section: %s", module_name)
                     # Enable connection type (shows device section in panel)
-                    self.logger_system.device_system.set_connection_enabled(interface, family, True)
-                    self.logger_system.device_manager.set_connection_enabled(interface, family, True)
+                    self.logger_system.set_connection_enabled(interface, family, True)
                 else:
                     self.logger.info("Auto-starting module: %s", module_name)
                     success = await self.logger_system.set_module_enabled(module_name, True)

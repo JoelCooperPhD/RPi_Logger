@@ -29,7 +29,6 @@ class CameraView:
         root=None,
         *,
         logger: LoggerLike = None,
-        on_refresh: Optional[Callable[[], None]] = None,
         on_apply_config: Optional[Callable[[str, Dict[str, str]], None]] = None,
     ) -> None:
         self.camera_id = camera_id
@@ -39,7 +38,6 @@ class CameraView:
         self._canvas: Optional[tk.Canvas] = None
         self._image_id: Optional[int] = None
         self._photo_ref: Optional[tk.PhotoImage] = None
-        self._on_refresh = on_refresh
         self._on_apply_config = on_apply_config
         self._logged_first_frame = False
 
@@ -144,7 +142,3 @@ class CameraView:
                 self.frame.destroy()
             except Exception:
                 self._logger.debug("Camera view destroy failed for %s", self.camera_id, exc_info=True)
-
-
-# Backward compatibility alias
-CameraTab = CameraView

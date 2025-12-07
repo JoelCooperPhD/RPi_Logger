@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
 
 from .level_meter import LevelMeter
 
@@ -19,12 +18,12 @@ class AudioDeviceInfo:
 
 @dataclass(slots=True, frozen=True)
 class AudioSnapshot:
-    devices: Dict[int, AudioDeviceInfo]
-    selected_devices: Dict[int, AudioDeviceInfo]
-    level_meters: Dict[int, LevelMeter]
+    devices: dict[int, AudioDeviceInfo]
+    selected_devices: dict[int, AudioDeviceInfo]
+    level_meters: dict[int, LevelMeter]
     recording: bool
     trial_number: int
-    session_dir: Optional[Path]
+    session_dir: Path | None
     status_text: str
 
 

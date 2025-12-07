@@ -6,15 +6,25 @@ device assignments via assign_device commands.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-
-from rpi_logger.core.commands import StatusMessage
+from typing import Any
 
 from vmc import ModuleRuntime, RuntimeContext
+
+from rpi_logger.core.commands import StatusMessage
 
 from ..app import AudioApp
 from ..config import AudioSettings
 from ..domain import AudioDeviceInfo
+
+
+def _parse_audio_device_id(device_id: str) -> int | None:
+    """Parse sounddevice index from device_id string (format: 'audio_N')."""
+    if not device_id.startswith("audio_"):
+        return None
+    try:
+        return int(device_id.split("_")[1])
+    except (IndexError, ValueError):
+        return None
 
 
 class AudioRuntime(ModuleRuntime):
@@ -53,14 +63,14 @@ class AudioRuntime(ModuleRuntime):
         self,
         device_id: str,
         device_type: str,
-        port: Optional[str],
+        port: str | None,
         baudrate: int,
         is_wireless: bool = False,
         *,
-        sounddevice_index: Optional[int] = None,
-        audio_channels: Optional[int] = None,
-        audio_sample_rate: Optional[float] = None,
-        display_name: Optional[str] = None,
+        sounddevice_index: int | None = None,
+        audio_channels: int | None = None,
+        audio_sample_rate: float | None = None,
+        display_name: str | None = None,
     ) -> bool:
         """
         Assign an audio device to this module (called by main logger).
@@ -103,6 +113,18 @@ class AudioRuntime(ModuleRuntime):
             self.app.state.set_device(sounddevice_index, device_info)
             await self.app.toggle_device(sounddevice_index, enabled=True)
 
+            # Update window title: Audio(USB):device_name
+            if hasattr(self.context, 'view') and self.context.view:
+                short_name = device_name
+                # Truncate long device names
+                if len(short_name) > 20:
+                    short_name = short_name[:17] + "..."
+                title = f"Audio(USB):{short_name}"
+                try:
+                    self.context.view.set_window_title(title)
+                except Exception:
+                    pass
+
             self.logger.info("Audio device %s assigned and enabled (index=%d)", device_id, sounddevice_index)
             return True
 
@@ -119,24 +141,15 @@ class AudioRuntime(ModuleRuntime):
         """
         self.logger.info("Unassigning audio device: %s", device_id)
 
-        try:
-            # Extract sounddevice index from device_id (format: "audio_N")
-            if device_id.startswith("audio_"):
-                try:
-                    sounddevice_index = int(device_id.split("_")[1])
-                except (IndexError, ValueError):
-                    self.logger.warning("Could not parse device_id: %s", device_id)
-                    return
-            else:
-                self.logger.warning("Unknown device_id format: %s", device_id)
-                return
+        sounddevice_index = _parse_audio_device_id(device_id)
+        if sounddevice_index is None:
+            self.logger.warning("Could not parse device_id: %s", device_id)
+            return
 
-            # Disable and remove the device
+        try:
             await self.app.toggle_device(sounddevice_index, enabled=False)
             self.app.state.remove_device(sounddevice_index)
-
             self.logger.info("Audio device %s unassigned", device_id)
-
         except Exception as e:
             self.logger.error("Error unassigning audio device %s: %s", device_id, e, exc_info=True)
 
@@ -144,7 +157,7 @@ class AudioRuntime(ModuleRuntime):
     # Command and action handling
     # ------------------------------------------------------------------
 
-    async def handle_command(self, command: Dict[str, Any]) -> bool:
+    async def handle_command(self, command: dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
 
         if action == "assign_device":
