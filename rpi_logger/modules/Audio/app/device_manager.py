@@ -7,7 +7,6 @@ enabling/disabling devices that are assigned by the main logger.
 from __future__ import annotations
 
 import logging
-from typing import Iterable
 
 from ..domain import AudioDeviceInfo, AudioState
 from ..services import RecorderService
@@ -56,20 +55,6 @@ class DeviceManager:
             self.state.deselect_device(device_id)
             await self.recorder_service.disable_device(device_id)
             self.logger.info("Device %d disabled", device_id)
-
-    async def auto_select(self, device_ids: Iterable[int]) -> None:
-        ordered = tuple(sorted(device_ids))
-        if ordered:
-            self.logger.info("Auto-selecting device(s): %s", ordered)
-        for device_id in sorted(device_ids):
-            await self.toggle_device(device_id, True)
-
-    async def auto_select_first_available(self) -> None:
-        if not self.state.devices:
-            return
-        first = min(self.state.devices.keys())
-        self.logger.info("Auto-selecting first available device: %d", first)
-        await self.toggle_device(first, True)
 
 
 __all__ = ["DeviceManager"]

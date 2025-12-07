@@ -13,7 +13,7 @@ from enum import Enum
 from rpi_logger.core.logging_utils import get_module_logger
 from .device_registry import (
     DeviceType, DeviceFamily, InterfaceType, ConnectionKey,
-    get_spec, get_module_for_device, get_available_connections
+    get_spec, get_module_for_device, get_available_connections, get_interface_display_name
 )
 from .usb_scanner import USBScanner, DiscoveredUSBDevice
 from .xbee_manager import XBeeManager, WirelessDevice, XBEE_AVAILABLE
@@ -601,12 +601,14 @@ class DeviceConnectionManager:
             self._xbee_dongles[usb_device.port] = XBeeDongleInfo(port=usb_device.port)
             logger.info(f"XBee dongle discovered: {usb_device.port}")
         else:
+            # Include interface type in display name for disambiguation in family-grouped UI
+            interface_hint = get_interface_display_name(spec.interface_type)
             device_info = DeviceInfo(
                 device_id=usb_device.port,
                 device_type=usb_device.device_type,
                 family=spec.family,
                 interface_type=spec.interface_type,
-                display_name=f"{spec.display_name} on {usb_device.port}",
+                display_name=f"{spec.display_name} ({interface_hint})",
                 port=usb_device.port,
                 baudrate=spec.baudrate,
                 module_id=spec.module_id,
@@ -685,12 +687,14 @@ class DeviceConnectionManager:
 
         dongle = self._xbee_dongles[dongle_port]
 
+        # Include interface type in display name for disambiguation in family-grouped UI
+        interface_hint = get_interface_display_name(spec.interface_type)
         device_info = DeviceInfo(
             device_id=wireless_device.node_id,
             device_type=wireless_device.device_type,
             family=wireless_device.family,
             interface_type=spec.interface_type,
-            display_name=spec.display_name,  # Use simple name like "DRT" or "VOG"
+            display_name=f"{spec.display_name} ({interface_hint})",
             port=dongle_port,  # Use dongle port for wireless devices
             baudrate=spec.baudrate,
             module_id=spec.module_id,
@@ -889,12 +893,14 @@ class DeviceConnectionManager:
             logger.debug(f"Ignoring disabled USB camera device: {spec.display_name}")
             return
 
+        # Include interface type in display name for disambiguation in family-grouped UI
+        interface_hint = get_interface_display_name(spec.interface_type)
         device_info = DeviceInfo(
             device_id=camera.device_id,
             device_type=DeviceType.USB_CAMERA,
             family=DeviceFamily.CAMERA,
             interface_type=spec.interface_type,
-            display_name=camera.friendly_name,
+            display_name=f"{camera.friendly_name} ({interface_hint})",
             port=None,  # Cameras don't use serial ports
             baudrate=0,
             module_id=spec.module_id,
@@ -907,7 +913,7 @@ class DeviceConnectionManager:
         )
 
         self._camera_devices[camera.device_id] = device_info
-        logger.info(f"USB camera discovered: {camera.friendly_name} ({camera.device_id})")
+        logger.info(f"USB camera discovered: {device_info.display_name} ({camera.device_id})")
 
         # Check if this module should auto-connect
         if spec.module_id in self._pending_auto_connect_modules:
@@ -943,12 +949,14 @@ class DeviceConnectionManager:
             logger.debug(f"Ignoring disabled CSI camera device: {spec.display_name}")
             return
 
+        # Include interface type in display name for disambiguation in family-grouped UI
+        interface_hint = get_interface_display_name(spec.interface_type)
         device_info = DeviceInfo(
             device_id=camera.device_id,
             device_type=DeviceType.PI_CAMERA,
             family=DeviceFamily.CAMERA,
             interface_type=spec.interface_type,
-            display_name=camera.friendly_name,
+            display_name=f"{camera.friendly_name} ({interface_hint})",
             port=None,  # Cameras don't use serial ports
             baudrate=0,
             module_id=spec.module_id,
@@ -961,7 +969,7 @@ class DeviceConnectionManager:
         )
 
         self._camera_devices[camera.device_id] = device_info
-        logger.info(f"CSI camera discovered: {camera.friendly_name} ({camera.device_id})")
+        logger.info(f"CSI camera discovered: {device_info.display_name} ({camera.device_id})")
 
         # Check if this module should auto-connect
         if spec.module_id in self._pending_auto_connect_modules:
@@ -997,12 +1005,14 @@ class DeviceConnectionManager:
             logger.debug(f"Ignoring disabled UART device: {spec.display_name}")
             return
 
+        # Include interface type in display name for disambiguation in family-grouped UI
+        interface_hint = get_interface_display_name(spec.interface_type)
         device_info = DeviceInfo(
             device_id=uart_device.device_id,
             device_type=uart_device.device_type,
             family=spec.family,
             interface_type=spec.interface_type,
-            display_name=spec.display_name,
+            display_name=f"{spec.display_name} ({interface_hint})",
             port=uart_device.path,  # Use the UART path as port
             baudrate=spec.baudrate,
             module_id=spec.module_id,
@@ -1011,7 +1021,7 @@ class DeviceConnectionManager:
         )
 
         self._uart_devices[uart_device.device_id] = device_info
-        logger.info(f"UART device discovered: {spec.display_name} at {uart_device.path}")
+        logger.info(f"UART device discovered: {device_info.display_name} at {uart_device.path}")
 
         # Check if this module should auto-connect
         if spec.module_id in self._pending_auto_connect_modules:

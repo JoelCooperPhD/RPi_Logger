@@ -16,7 +16,15 @@ from ..module_process import ModuleState
 from ..config_manager import get_config_manager
 from ..paths import CONFIG_PATH
 from ..shutdown_coordinator import get_shutdown_coordinator
+from ..devices import InterfaceType, DeviceFamily
 from .timer_manager import TimerManager
+
+# Mapping from module name to (interface, family) for device-based modules
+# These modules don't auto-launch - they show devices in the panel instead
+DEVICE_BASED_MODULES = {
+    "Audio": (InterfaceType.USB, DeviceFamily.AUDIO),
+    "Cameras": (InterfaceType.USB, DeviceFamily.CAMERA),
+}
 
 
 class MainController:
@@ -47,6 +55,7 @@ class MainController:
     def set_widgets(
         self,
         root: tk.Tk,
+        module_vars: dict[str, tk.BooleanVar],
         session_button: RoundedButton,
         trial_button: RoundedButton,
         session_status_label: ttk.Label,
@@ -55,6 +64,7 @@ class MainController:
         trial_label_var: tk.StringVar
     ) -> None:
         self.root = root
+        self.module_vars = module_vars
         self.session_button = session_button
         self.trial_button = trial_button
         self.session_status_label = session_status_label
@@ -274,16 +284,113 @@ class MainController:
         """Handle module state changes - log only, no UI checkboxes to update."""
         self.logger.debug("Module %s state changed to %s", module_name, state.value)
 
+    async def on_module_menu_toggle(self, module_name: str) -> None:
+        """Handle module menu checkbox toggle."""
+        desired_state = self.module_vars[module_name].get()
+
+        if self.logger_system.event_logger:
+            action = "enable" if desired_state else "disable"
+            await self.logger_system.event_logger.log_button_press(f"module_{module_name}", action)
+
+        # Check if this is a device-based module (Audio, Cameras)
+        # These modules show devices in the panel instead of auto-launching
+        if module_name in DEVICE_BASED_MODULES:
+            interface, family = DEVICE_BASED_MODULES[module_name]
+            self.logger.info(
+                "%s device section: %s (%s > %s)",
+                "Showing" if desired_state else "Hiding",
+                module_name, interface.value, family.value
+            )
+            # Toggle the connection type which controls section visibility
+            self._schedule_task(self._handle_device_module_toggle(module_name, interface, family, desired_state))
+            return
+
+        await self.logger_system.toggle_module_enabled(module_name, desired_state)
+
+        self.logger.info("%s module: %s", "Starting" if desired_state else "Stopping", module_name)
+        self._schedule_task(self._handle_module_toggle(module_name, desired_state))
+
+    async def _handle_module_toggle(self, module_name: str, desired_state: bool) -> None:
+        """Handle the actual module start/stop after toggle."""
+        try:
+            success = await self.logger_system.set_module_enabled(module_name, desired_state)
+
+            if not success:
+                self.module_vars[module_name].set(not desired_state)
+                action = "start" if desired_state else "stop"
+                messagebox.showerror(
+                    f"{action.capitalize()} Failed",
+                    f"Failed to {action} module: {module_name}\nCheck logs for details."
+                )
+            else:
+                self.logger.info("Module %s %s successfully", module_name, "started" if desired_state else "stopped")
+                if self.logger_system.event_logger:
+                    if desired_state:
+                        await self.logger_system.event_logger.log_module_started(module_name)
+                    else:
+                        await self.logger_system.event_logger.log_module_stopped(module_name)
+        except Exception as e:
+            self.logger.error("Error toggling module %s: %s", module_name, e, exc_info=True)
+            self.module_vars[module_name].set(not desired_state)
+
+    async def _handle_device_module_toggle(
+        self,
+        module_name: str,
+        interface: InterfaceType,
+        family: DeviceFamily,
+        enabled: bool
+    ) -> None:
+        """Handle toggle for device-based modules (Audio, Cameras).
+
+        These modules don't auto-launch. Instead, they:
+        1. Enable/disable the connection type (shows/hides device section)
+        2. Save the enabled state to config
+        3. Wait for user to connect to a specific device
+        """
+        try:
+            # Enable/disable the connection type in DeviceSystem
+            # This controls visibility of the device section in the panel
+            self.logger_system.device_system.set_connection_enabled(interface, family, enabled)
+
+            # Also sync to legacy device_manager
+            self.logger_system.device_manager.set_connection_enabled(interface, family, enabled)
+
+            # Save enabled state to module config
+            await self.logger_system.toggle_module_enabled(module_name, enabled)
+
+            # Notify devices changed to refresh UI
+            self.logger_system.notify_devices_changed()
+
+            self.logger.info(
+                "Device module %s %s (section %s)",
+                module_name, "enabled" if enabled else "disabled", family.value
+            )
+
+        except Exception as e:
+            self.logger.error("Error toggling device module %s: %s", module_name, e, exc_info=True)
+            self.module_vars[module_name].set(not enabled)
+
     async def auto_start_modules(self) -> None:
         await asyncio.sleep(0.5)
 
         for module_name, enabled in self.logger_system.get_module_enabled_states().items():
             if enabled:
-                self.logger.info("Auto-starting module: %s", module_name)
-                success = await self.logger_system.set_module_enabled(module_name, True)
-                if not success:
-                    self.logger.error("Failed to auto-start module: %s", module_name)
-                    # Note: checkbox will be auto-updated by UIStateObserver
+                # Check if this is a device-based module
+                if module_name in DEVICE_BASED_MODULES:
+                    interface, family = DEVICE_BASED_MODULES[module_name]
+                    self.logger.info("Auto-enabling device section: %s", module_name)
+                    # Enable connection type (shows device section in panel)
+                    self.logger_system.device_system.set_connection_enabled(interface, family, True)
+                    self.logger_system.device_manager.set_connection_enabled(interface, family, True)
+                else:
+                    self.logger.info("Auto-starting module: %s", module_name)
+                    success = await self.logger_system.set_module_enabled(module_name, True)
+                    if not success:
+                        self.logger.error("Failed to auto-start module: %s", module_name)
+                        # Note: checkbox will be auto-updated by UIStateObserver
+
+        # Refresh UI after enabling device sections
+        self.logger_system.notify_devices_changed()
 
         # Signal that startup is complete (for state file cleanup)
         await self.logger_system.on_startup_complete()

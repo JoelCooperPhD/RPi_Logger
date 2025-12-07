@@ -133,6 +133,20 @@ class AudioScanner:
         if self._running:
             await self._scan_devices()
 
+    async def reannounce_devices(self) -> None:
+        """Re-emit discovery events for all known devices.
+
+        Call this when a connection type gets enabled to re-announce
+        devices that were previously discovered but ignored.
+        """
+        logger.debug(f"Re-announcing {len(self._known_devices)} audio devices")
+        for device in self._known_devices.values():
+            if self._on_device_found:
+                try:
+                    await self._on_device_found(device)
+                except Exception as e:
+                    logger.error(f"Error re-announcing device: {e}")
+
     async def _scan_loop(self) -> None:
         """Main scanning loop."""
         while self._running:

@@ -37,7 +37,10 @@ from .config_manager import get_config_manager
 from .paths import STATE_FILE
 from .module_manager import ModuleManager
 from .session_manager import SessionManager
-from .devices import DeviceConnectionManager, DeviceInfo, XBeeDongleInfo, ConnectionState
+from .devices import (
+    DeviceConnectionManager, DeviceInfo, XBeeDongleInfo, ConnectionState,
+    DeviceSystem,
+)
 
 if TYPE_CHECKING:
     from .event_logger import EventLogger
@@ -115,7 +118,13 @@ class LoggerSystem:
             }
         )
 
-        # Device connection manager
+        # New device system (replaces DeviceConnectionManager for scanning/UI)
+        self.device_system = DeviceSystem()
+        self.device_system.set_on_devices_changed(self._on_devices_changed)
+        self.device_system.set_xbee_data_callback(self._route_xbee_to_module)
+
+        # Legacy device manager (kept for compatibility during migration)
+        # TODO: Remove once all code migrated to DeviceSystem
         self.device_manager = DeviceConnectionManager()
         self.device_manager.set_devices_changed_callback(self._on_devices_changed)
         self.device_manager.set_device_connected_callback(self._on_device_connected)
@@ -124,11 +133,9 @@ class LoggerSystem:
         self.device_manager.set_load_connection_state_callback(self._load_device_connection_state)
         self.device_manager.set_xbee_data_router(self._route_xbee_to_module)
 
-        # UI callback for device panel updates (usb_devices, dongles, network_devices, audio_devices)
-        self.devices_ui_callback: Optional[Callable[[List[DeviceInfo], List[XBeeDongleInfo], List[DeviceInfo], List[DeviceInfo]], None]] = None
-
-        # UI callback for device state changes
+        # UI callbacks
         self.device_connected_callback: Optional[Callable[[str, bool], None]] = None
+        self.devices_ui_callback: Optional[Callable] = None
 
         # State
         self.shutdown_event = asyncio.Event()
@@ -615,7 +622,14 @@ class LoggerSystem:
         """Start USB and XBee device scanning."""
         # Load device connection states and mark modules for auto-connect
         await self._load_pending_auto_connects()
+
+        # Start new DeviceSystem scanning (provides devices to new UI)
+        await self.device_system.start_scanning()
+
+        # Also start legacy device_manager for connection management
+        # TODO: Remove once connection management migrated to DeviceSystem
         await self.device_manager.start_scanning()
+
         # Clear pending auto-connects after initial scan completes.
         # This prevents devices discovered later (by periodic scans) from
         # auto-connecting - the user must explicitly click Connect.
@@ -624,6 +638,7 @@ class LoggerSystem:
 
     async def stop_device_scanning(self) -> None:
         """Stop USB and XBee device scanning."""
+        await self.device_system.stop_scanning()
         await self.device_manager.stop_scanning()
         self.logger.info("Device scanning stopped")
 
@@ -735,6 +750,51 @@ class LoggerSystem:
             command = CommandMessage.unassign_device(device_id)
             await self.module_manager.send_command(module_name, command)
 
+    async def _send_assign_device(self, device: DeviceInfo) -> bool:
+        """Send assign_device command to the appropriate module.
+
+        Used when reconnecting to a device after module restart.
+
+        Returns:
+            True if command was sent successfully.
+        """
+        module_id = device.module_id
+        if not module_id:
+            self.logger.warning("Device %s has no module_id", device.device_id)
+            return False
+
+        # Internal devices don't need hardware assignment
+        if device.is_internal:
+            self.logger.debug("Internal device %s - skipping assign_device", device.device_id)
+            return True
+
+        session_dir_str = str(self.session_dir) if self.session_dir else None
+        command = CommandMessage.assign_device(
+            device_id=device.device_id,
+            device_type=device.device_type.value,
+            port=device.port or "",
+            baudrate=device.baudrate,
+            session_dir=session_dir_str,
+            is_wireless=device.is_wireless,
+            is_network=device.is_network,
+            network_address=device.network_address,
+            network_port=device.network_port,
+            sounddevice_index=device.sounddevice_index,
+            audio_channels=device.audio_channels,
+            audio_sample_rate=device.audio_sample_rate,
+            is_camera=device.is_camera,
+            camera_type=device.camera_type,
+            camera_stable_id=device.camera_stable_id,
+            camera_dev_path=device.camera_dev_path,
+            camera_hw_model=device.camera_hw_model,
+            camera_location=device.camera_location,
+            display_name=device.display_name,
+        )
+        success = await self.module_manager.send_command(module_id, command)
+        if not success:
+            self.logger.error("Failed to send assign_device to module %s", module_id)
+        return success
+
     async def connect_device(self, device_id: str) -> bool:
         """Connect a device (called from UI)."""
         return await self.device_manager.connect_device(device_id)
@@ -835,6 +895,8 @@ class LoggerSystem:
             if not success:
                 self.logger.error("Failed to start module %s", module_id)
                 return False
+            # Module restarted - need to re-assign device since module has fresh state
+            await self._send_assign_device(device)
             self._notify_device_connected(device_id, True)
             return True
 

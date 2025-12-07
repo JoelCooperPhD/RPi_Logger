@@ -22,7 +22,7 @@ except ImportError:
 
 
 class CamerasView:
-    """Composes the Cameras Tk UI (tabs, metrics, settings)."""
+    """Composes the Cameras Tk UI (camera view, metrics, settings)."""
 
     def __init__(self, stub_view: Any = None, *, logger: LoggerLike = None) -> None:
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
@@ -30,8 +30,8 @@ class CamerasView:
         self._root = getattr(stub_view, "root", None)
         self._ui_thread = threading.current_thread()
         self._adapter = ViewAdapter(logger=self._logger)
-        self._placeholder_tab: Optional[Any] = None
-        self._notebook: Any = None
+        self._placeholder_label: Optional[Any] = None
+        self._view_container: Any = None
         self._settings_menu: Any = None
         self._has_ui = False
         self._activate_handler: Optional[Callable[[Optional[str]], None]] = None
@@ -86,35 +86,34 @@ class CamerasView:
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(0, weight=1)
 
-        notebook = ttk.Notebook(parent)
-        notebook.grid(row=0, column=0, sticky="nsew")
-        notebook.enable_traversal()
-        self._notebook = notebook
-        self._adapter.attach(notebook)
-
-        # Use themed colors if available
+        # Simple container frame for the camera view (no notebook/tabs)
         if HAS_THEME and Colors is not None:
-            placeholder = tk.Frame(notebook, bg=Colors.BG_FRAME, padx=16, pady=16)
+            container = tk.Frame(parent, bg=Colors.BG_FRAME)
+        else:
+            container = ttk.Frame(parent)
+        container.grid(row=0, column=0, sticky="nsew")
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
+        self._view_container = container
+        self._adapter.attach(container)
+
+        # Placeholder label shown when no cameras are connected
+        if HAS_THEME and Colors is not None:
             lbl = tk.Label(
-                placeholder,
+                container,
                 text="Waiting for cameras...",
                 anchor="center",
                 bg=Colors.BG_FRAME,
                 fg=Colors.FG_PRIMARY,
             )
         else:
-            placeholder = ttk.Frame(notebook, padding="16")
             lbl = ttk.Label(
-                placeholder,
+                container,
                 text="Waiting for cameras...",
                 anchor="center",
             )
         lbl.grid(row=0, column=0, sticky="nsew")
-        placeholder.columnconfigure(0, weight=1)
-        placeholder.rowconfigure(0, weight=1)
-        self._placeholder_tab = placeholder
-        notebook.add(placeholder, text="No Cameras")
-        notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        self._placeholder_label = lbl
 
         # Pop-out windows and settings menu controls
         self._install_settings_window(tk)
@@ -190,7 +189,7 @@ class CamerasView:
         if not self._has_ui:
             return
         self._remove_placeholder()
-        tab = self._adapter.add_camera(
+        self._adapter.add_camera(
             camera_id,
             title=title,
             refresh_cb=self._handle_refresh_clicked,
@@ -256,6 +255,18 @@ class CamerasView:
     def get_active_camera_id(self) -> Optional[str]:
         return self._active_camera_id
 
+    def set_active_camera(self, camera_id: Optional[str]) -> None:
+        """Switch to displaying the specified camera."""
+        if camera_id == self._active_camera_id:
+            return
+        previous_active = self._active_camera_id
+        self._active_camera_id = camera_id
+        self._adapter.set_active_camera(camera_id)
+        if self._active_camera_id != previous_active:
+            self._emit_active_camera_changed()
+        self._sync_metrics_active_camera()
+        self._sync_settings_active_camera()
+
     def _emit_active_camera_changed(self) -> None:
         if not self._activate_handler:
             return
@@ -267,53 +278,23 @@ class CamerasView:
     # ------------------------------------------------------------------ Internal helpers
 
     def _remove_placeholder(self) -> None:
-        if self._placeholder_tab and self._notebook:
+        if self._placeholder_label:
             try:
-                self._notebook.forget(self._placeholder_tab)
+                self._placeholder_label.grid_remove()
             except Exception:
                 pass
-            self._placeholder_tab = None
 
     def _restore_placeholder(self) -> None:
-        if self._placeholder_tab or not self._notebook:
+        if not self._placeholder_label:
             return
         try:
-            import tkinter as tk  # type: ignore  # noqa: F401
-            from tkinter import ttk  # type: ignore  # noqa: F401
+            self._placeholder_label.grid()
         except Exception:
-            return
-        # Use themed colors if available
-        if HAS_THEME and Colors is not None:
-            placeholder = tk.Frame(self._notebook, bg=Colors.BG_FRAME, padx=16, pady=16)
-            lbl = tk.Label(
-                placeholder,
-                text="Waiting for cameras...",
-                anchor="center",
-                bg=Colors.BG_FRAME,
-                fg=Colors.FG_PRIMARY,
-            )
-        else:
-            placeholder = ttk.Frame(self._notebook, padding="16")
-            lbl = ttk.Label(placeholder, text="Waiting for cameras...", anchor="center")
-        lbl.grid(row=0, column=0, sticky="nsew")
-        placeholder.columnconfigure(0, weight=1)
-        placeholder.rowconfigure(0, weight=1)
-        self._placeholder_tab = placeholder
-        self._notebook.add(placeholder, text="No Cameras")
+            pass
         previous_active = self._active_camera_id
         self._active_camera_id = None
         if previous_active is not None:
             self._emit_active_camera_changed()
-
-    def _on_tab_changed(self, event) -> None:
-        if not self._notebook:
-            return
-        tab_id = self._notebook.select()
-        camera_id = self._adapter.camera_id_for_tab(tab_id)
-        self._active_camera_id = camera_id
-        self._sync_metrics_active_camera()
-        self._sync_settings_active_camera()
-        self._emit_active_camera_changed()
 
     def _apply_config_from_tab(self, camera_id: str, settings: Dict[str, str]) -> None:
         self._apply_config(camera_id, settings)
@@ -449,7 +430,7 @@ class CamerasView:
                 command=self._toggle_settings_window,
             )
         menu.add_separator()
-        menu.add_command(label="Refresh Camera Tabs", command=self._handle_refresh_clicked)
+        menu.add_command(label="Refresh Cameras", command=self._handle_refresh_clicked)
 
     def _apply_config(self, camera_id: Optional[str], settings: Dict[str, str]) -> None:
         if not camera_id:

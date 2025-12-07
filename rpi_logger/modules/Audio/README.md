@@ -21,7 +21,6 @@ command-line interaction otherwise.
 
 Only `sounddevice`, `numpy`, and the codex helpers are required.
 
-All USB audio input devices are enabled automatically whenever they appear, so
-no per-device configuration or persistence is required. The view reports their
-levels, while the recorder service immediately starts streaming from each
-detected USB microphone.
+Device discovery is centralized in the main logger. Audio devices are assigned
+to this module via `assign_device` commands, which enables streaming and level
+metering for each device.

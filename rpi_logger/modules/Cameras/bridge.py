@@ -55,12 +55,12 @@ class CamerasRuntime(ModuleRuntime):
         self.ctx = ctx
         self.logger = ctx.logger.getChild("Cameras") if hasattr(ctx, "logger") else logger
         self.module_dir = ctx.module_dir
+        self.config = load_config(ctx.model.preferences, overrides=None, logger=self.logger)
         self.cache = KnownCamerasCache(self.module_dir / "storage" / "known_cameras.json", logger=self.logger)
         self.registry = Registry(cache=self.cache, logger=self.logger)
-        self.disk_guard = DiskGuard(threshold_gb=1.0, logger=self.logger)
+        self.disk_guard = DiskGuard(threshold_gb=self.config.guard.disk_free_gb_min, logger=self.logger)
         self.view = CamerasView(ctx.view, logger=self.logger)
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-        self.config = load_config(ctx.model.preferences, overrides=None, logger=self.logger)
 
         # Worker management
         self._preview_receiver = PreviewReceiver()
@@ -84,6 +84,15 @@ class CamerasRuntime(ModuleRuntime):
         self._preview_frame_counts: Dict[str, int] = {}
         self._preview_tasks: Dict[str, asyncio.Task] = {}
         self._settings_tasks: Dict[str, asyncio.Task] = {}
+
+    # ------------------------------------------------------------------ Helpers
+
+    def _cancel_task(self, tasks: Dict[str, asyncio.Task], key: str) -> None:
+        """Cancel an existing task for key if running."""
+        if key in tasks:
+            old_task = tasks[key]
+            if not old_task.done():
+                old_task.cancel()
 
     # ------------------------------------------------------------------ Lifecycle
 
@@ -452,11 +461,7 @@ class CamerasRuntime(ModuleRuntime):
         """Handle configuration changes from UI - persist and apply settings."""
         self.logger.info("[CONFIG] Applying settings for %s: %s", camera_id, settings)
         # Persist and restart preview with new settings
-        # Cancel any existing settings task for this camera
-        if camera_id in self._settings_tasks:
-            old_task = self._settings_tasks[camera_id]
-            if not old_task.done():
-                old_task.cancel()
+        self._cancel_task(self._settings_tasks, camera_id)
         self._settings_tasks[camera_id] = asyncio.create_task(
             self._apply_camera_settings(camera_id, settings), name=f"settings_{camera_id}"
         )
@@ -517,10 +522,7 @@ class CamerasRuntime(ModuleRuntime):
     def _push_config_to_settings(self, camera_id: str) -> None:
         """Push config values to settings window for a camera (loads from cache if available)."""
         # Schedule async load from cache - track task for graceful shutdown
-        if camera_id in self._settings_tasks:
-            old_task = self._settings_tasks[camera_id]
-            if not old_task.done():
-                old_task.cancel()
+        self._cancel_task(self._settings_tasks, camera_id)
         self._settings_tasks[camera_id] = asyncio.create_task(
             self._load_and_push_settings(camera_id), name=f"load_settings_{camera_id}"
         )

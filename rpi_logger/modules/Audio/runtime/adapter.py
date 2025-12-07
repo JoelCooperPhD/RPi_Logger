@@ -60,6 +60,7 @@ class AudioRuntime(ModuleRuntime):
         sounddevice_index: Optional[int] = None,
         audio_channels: Optional[int] = None,
         audio_sample_rate: Optional[float] = None,
+        display_name: Optional[str] = None,
     ) -> bool:
         """
         Assign an audio device to this module (called by main logger).
@@ -73,6 +74,7 @@ class AudioRuntime(ModuleRuntime):
             sounddevice_index: The sounddevice index for this device
             audio_channels: Number of input channels
             audio_sample_rate: Sample rate for the device
+            display_name: Human-readable device name (e.g., "HD Pro Webcam C920: USB Audio")
 
         Returns:
             True if device was successfully assigned
@@ -88,9 +90,11 @@ class AudioRuntime(ModuleRuntime):
 
         try:
             # Create AudioDeviceInfo from the assignment
+            # Use display_name for human-readable label, fall back to device_id
+            device_name = display_name or device_id
             device_info = AudioDeviceInfo(
                 device_id=sounddevice_index,
-                name=device_id,  # Use device_id as name, will be updated
+                name=device_name,
                 channels=audio_channels or 1,
                 sample_rate=audio_sample_rate or self.settings.sample_rate,
             )
@@ -153,6 +157,7 @@ class AudioRuntime(ModuleRuntime):
                 sounddevice_index=command.get("sounddevice_index"),
                 audio_channels=command.get("audio_channels"),
                 audio_sample_rate=command.get("audio_sample_rate"),
+                display_name=command.get("display_name"),
             )
 
         if action == "unassign_device":

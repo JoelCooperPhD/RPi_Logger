@@ -1,10 +1,10 @@
 view.show_logger = true
 display_name = DRT
-window_geometry = 320x200+210+882
+window_geometry = 718x452+1282+233
 preview_resolution = auto
-enabled = false
+enabled = true
 
 # Auto-generated settings (do not edit unless you know what you are doing)
 config_dialog_geometry = +1038+875
-device_connected = false
+device_connected = true
 view.show_io_panel = true

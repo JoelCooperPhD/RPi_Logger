@@ -367,6 +367,30 @@ def get_devices_for_connection(interface: InterfaceType, family: DeviceFamily) -
     ]
 
 
+def get_connections_by_family() -> Dict[DeviceFamily, Set[InterfaceType]]:
+    """
+    Get all available device family + interface combinations, grouped by family.
+
+    Returns:
+        Dict mapping DeviceFamily to set of InterfaceType that support that family.
+        Excludes coordinators (they're infrastructure, not user-selectable).
+    """
+    connections: Dict[DeviceFamily, Set[InterfaceType]] = {}
+
+    for spec in DEVICE_REGISTRY.values():
+        if spec.is_coordinator:
+            continue
+
+        family = spec.family
+        interface = spec.interface_type
+
+        if family not in connections:
+            connections[family] = set()
+        connections[family].add(interface)
+
+    return connections
+
+
 def get_connection_display_name(family: DeviceFamily) -> str:
     """Get human-readable display name for a device family."""
     display_names = {
@@ -379,6 +403,19 @@ def get_connection_display_name(family: DeviceFamily) -> str:
         DeviceFamily.GPS: "GPS",
     }
     return display_names.get(family, family.value)
+
+
+def get_interface_display_name(interface: InterfaceType) -> str:
+    """Get human-readable display name for an interface type."""
+    display_names = {
+        InterfaceType.USB: "USB",
+        InterfaceType.XBEE: "XBee",
+        InterfaceType.NETWORK: "Network",
+        InterfaceType.CSI: "CSI",
+        InterfaceType.INTERNAL: "Internal",
+        InterfaceType.UART: "UART",
+    }
+    return display_names.get(interface, interface.value)
 
 
 def get_uart_device_specs() -> list[DeviceSpec]:

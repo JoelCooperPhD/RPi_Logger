@@ -64,8 +64,8 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 # Window position and size (saved automatically on window close)
 window_x = 210
 window_y = 144
-window_width = 800
-window_height = 600
+window_width = 914
+window_height = 624
 
 
 ################################################################################

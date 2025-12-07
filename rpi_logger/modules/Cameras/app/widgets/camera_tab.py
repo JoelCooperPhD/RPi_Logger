@@ -1,4 +1,4 @@
-"""Tk widget representing a camera tab with a preview canvas."""
+"""Tk widget representing a camera view with a preview canvas."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ except Exception:  # pragma: no cover - headless hosts
     ttk = None  # type: ignore
 
 
-class CameraTab:
-    """Tk-backed camera tab that renders preview frames."""
+class CameraView:
+    """Tk-backed camera view that renders preview frames."""
 
     def __init__(
         self,
@@ -44,7 +44,7 @@ class CameraTab:
         self._logged_first_frame = False
 
         if tk is None or ttk is None:
-            self._logger.warning("Tk unavailable; camera tab %s will be headless", camera_id)
+            self._logger.warning("Tk unavailable; camera view %s will be headless", camera_id)
             return
 
         self.frame = ttk.Frame(parent, padding="6")
@@ -62,7 +62,7 @@ class CameraTab:
 
         if self._canvas is None or tk is None:
             if not hasattr(self, '_no_canvas_warned'):
-                self._logger.warning("[CAMERA_TAB] %s: update_frame called but no canvas!", self.camera_id)
+                self._logger.warning("[CAMERA_VIEW] %s: update_frame called but no canvas!", self.camera_id)
                 self._no_canvas_warned = True
             return
 
@@ -77,16 +77,16 @@ class CameraTab:
             rgb_frame = to_rgb(ensure_uint8(frame), assume_rgb=assume_rgb)
             if rgb_frame is None:
                 if self._frame_count <= 3:
-                    self._logger.warning("[CAMERA_TAB] %s: to_rgb returned None!", self.camera_id)
+                    self._logger.warning("[CAMERA_VIEW] %s: to_rgb returned None!", self.camera_id)
                 return
             image = Image.fromarray(rgb_frame)
         except Exception:
-            self._logger.debug("[CAMERA_TAB] %s: Unable to convert frame", self.camera_id, exc_info=True)
+            self._logger.debug("[CAMERA_VIEW] %s: Unable to convert frame", self.camera_id, exc_info=True)
             return
 
         if not self._logged_first_frame:
             self._logger.info(
-                "[CAMERA_TAB] %s: FIRST FRAME RECEIVED! shape=%s mode=%s canvas=%dx%d",
+                "[CAMERA_VIEW] %s: FIRST FRAME RECEIVED! shape=%s mode=%s canvas=%dx%d",
                 self.camera_id,
                 getattr(image, "size", None),
                 image.mode,
@@ -95,7 +95,7 @@ class CameraTab:
             )
             self._logged_first_frame = True
         elif self._frame_count % 60 == 0:
-            self._logger.debug("[CAMERA_TAB] %s: frame #%d rendered", self.camera_id, self._frame_count)
+            self._logger.debug("[CAMERA_VIEW] %s: frame #%d rendered", self.camera_id, self._frame_count)
 
         canvas_w = self._canvas.winfo_width()
         canvas_h = self._canvas.winfo_height()
@@ -143,4 +143,8 @@ class CameraTab:
             try:
                 self.frame.destroy()
             except Exception:
-                self._logger.debug("Camera tab destroy failed for %s", self.camera_id, exc_info=True)
+                self._logger.debug("Camera view destroy failed for %s", self.camera_id, exc_info=True)
+
+
+# Backward compatibility alias
+CameraTab = CameraView

@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from .constants import DEFAULT_SESSION_PREFIX
 from .entities import AudioDeviceInfo, AudioSnapshot
 from .level_meter import LevelMeter
 
@@ -23,7 +22,6 @@ class AudioState:
         self.session_dir: Optional[Path] = None
         self.recording: bool = False
         self.trial_number: int = 1
-        self.session_prefix: str = DEFAULT_SESSION_PREFIX
         self._observers: list[Callable[[AudioSnapshot], None]] = []
         self._status_text: str = "No audio devices detected"
 
@@ -101,14 +99,6 @@ class AudioState:
         self._update_status()
         self._notify()
 
-    def set_trial_number(self, trial_number: int) -> None:
-        trial_number = max(1, trial_number)
-        if self.trial_number == trial_number:
-            return
-        self.trial_number = trial_number
-        self._update_status()
-        self._notify()
-
     def ensure_meter(self, device_id: int) -> LevelMeter:
         meter = self.level_meters.get(device_id)
         if meter is None:
@@ -131,12 +121,6 @@ class AudioState:
         self.selected_devices.pop(device_id, None)
         self.level_meters.pop(device_id, None)
         self._update_status()
-        self._notify()
-
-    def update_session_prefix(self, prefix: str) -> None:
-        if not prefix or prefix == self.session_prefix:
-            return
-        self.session_prefix = prefix
         self._notify()
 
     def _update_status(self) -> None:

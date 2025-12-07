@@ -7,7 +7,6 @@ from .constants import (
     DB_MIN,
     DB_RED,
     DB_YELLOW,
-    DEFAULT_SESSION_PREFIX,
 )
 from .entities import AudioDeviceInfo, AudioSnapshot
 from .level_meter import LevelMeter
@@ -20,7 +19,6 @@ __all__ = [
     "LevelMeter",
     "AUDIO_BIT_DEPTH",
     "AUDIO_CHANNELS_MONO",
-    "DEFAULT_SESSION_PREFIX",
     "DB_MIN",
     "DB_MAX",
     "DB_YELLOW",

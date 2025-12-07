@@ -6,20 +6,19 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from pathlib import Path
-from typing import Dict, Optional, Set, Tuple
+from typing import Optional
 from PIL import Image
 import io
 
 from ..logger_system import LoggerSystem
 from ..config_manager import get_config_manager
 from ..paths import CONFIG_PATH, LOGO_PATH
-from ..devices import (
-    InterfaceType, DeviceFamily, ConnectionKey,
-    get_available_connections, get_connection_display_name
-)
+from ..devices import InterfaceType, DeviceFamily
 from .main_controller import MainController
 from .timer_manager import TimerManager
-from .devices_panel import USBDevicesPanel
+from .device_controller import DeviceUIController
+from .devices_panel import DevicesPanel
+from .connections_menu import ConnectionsMenu
 from .theme.colors import Colors
 from .theme.styles import Theme
 from .theme.widgets import RoundedButton
@@ -32,6 +31,7 @@ class TextHandler(logging.Handler):
         self.text_widget = text_widget
         self.max_lines = 500
         self._closed = False
+        self._pending_after_ids: list[str] = []
         self.setFormatter(
             logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -44,7 +44,8 @@ class TextHandler(logging.Handler):
             return
         try:
             msg = self.format(record) + '\n'
-            self.text_widget.after(0, self._append_log, msg)
+            after_id = self.text_widget.after(0, self._append_log, msg)
+            self._pending_after_ids.append(after_id)
         except Exception:
             pass
 
@@ -52,6 +53,10 @@ class TextHandler(logging.Handler):
         if self._closed:
             return
         try:
+            # Check if widget still exists
+            if not self.text_widget.winfo_exists():
+                self._closed = True
+                return
             self.text_widget.config(state='normal')
             self.text_widget.insert(tk.END, msg)
             self.text_widget.see(tk.END)
@@ -61,11 +66,21 @@ class TextHandler(logging.Handler):
                 self.text_widget.delete('1.0', f'{num_lines - self.max_lines}.0')
 
             self.text_widget.config(state='disabled')
+        except tk.TclError:
+            # Widget was destroyed
+            self._closed = True
         except Exception:
             pass
 
     def close(self) -> None:
         self._closed = True
+        # Cancel any pending after callbacks
+        for after_id in self._pending_after_ids:
+            try:
+                self.text_widget.after_cancel(after_id)
+            except Exception:
+                pass
+        self._pending_after_ids.clear()
         super().close()
 
 
@@ -78,9 +93,11 @@ class MainWindow:
         self.timer_manager = TimerManager()
         self.controller = MainController(logger_system, self.timer_manager)
 
+        # Use device system from logger_system
+        self.device_system = logger_system.device_system
+
         self.root: Optional[tk.Tk] = None
-        # Connection vars: maps (InterfaceType, DeviceFamily) to BooleanVar
-        self.connection_vars: Dict[Tuple[InterfaceType, DeviceFamily], tk.BooleanVar] = {}
+        self.module_vars: dict[str, tk.BooleanVar] = {}
 
         self.session_button: Optional[RoundedButton] = None
         self.trial_button: Optional[RoundedButton] = None
@@ -103,8 +120,9 @@ class MainWindow:
         self.logger_visible_var: Optional[tk.BooleanVar] = None
         self.log_handler: Optional[logging.Handler] = None
 
-        # USB Devices panel
-        self.devices_panel: Optional[USBDevicesPanel] = None
+        # Device UI components
+        self.devices_panel: Optional[DevicesPanel] = None
+        self.connections_menu: Optional[ConnectionsMenu] = None
         self._main_frame: Optional[ttk.Frame] = None
 
         self._pending_tasks: list[asyncio.Task] = []
@@ -163,6 +181,7 @@ class MainWindow:
 
         self.controller.set_widgets(
             self.root,
+            self.module_vars,
             self.session_button,
             self.trial_button,
             self.session_status_label,
@@ -171,11 +190,8 @@ class MainWindow:
             self.trial_label_var
         )
 
-        # Wire up device UI callback
-        self.logger_system.set_devices_ui_callback(self.update_devices_display)
-
-        # Wire up device state callback for UI updates
-        self.logger_system.set_device_connected_callback(self.on_device_connected_changed)
+        # Wire device system to logger_system callbacks
+        self._wire_device_system()
 
         # Set UI root for thread-safe state updates
         self.logger_system.set_ui_root(self.root)
@@ -193,6 +209,9 @@ class MainWindow:
         menubar = tk.Menu(self.root)
         Theme.configure_menu(menubar)
         self.root.config(menu=menubar)
+
+        # Build Modules menu for enabling/disabling data logging modules
+        self._build_modules_menu(menubar)
 
         # Build Connections menu with interface > device structure
         self._build_connections_menu(menubar)
@@ -261,112 +280,89 @@ class MainWindow:
             command=self.controller.report_issue
         )
 
+    def _build_modules_menu(self, menubar: tk.Menu) -> None:
+        """Build the Modules menu for enabling/disabling data logging modules."""
+        modules_menu = tk.Menu(menubar, tearoff=0)
+        Theme.configure_menu(modules_menu)
+        menubar.add_cascade(label="Modules", menu=modules_menu)
+
+        for module_info in self.logger_system.get_available_modules():
+            is_enabled = self.logger_system.is_module_enabled(module_info.name)
+            var = tk.BooleanVar(value=is_enabled)
+            self.module_vars[module_info.name] = var
+
+            modules_menu.add_checkbutton(
+                label=module_info.display_name,
+                variable=var,
+                command=lambda name=module_info.name: self._schedule_task(
+                    self.controller.on_module_menu_toggle(name)
+                )
+            )
+
     def _build_connections_menu(self, menubar: tk.Menu) -> None:
-        """Build the Connections menu with interface > device structure.
+        """Build the Connections menu using the new architecture."""
+        if self.device_system.ui_controller:
+            self.connections_menu = ConnectionsMenu(menubar, self.device_system.ui_controller)
+        else:
+            # Fallback: create empty menu if UI controller not available
+            connections_menu = tk.Menu(menubar, tearoff=0)
+            Theme.configure_menu(connections_menu)
+            menubar.add_cascade(label="Connections", menu=connections_menu)
 
-        Menu structure:
-            Connections
-            ├─ USB
-            │  ├─ ☑ DRT
-            │  └─ ☑ VOG
-            ├─ Wireless
-            │  ├─ ☑ DRT
-            │  └─ ☑ VOG
-            ├─ Network
-            │  └─ ☑ Eye Tracker
-            ├─ Audio
-            │  └─ ☑ Microphone
-            └─ Internal
-               └─ ☑ Notes
-        """
-        connections_menu = tk.Menu(menubar, tearoff=0)
-        Theme.configure_menu(connections_menu)
-        menubar.add_cascade(label="Connections", menu=connections_menu)
+    def _wire_device_system(self) -> None:
+        """Wire the device system to application callbacks."""
+        # Connection toggle callback - when user enables/disables a connection type
+        async def on_connection_changed(interface: InterfaceType, family: DeviceFamily, enabled: bool):
+            self.logger.info(
+                "Connection %s > %s %s",
+                interface.value, family.value,
+                "enabled" if enabled else "disabled"
+            )
 
-        # Get available connections grouped by interface
-        available = get_available_connections()
+            # Sync to legacy device_manager
+            self.logger_system.device_manager.set_connection_enabled(interface, family, enabled)
 
-        # Get currently enabled connections from device manager
-        enabled = self.logger_system.device_manager.get_enabled_connections()
+            # Get devices to disconnect if disabling
+            if not enabled:
+                devices = self.device_system.set_connection_enabled(interface, family, enabled)
+                for device in devices:
+                    self.logger.info(
+                        "Disconnecting %s due to connection type disabled",
+                        device.display_name
+                    )
+                    await self.logger_system.stop_and_disconnect_device(device.device_id)
+            else:
+                self.device_system.set_connection_enabled(interface, family, enabled)
 
-        # Define interface order for consistent menu layout
-        interface_order = [
-            InterfaceType.USB,
-            InterfaceType.XBEE,
-            InterfaceType.NETWORK,
-            InterfaceType.CSI,
-            InterfaceType.INTERNAL,
-        ]
+            # Save to config
+            self._save_enabled_connections()
 
-        for interface in interface_order:
-            if interface not in available:
-                continue
+            # Trigger UI refresh
+            self.logger_system.notify_devices_changed()
 
-            families = sorted(available[interface], key=lambda f: f.value)
+        self.device_system.set_on_connection_changed(on_connection_changed)
 
-            # Create submenu for this interface
-            interface_submenu = tk.Menu(connections_menu, tearoff=0)
-            Theme.configure_menu(interface_submenu)
-            connections_menu.add_cascade(label=interface.value, menu=interface_submenu)
+        # Device connect callback
+        async def on_connect_device(device_id: str):
+            self.logger.info("Connect request for device: %s", device_id)
+            await self.logger_system.connect_and_start_device(device_id)
 
-            for family in families:
-                key: ConnectionKey = (interface, family)
-                is_enabled = key in enabled
+        self.device_system.set_on_connect_device(on_connect_device)
 
-                var = tk.BooleanVar(value=is_enabled)
-                self.connection_vars[key] = var
+        # Device disconnect callback
+        async def on_disconnect_device(device_id: str):
+            self.logger.info("Disconnect request for device: %s", device_id)
+            await self.logger_system.stop_and_disconnect_device(device_id)
 
-                display_name = get_connection_display_name(family)
-                interface_submenu.add_checkbutton(
-                    label=display_name,
-                    variable=var,
-                    command=lambda k=key: self._on_connection_toggle(k)
-                )
+        self.device_system.set_on_disconnect_device(on_disconnect_device)
 
-    def _on_connection_toggle(self, key: ConnectionKey) -> None:
-        """Handle connection checkbox toggle."""
-        interface, family = key
-        enabled = self.connection_vars[key].get()
-
-        # Update device manager and get devices to disconnect
-        devices_to_disconnect = self.logger_system.device_manager.set_connection_enabled(
-            interface, family, enabled
-        )
-
-        # Disconnect devices of this type if disabling
-        if not enabled and devices_to_disconnect:
-            for device in devices_to_disconnect:
-                self.logger.info(
-                    "Disconnecting %s due to connection type disabled",
-                    device.display_name
-                )
-                self._schedule_task(
-                    self.logger_system.stop_and_disconnect_device(device.device_id)
-                )
-
-        # Save to config
-        self._save_enabled_connections()
-
-        # Refresh device display to show/hide section
-        self.logger_system.notify_devices_changed()
-
-        self.logger.info(
-            "Connection %s > %s %s",
-            interface.value, family.value,
-            "enabled" if enabled else "disabled"
-        )
+        # Wire up device state callback for UI updates
+        self.logger_system.set_device_connected_callback(self.on_device_connected_changed)
 
     def _save_enabled_connections(self) -> None:
         """Save enabled connections to config file."""
         config_manager = get_config_manager()
-        enabled = self.logger_system.device_manager.get_enabled_connections()
-
-        # Convert to serializable format: "USB:VOG,USB:DRT,Wireless:VOG,..."
-        connections_str = ",".join(
-            f"{interface.value}:{family.value}"
-            for interface, family in sorted(enabled, key=lambda x: (x[0].value, x[1].value))
-        )
-
+        connections_str = self.device_system.save_enabled_connections()
         config_manager.write_config(CONFIG_PATH, {'enabled_connections': connections_str})
         self.logger.debug("Saved enabled connections: %s", connections_str)
 
@@ -380,26 +376,9 @@ class MainWindow:
         config = config_manager.read_config(CONFIG_PATH)
         connections_str = config_manager.get_str(config, 'enabled_connections', default='')
 
-        if not connections_str:
-            return  # Use defaults
-
-        # Parse the connections string
-        enabled: Set[ConnectionKey] = set()
-        for item in connections_str.split(','):
-            item = item.strip()
-            if ':' not in item:
-                continue
-            interface_str, family_str = item.split(':', 1)
-            try:
-                interface = InterfaceType(interface_str)
-                family = DeviceFamily(family_str)
-                enabled.add((interface, family))
-            except ValueError:
-                self.logger.warning("Unknown connection type: %s", item)
-
-        # Apply to device manager
-        self.logger_system.device_manager.set_enabled_connections(enabled)
-        self.logger.info("Loaded %d enabled connections from config", len(enabled))
+        if connections_str:
+            self.device_system.load_enabled_connections(connections_str)
+            self.logger.info("Loaded enabled connections from config")
 
     def _build_header(self) -> None:
         header_frame = ttk.Frame(self.root, height=80)
@@ -617,61 +596,22 @@ class MainWindow:
         self.disk_label.grid(row=9, column=1, sticky='e', pady=0)
 
     def _build_devices_panel(self) -> None:
-        """Build the USB devices panel in the right column."""
-        self.devices_panel = USBDevicesPanel(
-            self._main_frame,
-            on_connect_change=lambda device_id, connect: self._schedule_task(
-                self.controller.on_device_connect_change(device_id, connect)
-            ),
-        )
-        # Right column of main content area
-        self.devices_panel.grid(row=0, column=1, sticky="nsew")
-
-    def update_devices_display(
-        self,
-        devices: list,
-        dongles: list,
-        network_devices: list = None,
-        audio_devices: list = None,
-        internal_devices: list = None,
-        camera_devices: list = None,
-    ) -> None:
-        """Update the devices panel with current device list."""
-        if network_devices is None:
-            network_devices = []
-        if audio_devices is None:
-            audio_devices = []
-        if internal_devices is None:
-            internal_devices = []
-        if camera_devices is None:
-            camera_devices = []
-        total_child_devices = sum(len(d.child_devices) for d in dongles)
-        self.logger.info(
-            "Updating devices display: %d internal, %d USB, %d dongles, %d wireless, %d network, %d audio, %d camera",
-            len(internal_devices), len(devices), len(dongles), total_child_devices,
-            len(network_devices), len(audio_devices), len(camera_devices)
-        )
-        for d in dongles:
-            if d.child_devices:
-                self.logger.debug("  Dongle %s has children: %s", d.port, list(d.child_devices.keys()))
-        if self.devices_panel:
-            # Pass enabled connections so sections are shown even when empty
-            enabled_connections = self.logger_system.device_manager.get_enabled_connections()
-            self.devices_panel.update_devices(
-                devices, dongles, network_devices, audio_devices, internal_devices, camera_devices,
-                enabled_connections=enabled_connections
-            )
+        """Build the devices panel in the right column using the new architecture."""
+        if self.device_system.ui_controller:
+            self.devices_panel = DevicesPanel(self._main_frame, self.device_system.ui_controller)
+            # Right column of main content area
+            self.devices_panel.grid(row=0, column=1, sticky="nsew")
+        else:
+            self.logger.warning("DeviceUIController not available, devices panel disabled")
 
     def on_device_connected_changed(self, device_id: str, connected: bool) -> None:
         """Handle device connection state change (from LoggerSystem).
 
-        Updates dot and Connect/Disconnect button.
+        Syncs to the new DeviceSystem architecture.
         """
-        self.logger.info("on_device_connected_changed: device=%s connected=%s", device_id, connected)
-        if self.devices_panel:
-            self.devices_panel.set_device_connected(device_id, connected)
-        else:
-            self.logger.warning("devices_panel is None!")
+        self.logger.debug("on_device_connected_changed: device=%s connected=%s", device_id, connected)
+        # Sync connection state to DeviceSystem
+        self.device_system.set_device_connected(device_id, connected)
 
     def _build_logger_frame(self) -> None:
         self.logger_frame = ttk.LabelFrame(self.root, text="System Log", padding="3")

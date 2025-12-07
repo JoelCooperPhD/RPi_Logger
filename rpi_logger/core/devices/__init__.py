@@ -19,8 +19,10 @@ from .device_registry import (
     parse_wireless_node_id,
     extract_device_number,
     get_available_connections,
+    get_connections_by_family,
     get_devices_for_connection,
     get_connection_display_name,
+    get_interface_display_name,
     get_uart_device_specs,
 )
 
@@ -66,6 +68,11 @@ from .uart_scanner import (
     DiscoveredUARTDevice,
 )
 
+from .internal_scanner import (
+    InternalDeviceScanner,
+    DiscoveredInternalDevice,
+)
+
 from .connection_manager import (
     DeviceConnectionManager,
     ConnectionState,
@@ -73,8 +80,18 @@ from .connection_manager import (
     XBeeDongleInfo,
 )
 
-# Re-export InterfaceType from connection_manager for convenience
-# (it's imported from device_registry there)
+# New architecture components
+from .catalog import DeviceCatalog, FamilyMetadata, InterfaceMetadata
+from .selection import DeviceSelectionModel
+from .lifecycle import DeviceLifecycleManager
+from .events import (
+    DeviceDiscoveredEvent,
+    DeviceLostEvent,
+    DeviceEvent,
+    ScannerProtocol,
+)
+from .scanner_adapter import ScannerEventAdapter
+from .device_system import DeviceSystem
 
 __all__ = [
     # Device Registry
@@ -91,8 +108,10 @@ __all__ = [
     "parse_wireless_node_id",
     "extract_device_number",
     "get_available_connections",
+    "get_connections_by_family",
     "get_devices_for_connection",
     "get_connection_display_name",
+    "get_interface_display_name",
     # USB Scanner
     "USBScanner",
     "DiscoveredUSBDevice",
@@ -122,9 +141,24 @@ __all__ = [
     "UARTScanner",
     "DiscoveredUARTDevice",
     "get_uart_device_specs",
-    # Connection Manager
+    # Internal Scanner (virtual devices)
+    "InternalDeviceScanner",
+    "DiscoveredInternalDevice",
+    # Connection Manager (legacy)
     "DeviceConnectionManager",
     "ConnectionState",
     "DeviceInfo",
     "XBeeDongleInfo",
+    # New Architecture
+    "DeviceCatalog",
+    "FamilyMetadata",
+    "InterfaceMetadata",
+    "DeviceSelectionModel",
+    "DeviceLifecycleManager",
+    "DeviceDiscoveredEvent",
+    "DeviceLostEvent",
+    "DeviceEvent",
+    "ScannerProtocol",
+    "ScannerEventAdapter",
+    "DeviceSystem",
 ]
