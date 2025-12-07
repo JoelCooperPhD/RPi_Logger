@@ -1,13 +1,12 @@
 """
 Devices panel for main window.
 
-Displays discovered devices in sections:
-- INTERNAL: Software-only modules (Notes, etc.) - always available
-- USB: Direct USB-connected devices
-- WIRELESS: Devices connected via XBee dongles
-- NETWORK: Network-discovered devices (eye trackers via mDNS)
-- AUDIO: Audio input devices (microphones)
-- CAMERA: USB cameras and Pi CSI cameras
+Displays discovered devices in sections matching the Connections menu:
+- Internal: Software-only modules (Notes, etc.)
+- USB: Direct USB-connected devices (VOG, DRT, Audio, USB cameras)
+- XBee: Devices connected via XBee wireless dongles
+- Network: Network-discovered devices (eye trackers via mDNS)
+- CSI: Raspberry Pi CSI camera devices
 
 Each device is shown as a single-line tile with:
 - Round toggle button (green when on, dark when off)
@@ -141,11 +140,11 @@ class DeviceRow(ttk.Frame):
         # Round toggle button (column 0) - reflects connection state
         self.toggle_btn = RoundToggle(
             self,
-            size=20,
+            size=16,
             command=self._on_toggle_click,
             active=self._is_connected
         )
-        self.toggle_btn.grid(row=0, column=0, padx=(4, 10), pady=4)
+        self.toggle_btn.grid(row=0, column=0, padx=(4, 6), pady=2)
 
         # Device name (column 1)
         self.name_label = ttk.Label(
@@ -153,20 +152,20 @@ class DeviceRow(ttk.Frame):
             text=device.display_name,
             style='Inframe.TLabel'
         )
-        self.name_label.grid(row=0, column=1, sticky="w", pady=4)
+        self.name_label.grid(row=0, column=1, sticky="w", pady=2)
 
         # Connect/Disconnect button (column 2)
         self.connect_btn = RoundedButton(
             self,
             text="Disconnect" if self._is_connected else "Connect",
             command=self._on_connect_click,
-            width=80,
-            height=24,
-            corner_radius=6,
+            width=70,
+            height=20,
+            corner_radius=5,
             style='default',
             bg=Colors.BG_FRAME
         )
-        self.connect_btn.grid(row=0, column=2, padx=(8, 4), pady=4)
+        self.connect_btn.grid(row=0, column=2, padx=(4, 4), pady=2)
 
     def _on_toggle_click(self, active: bool) -> None:
         """Handle dot toggle click - toggle connection."""
@@ -222,13 +221,13 @@ class DeviceSection(ttk.Frame):
             self.header,
             text=title,
             style='SectionHeader.TLabel',
-            font=('TkDefaultFont', 9, 'bold')
+            font=('TkDefaultFont', 8, 'bold')
         )
-        self.header_label.grid(row=0, column=0, sticky="w", padx=8, pady=4)
+        self.header_label.grid(row=0, column=0, sticky="w", padx=6, pady=2)
 
         # Content frame for device rows
         self.content = ttk.Frame(self, style='Inframe.TFrame')
-        self.content.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
+        self.content.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 2))
         self.content.columnconfigure(0, weight=1)
 
         # Empty state label
@@ -236,15 +235,15 @@ class DeviceSection(ttk.Frame):
             self.content,
             text="No devices",
             style='Inframe.Secondary.TLabel',
-            font=('TkDefaultFont', 9, 'italic')
+            font=('TkDefaultFont', 8, 'italic')
         )
-        self.empty_label.grid(row=0, column=0, sticky="w", padx=8, pady=4)
+        self.empty_label.grid(row=0, column=0, sticky="w", padx=6, pady=2)
 
     def update_devices(self, devices: List[DeviceInfo]) -> None:
         """Update the section with a list of devices."""
         if not devices:
             # Show empty state
-            self.empty_label.grid(row=0, column=0, sticky="w", padx=8, pady=4)
+            self.empty_label.grid(row=0, column=0, sticky="w", padx=6, pady=2)
             for row in self._device_rows.values():
                 row.destroy()
             self._device_rows.clear()
@@ -345,48 +344,41 @@ class USBDevicesPanel(ttk.LabelFrame):
         self.canvas.bind_all("<Button-4>", self._on_mousewheel)
         self.canvas.bind_all("<Button-5>", self._on_mousewheel)
 
-        # Create sections - INTERNAL first since it's always available
+        # Create sections - names match Connections menu for clarity
         self.internal_section = DeviceSection(
             self.scrollable_frame,
-            "INTERNAL",
+            "Internal",
             self._on_connect_change,
         )
-        self.internal_section.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self.internal_section.grid(row=0, column=0, sticky="ew", pady=(0, 4))
 
         self.usb_section = DeviceSection(
             self.scrollable_frame,
             "USB",
             self._on_connect_change,
         )
-        self.usb_section.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        self.usb_section.grid(row=1, column=0, sticky="ew", pady=(0, 4))
 
         self.wireless_section = DeviceSection(
             self.scrollable_frame,
-            "WIRELESS",
+            "XBee",
             self._on_connect_change,
         )
-        self.wireless_section.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        self.wireless_section.grid(row=2, column=0, sticky="ew", pady=(0, 4))
 
         self.network_section = DeviceSection(
             self.scrollable_frame,
-            "NETWORK",
+            "Network",
             self._on_connect_change,
         )
-        self.network_section.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        self.network_section.grid(row=3, column=0, sticky="ew", pady=(0, 4))
 
-        self.audio_section = DeviceSection(
+        self.csi_section = DeviceSection(
             self.scrollable_frame,
-            "AUDIO",
+            "CSI",
             self._on_connect_change,
         )
-        self.audio_section.grid(row=4, column=0, sticky="ew", pady=(0, 8))
-
-        self.camera_section = DeviceSection(
-            self.scrollable_frame,
-            "CAMERA",
-            self._on_connect_change,
-        )
-        self.camera_section.grid(row=5, column=0, sticky="ew")
+        self.csi_section.grid(row=4, column=0, sticky="ew")
 
         # Empty state (shown when no devices at all)
         self.empty_label = ttk.Label(
@@ -445,13 +437,22 @@ class USBDevicesPanel(ttk.LabelFrame):
         for dongle in dongles:
             wireless_devices.extend(dongle.child_devices.values())
 
+        # Merge audio and USB camera devices into USB section
+        all_usb_devices = list(devices) + list(audio_devices or [])
+        # USB cameras go in USB section, CSI cameras go in CSI section
+        usb_cameras = [d for d in (camera_devices or [])
+                       if getattr(d, 'interface_type', None) == InterfaceType.USB]
+        csi_cameras = [d for d in (camera_devices or [])
+                       if getattr(d, 'interface_type', None) != InterfaceType.USB]
+        all_usb_devices.extend(usb_cameras)
+
         # Check which sections should be visible based on enabled connections
         # INTERNAL section: shown if Internal:Internal is enabled
         internal_enabled = (InterfaceType.INTERNAL, DeviceFamily.INTERNAL) in enabled_connections
 
-        # USB section: shown if any USB device family (VOG, DRT) is enabled (excluding Audio)
+        # USB section: shown if any USB connection is enabled
         usb_enabled = any(
-            interface == InterfaceType.USB and family not in (DeviceFamily.AUDIO, DeviceFamily.CAMERA)
+            interface == InterfaceType.USB
             for interface, family in enabled_connections
         )
 
@@ -467,19 +468,13 @@ class USBDevicesPanel(ttk.LabelFrame):
             for interface, _ in enabled_connections
         )
 
-        # AUDIO section: shown if USB:Audio is enabled
-        audio_enabled = (InterfaceType.USB, DeviceFamily.AUDIO) in enabled_connections
-
-        # CAMERA section: shown if CSI:Camera or USB:Camera is enabled
-        camera_enabled = (
-            (InterfaceType.CSI, DeviceFamily.CAMERA) in enabled_connections
-            or (InterfaceType.USB, DeviceFamily.CAMERA) in enabled_connections
-        )
+        # CSI section: shown if CSI:Camera is enabled
+        csi_enabled = (InterfaceType.CSI, DeviceFamily.CAMERA) in enabled_connections
 
         # Any section enabled means we should show the panel content
         has_any_enabled = (
             internal_enabled or usb_enabled or wireless_enabled
-            or network_enabled or audio_enabled or camera_enabled
+            or network_enabled or csi_enabled
         )
 
         # Show/hide sections based on enabled connections (not just device presence)
@@ -492,15 +487,15 @@ class USBDevicesPanel(ttk.LabelFrame):
             # INTERNAL section
             if internal_enabled:
                 self.internal_section.update_devices(internal_devices)
-                self.internal_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 8))
+                self.internal_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 4))
                 row_idx += 1
             else:
                 self.internal_section.grid_remove()
 
-            # USB section
+            # USB section (includes Audio and USB cameras)
             if usb_enabled:
-                self.usb_section.update_devices(devices)
-                self.usb_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 8))
+                self.usb_section.update_devices(all_usb_devices)
+                self.usb_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 4))
                 row_idx += 1
             else:
                 self.usb_section.grid_remove()
@@ -508,7 +503,7 @@ class USBDevicesPanel(ttk.LabelFrame):
             # WIRELESS section
             if wireless_enabled:
                 self.wireless_section.update_devices(wireless_devices)
-                self.wireless_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 8))
+                self.wireless_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 4))
                 row_idx += 1
             else:
                 self.wireless_section.grid_remove()
@@ -516,43 +511,34 @@ class USBDevicesPanel(ttk.LabelFrame):
             # NETWORK section
             if network_enabled:
                 self.network_section.update_devices(network_devices)
-                self.network_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 8))
+                self.network_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 4))
                 row_idx += 1
             else:
                 self.network_section.grid_remove()
 
-            # AUDIO section
-            if audio_enabled:
-                self.audio_section.update_devices(audio_devices)
-                self.audio_section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 8))
-                row_idx += 1
+            # CSI section
+            if csi_enabled:
+                self.csi_section.update_devices(csi_cameras)
+                self.csi_section.grid(row=row_idx, column=0, sticky="ew")
             else:
-                self.audio_section.grid_remove()
-
-            # CAMERA section
-            if camera_enabled:
-                self.camera_section.update_devices(camera_devices)
-                self.camera_section.grid(row=row_idx, column=0, sticky="ew")
-            else:
-                self.camera_section.grid_remove()
+                self.csi_section.grid_remove()
         else:
             self.internal_section.grid_remove()
             self.usb_section.grid_remove()
             self.wireless_section.grid_remove()
             self.network_section.grid_remove()
-            self.audio_section.grid_remove()
-            self.camera_section.grid_remove()
+            self.csi_section.grid_remove()
             self.empty_label.grid(row=0, column=0, pady=20)
             return
 
         total_devices = (
-            len(devices) + len(wireless_devices) + len(network_devices)
-            + len(audio_devices) + len(internal_devices) + len(camera_devices)
+            len(all_usb_devices) + len(wireless_devices) + len(network_devices)
+            + len(internal_devices) + len(csi_cameras)
         )
         logger.debug(
-            "Updated devices panel: %d internal, %d USB, %d wireless, %d network, %d audio, %d camera, %d total",
-            len(internal_devices), len(devices), len(wireless_devices),
-            len(network_devices), len(audio_devices), len(camera_devices), total_devices
+            "Updated devices panel: %d internal, %d USB, %d wireless, %d network, %d CSI, %d total",
+            len(internal_devices), len(all_usb_devices), len(wireless_devices),
+            len(network_devices), len(csi_cameras), total_devices
         )
 
     def set_device_connected(self, device_id: str, connected: bool) -> None:
@@ -573,10 +559,7 @@ class USBDevicesPanel(ttk.LabelFrame):
         if self.network_section.set_device_connected(device_id, connected):
             logger.info("  -> found in network_section")
             return
-        if self.audio_section.set_device_connected(device_id, connected):
-            logger.info("  -> found in audio_section")
-            return
-        if self.camera_section.set_device_connected(device_id, connected):
-            logger.info("  -> found in camera_section")
+        if self.csi_section.set_device_connected(device_id, connected):
+            logger.info("  -> found in csi_section")
             return
         logger.warning("  -> device NOT FOUND in any section!")

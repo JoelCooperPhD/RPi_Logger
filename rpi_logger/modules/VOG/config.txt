@@ -3,8 +3,8 @@ window_geometry = 798x404+1305+395
 preview_resolution = auto
 view.show_io_panel = false
 view.show_logger = true
-enabled = true
-device_connected = true
+enabled = false
+device_connected = false
 
 # Auto-generated settings (do not edit unless you know what you are doing)
 config_dialog_geometry = +1874+158
