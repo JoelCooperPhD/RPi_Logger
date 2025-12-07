@@ -127,9 +127,8 @@ class LoggerSystem:
         # UI callback for device panel updates (usb_devices, dongles, network_devices, audio_devices)
         self.devices_ui_callback: Optional[Callable[[List[DeviceInfo], List[XBeeDongleInfo], List[DeviceInfo], List[DeviceInfo]], None]] = None
 
-        # UI callbacks for device state changes
+        # UI callback for device state changes
         self.device_connected_callback: Optional[Callable[[str, bool], None]] = None
-        self.device_visible_callback: Optional[Callable[[str, bool], None]] = None
 
         # State
         self.shutdown_event = asyncio.Event()
@@ -249,11 +248,14 @@ class LoggerSystem:
                     module_name, ActualState.IDLE
                 )
             elif status.get_status_type() == "quitting":
-                self.logger.info("Module %s is quitting", module_name)
+                self.logger.info("=== MODULE QUITTING: %s ===", module_name)
                 self._gracefully_quitting_modules.add(module_name)
                 self.module_manager.cleanup_stopped_process(module_name)
                 if not self.module_manager.is_module_state_changing(module_name):
                     await self.state_manager.set_desired_state(module_name, False)
+                # Notify UI that all devices for this module are now disconnected
+                self.logger.info("Calling _notify_device_connected_for_module for %s", module_name)
+                self._notify_device_connected_for_module(module_name, False)
                 if self.ui_callback:
                     try:
                         await self.ui_callback(module_name, process.get_state(), status)
@@ -261,8 +263,9 @@ class LoggerSystem:
                         self.logger.error("UI callback error: %s", e)
                 return
             elif status.get_status_type() in ("window_hidden", "window_shown"):
-                visible = status.get_status_type() == "window_shown"
-                self._notify_device_visible_for_module(module_name, visible)
+                # Window visibility is now tied to connection state
+                # No separate tracking needed
+                pass
             elif status.is_error():
                 self.logger.error("Module %s error: %s",
                                 module_name,
@@ -274,6 +277,8 @@ class LoggerSystem:
                 self.module_manager.cleanup_stopped_process(module_name)
                 await self.state_manager.set_actual_state(module_name, ActualState.CRASHED)
                 await self.state_manager.set_desired_state(module_name, False, reconcile=False)
+                # Notify UI that all devices for this module are now disconnected
+                self._notify_device_connected_for_module(module_name, False)
 
         if not process.is_running() and module_name in self._gracefully_quitting_modules:
             self._gracefully_quitting_modules.discard(module_name)
@@ -295,44 +300,27 @@ class LoggerSystem:
         except Exception as e:
             self.logger.error("Device connected callback error: %s", e)
 
-    def _notify_device_visible(self, device_id: str, visible: bool) -> None:
-        """Notify UI about device window visibility change."""
-        if not self.device_visible_callback:
-            return
-
-        self.logger.debug("Device %s visible=%s", device_id, visible)
-        try:
-            self.device_visible_callback(device_id, visible)
-        except Exception as e:
-            self.logger.error("Device visible callback error: %s", e)
-
     def _notify_device_connected_for_module(self, module_name: str, connected: bool) -> None:
         """Notify UI about connection state change for all devices of a module."""
+        self.logger.info(
+            "_notify_device_connected_for_module called: module=%s connected=%s callback=%s",
+            module_name, connected, self.device_connected_callback is not None
+        )
         if not self.device_connected_callback:
+            self.logger.warning("No device_connected_callback registered!")
             return
 
         devices = self.device_manager.get_devices_for_module(module_name)
-        self.logger.debug(
-            "Module %s connected=%s, updating %d devices",
+        self.logger.info(
+            "Module %s connected=%s, found %d devices to update",
             module_name, connected, len(devices)
         )
         for device in devices:
+            self.logger.info("Updating device %s connected=%s", device.device_id, connected)
             try:
                 self.device_connected_callback(device.device_id, connected)
             except Exception as e:
                 self.logger.error("Device connected callback error: %s", e)
-
-    def _notify_device_visible_for_module(self, module_name: str, visible: bool) -> None:
-        """Notify UI about visibility change for all devices of a module."""
-        if not self.device_visible_callback:
-            return
-
-        devices = self.device_manager.get_devices_for_module(module_name)
-        for device in devices:
-            try:
-                self.device_visible_callback(device.device_id, visible)
-            except Exception as e:
-                self.logger.error("Device visible callback error: %s", e)
 
     # =========================================================================
     # UI Observer Access
@@ -623,21 +611,15 @@ class LoggerSystem:
         """
         self.device_connected_callback = callback
 
-    def set_device_visible_callback(
-        self,
-        callback: Callable[[str, bool], None]
-    ) -> None:
-        """Set callback for device window visibility changes.
-
-        The callback receives (device_id, visible) when window visibility changes.
-        """
-        self.device_visible_callback = callback
-
     async def start_device_scanning(self) -> None:
         """Start USB and XBee device scanning."""
         # Load device connection states and mark modules for auto-connect
         await self._load_pending_auto_connects()
         await self.device_manager.start_scanning()
+        # Clear pending auto-connects after initial scan completes.
+        # This prevents devices discovered later (by periodic scans) from
+        # auto-connecting - the user must explicitly click Connect.
+        self.device_manager.clear_all_pending_auto_connects()
         self.logger.info("Device scanning started")
 
     async def stop_device_scanning(self) -> None:
@@ -655,6 +637,13 @@ class LoggerSystem:
             internal_devices = self.device_manager.get_internal_devices()
             camera_devices = self.device_manager.get_camera_devices()
             self.devices_ui_callback(devices, dongles, network_devices, audio_devices, internal_devices, camera_devices)
+
+    def notify_devices_changed(self) -> None:
+        """Notify the UI that the device list should be refreshed.
+
+        Call this when enabled connections change to update section visibility.
+        """
+        self._on_devices_changed()
 
     async def _on_device_connected(self, device: DeviceInfo) -> None:
         """
@@ -735,7 +724,6 @@ class LoggerSystem:
 
         # Module started with window visible - update UI
         self._notify_device_connected(device.device_id, True)
-        self._notify_device_visible(device.device_id, True)
 
     async def _on_device_disconnected(self, device_id: str) -> None:
         """Callback when a device is disconnected."""
@@ -838,7 +826,6 @@ class LoggerSystem:
                 return False
             # connect_device triggers _on_device_connected which starts module
             self._notify_device_connected(device_id, True)
-            self._notify_device_visible(device_id, True)
             return True
 
         # Step 2: Start module if not running (device already connected)
@@ -849,7 +836,6 @@ class LoggerSystem:
                 self.logger.error("Failed to start module %s", module_id)
                 return False
             self._notify_device_connected(device_id, True)
-            self._notify_device_visible(device_id, True)
             return True
 
         # Already connected and running
@@ -870,7 +856,6 @@ class LoggerSystem:
         if not device:
             self.logger.warning("Device not found: %s", device_id)
             self._notify_device_connected(device_id, False)
-            self._notify_device_visible(device_id, False)
             return True
 
         module_id = device.module_id
@@ -884,85 +869,9 @@ class LoggerSystem:
             self.logger.info("Stopping module %s", module_id)
             await self.set_module_enabled(module_id, False)
 
-        # Step 2: Disconnect device
-        # (The device manager handles actual disconnection)
+        # Step 2: Disconnect device (saves state to config)
+        await self.device_manager.disconnect_device(device_id)
 
-        # Notify UI
-        self._notify_device_connected(device_id, False)
-        self._notify_device_visible(device_id, False)
-        return True
-
-    async def show_device_window(self, device_id: str) -> bool:
-        """Show the device's module window.
-
-        If the device is not connected, connects first.
-
-        Returns:
-            True if window is now visible.
-        """
-        self.logger.info("show_device_window: %s", device_id)
-
-        device = self.device_manager.get_device(device_id)
-        if not device:
-            self.logger.warning("Device not found: %s", device_id)
-            return False
-
-        module_id = device.module_id
-        if not module_id:
-            self.logger.warning("Device has no module_id: %s", device_id)
-            return False
-
-        # If not connected, connect first (which starts module and shows window)
-        if device.state != ConnectionState.CONNECTED:
-            success = await self.connect_and_start_device(device_id)
-            return success
-
-        # If module not running, start it (which shows window)
-        if not self.is_module_running(module_id):
-            self.logger.info("Starting module %s for device %s", module_id, device_id)
-            success = await self.set_module_enabled(module_id, True)
-            if success:
-                self._notify_device_visible(device_id, True)
-            return success
-
-        # Module running - just show window
-        self.logger.info("Sending show_window to module %s", module_id)
-        command = CommandMessage.show_window()
-        success = await self.module_manager.send_command(module_id, command)
-        if success:
-            self._notify_device_visible(device_id, True)
-        return success
-
-    async def hide_device_window(self, device_id: str) -> bool:
-        """Hide the device's module window.
-
-        Does NOT stop the module - it keeps running in the background.
-
-        Returns:
-            True if window is now hidden.
-        """
-        self.logger.info("hide_device_window: %s", device_id)
-
-        device = self.device_manager.get_device(device_id)
-        if not device:
-            self.logger.warning("Device not found: %s", device_id)
-            self._notify_device_visible(device_id, False)
-            return True
-
-        module_id = device.module_id
-        if not module_id:
-            self.logger.warning("Device has no module_id: %s", device_id)
-            self._notify_device_visible(device_id, False)
-            return True
-
-        # Hide window if module is running
-        if self.is_module_running(module_id):
-            self.logger.info("Sending hide_window to module %s", module_id)
-            command = CommandMessage.hide_window()
-            await self.module_manager.send_command(module_id, command)
-
-        # Notify UI
-        self._notify_device_visible(device_id, False)
         return True
 
     # =========================================================================

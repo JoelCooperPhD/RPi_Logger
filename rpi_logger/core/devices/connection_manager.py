@@ -229,6 +229,19 @@ class DeviceConnectionManager:
         """Clear pending auto-connect for a module."""
         self._pending_auto_connect_modules.discard(module_id)
 
+    def clear_all_pending_auto_connects(self) -> None:
+        """Clear all pending auto-connects.
+
+        Call this after initial startup scan completes to prevent
+        late device discoveries from auto-connecting.
+        """
+        if self._pending_auto_connect_modules:
+            logger.info(
+                f"Clearing {len(self._pending_auto_connect_modules)} pending auto-connects: "
+                f"{self._pending_auto_connect_modules}"
+            )
+            self._pending_auto_connect_modules.clear()
+
     # =========================================================================
     # Enabled Connections Management
     # =========================================================================
@@ -246,15 +259,35 @@ class DeviceConnectionManager:
         """Check if a specific interface+device combination is enabled."""
         return (interface, family) in self._enabled_connections
 
-    def set_connection_enabled(self, interface: InterfaceType, family: DeviceFamily, enabled: bool) -> None:
-        """Enable or disable a specific interface+device combination."""
+    def set_connection_enabled(self, interface: InterfaceType, family: DeviceFamily, enabled: bool) -> list['DeviceInfo']:
+        """Enable or disable a specific interface+device combination.
+
+        Returns:
+            List of connected devices that should be disconnected (when disabling).
+            Empty list when enabling.
+        """
         key = (interface, family)
+        devices_to_disconnect = []
+
         if enabled:
             self._enabled_connections.add(key)
             logger.info(f"Enabled connection: {interface.value} > {family.value}")
         else:
             self._enabled_connections.discard(key)
             logger.info(f"Disabled connection: {interface.value} > {family.value}")
+            # Find connected devices of this type that need to be disconnected
+            devices_to_disconnect = self.get_connected_devices_by_connection(interface, family)
+            if devices_to_disconnect:
+                logger.info(f"Found {len(devices_to_disconnect)} connected device(s) to disconnect")
+
+        return devices_to_disconnect
+
+    def get_connected_devices_by_connection(self, interface: InterfaceType, family: DeviceFamily) -> list['DeviceInfo']:
+        """Get connected devices matching a specific interface+family combination."""
+        return [
+            d for d in self.get_connected_devices()
+            if d.interface_type == interface and d.family == family
+        ]
 
     def _is_device_enabled(self, spec) -> bool:
         """Check if a device should be tracked based on enabled connections."""

@@ -127,6 +127,15 @@ class MainWindow:
             window_width = config_manager.get_int(config, 'window_width', default=800)
             window_height = config_manager.get_int(config, 'window_height', default=600)
 
+            # Enforce minimum window size to prevent invisible windows
+            MIN_WIDTH, MIN_HEIGHT = 400, 300
+            if window_width < MIN_WIDTH or window_height < MIN_HEIGHT:
+                self.logger.warning(
+                    "Window size %dx%d below minimum, resetting to 800x600",
+                    window_width, window_height
+                )
+                window_width, window_height = 800, 600
+
             if window_x != 0 or window_y != 0:
                 self.root.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
                 self.logger.info("Applied saved window geometry: %dx%d+%d+%d", window_width, window_height, window_x, window_y)
@@ -165,9 +174,8 @@ class MainWindow:
         # Wire up device UI callback
         self.logger_system.set_devices_ui_callback(self.update_devices_display)
 
-        # Wire up device state callbacks for UI updates
+        # Wire up device state callback for UI updates
         self.logger_system.set_device_connected_callback(self.on_device_connected_changed)
-        self.logger_system.set_device_visible_callback(self.on_device_visible_changed)
 
         # Set UI root for thread-safe state updates
         self.logger_system.set_ui_root(self.root)
@@ -320,11 +328,27 @@ class MainWindow:
         interface, family = key
         enabled = self.connection_vars[key].get()
 
-        # Update device manager
-        self.logger_system.device_manager.set_connection_enabled(interface, family, enabled)
+        # Update device manager and get devices to disconnect
+        devices_to_disconnect = self.logger_system.device_manager.set_connection_enabled(
+            interface, family, enabled
+        )
+
+        # Disconnect devices of this type if disabling
+        if not enabled and devices_to_disconnect:
+            for device in devices_to_disconnect:
+                self.logger.info(
+                    "Disconnecting %s due to connection type disabled",
+                    device.display_name
+                )
+                self._schedule_task(
+                    self.logger_system.stop_and_disconnect_device(device.device_id)
+                )
 
         # Save to config
         self._save_enabled_connections()
+
+        # Refresh device display to show/hide section
+        self.logger_system.notify_devices_changed()
 
         self.logger.info(
             "Connection %s > %s %s",
@@ -599,9 +623,6 @@ class MainWindow:
             on_connect_change=lambda device_id, connect: self._schedule_task(
                 self.controller.on_device_connect_change(device_id, connect)
             ),
-            on_visibility_change=lambda device_id, visible: self._schedule_task(
-                self.controller.on_device_visibility_change(device_id, visible)
-            ),
         )
         # Right column of main content area
         self.devices_panel.grid(row=0, column=1, sticky="nsew")
@@ -634,8 +655,11 @@ class MainWindow:
             if d.child_devices:
                 self.logger.debug("  Dongle %s has children: %s", d.port, list(d.child_devices.keys()))
         if self.devices_panel:
+            # Pass enabled connections so sections are shown even when empty
+            enabled_connections = self.logger_system.device_manager.get_enabled_connections()
             self.devices_panel.update_devices(
-                devices, dongles, network_devices, audio_devices, internal_devices, camera_devices
+                devices, dongles, network_devices, audio_devices, internal_devices, camera_devices,
+                enabled_connections=enabled_connections
             )
 
     def on_device_connected_changed(self, device_id: str, connected: bool) -> None:
@@ -643,16 +667,11 @@ class MainWindow:
 
         Updates dot and Connect/Disconnect button.
         """
+        self.logger.info("on_device_connected_changed: device=%s connected=%s", device_id, connected)
         if self.devices_panel:
             self.devices_panel.set_device_connected(device_id, connected)
-
-    def on_device_visible_changed(self, device_id: str, visible: bool) -> None:
-        """Handle device window visibility change (from LoggerSystem).
-
-        Updates Show/Hide button.
-        """
-        if self.devices_panel:
-            self.devices_panel.set_device_visible(device_id, visible)
+        else:
+            self.logger.warning("devices_panel is None!")
 
     def _build_logger_frame(self) -> None:
         self.logger_frame = ttk.LabelFrame(self.root, text="System Log", padding="3")

@@ -167,6 +167,10 @@ class ModuleManager:
         """Get list of all discovered modules."""
         return self.available_modules
 
+    def get_module(self, module_name: str) -> Optional[ModuleProcess]:
+        """Get the ModuleProcess instance for a module if it exists."""
+        return self.module_processes.get(module_name)
+
     # =========================================================================
     # Module State Setters
     # =========================================================================

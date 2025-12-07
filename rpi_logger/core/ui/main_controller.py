@@ -380,8 +380,8 @@ class MainController:
     async def on_device_connect_change(self, device_id: str, connect: bool) -> None:
         """Handle device connection change request from UI (dot or Connect button).
 
-        connect=True: Connect device and start module (window shown automatically)
-        connect=False: Stop module and disconnect device
+        connect=True: Connect device, start module, and show window
+        connect=False: Hide window, stop module, and disconnect device
         """
         try:
             if connect:
@@ -394,21 +394,3 @@ class MainController:
                 await self.logger_system.stop_and_disconnect_device(device_id)
         except Exception as e:
             self.logger.error("Error changing device connection: %s", e, exc_info=True)
-
-    async def on_device_visibility_change(self, device_id: str, visible: bool) -> None:
-        """Handle device window visibility change request from UI (Show/Hide button).
-
-        visible=True: Show window (connect first if not connected)
-        visible=False: Hide window (keep module running)
-        """
-        try:
-            if visible:
-                self.logger.info("Showing device window: %s", device_id)
-                success = await self.logger_system.show_device_window(device_id)
-                if not success:
-                    self.logger.error("Failed to show device window: %s", device_id)
-            else:
-                self.logger.info("Hiding device window: %s", device_id)
-                await self.logger_system.hide_device_window(device_id)
-        except Exception as e:
-            self.logger.error("Error changing device visibility: %s", e, exc_info=True)
