@@ -153,7 +153,7 @@ class BaseGUIMode(BaseMode, ABC):
                 if hasattr(self.system, 'enable_gui_commands') and self.system.enable_gui_commands:
                     from rpi_logger.core.commands import StatusMessage
                     init_duration = self.system.lifecycle_timer.get_duration("process_start", "initialized")
-                    StatusMessage.send_with_timing("initialized", init_duration, {
+                    StatusMessage.send_with_timing("ready", init_duration, {
                         "status": "connected",
                         "scan_attempts": retry_attempt
                     })

@@ -223,6 +223,15 @@ class CommandMessage:
         return CommandMessage.create("unassign_device", device_id=device_id)
 
     @staticmethod
+    def unassign_all_devices() -> str:
+        """Disconnect all devices from the module before shutdown.
+
+        This ensures serial ports are properly released before the process
+        is terminated. Should be sent before quit() during graceful shutdown.
+        """
+        return CommandMessage.create("unassign_all_devices")
+
+    @staticmethod
     def show_window() -> str:
         """Show the module window."""
         return CommandMessage.create("show_window")

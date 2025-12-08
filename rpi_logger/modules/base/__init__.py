@@ -32,10 +32,7 @@ from .session_utils import (
 from .utils import RollingFPS
 from .gui_utils import (
     parse_geometry_string,
-    save_window_geometry,
     send_geometry_to_parent,
-    get_module_config_path,
-    load_window_geometry_from_config,
 )
 from .tkinter_gui_base import TkinterGUIBase
 from .tkinter_menu_base import TkinterMenuBase
@@ -93,10 +90,7 @@ __all__ = [
     'setup_session_from_args',
     'RollingFPS',
     'parse_geometry_string',
-    'save_window_geometry',
     'send_geometry_to_parent',
-    'get_module_config_path',
-    'load_window_geometry_from_config',
     'TkinterGUIBase',
     'TkinterMenuBase',
     'USBDeviceConfig',

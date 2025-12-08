@@ -189,18 +189,16 @@ class BaseCommandHandler(ABC):
             parsed = gui_utils.parse_geometry_string(geometry_str)
 
             if parsed:
-                width, height, raw_x, raw_y = parsed
+                width, height, x, y = parsed
 
                 try:
                     screen_height = int(window.winfo_screenheight())
                 except Exception:
                     screen_height = None
 
-                width, height, x, y = gui_utils.normalize_geometry_values(
-                    width,
-                    height,
-                    raw_x,
-                    raw_y,
+                # Clamp to screen bounds (keeps window above taskbar)
+                width, height, x, y = gui_utils.clamp_geometry_to_screen(
+                    width, height, x, y,
                     screen_height=screen_height,
                 )
 
@@ -211,13 +209,8 @@ class BaseCommandHandler(ABC):
                     "y": y
                 })
                 self.logger.debug(
-                    "Sent normalized geometry to parent: %dx%d+%d+%d (raw=%dx%d)",
-                    width,
-                    height,
-                    x,
-                    y,
-                    raw_x,
-                    raw_y,
+                    "Sent geometry to parent: %dx%d+%d+%d",
+                    width, height, x, y,
                 )
             else:
                 StatusMessage.send("error", {"message": f"Failed to parse window geometry: {geometry_str}"})
@@ -239,25 +232,13 @@ class BaseCommandHandler(ABC):
     async def handle_quit(self, command_data: Dict[str, Any]) -> None:
         self.logger.info("Quit command received")
 
-        # Save geometry before quitting (for both standalone and parent modes)
-        if self.gui:
-            self.logger.info("QUIT_HANDLER: Saving geometry before quitting...")
-
-            if hasattr(self.gui, 'save_window_geometry_to_config'):
-                try:
-                    self.gui.save_window_geometry_to_config()
-                    self.logger.info("QUIT_HANDLER: ✓ Saved geometry to local config")
-                except Exception as e:
-                    self.logger.error("QUIT_HANDLER: ✗ Failed to save to local config: %s", e)
-
-            if hasattr(self.gui, 'send_geometry_to_parent'):
-                try:
-                    self.gui.send_geometry_to_parent()
-                    self.logger.info("QUIT_HANDLER: ✓ Sent geometry to parent")
-                except Exception as e:
-                    self.logger.error("QUIT_HANDLER: ✗ Failed to send to parent: %s", e)
-        else:
-            self.logger.debug("QUIT_HANDLER: No GUI available, skipping geometry save")
+        # Send geometry to parent before quitting (parent handles persistence)
+        if self.gui and hasattr(self.gui, 'send_geometry_to_parent'):
+            try:
+                self.gui.send_geometry_to_parent()
+                self.logger.info("QUIT_HANDLER: Sent geometry to parent")
+            except Exception as e:
+                self.logger.debug("QUIT_HANDLER: Failed to send geometry to parent: %s", e)
 
         StatusMessage.send("quitting", {})
 

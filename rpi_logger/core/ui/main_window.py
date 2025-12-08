@@ -147,29 +147,23 @@ class MainWindow:
         except Exception as e:
             self.logger.warning("Could not set window icon: %s", e)
 
-        config_manager = get_config_manager()
+        # Load main window geometry from instance geometry store
+        from rpi_logger.core.instance_geometry_store import get_instance_geometry_store
+        geometry_store = get_instance_geometry_store()
+        geometry = geometry_store.get("main_window")
 
-        if CONFIG_PATH.exists():
-            config = config_manager.read_config(CONFIG_PATH)
-            window_x = config_manager.get_int(config, 'window_x', default=0)
-            window_y = config_manager.get_int(config, 'window_y', default=0)
-            window_width = config_manager.get_int(config, 'window_width', default=800)
-            window_height = config_manager.get_int(config, 'window_height', default=600)
-
+        if geometry:
             # Enforce minimum window size to prevent invisible windows
             MIN_WIDTH, MIN_HEIGHT = 400, 300
-            if window_width < MIN_WIDTH or window_height < MIN_HEIGHT:
+            width = max(geometry.width, MIN_WIDTH)
+            height = max(geometry.height, MIN_HEIGHT)
+            if width != geometry.width or height != geometry.height:
                 self.logger.warning(
-                    "Window size %dx%d below minimum, resetting to 800x600",
-                    window_width, window_height
+                    "Window size %dx%d below minimum, using %dx%d",
+                    geometry.width, geometry.height, width, height
                 )
-                window_width, window_height = 800, 600
-
-            if window_x != 0 or window_y != 0:
-                self.root.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
-                self.logger.info("Applied saved window geometry: %dx%d+%d+%d", window_width, window_height, window_x, window_y)
-            else:
-                self.root.geometry(f"{window_width}x{window_height}")
+            self.root.geometry(f"{width}x{height}+{geometry.x}+{geometry.y}")
+            self.logger.info("Applied saved window geometry: %dx%d+%d+%d", width, height, geometry.x, geometry.y)
         else:
             self.root.geometry("800x600")
 
@@ -578,11 +572,15 @@ class MainWindow:
         task.add_done_callback(lambda t: self._pending_tasks.remove(t) if t in self._pending_tasks else None)
 
     def save_window_geometry(self) -> None:
+        """Save main window geometry to instance geometry store."""
         if not self.root:
             return
 
         try:
             import re
+            from rpi_logger.core.instance_geometry_store import get_instance_geometry_store
+            from rpi_logger.core.window_manager import WindowGeometry
+
             geometry_str = self.root.geometry()
             match = re.match(r'(\d+)x(\d+)([\+\-]\d+)([\+\-]\d+)', geometry_str)
 
@@ -592,23 +590,17 @@ class MainWindow:
                 x = int(match.group(3))
                 y = int(match.group(4))
 
-                config_manager = get_config_manager()
-                updates = {
-                    'window_x': x,
-                    'window_y': y,
-                    'window_width': width,
-                    'window_height': height,
-                }
+                # Save geometry to instance store
+                geometry = WindowGeometry(x=x, y=y, width=width, height=height)
+                geometry_store = get_instance_geometry_store()
+                geometry_store.set("main_window", geometry)
+                self.logger.info("Saved main window geometry: %dx%d+%d+%d", width, height, x, y)
 
-                # Save trial label if set
+                # Save trial label separately to main config
                 if self.trial_label_var:
                     trial_label = self.trial_label_var.get()
-                    updates['last_trial_label'] = trial_label
-
-                if config_manager.write_config(CONFIG_PATH, updates):
-                    self.logger.info("Saved main logger window geometry: %dx%d+%d+%d", width, height, x, y)
-                else:
-                    self.logger.warning("Failed to save window geometry")
+                    config_manager = get_config_manager()
+                    config_manager.write_config(CONFIG_PATH, {'last_trial_label': trial_label})
             else:
                 self.logger.warning("Failed to parse window geometry: %s", geometry_str)
         except Exception as e:

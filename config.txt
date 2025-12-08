@@ -61,11 +61,7 @@ console_output = false        # Also print to console (true/false)
 # UI update rate (Hz)
 ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 
-# Window position and size (saved automatically on window close)
-window_x = 254
-window_y = 513
-window_width = 802
-window_height = 510
+# Window geometry is now saved in ~/.config/rpi_logger/instance_geometry.json
 
 
 ################################################################################
@@ -129,3 +125,7 @@ camera_1_alias = Camera 1
 camera_2_alias = Camera 2
 enabled_connections = CSI:Camera,Network:EyeTracker,UART:GPS,USB:Camera,USB:DRT,USB:VOG
 last_trial_label = 
+window_x = 254
+window_y = 513
+window_width = 802
+window_height = 510

@@ -94,7 +94,6 @@ class TelemetrySettings:
 
 @dataclass(slots=True)
 class UISettings:
-    geometry: Optional[str]
     auto_start_preview: bool
 
 
@@ -224,7 +223,6 @@ def load_config(
     )
 
     ui = UISettings(
-        geometry=_coerce_optional_str(merged, ("ui.geometry", "window_geometry"), default=None),
         auto_start_preview=preview.auto_start,
     )
 
@@ -297,8 +295,6 @@ def _flatten_config(config: CamerasConfig) -> Dict[str, Any]:
 
     updates["telemetry.emit_interval_ms"] = config.telemetry.emit_interval_ms
     updates["telemetry.include_metrics"] = config.telemetry.include_metrics
-
-    updates["ui.geometry"] = config.ui.geometry or ""
 
     if config.backend.picam_controls:
         updates["backend.picam_controls"] = json.dumps(config.backend.picam_controls)

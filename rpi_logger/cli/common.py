@@ -135,6 +135,15 @@ def add_common_cli_arguments(
             help="Window position and size (format: WIDTHxHEIGHT+X+Y, e.g., 800x600+100+50)",
         )
 
+    # Instance ID for multi-instance modules (e.g., DRT:ACM0, DRT:ACM1)
+    parser.add_argument(
+        "--instance-id",
+        dest="instance_id",
+        type=str,
+        default=None,
+        help="Instance ID for multi-instance modules (e.g., DRT:ACM0). Used for per-instance geometry persistence.",
+    )
+
 
 RESOLUTION_PRESETS = {
     0: (1456, 1088, "Native - Full sensor resolution", "4:3"),

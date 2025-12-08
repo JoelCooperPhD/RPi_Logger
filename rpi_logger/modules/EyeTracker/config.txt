@@ -80,15 +80,9 @@ discovery_timeout = 5.0   # Seconds to wait for headset
 discovery_retry = 3.0     # Seconds between retries
 
 ################################################################################
-# MASTER LOGGER WINDOW STATE (AUTOSAVED)
+# MASTER LOGGER INTEGRATION
 ################################################################################
 enabled = true
-window_x = 1010
-window_y = 349
-window_width = 1419
-window_height = 699
-################################################################################
-window_geometry = 320x200
 preview_resolution = auto
 gui_io_stub_visible = false
 view.show_io_panel = false

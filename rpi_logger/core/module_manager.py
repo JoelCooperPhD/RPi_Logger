@@ -474,6 +474,7 @@ class ModuleManager:
                 status_callback=self._make_instance_status_callback(instance_id),
                 log_level=self.log_level,
                 window_geometry=window_geometry,
+                instance_id=instance_id,
             )
 
             try:

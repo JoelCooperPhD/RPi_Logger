@@ -88,7 +88,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return args
 
 
-async def _cleanup_logger_system(logger_system: LoggerSystem, request_geometry: bool) -> None:
+async def _cleanup_logger_system(logger_system: LoggerSystem) -> None:
     """Shared cleanup logic for logger system shutdown."""
     logger.info("Starting logger system cleanup...")
     state_start = time.time()
@@ -96,7 +96,7 @@ async def _cleanup_logger_system(logger_system: LoggerSystem, request_geometry: 
     logger.info("⏱️  Saved state in %.3fs", time.time() - state_start)
 
     cleanup_start = time.time()
-    await logger_system.cleanup(request_geometry=request_geometry)
+    await logger_system.cleanup()
     logger.info("⏱️  Logger cleanup in %.3fs", time.time() - cleanup_start)
 
     update_start = time.time()
@@ -133,7 +133,7 @@ async def run_gui(args, logger_system: LoggerSystem) -> None:
             logger.info("⏱️  Destroyed window in %.3fs", time.time() - destroy_start)
 
     shutdown_coordinator.register_cleanup(
-        lambda: _cleanup_logger_system(logger_system, request_geometry=False)
+        lambda: _cleanup_logger_system(logger_system)
     )
     shutdown_coordinator.register_cleanup(cleanup_ui)
 
@@ -174,7 +174,7 @@ async def run_cli(args, logger_system: LoggerSystem) -> None:
     shutdown_task: Optional[asyncio.Task] = None
 
     shutdown_coordinator.register_cleanup(
-        lambda: _cleanup_logger_system(logger_system, request_geometry=True)
+        lambda: _cleanup_logger_system(logger_system)
     )
 
     loop = asyncio.get_running_loop()

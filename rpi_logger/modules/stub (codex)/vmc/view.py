@@ -36,7 +36,6 @@ PREF_SHOW_IO_PANEL = "view.show_io_panel"
 PREF_SHOW_LOGGER = "view.show_logger"
 
 # Geometry helpers local to the stub to avoid depending on other modules.
-WINDOW_TITLE_BAR_OFFSET = 28
 _BOTTOM_MARGIN_ENV = "RPILOGGER_BOTTOM_UI_MARGIN"
 try:
     SCREEN_BOTTOM_RESERVED = max(0, int(os.environ.get(_BOTTOM_MARGIN_ENV, "48")))
@@ -45,6 +44,7 @@ except ValueError:
 
 
 def _parse_geometry_string(geometry_str: str) -> Optional[tuple[int, int, int, int]]:
+    """Parse a Tk geometry string into (width, height, x, y)."""
     try:
         match = re.match(r"(\d+)x(\d+)([\+\-]\d+)([\+\-]\d+)", geometry_str)
         if not match:
@@ -60,7 +60,12 @@ def _parse_geometry_string(geometry_str: str) -> Optional[tuple[int, int, int, i
         return None
 
 
-def _normalize_geometry_values(
+def _format_geometry_string(width: int, height: int, x: int, y: int) -> str:
+    """Format geometry values into a Tk geometry string."""
+    return f"{width}x{height}+{x}+{y}"
+
+
+def _clamp_geometry_to_screen(
     width: int,
     height: int,
     x: int,
@@ -68,39 +73,27 @@ def _normalize_geometry_values(
     *,
     screen_height: Optional[int] = None,
 ) -> tuple[int, int, int, int]:
+    """Clamp geometry so window bottom stays above the reserved screen area.
+
+    This prevents windows from being positioned under the RPi taskbar.
+    Uses raw Tk coordinates - no title bar offset adjustments.
+    """
     width = int(width)
     height = int(height)
     x = int(x)
     y = int(y)
 
-    adjusted_y = max(0, y - WINDOW_TITLE_BAR_OFFSET)
-
     if screen_height is not None and screen_height > 0:
         bottom_limit = max(0, screen_height - SCREEN_BOTTOM_RESERVED)
-        max_adjusted_y = max(0, bottom_limit - height - WINDOW_TITLE_BAR_OFFSET)
-        if adjusted_y > max_adjusted_y:
+        max_y = max(0, bottom_limit - height)
+        if y > max_y:
             _BASE_LOGGER.debug(
-                "Clamping window bottom to visible region (screen=%d, reserve=%d, height=%d)",
-                screen_height,
-                SCREEN_BOTTOM_RESERVED,
-                height,
+                "Clamping window to visible region (screen=%d, reserve=%d, height=%d, y=%d->%d)",
+                screen_height, SCREEN_BOTTOM_RESERVED, height, y, max_y,
             )
-        adjusted_y = min(adjusted_y, max_adjusted_y)
+            y = max_y
 
-    return width, height, x, adjusted_y
-
-
-def _denormalize_geometry_values(width: int, height: int, x: int, y: int) -> tuple[int, int, int, int]:
-    width = int(width)
-    height = int(height)
-    x = int(x)
-    raw_y = max(0, int(y) + WINDOW_TITLE_BAR_OFFSET)
-    return width, height, x, raw_y
-
-
-def _build_geometry_string_from_normalized(width: int, height: int, x: int, y: int) -> str:
-    width, height, x, raw_y = _denormalize_geometry_values(width, height, x, y)
-    return f"{width}x{height}+{x}+{raw_y}"
+    return width, height, x, y
 
 class StubCodexView:
     """Tkinter view that mirrors model state and forwards user intent."""
@@ -168,15 +161,16 @@ class StubCodexView:
         except tk.TclError:
             pass
 
+        # Clamp initial geometry to screen bounds (keeps window above taskbar)
         initial_geometry = self._current_geometry_string()
-        normalized_geometry = self._normalize_geometry_string(initial_geometry)
-        if normalized_geometry and normalized_geometry != initial_geometry:
+        clamped_geometry = self._clamp_geometry_string(initial_geometry)
+        if clamped_geometry and clamped_geometry != initial_geometry:
             try:
-                self.root.geometry(normalized_geometry)
-                self.logger.debug("Adjusted initial geometry to stay within safe bounds: %s -> %s", initial_geometry, normalized_geometry)
+                self.root.geometry(clamped_geometry)
+                self.logger.debug("Clamped initial geometry to screen bounds: %s -> %s", initial_geometry, clamped_geometry)
             except tk.TclError:
                 pass
-        self._last_geometry = normalized_geometry or initial_geometry
+        self._last_geometry = clamped_geometry or initial_geometry
         self.root.bind("<Configure>", self._on_configure)
 
         elapsed = (time.perf_counter() - start) * 1000.0
@@ -704,11 +698,12 @@ class StubCodexView:
             getattr(event, 'y', -1),
         )
         self._logged_first_configure = True
-        normalized_geometry = self._normalize_geometry_string(geometry)
-        if not normalized_geometry or normalized_geometry == self._last_geometry:
+        # Clamp to screen bounds, store raw Tk coordinates
+        clamped_geometry = self._clamp_geometry_string(geometry)
+        if not clamped_geometry or clamped_geometry == self._last_geometry:
             return
-        self._last_geometry = normalized_geometry
-        updated = self.model.set_window_geometry(normalized_geometry)
+        self._last_geometry = clamped_geometry
+        updated = self.model.set_window_geometry(clamped_geometry)
         if updated or self.model.has_pending_window_geometry():
             self._schedule_geometry_persist()
 
@@ -772,7 +767,8 @@ class StubCodexView:
     def is_resizing(self) -> bool:
         return bool(self._resize_active)
 
-    def _normalize_geometry_string(self, geometry: Optional[str]) -> Optional[str]:
+    def _clamp_geometry_string(self, geometry: Optional[str]) -> Optional[str]:
+        """Clamp geometry string to keep window within screen bounds."""
         if not geometry:
             return None
 
@@ -781,17 +777,11 @@ class StubCodexView:
             return None
 
         width, height, x, y = parsed
-        normalized = _normalize_geometry_values(
-            width,
-            height,
-            x,
-            y,
+        width, height, x, y = _clamp_geometry_to_screen(
+            width, height, x, y,
             screen_height=self._get_screen_height(),
         )
-        normalized_string = _build_geometry_string_from_normalized(*normalized)
-        if normalized_string != geometry:
-            self.logger.debug("Normalized geometry for persistence: %s -> %s", geometry, normalized_string)
-        return normalized_string
+        return _format_geometry_string(width, height, x, y)
 
     def _get_screen_height(self) -> Optional[int]:
         if tk is None:

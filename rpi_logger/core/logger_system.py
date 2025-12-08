@@ -38,6 +38,7 @@ from .module_manager import ModuleManager
 from .session_manager import SessionManager
 from .instance_manager import InstanceStateManager
 from .instance_state import InstanceState
+from .instance_geometry_store import get_instance_geometry_store
 from .devices import (
     DeviceSystem, InterfaceType, DeviceFamily,
     DeviceInfo,
@@ -322,6 +323,21 @@ class LoggerSystem:
                 # Window visibility is now tied to connection state
                 # No separate tracking needed
                 pass
+            elif status.get_status_type() == "geometry_changed":
+                # Persist window geometry to InstanceGeometryStore
+                payload = status.get_payload()
+                geom_instance_id = payload.get("instance_id") or module_name
+                geometry = WindowGeometry(
+                    x=payload.get("x", 0),
+                    y=payload.get("y", 0),
+                    width=payload.get("width", 800),
+                    height=payload.get("height", 600),
+                )
+                get_instance_geometry_store().set(geom_instance_id, geometry)
+                self.logger.info(
+                    "Saved geometry for %s: %s",
+                    geom_instance_id, geometry.to_geometry_string()
+                )
             elif status.is_error():
                 self.logger.error("Module %s error: %s",
                                 module_name,
@@ -568,7 +584,7 @@ class LoggerSystem:
         return self.state_manager.get_desired_states()
 
     def _normalize_geometry(self, geometry: WindowGeometry) -> WindowGeometry:
-        width, height, x, y = gui_utils.normalize_geometry_values(
+        width, height, x, y = gui_utils.clamp_geometry_to_screen(
             geometry.width,
             geometry.height,
             geometry.x,
@@ -577,8 +593,45 @@ class LoggerSystem:
         )
         return WindowGeometry(x=x, y=y, width=width, height=height)
 
-    async def _load_module_geometry(self, module_name: str) -> Optional[WindowGeometry]:
-        """Load saved window geometry for a module."""
+    async def _load_module_geometry(
+        self, module_name: str, instance_id: Optional[str] = None
+    ) -> Optional[WindowGeometry]:
+        """Load saved window geometry for a module or instance.
+
+        For multi-instance modules (DRT, VOG), pass instance_id (e.g., "DRT:ACM0")
+        to load geometry specific to that device instance.
+
+        Checks InstanceGeometryStore first (primary), then falls back to
+        module config files for backwards compatibility.
+
+        Args:
+            module_name: The module name (e.g., "DRT")
+            instance_id: Optional instance ID for multi-instance modules (e.g., "DRT:ACM0")
+        """
+        geometry_store = get_instance_geometry_store()
+
+        # For multi-instance modules, try instance-specific geometry first
+        if instance_id and instance_id != module_name:
+            geometry = geometry_store.get(instance_id)
+            if geometry:
+                normalized = self._normalize_geometry(geometry)
+                self.logger.debug(
+                    "Loaded geometry from store for instance %s: %s",
+                    instance_id, geometry.to_geometry_string()
+                )
+                return normalized
+
+        # Try module-level geometry in store
+        geometry = geometry_store.get(module_name)
+        if geometry:
+            normalized = self._normalize_geometry(geometry)
+            self.logger.debug(
+                "Loaded geometry from store for %s: %s",
+                module_name, geometry.to_geometry_string()
+            )
+            return normalized
+
+        # Fallback: Check module config file
         modules = self.module_manager.get_available_modules()
         module_info = next((m for m in modules if m.name == module_name), None)
 
@@ -588,19 +641,19 @@ class LoggerSystem:
 
         config = await self.config_manager.read_config_async(module_info.config_path)
 
-        # First try to load from "window_geometry" string
+        # Try to load from "window_geometry" string in config
         geometry_str = self.config_manager.get_str(config, 'window_geometry', default=None)
         if geometry_str:
             try:
                 geometry = WindowGeometry.from_geometry_string(geometry_str)
                 if geometry:
                     normalized = self._normalize_geometry(geometry)
-                    self.logger.debug("Loaded geometry string for %s: %s", module_name, geometry_str)
+                    self.logger.debug("Loaded geometry from config for %s: %s", module_name, geometry_str)
                     return normalized
             except Exception:
                 self.logger.warning("Failed to parse window_geometry for %s: %s", module_name, geometry_str)
 
-        # Fallback to decomposed fields
+        # Legacy fallback: decomposed fields
         x = self.config_manager.get_int(config, 'window_x', default=None)
         y = self.config_manager.get_int(config, 'window_y', default=None)
         width = self.config_manager.get_int(config, 'window_width', default=None)
@@ -945,7 +998,7 @@ class LoggerSystem:
 
             if self._is_multi_instance_module(module_id):
                 # Multi-instance module: use instance manager with robust connection
-                window_geometry = await self._load_module_geometry(module_id)
+                window_geometry = await self._load_module_geometry(module_id, instance_id)
                 success = await self.instance_manager.start_instance(
                     instance_id=instance_id,
                     module_id=module_id,
@@ -1134,8 +1187,8 @@ class LoggerSystem:
             self.logger.info("Instance %s already connected", instance_id)
             return True
 
-        # Load geometry for this instance
-        window_geometry = await self._load_module_geometry(module_id)
+        # Load geometry for this instance (try instance-specific first for multi-instance)
+        window_geometry = await self._load_module_geometry(module_id, instance_id)
 
         # Start instance via InstanceStateManager
         # This handles waiting for any shutting-down instance and sets STARTING state
@@ -1155,6 +1208,12 @@ class LoggerSystem:
 
         # Set up XBee send callback for the instance
         self._setup_xbee_send_callback(instance_id)
+
+        # Wait for module to become ready before sending connection command
+        # This prevents race condition where connect_device is called before module is ready
+        if not await self.instance_manager.wait_for_ready(instance_id, timeout=10.0):
+            self.logger.error("Instance %s failed to become ready", instance_id)
+            return False
 
         # Send assign_device command via InstanceStateManager (non-blocking)
         # This transitions to CONNECTING state. Connection result comes via status messages.

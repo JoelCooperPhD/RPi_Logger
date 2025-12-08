@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import re
 import shutil
 import time
 from dataclasses import dataclass
@@ -437,12 +438,57 @@ class StubCodexModel:
             self._pending_window_geometry = None
             return
 
-        update = {"window_geometry": self._pending_window_geometry}
+        geometry_str = self._pending_window_geometry
+
+        # Send geometry to parent process for per-instance persistence.
+        # This is critical for multi-instance modules (DRT, VOG) where each
+        # device instance needs its own saved window position.
+        self._send_geometry_changed_status(geometry_str)
+
+        update = {"window_geometry": geometry_str}
         success = await self.preferences.write_async(update)
         if success:
-            self.saved_window_geometry = self._pending_window_geometry
+            self.saved_window_geometry = geometry_str
             self.config_data["window_geometry"] = self.saved_window_geometry
             self._pending_window_geometry = None
+
+    def _send_geometry_changed_status(self, geometry_str: str) -> None:
+        """Send geometry_changed StatusMessage to parent process.
+
+        For multi-instance modules, includes instance_id so the parent can
+        save geometry per-instance in instance_geometry_store.
+
+        Sends raw Tk coordinates - no normalization needed since the entire
+        pipeline now uses raw Tk coords consistently.
+        """
+        # Parse geometry string (format: WIDTHxHEIGHT+X+Y or WIDTHxHEIGHT-X-Y)
+        match = re.match(r"^(\d+)x(\d+)([-+]\d+)([-+]\d+)$", geometry_str)
+        if not match:
+            self.logger.debug("Could not parse geometry for status: %s", geometry_str)
+            return
+
+        width = int(match.group(1))
+        height = int(match.group(2))
+        x = int(match.group(3))
+        y = int(match.group(4))
+
+        payload = {
+            "width": width,
+            "height": height,
+            "x": x,
+            "y": y,
+        }
+
+        # Include instance_id for multi-instance module support
+        instance_id = getattr(self.args, "instance_id", None)
+        if instance_id:
+            payload["instance_id"] = instance_id
+
+        StatusMessage.send("geometry_changed", payload)
+        self.logger.debug(
+            "Sent geometry_changed to parent: %dx%d+%d+%d (instance: %s)",
+            width, height, x, y, instance_id or "none"
+        )
 
     def has_pending_window_geometry(self) -> bool:
         return bool(self._pending_window_geometry)

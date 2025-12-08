@@ -125,10 +125,18 @@ class DRTModuleRuntime(ModuleRuntime):
                 baudrate=command.get("baudrate", 0),
                 is_wireless=command.get("is_wireless", False),
                 command_id=command.get("command_id"),  # Pass correlation ID for ack
+                display_name=command.get("display_name", ""),
             )
 
         if action == "unassign_device":
             await self.unassign_device(command.get("device_id", ""))
+            return True
+
+        if action == "unassign_all_devices":
+            # Disconnect all devices before shutdown to release serial ports
+            self.logger.info("Unassigning all devices before shutdown")
+            for device_id in list(self.handlers.keys()):
+                await self.unassign_device(device_id)
             return True
 
         if action == "start_recording":
@@ -211,6 +219,7 @@ class DRTModuleRuntime(ModuleRuntime):
         baudrate: int,
         is_wireless: bool = False,
         command_id: str | None = None,
+        display_name: str = "",
     ) -> bool:
         """
         Assign a device to this module (called by main logger).
@@ -222,6 +231,7 @@ class DRTModuleRuntime(ModuleRuntime):
             baudrate: Serial baudrate
             is_wireless: Whether this is a wireless device
             command_id: Correlation ID for acknowledgment tracking
+            display_name: Display name for the device (e.g., "USB: DRT Device ACM0")
 
         Returns:
             True if device was successfully assigned
@@ -231,8 +241,8 @@ class DRTModuleRuntime(ModuleRuntime):
             return True
 
         self.logger.info(
-            "Assigning device: id=%s, type=%s, port=%s, baudrate=%d, wireless=%s",
-            device_id, device_type, port, baudrate, is_wireless
+            "Assigning device: id=%s, type=%s, port=%s, baudrate=%d, wireless=%s, display_name=%r",
+            device_id, device_type, port, baudrate, is_wireless, display_name
         )
 
         try:
@@ -288,6 +298,15 @@ class DRTModuleRuntime(ModuleRuntime):
             self.device_types[device_id] = drt_device_type
 
             self.logger.info("Device %s assigned and started (%s)", device_id, drt_device_type.value)
+
+            # Update window title to show device display name
+            self.logger.debug("Checking window title update: view=%s, display_name=%r", bool(self.view), display_name)
+            if self.view and display_name:
+                try:
+                    self.logger.info("Setting window title to: %s", display_name)
+                    self.view.set_window_title(display_name)
+                except Exception as e:
+                    self.logger.warning("Failed to set window title: %s", e)
 
             # Notify view
             if self.view:

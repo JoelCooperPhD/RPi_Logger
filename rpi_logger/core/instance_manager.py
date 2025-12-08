@@ -169,6 +169,50 @@ class InstanceStateManager:
         logger.info("Instance %s process launched, waiting for 'ready' status", instance_id)
         return True
 
+    async def wait_for_ready(self, instance_id: str, timeout: float = 10.0) -> bool:
+        """Wait for an instance to become ready for commands.
+
+        After start_instance() returns, the instance is in STARTING state.
+        This method waits for the module to send its "ready" status,
+        which transitions the instance to RUNNING (or CONNECTED for internal modules).
+
+        Args:
+            instance_id: The instance to wait for
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            True if instance reached RUNNING/CONNECTED state, False on timeout
+        """
+        info = self._instances.get(instance_id)
+        if not info:
+            logger.error("Instance %s not found for wait_for_ready", instance_id)
+            return False
+
+        # Internal modules go directly to CONNECTED
+        if self._module_manager.is_internal_module(info.module_id):
+            target_states = {InstanceState.CONNECTED}
+        else:
+            target_states = {InstanceState.RUNNING, InstanceState.CONNECTED}
+
+        elapsed = 0.0
+        interval = 0.1
+
+        while elapsed < timeout:
+            info = self._instances.get(instance_id)
+            if not info:
+                return False
+            if info.state in target_states:
+                logger.info("Instance %s ready after %.1fs", instance_id, elapsed)
+                return True
+            if info.state == InstanceState.STOPPED:
+                logger.error("Instance %s stopped while waiting for ready", instance_id)
+                return False
+            await asyncio.sleep(interval)
+            elapsed += interval
+
+        logger.error("Timeout waiting for instance %s to become ready (state: %s)", instance_id, info.state.value)
+        return False
+
     async def connect_device(
         self,
         instance_id: str,

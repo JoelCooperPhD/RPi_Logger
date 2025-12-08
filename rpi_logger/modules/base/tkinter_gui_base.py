@@ -349,13 +349,8 @@ class TkinterGUIBase:
             logging.getLogger().removeHandler(self.log_handler)
             self.log_handler = None
 
-    def save_window_geometry_to_config(self):
-        raise NotImplementedError(
-            "Subclasses must override save_window_geometry_to_config() "
-            "to provide their own __file__ path for config calculation"
-        )
-
     def send_geometry_to_parent(self):
+        """Send current window geometry to parent process for persistence."""
         if getattr(self, "_embedded_mode", False):
             logger.debug("Embedded GUI geometry managed by host; skipping send")
             return
@@ -363,7 +358,13 @@ class TkinterGUIBase:
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
 
         from rpi_logger.modules.base import gui_utils
-        gui_utils.send_geometry_to_parent(self.root)
+
+        # Get instance_id from args if available (for multi-instance modules)
+        instance_id = None
+        if hasattr(self, 'args') and hasattr(self.args, 'instance_id'):
+            instance_id = self.args.instance_id
+
+        gui_utils.send_geometry_to_parent(self.root, instance_id=instance_id)
 
     def send_quitting_status(self):
         try:
@@ -395,23 +396,18 @@ class TkinterGUIBase:
             logger.debug("Error destroying window: %s", e)
 
     def handle_window_close(self):
+        """Handle window close - send geometry to parent and signal quitting."""
         if getattr(self, "_embedded_mode", False):
             logger.debug("Embedded GUI close handled by host container")
             return
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
 
-        logger.info("Saving window geometry before shutdown")
-
-        try:
-            self.save_window_geometry_to_config()
-            logger.info("✓ Saved geometry to local config")
-        except Exception as e:
-            logger.error("Failed to save geometry: %s", e, exc_info=True)
+        logger.info("Sending window geometry before shutdown")
 
         try:
             self.send_geometry_to_parent()
-            logger.info("✓ Sent geometry to parent")
+            logger.info("Sent geometry to parent")
         except Exception as e:
             logger.debug("Failed to send geometry to parent: %s", e)
 

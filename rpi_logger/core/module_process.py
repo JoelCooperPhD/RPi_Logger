@@ -35,6 +35,7 @@ class ModuleProcess:
         status_callback: Optional[Callable] = None,
         log_level: str = "info",
         window_geometry: Optional[WindowGeometry] = None,
+        instance_id: Optional[str] = None,
     ):
         self.module_info = module_info
         self.output_dir = Path(output_dir)
@@ -42,6 +43,7 @@ class ModuleProcess:
         self.status_callback = status_callback
         self.log_level = log_level
         self.window_geometry = window_geometry
+        self.instance_id = instance_id
 
         self.logger = get_module_logger(f"ModuleProcess.{module_info.name}")
 
@@ -86,7 +88,8 @@ class ModuleProcess:
             ]
 
             if self.window_geometry and mode == "gui":
-                geometry_str = gui_utils.build_geometry_string_from_normalized(
+                # Pass raw Tk geometry - no denormalization needed
+                geometry_str = gui_utils.format_geometry_string(
                     self.window_geometry.width,
                     self.window_geometry.height,
                     self.window_geometry.x,
@@ -95,6 +98,10 @@ class ModuleProcess:
                 base_args.extend([
                     "--window-geometry", geometry_str
                 ])
+
+            # Pass instance ID to subprocess for multi-instance modules
+            if self.instance_id:
+                base_args.extend(["--instance-id", self.instance_id])
 
             # Determine how to run the module
             if _is_frozen():
@@ -290,14 +297,13 @@ class ModuleProcess:
 
         self.logger.info("Status: %s - %s", status_type, status.get_payload())
 
-        if status_type == "initialized":
+        if status_type == "ready":
             self.state = ModuleState.IDLE
         elif status_type == "recording_started":
             self.state = ModuleState.RECORDING
         elif status_type == "recording_stopped":
             self.state = ModuleState.IDLE
-        elif status_type == StatusType.GEOMETRY_CHANGED:
-            await self._save_geometry(status.get_payload())
+        # Note: geometry_changed is handled by LoggerSystem via status_callback
         elif status_type == "error":
             self.state = ModuleState.ERROR
             self.error_message = status.get_error_message()
@@ -395,6 +401,12 @@ class ModuleProcess:
         self.state = ModuleState.STOPPING
 
         try:
+            # First, request device disconnection to release serial ports
+            # This gives the module a chance to properly close USB connections
+            await self.send_command(CommandMessage.unassign_all_devices())
+            await asyncio.sleep(0.5)  # Brief wait for ports to close
+
+            # Then send quit command
             await self.send_command(CommandMessage.quit())
 
             try:
@@ -477,44 +489,6 @@ class ModuleProcess:
     def get_error_message(self) -> Optional[str]:
         return self.error_message
 
-    async def _save_geometry(self, payload: dict) -> None:
-        try:
-            self.logger.info("=" * 60)
-            self.logger.info("GEOMETRY_SAVE (parent): Received geometry from module %s", self.module_info.name)
-            self.logger.info("GEOMETRY_SAVE (parent): Payload: %s", payload)
-
-            x = payload.get('x', 0)
-            y = payload.get('y', 0)
-            width = payload.get('width', 800)
-            height = payload.get('height', 600)
-
-            self.logger.info("GEOMETRY_SAVE (parent): Parsed: x=%d, y=%d, width=%d, height=%d", x, y, width, height)
-
-            config_path = self.module_info.config_path
-            if config_path:
-                self.logger.info("GEOMETRY_SAVE (parent): Config path: %s", config_path)
-                config_manager = get_config_manager()
-                updates = {
-                    'window_x': x,
-                    'window_y': y,
-                    'window_width': width,
-                    'window_height': height,
-                    'window_geometry': gui_utils.build_geometry_string_from_normalized(width, height, x, y),
-                }
-                self.logger.info("GEOMETRY_SAVE (parent): Writing updates: %s", updates)
-                success = config_manager.write_config(config_path, updates)
-                if success:
-                    self.logger.info("GEOMETRY_SAVE (parent): ✓ Saved geometry: %dx%d+%d+%d", width, height, x, y)
-                else:
-                    self.logger.warning("GEOMETRY_SAVE (parent): ✗ Failed to save geometry to config")
-            else:
-                self.logger.warning("GEOMETRY_SAVE (parent): ✗ No config path available to save geometry")
-
-            self.logger.info("=" * 60)
-
-        except Exception as e:
-            self.logger.error("GEOMETRY_SAVE (parent): Error saving geometry: %s", e, exc_info=True)
-
     async def _update_enabled_state(self, enabled: bool) -> None:
         try:
             config_path = self.module_info.config_path
@@ -554,19 +528,3 @@ class ModuleProcess:
             self.module_info.config_path,
             {'enabled': enabled}
         )
-
-    async def load_window_geometry(self) -> Optional[WindowGeometry]:
-        config = await self.load_module_config()
-        if not config:
-            return None
-
-        config_manager = get_config_manager()
-        x = config_manager.get_int(config, 'window_x', default=0)
-        y = config_manager.get_int(config, 'window_y', default=0)
-        width = config_manager.get_int(config, 'window_width', default=800)
-        height = config_manager.get_int(config, 'window_height', default=600)
-
-        if x != 0 or y != 0:
-            return WindowGeometry(x=x, y=y, width=width, height=height)
-
-        return None

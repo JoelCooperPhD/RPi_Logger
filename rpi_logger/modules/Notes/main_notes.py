@@ -37,7 +37,7 @@ from vmc.constants import PLACEHOLDER_GEOMETRY
 from notes_runtime import NotesRuntime
 from rpi_logger.modules.base.config_paths import resolve_module_config_path, resolve_writable_module_config
 from rpi_logger.modules.base.preferences import ModulePreferences
-from rpi_logger.cli.common import install_signal_handlers
+from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers
 
 DISPLAY_NAME = "Notes"
 MODULE_ID = "notes"
@@ -53,51 +53,22 @@ def parse_args(argv: Optional[list[str]] = None):
     config = _load_notes_config()
     parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} module")
 
-    parser.add_argument(
-        "--mode",
-        choices=("gui", "headless"),
-        default=_normalize_mode(_config_text(config, "mode") or "gui"),
-        help="Execution mode set by the module manager",
+    # Use common CLI arguments for standard options
+    add_common_cli_arguments(
+        parser,
+        default_output=_config_path(config, "output_dir", DEFAULT_OUTPUT_SUBDIR),
+        allowed_modes=["gui", "headless"],
+        default_mode=_normalize_mode(_config_text(config, "mode") or "gui"),
+        include_session_prefix=True,
+        default_session_prefix=_config_text(config, "session_prefix") or MODULE_ID,
+        include_console_control=True,
+        default_console_output=_config_bool(config, "console_output", False),
+        include_auto_recording=False,  # Notes uses its own --auto-start terminology
+        include_parent_control=True,
+        include_window_geometry=True,
     )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=_config_path(config, "output_dir", DEFAULT_OUTPUT_SUBDIR),
-        help="Session root provided by the module manager",
-    )
-    parser.add_argument(
-        "--session-prefix",
-        type=str,
-        default=_config_text(config, "session_prefix") or MODULE_ID,
-        help="Prefix for generated session directories",
-    )
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        default=_config_text(config, "log_level") or "info",
-        help="Logging verbosity",
-    )
-    parser.add_argument(
-        "--log-file",
-        type=Path,
-        default=_config_optional_path(config, "log_file"),
-        help="Optional explicit log file path",
-    )
-    parser.add_argument(
-        "--enable-commands",
-        action="store_true",
-        default=False,
-        help="Flag supplied by the logger when running under module manager",
-    )
-    parser.add_argument(
-        "--window-geometry",
-        type=str,
-        default=None,
-        help=(
-            "Initial window geometry when launched with GUI "
-            f"(fallback to saved config or {PLACEHOLDER_GEOMETRY})"
-        ),
-    )
+
+    # Notes-specific arguments
     parser.add_argument(
         "--history-limit",
         type=int,
@@ -105,38 +76,21 @@ def parse_args(argv: Optional[list[str]] = None):
         help="Maximum number of notes retained in the on-screen history",
     )
 
+    # Notes-specific auto-start (different from generic "recording")
     auto_group = parser.add_mutually_exclusive_group()
     auto_group.add_argument(
         "--auto-start",
         dest="auto_start",
         action="store_true",
-        help="Automatically begin recording when the module starts",
+        help="Automatically begin note collection when the module starts",
     )
     auto_group.add_argument(
         "--no-auto-start",
         dest="auto_start",
         action="store_false",
-        help="Disable automatic recording on startup",
+        help="Disable automatic note collection on startup",
     )
-
-    console_group = parser.add_mutually_exclusive_group()
-    console_group.add_argument(
-        "--console",
-        dest="console_output",
-        action="store_true",
-        help="Enable console logging (unused for manager launches)",
-    )
-    console_group.add_argument(
-        "--no-console",
-        dest="console_output",
-        action="store_false",
-        help="Disable console logging",
-    )
-
-    parser.set_defaults(
-        auto_start=_config_bool(config, "auto_start", False),
-        console_output=_config_bool(config, "console_output", False),
-    )
+    parser.set_defaults(auto_start=_config_bool(config, "auto_start", False))
 
     return parser.parse_args(argv)
 

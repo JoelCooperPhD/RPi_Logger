@@ -49,7 +49,7 @@ from vog.view import VOGView
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_file
 from rpi_logger.modules.base.config_paths import resolve_module_config_path
-from rpi_logger.cli.common import install_signal_handlers
+from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers
 
 logger = get_module_logger("MainVOG")
 CONFIG_CONTEXT = resolve_module_config_path(MODULE_DIR, "vog")
@@ -65,48 +65,22 @@ def parse_args(argv: Optional[list[str]] = None):
 
     parser = argparse.ArgumentParser(description="VOG (Visual Occlusion Glasses) module")
 
-    parser.add_argument(
-        "--mode",
-        choices=("gui", "headless"),
-        default=str(config.get('default_mode', 'gui')).lower(),
-        help="Execution mode supplied by the logger controller",
+    # Use common CLI arguments for standard options
+    add_common_cli_arguments(
+        parser,
+        default_output=default_output,
+        allowed_modes=["gui", "headless"],
+        default_mode=str(config.get('default_mode', 'gui')).lower(),
+        include_session_prefix=True,
+        default_session_prefix=default_session_prefix,
+        include_console_control=True,
+        default_console_output=default_console,
+        include_auto_recording=False,  # VOG doesn't use auto-recording
+        include_parent_control=True,
+        include_window_geometry=True,
     )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=default_output,
-        help="Session root provided by the module manager",
-    )
-    parser.add_argument(
-        "--session-prefix",
-        type=str,
-        default=default_session_prefix,
-        help="Prefix for generated session directories",
-    )
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        default=str(config.get('log_level', 'info')),
-        help="Logging verbosity",
-    )
-    parser.add_argument(
-        "--log-file",
-        type=Path,
-        default=None,
-        help="Optional explicit log file path",
-    )
-    parser.add_argument(
-        "--enable-commands",
-        action="store_true",
-        default=False,
-        help="Enable stdin command channel (required when launched by the logger)",
-    )
-    parser.add_argument(
-        "--window-geometry",
-        type=str,
-        default=config.get('window_geometry'),
-        help="Window layout forwarded when running with the GUI",
-    )
+
+    # VOG-specific arguments only
     parser.add_argument(
         "--close-delay-ms",
         dest="close_delay_ms",
@@ -114,21 +88,6 @@ def parse_args(argv: Optional[list[str]] = None):
         default=0,
         help="Optional auto-close delay for placeholder windows (unused)",
     )
-
-    console_group = parser.add_mutually_exclusive_group()
-    console_group.add_argument(
-        "--console",
-        dest="console_output",
-        action="store_true",
-        help="Enable console logging",
-    )
-    console_group.add_argument(
-        "--no-console",
-        dest="console_output",
-        action="store_false",
-        help="Disable console logging",
-    )
-    parser.set_defaults(console_output=default_console)
 
     args = parser.parse_args(argv)
     args.config = config

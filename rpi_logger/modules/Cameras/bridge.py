@@ -283,23 +283,10 @@ class CamerasRuntime(ModuleRuntime):
             await self.discovery._spawn_worker_for(descriptor)
             self.view.set_status("Camera connected")
 
-            # Update window title to show device info: Cameras(USB):video0 or Cameras(CSI):0
-            if self.ctx.view:
-                conn_type = "CSI" if camera_type == "picam" else "USB"
-                # Extract short device ID from dev_path or stable_id
-                short_id = ""
-                if dev_path:
-                    short_id = dev_path.split("/")[-1]
-                elif stable_id:
-                    short_id = stable_id.split(":")[-1] if ":" in stable_id else stable_id
-
-                if short_id:
-                    title = f"Cameras({conn_type}):{short_id}"
-                else:
-                    title = f"Cameras({conn_type})"
-
+            # Update window title to show device display name (e.g., "USB: HD PRO Webcam C920")
+            if self.ctx.view and display_name:
                 with contextlib.suppress(Exception):
-                    self.ctx.view.set_window_title(title)
+                    self.ctx.view.set_window_title(display_name)
 
             # Send acknowledgement to logger that device is ready
             # This turns the indicator from yellow (CONNECTING) to green (CONNECTED)

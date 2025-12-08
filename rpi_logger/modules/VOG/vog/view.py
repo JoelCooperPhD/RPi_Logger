@@ -244,13 +244,28 @@ class VOGTkinterGUI:
         self._update_window_title()
 
     def _update_window_title(self) -> None:
-        """Update window title based on connected device."""
+        """Update window title based on instance ID or connected device."""
         if not self.root:
             return
 
         try:
             toplevel = self.root.winfo_toplevel()
-            if self._port and self._device_type:
+
+            # DEBUG: Log what we have available
+            has_attr = hasattr(self.args, 'instance_id')
+            instance_id_value = getattr(self.args, 'instance_id', None) if has_attr else None
+            self.logger.info("VOG _update_window_title DEBUG: has_instance_id_attr=%s, instance_id=%r, port=%r, device_type=%r",
+                           has_attr, instance_id_value, self._port, self._device_type)
+
+            # Also log all args attributes for debugging
+            self.logger.info("VOG args attributes: %s", dir(self.args))
+
+            # Primary: Use instance_id if available (for multi-instance modules)
+            if hasattr(self.args, 'instance_id') and self.args.instance_id:
+                title = self.args.instance_id
+                self.logger.info("VOG using instance_id for title: %s", title)
+            # Fallback: Build from device info (original logic)
+            elif self._port and self._device_type:
                 # Format: "VOG(USB):ACM0" or "VOG(XBee):ACM0"
                 # Extract short port name (e.g., "ACM0" from "/dev/ttyACM0")
                 port_short = self._port
@@ -267,10 +282,13 @@ class VOGTkinterGUI:
                     conn_type = "USB"
 
                 title = f"VOG({conn_type}):{port_short}"
+                self.logger.info("VOG using device info for title: %s", title)
             else:
                 title = "VOG"
+                self.logger.info("VOG using default title: %s", title)
 
             toplevel.title(title)
+            self.logger.info("VOG window title set to: %s", title)
         except Exception as e:
             self.logger.warning("Failed to update window title: %s", e)
 
@@ -576,6 +594,13 @@ class VOGView:
             return
         self.call_in_gui(self.gui.sync_recording_state)
         self.call_in_gui(self._update_device_menu_state)
+
+    # ------------------------------------------------------------------
+    # Window title
+
+    def set_window_title(self, title: str) -> None:
+        """Delegate window title changes to the stub view."""
+        self._stub_view.set_window_title(title)
 
     # ------------------------------------------------------------------
     # Lifecycle controls

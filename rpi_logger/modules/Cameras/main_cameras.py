@@ -38,7 +38,7 @@ from vmc import StubCodexSupervisor, RuntimeRetryPolicy  # type: ignore  # noqa:
 from vmc.constants import PLACEHOLDER_GEOMETRY  # type: ignore  # noqa: E402
 from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
 from rpi_logger.modules.base.config_paths import resolve_module_config_path  # noqa: E402
-from rpi_logger.cli.common import install_signal_handlers  # noqa: E402
+from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers  # noqa: E402
 from .bridge import factory  # noqa: E402
 
 DISPLAY_NAME = "Cameras"
@@ -50,29 +50,23 @@ logger = get_module_logger(__name__)
 
 def parse_args(argv: Optional[list[str]] = None):
     parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} module")
-    parser.add_argument("--mode", choices=("gui", "headless"), default="gui")
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_SUBDIR)
-    parser.add_argument("--session-prefix", type=str, default=MODULE_ID)
-    parser.add_argument("--log-level", type=str, default="info")
-    parser.add_argument("--log-file", type=Path, default=None)
-    parser.add_argument("--enable-commands", action="store_true", default=False)
-    parser.add_argument("--window-geometry", type=str, default=None)
 
-    console_group = parser.add_mutually_exclusive_group()
-    console_group.add_argument(
-        "--console",
-        dest="console_output",
-        action="store_true",
-        help="Enable console logging (unused for manager launches)",
+    # Use common CLI arguments for standard options
+    add_common_cli_arguments(
+        parser,
+        default_output=DEFAULT_OUTPUT_SUBDIR,
+        allowed_modes=["gui", "headless"],
+        default_mode="gui",
+        include_session_prefix=True,
+        default_session_prefix=MODULE_ID,
+        include_console_control=True,
+        default_console_output=False,
+        include_auto_recording=False,  # Cameras doesn't use auto-recording
+        include_parent_control=True,
+        include_window_geometry=True,
     )
-    console_group.add_argument(
-        "--no-console",
-        dest="console_output",
-        action="store_false",
-        help="Disable console logging (default)",
-    )
-    parser.set_defaults(console_output=False)
 
+    # Cameras has no additional CLI args - all config via CamerasConfig
     return parser.parse_args(argv)
 
 

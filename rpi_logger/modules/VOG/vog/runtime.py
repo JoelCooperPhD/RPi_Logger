@@ -131,6 +131,7 @@ class VOGModuleRuntime(ModuleRuntime):
         baudrate: int,
         is_wireless: bool = False,
         command_id: str | None = None,
+        display_name: str = "",
     ) -> bool:
         """
         Assign a device to this module (called by main logger).
@@ -142,6 +143,7 @@ class VOGModuleRuntime(ModuleRuntime):
             baudrate: Serial baudrate
             is_wireless: Whether this is a wireless device
             command_id: Correlation ID for acknowledgment tracking
+            display_name: Display name for the device (e.g., "USB: VOG Device ACM0")
 
         Returns:
             True if device was successfully assigned
@@ -206,6 +208,13 @@ class VOGModuleRuntime(ModuleRuntime):
             self.handlers[device_id] = handler
             self.device_types[device_id] = vog_device_type
             self.logger.info("Device %s assigned and started (%s)", device_id, vog_device_type.value)
+
+            # Update window title to show device display name
+            if self.view and display_name:
+                try:
+                    self.view.set_window_title(display_name)
+                except Exception:
+                    pass  # Ignore if view doesn't support set_window_title
 
             # Notify view
             if self.view:
@@ -298,10 +307,18 @@ class VOGModuleRuntime(ModuleRuntime):
                 baudrate=command.get("baudrate", 0),
                 is_wireless=command.get("is_wireless", False),
                 command_id=command.get("command_id"),  # Pass correlation ID for ack
+                display_name=command.get("display_name", ""),
             )
 
         if action == "unassign_device":
             await self.unassign_device(command.get("device_id", ""))
+            return True
+
+        if action == "unassign_all_devices":
+            # Disconnect all devices before shutdown to release serial ports
+            self.logger.info("Unassigning all devices before shutdown")
+            for device_id in list(self.handlers.keys()):
+                await self.unassign_device(device_id)
             return True
 
         if action == "start_recording":

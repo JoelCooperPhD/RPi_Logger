@@ -16,58 +16,32 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
     sys.path.insert(0, str(_venv_site))
 
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.cli.common import add_common_cli_arguments
 from vmc import StubCodexSupervisor
 from vmc.constants import DEFAULT_OUTPUT_SUBDIR, DISPLAY_NAME
 
 logger = get_module_logger(__name__)
 
 
-
 def parse_args(argv: Optional[list[str]] = None):
     parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} shell module")
 
-    parser.add_argument(
-        "--mode",
-        choices=("gui", "headless"),
-        default="gui",
-        help="Execution mode set by the module manager",
+    # Use common CLI arguments for standard options
+    add_common_cli_arguments(
+        parser,
+        default_output=DEFAULT_OUTPUT_SUBDIR,
+        allowed_modes=["gui", "headless"],
+        default_mode="gui",
+        include_session_prefix=True,
+        default_session_prefix="stub_codex",
+        include_console_control=True,
+        default_console_output=False,
+        include_auto_recording=False,  # Stub doesn't use auto-recording
+        include_parent_control=True,
+        include_window_geometry=True,
     )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=DEFAULT_OUTPUT_SUBDIR,
-        help="Session root provided by the module manager",
-    )
-    parser.add_argument(
-        "--session-prefix",
-        type=str,
-        default="stub_codex",
-        help="Prefix for generated session directories",
-    )
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        default="info",
-        help="Logging verbosity",
-    )
-    parser.add_argument(
-        "--log-file",
-        type=Path,
-        default=None,
-        help="Optional explicit log file path",
-    )
-    parser.add_argument(
-        "--enable-commands",
-        action="store_true",
-        default=False,
-        help="Flag supplied by the logger when running autonomously",
-    )
-    parser.add_argument(
-        "--window-geometry",
-        type=str,
-        default=None,
-        help="Window layout forwarded when running with the GUI",
-    )
+
+    # Stub-specific arguments only
     parser.add_argument(
         "--close-delay-ms",
         dest="close_delay_ms",
@@ -75,21 +49,6 @@ def parse_args(argv: Optional[list[str]] = None):
         default=0,
         help="Optional auto-close delay for the placeholder window (0 keeps it open until disabled)",
     )
-
-    console_group = parser.add_mutually_exclusive_group()
-    console_group.add_argument(
-        "--console",
-        dest="console_output",
-        action="store_true",
-        help="Enable console logging (unused for manager launches)",
-    )
-    console_group.add_argument(
-        "--no-console",
-        dest="console_output",
-        action="store_false",
-        help="Disable console logging (default)",
-    )
-    parser.set_defaults(console_output=False)
 
     return parser.parse_args(argv)
 

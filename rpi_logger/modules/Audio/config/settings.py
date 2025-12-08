@@ -7,9 +7,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from rpi_logger.cli.common import add_common_cli_arguments
 from rpi_logger.modules.base.preferences import ScopedPreferences
 
-INTERACTION_MODES: tuple[str, str] = ("gui", "cli")
+INTERACTION_MODES: tuple[str, str] = ("gui", "headless")
 
 
 @dataclass(slots=True)
@@ -22,7 +23,6 @@ class AudioSettings:
     log_level: str = "debug"
     log_file: Path | None = None
     enable_commands: bool = False
-    window_geometry: str | None = None
     sample_rate: int = 48_000
     console_output: bool = False
     meter_refresh_interval: float = 0.08
@@ -54,7 +54,6 @@ class AudioSettings:
             log_level=str(getattr(args, "log_level", defaults.log_level)),
             log_file=getattr(args, "log_file", None),
             enable_commands=_to_bool(getattr(args, "enable_commands", defaults.enable_commands)),
-            window_geometry=getattr(args, "window_geometry", None),
             sample_rate=int(getattr(args, "sample_rate", defaults.sample_rate)),
             console_output=_to_bool(getattr(args, "console_output", defaults.console_output)),
             meter_refresh_interval=float(
@@ -87,7 +86,6 @@ class AudioSettings:
 
         _maybe_update("session_prefix", str)
         _maybe_update("log_level", str)
-        _maybe_update("window_geometry", str)
         _maybe_update("sample_rate", int)
         _maybe_update("console_output", bool)
         _maybe_update("output_dir", lambda value: Path(value))
@@ -149,68 +147,27 @@ def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
 
     default_mode = _normalize_mode(_config_value(config, "mode", defaults.mode))
 
-    parser.add_argument(
-        "--mode",
-        choices=INTERACTION_MODES,
-        default=default_mode,
-        help="Interaction mode: 'gui' enables the Tk panel, 'cli' runs command-line controls only",
+    # Use common CLI arguments for standard options
+    add_common_cli_arguments(
+        parser,
+        default_output=_config_value(config, "output_dir", defaults.output_dir),
+        allowed_modes=list(INTERACTION_MODES),
+        default_mode=default_mode,
+        include_session_prefix=True,
+        default_session_prefix=_config_value(config, "session_prefix", defaults.session_prefix),
+        include_console_control=True,
+        default_console_output=bool(_config_value(config, "console_output", defaults.console_output)),
+        include_auto_recording=False,  # Audio doesn't use auto-recording
+        include_parent_control=True,
+        include_window_geometry=True,
     )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=_config_value(config, "output_dir", defaults.output_dir),
-        help="Session root provided by the module manager",
-    )
-    parser.add_argument(
-        "--session-prefix",
-        type=str,
-        default=_config_value(config, "session_prefix", defaults.session_prefix),
-        help="Prefix for generated session directories",
-    )
-    parser.add_argument(
-        "--log-level",
-        type=str,
-        default=_config_value(config, "log_level", defaults.log_level),
-        help="Logging verbosity",
-    )
-    parser.add_argument(
-        "--log-file",
-        type=Path,
-        default=_config_value(config, "log_file", defaults.log_file),
-        help="Optional explicit log file path",
-    )
-    parser.add_argument(
-        "--enable-commands",
-        action="store_true",
-        default=_config_value(config, "enable_commands", defaults.enable_commands),
-        help="Flag supplied by the logger when running under module manager",
-    )
-    parser.add_argument(
-        "--window-geometry",
-        type=str,
-        default=defaults.window_geometry,
-        help="Initial window geometry when launched with GUI",
-    )
+
+    # Audio-specific arguments
     parser.add_argument(
         "--sample-rate",
         type=int,
         default=_config_value(config, "sample_rate", defaults.sample_rate),
         help="Sample rate (Hz) for input streams",
-    )
-
-    console_group = parser.add_mutually_exclusive_group()
-    console_group.add_argument(
-        "--console",
-        dest="console_output",
-        action="store_true",
-        default=_config_value(config, "console_output", defaults.console_output),
-        help="Enable console logging",
-    )
-    console_group.add_argument(
-        "--no-console",
-        dest="console_output",
-        action="store_false",
-        help="Disable console logging",
     )
 
     return parser
@@ -230,8 +187,9 @@ def parse_cli_args(
 
 def _normalize_mode(value: Any) -> str:
     text = str(value or "").strip().lower()
-    if text == "headless":
-        return "cli"
+    # Map "cli" → "headless" for backwards compatibility
+    if text == "cli":
+        return "headless"
     if text in INTERACTION_MODES:
         return text
     return INTERACTION_MODES[0]

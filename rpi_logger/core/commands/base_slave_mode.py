@@ -131,7 +131,7 @@ class BaseSlaveMode(ABC):
         await self._shutdown_event.wait()
 
     async def _on_ready(self) -> None:
-        StatusMessage.send("initialized", {
+        StatusMessage.send("ready", {
             "module": self.__class__.__name__,
             "ready": True
         })
