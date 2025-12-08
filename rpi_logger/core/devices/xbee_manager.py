@@ -112,6 +112,7 @@ class XBeeManager:
         self.on_device_lost: Optional[DeviceLostCallback] = None
         self.on_status_change: Optional[StatusCallback] = None
         self.on_data_received: Optional[DataReceivedCallback] = None
+        self.on_scanning_changed: Optional[Callable[[bool], None]] = None  # True=scanning, False=idle
 
         # XBee state
         self._coordinator: Optional['XBeeDevice'] = None
@@ -410,6 +411,10 @@ class XBeeManager:
             logger.info("Starting XBee network discovery")
             self._state = XBeeManagerState.DISCOVERING
 
+            # Notify scanning started
+            if self.on_scanning_changed:
+                self.on_scanning_changed(True)
+
             network = self._coordinator.get_network()
 
             # Set discovery callback
@@ -423,6 +428,9 @@ class XBeeManager:
         except Exception as e:
             logger.error(f"Error starting network discovery: {e}")
             self._state = XBeeManagerState.CONNECTED
+            # Notify scanning ended on error
+            if self.on_scanning_changed:
+                self.on_scanning_changed(False)
 
     async def _periodic_rediscovery_loop(self) -> None:
         """Periodically trigger network rediscovery to find new devices."""
@@ -477,6 +485,10 @@ class XBeeManager:
 
             # Update state back to connected
             self._state = XBeeManagerState.CONNECTED
+
+            # Notify scanning ended (thread-safe)
+            if self.on_scanning_changed:
+                loop.call_soon_threadsafe(lambda: self.on_scanning_changed(False))
 
         except Exception as e:
             logger.error(f"Error processing discovery results: {e}")

@@ -199,6 +199,7 @@ class XBeeBanner(tk.Frame):
 
         self._on_rescan = on_rescan
         self._device_count = 0
+        self._scanning = False
 
         self._label = tk.Label(
             self,
@@ -239,7 +240,16 @@ class XBeeBanner(tk.Frame):
     def set_device_count(self, count: int) -> None:
         """Update the wireless device count displayed."""
         self._device_count = count
-        self._label.configure(text=f"Wireless Devices: {count}")
+        if not self._scanning:
+            self._label.configure(text=f"Wireless Devices: {count}")
+
+    def set_scanning(self, scanning: bool) -> None:
+        """Update the scanning state."""
+        self._scanning = scanning
+        if scanning:
+            self._label.configure(text="Wireless Devices: Scanning...")
+        else:
+            self._label.configure(text=f"Wireless Devices: {self._device_count}")
 
     def set_visible(self, visible: bool) -> None:
         """Show or hide the banner."""
@@ -475,6 +485,7 @@ class DevicesPanel(ttk.LabelFrame):
         """Called when controller data changes."""
         # Update XBee banner state from controller
         self._xbee_banner.set_visible(self._controller.xbee_dongle_connected)
+        self._xbee_banner.set_scanning(self._controller.xbee_scanning)
         self._xbee_banner.set_device_count(self._controller.wireless_device_count)
 
         sections_data = self._controller.get_panel_data()

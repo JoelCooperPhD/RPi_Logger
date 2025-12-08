@@ -103,6 +103,7 @@ class DeviceUIController:
         # XBee dongle state
         self._xbee_dongle_connected = False
         self._wireless_device_count = 0
+        self._xbee_scanning = False
 
         # Subscribe to model changes
         selection_model.add_connection_observer(self._on_model_changed)
@@ -311,4 +312,15 @@ class DeviceUIController:
         """Update the wireless device count."""
         if self._wireless_device_count != count:
             self._wireless_device_count = count
+            self._notify_ui_observers()
+
+    @property
+    def xbee_scanning(self) -> bool:
+        """Check if XBee is currently scanning."""
+        return self._xbee_scanning
+
+    def set_xbee_scanning(self, scanning: bool) -> None:
+        """Update the XBee scanning state."""
+        if self._xbee_scanning != scanning:
+            self._xbee_scanning = scanning
             self._notify_ui_observers()

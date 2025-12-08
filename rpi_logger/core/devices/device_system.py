@@ -127,6 +127,7 @@ class DeviceSystem:
             self._xbee_manager.on_dongle_disconnected = self._handle_xbee_dongle_disconnected_internal
             self._xbee_manager.on_device_discovered = self._handle_xbee_device_discovered
             self._xbee_manager.on_device_lost = self._handle_xbee_device_lost
+            self._xbee_manager.on_scanning_changed = self._handle_xbee_scanning_changed
 
         self._network_scanner: Optional[NetworkScanner] = None
         if ZEROCONF_AVAILABLE:
@@ -854,6 +855,11 @@ class DeviceSystem:
         if self._xbee_manager and self._ui_controller:
             count = len(self._xbee_manager.discovered_devices)
             self._ui_controller.set_wireless_device_count(count)
+
+    def _handle_xbee_scanning_changed(self, scanning: bool) -> None:
+        """Handle XBee scanning state change."""
+        if self._ui_controller:
+            self._ui_controller.set_xbee_scanning(scanning)
 
     # =========================================================================
     # XBee Transport (for wireless device communication)
