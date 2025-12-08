@@ -83,11 +83,75 @@ def _get_screen_height(root_widget) -> Optional[int]:
         return None
 
 
+def get_frame_position(root_widget) -> Tuple[int, int, int, int]:
+    """Get window frame position, compensating for X11 geometry asymmetry.
+
+    On X11, after user interaction, geometry() may return content area position
+    while the setter expects frame position. This causes windows to drift down
+    by the title bar height each time they're saved and restored.
+
+    This function detects the issue and returns the correct frame position.
+
+    Returns:
+        (width, height, frame_x, frame_y)
+    """
+    root_widget.update_idletasks()
+
+    # Get position from geometry string
+    geom_str = root_widget.geometry()
+    parsed = parse_geometry_string(geom_str)
+    if not parsed:
+        raise ValueError(f"Failed to parse geometry: '{geom_str}'")
+
+    width, height, geom_x, geom_y = parsed
+
+    # Get absolute content position (always reliable)
+    root_x = root_widget.winfo_rootx()
+    root_y = root_widget.winfo_rooty()
+
+    # Calculate offset between geometry() position and winfo position
+    # - If geometry() returns frame position (correct): offset = title_bar_height > 0
+    # - If geometry() returns content position (X11 bug): offset = 0
+    offset_x = root_x - geom_x
+    offset_y = root_y - geom_y
+
+    logger.debug(
+        "Geometry analysis: geom=(%d,%d) winfo_root=(%d,%d) offset=(%d,%d)",
+        geom_x, geom_y, root_x, root_y, offset_x, offset_y
+    )
+
+    # Determine frame position
+    if offset_y >= 10:
+        # offset_y is a reasonable title bar height (10+ pixels)
+        # This means geometry() returned frame position correctly
+        frame_x = geom_x
+        frame_y = geom_y
+        logger.debug("geometry() returned frame position (offset=%d)", offset_y)
+    else:
+        # offset_y is suspiciously small (< 10 pixels)
+        # This suggests geometry() returned content position (X11 bug)
+        # We need to convert content position to frame position
+        # Frame position = content position - title_bar_height
+        # Since we can't measure title bar when buggy, use estimate
+        estimated_title_bar = 37  # Common title bar height on GNOME/GTK
+        frame_x = geom_x  # X offset is typically 0
+        frame_y = geom_y - estimated_title_bar
+        # Ensure we don't go negative
+        frame_y = max(0, frame_y)
+        logger.debug(
+            "geometry() likely returned content position, adjusting Y: %d -> %d (est. title_bar=%d)",
+            geom_y, frame_y, estimated_title_bar
+        )
+
+    return width, height, frame_x, frame_y
+
+
 def send_geometry_to_parent(root_widget, instance_id: Optional[str] = None) -> bool:
     """Send current window geometry to parent process.
 
-    Sends raw Tk coordinates. The geometry is clamped to keep the window
-    above the reserved screen bottom area (RPi taskbar).
+    Sends frame position (not content position) to ensure consistent restore.
+    The geometry is clamped to keep the window above the reserved screen
+    bottom area (RPi taskbar).
 
     Args:
         root_widget: The Tkinter root window
@@ -100,15 +164,14 @@ def send_geometry_to_parent(root_widget, instance_id: Optional[str] = None) -> b
         logger.debug("Sending geometry to parent process")
         from rpi_logger.core.commands import StatusMessage
 
-        geometry_str = root_widget.geometry()
-        logger.debug("Current geometry string: %s", geometry_str)
-
-        parsed = parse_geometry_string(geometry_str)
-        if not parsed:
-            logger.error("Failed to parse geometry: '%s'", geometry_str)
+        # Get frame position (compensates for X11 geometry asymmetry)
+        try:
+            width, height, x, y = get_frame_position(root_widget)
+        except ValueError as e:
+            logger.error("Failed to get frame position: %s", e)
             return False
 
-        width, height, x, y = parsed
+        logger.debug("Frame position: %dx%d+%d+%d", width, height, x, y)
 
         # Clamp to screen bounds (keeps window above taskbar)
         width, height, x, y = clamp_geometry_to_screen(

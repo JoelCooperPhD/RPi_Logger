@@ -577,32 +577,30 @@ class MainWindow:
             return
 
         try:
-            import re
             from rpi_logger.core.instance_geometry_store import get_instance_geometry_store
             from rpi_logger.core.window_manager import WindowGeometry
+            from rpi_logger.modules.base.gui_utils import get_frame_position
 
-            geometry_str = self.root.geometry()
-            match = re.match(r'(\d+)x(\d+)([\+\-]\d+)([\+\-]\d+)', geometry_str)
+            # Get frame position (compensates for X11 geometry asymmetry)
+            # On X11, geometry() may return content position after user moves window,
+            # causing windows to drift down on each save/restore cycle.
+            try:
+                width, height, x, y = get_frame_position(self.root)
+            except ValueError as e:
+                self.logger.warning("Failed to get frame position: %s", e)
+                return
 
-            if match:
-                width = int(match.group(1))
-                height = int(match.group(2))
-                x = int(match.group(3))
-                y = int(match.group(4))
+            # Save geometry to instance store
+            geometry = WindowGeometry(x=x, y=y, width=width, height=height)
+            geometry_store = get_instance_geometry_store()
+            geometry_store.set("main_window", geometry)
+            self.logger.info("Saved main window geometry: %dx%d+%d+%d", width, height, x, y)
 
-                # Save geometry to instance store
-                geometry = WindowGeometry(x=x, y=y, width=width, height=height)
-                geometry_store = get_instance_geometry_store()
-                geometry_store.set("main_window", geometry)
-                self.logger.info("Saved main window geometry: %dx%d+%d+%d", width, height, x, y)
-
-                # Save trial label separately to main config
-                if self.trial_label_var:
-                    trial_label = self.trial_label_var.get()
-                    config_manager = get_config_manager()
-                    config_manager.write_config(CONFIG_PATH, {'last_trial_label': trial_label})
-            else:
-                self.logger.warning("Failed to parse window geometry: %s", geometry_str)
+            # Save trial label separately to main config
+            if self.trial_label_var:
+                trial_label = self.trial_label_var.get()
+                config_manager = get_config_manager()
+                config_manager.write_config(CONFIG_PATH, {'last_trial_label': trial_label})
         except Exception as e:
             self.logger.error("Error saving window geometry: %s", e, exc_info=True)
 

@@ -674,14 +674,27 @@ class StubCodexView:
     # Geometry helpers
 
     def _current_geometry_string(self, event=None) -> Optional[str]:
+        """Get current window geometry as a string, compensating for X11 asymmetry.
+
+        On X11, after user interaction, winfo_geometry() may return content position
+        while the setter expects frame position. This causes windows to drift down
+        by the title bar height each time they're saved and restored.
+        """
         if tk is None:
             return None
         try:
-            geometry = self.root.winfo_geometry()
-        except tk.TclError:
-            return None
-        geometry = str(geometry).strip()
-        return geometry or None
+            # Use get_frame_position to compensate for X11 geometry asymmetry
+            from rpi_logger.modules.base.gui_utils import get_frame_position
+            width, height, x, y = get_frame_position(self.root)
+            return f"{width}x{height}+{x}+{y}"
+        except (tk.TclError, ValueError, ImportError) as e:
+            self.logger.debug("Failed to get frame position: %s", e)
+            # Fallback to raw geometry string
+            try:
+                geometry = self.root.winfo_geometry()
+                return str(geometry).strip() or None
+            except tk.TclError:
+                return None
 
     def _on_configure(self, event) -> None:
         if event.widget is not self.root:

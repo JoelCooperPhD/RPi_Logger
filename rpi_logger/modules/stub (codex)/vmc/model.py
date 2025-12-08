@@ -464,7 +464,7 @@ class StubCodexModel:
         # Parse geometry string (format: WIDTHxHEIGHT+X+Y or WIDTHxHEIGHT-X-Y)
         match = re.match(r"^(\d+)x(\d+)([-+]\d+)([-+]\d+)$", geometry_str)
         if not match:
-            self.logger.debug("Could not parse geometry for status: %s", geometry_str)
+            logger.debug("Could not parse geometry for status: %s", geometry_str)
             return
 
         width = int(match.group(1))
@@ -485,7 +485,7 @@ class StubCodexModel:
             payload["instance_id"] = instance_id
 
         StatusMessage.send("geometry_changed", payload)
-        self.logger.debug(
+        logger.debug(
             "Sent geometry_changed to parent: %dx%d+%d+%d (instance: %s)",
             width, height, x, y, instance_id or "none"
         )
