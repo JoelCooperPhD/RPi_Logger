@@ -106,7 +106,7 @@ class AudioView:
 
         self._device_label = ttk.Label(
             container,
-            text="Scanning Audio Devices...",
+            text="Waiting for device assignment...",
             anchor="w",
             font=("TkDefaultFont", 10, "bold"),
         )

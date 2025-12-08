@@ -97,7 +97,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=0x0483,
         baudrate=115200,
         display_name="VOG",
-        module_id="Vog",
+        module_id="VOG",
     ),
     DeviceType.WVOG_USB: DeviceSpec(
         device_type=DeviceType.WVOG_USB,
@@ -107,7 +107,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=0x08AE,
         baudrate=57600,
         display_name="VOG",
-        module_id="Vog",
+        module_id="VOG",
     ),
     DeviceType.WVOG_WIRELESS: DeviceSpec(
         device_type=DeviceType.WVOG_WIRELESS,
@@ -117,7 +117,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=None,
         baudrate=57600,
         display_name="VOG",
-        module_id="Vog",
+        module_id="VOG",
     ),
 
     # DRT devices
@@ -129,7 +129,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=0x801E,
         baudrate=9600,
         display_name="DRT",
-        module_id="Drt",
+        module_id="DRT",
     ),
     DeviceType.WDRT_USB: DeviceSpec(
         device_type=DeviceType.WDRT_USB,
@@ -139,7 +139,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=0x0457,
         baudrate=921600,
         display_name="DRT",
-        module_id="Drt",
+        module_id="DRT",
     ),
     DeviceType.WDRT_WIRELESS: DeviceSpec(
         device_type=DeviceType.WDRT_WIRELESS,
@@ -149,7 +149,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=None,
         baudrate=921600,
         display_name="DRT",
-        module_id="Drt",
+        module_id="DRT",
     ),
 
     # XBee coordinator (same VID/PID, used for both VOG and DRT wireless)

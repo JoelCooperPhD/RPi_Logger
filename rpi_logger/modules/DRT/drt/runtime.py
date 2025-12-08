@@ -94,6 +94,9 @@ class DRTModuleRuntime(ModuleRuntime):
 
         self.logger.info("DRT runtime ready; waiting for device assignments")
 
+        # Notify logger that module is ready for commands
+        StatusMessage.send("ready")
+
     async def shutdown(self) -> None:
         """Shutdown the runtime - stop recording and disconnect all devices."""
         self.logger.info("Shutting down DRT runtime")
@@ -121,6 +124,7 @@ class DRTModuleRuntime(ModuleRuntime):
                 port=command.get("port", ""),
                 baudrate=command.get("baudrate", 0),
                 is_wireless=command.get("is_wireless", False),
+                command_id=command.get("command_id"),  # Pass correlation ID for ack
             )
 
         if action == "unassign_device":
@@ -206,6 +210,7 @@ class DRTModuleRuntime(ModuleRuntime):
         port: str,
         baudrate: int,
         is_wireless: bool = False,
+        command_id: str | None = None,
     ) -> bool:
         """
         Assign a device to this module (called by main logger).
@@ -216,6 +221,7 @@ class DRTModuleRuntime(ModuleRuntime):
             port: Serial port path
             baudrate: Serial baudrate
             is_wireless: Whether this is a wireless device
+            command_id: Correlation ID for acknowledgment tracking
 
         Returns:
             True if device was successfully assigned
@@ -241,6 +247,7 @@ class DRTModuleRuntime(ModuleRuntime):
                 )
                 if not await transport.connect():
                     self.logger.error("Failed to initialize proxy transport for %s", device_id)
+                    StatusMessage.send("device_error", {"device_id": device_id, "error": "Failed to initialize proxy transport"}, command_id=command_id)
                     return False
 
                 self._proxy_transports[device_id] = transport
@@ -250,12 +257,14 @@ class DRTModuleRuntime(ModuleRuntime):
                 if not handler:
                     await transport.disconnect()
                     self.logger.error("Failed to create wireless handler for %s", device_type)
+                    StatusMessage.send("device_error", {"device_id": device_id, "error": "Failed to create wireless handler"}, command_id=command_id)
                     return False
             else:
                 # USB device - create transport
                 transport = USBTransport(port=port, baudrate=baudrate)
                 if not await transport.connect():
                     self.logger.error("Failed to connect to device %s on %s", device_id, port)
+                    StatusMessage.send("device_error", {"device_id": device_id, "error": f"Failed to connect on {port}"}, command_id=command_id)
                     return False
 
                 self._transports[device_id] = transport
@@ -265,6 +274,7 @@ class DRTModuleRuntime(ModuleRuntime):
                 if not handler:
                     await transport.disconnect()
                     self.logger.error("Failed to create handler for %s", device_type)
+                    StatusMessage.send("device_error", {"device_id": device_id, "error": "Failed to create handler"}, command_id=command_id)
                     return False
 
             # Set up data callback
@@ -282,6 +292,11 @@ class DRTModuleRuntime(ModuleRuntime):
             # Notify view
             if self.view:
                 self.view.on_device_connected(device_id, drt_device_type)
+
+            # Send acknowledgement to logger that device is ready
+            # Include command_id for correlation tracking
+            # This turns the indicator from yellow (CONNECTING) to green (CONNECTED)
+            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
 
             # If recording is active, start experiment on new device
             if self._recording_active:
@@ -303,6 +318,8 @@ class DRTModuleRuntime(ModuleRuntime):
             if device_id in self._proxy_transports:
                 transport = self._proxy_transports.pop(device_id)
                 await transport.disconnect()
+            # Notify logger that device assignment failed
+            StatusMessage.send("device_error", {"device_id": device_id, "error": str(e)}, command_id=command_id)
             return False
 
     async def unassign_device(self, device_id: str) -> None:

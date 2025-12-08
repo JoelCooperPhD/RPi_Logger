@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.core.commands import StatusMessage
 from rpi_logger.modules.Cameras.app.view import CamerasView
 from rpi_logger.modules.Cameras.defaults import DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_FPS
 from rpi_logger.modules.Cameras.utils import parse_resolution, parse_fps, CameraMetrics
@@ -130,6 +131,10 @@ class CamerasRuntime(ModuleRuntime):
         self.logger.info("CAMERAS RUNTIME STARTED - %d workers active", len(self.worker_manager.workers))
         self.logger.info("=" * 60)
 
+        # Notify logger that module is ready for commands
+        # This is the handshake signal that turns the indicator green
+        StatusMessage.send("ready")
+
     async def shutdown(self) -> None:
         self.logger.info("Shutting down Cameras runtime")
 
@@ -171,7 +176,8 @@ class CamerasRuntime(ModuleRuntime):
         action = (command.get("command") or "").lower()
 
         if action == "assign_device":
-            return await self._assign_camera(command)
+            command_id = command.get("command_id")
+            return await self._assign_camera(command, command_id=command_id)
 
         if action == "unassign_device":
             return await self._unassign_camera(command)
@@ -231,8 +237,16 @@ class CamerasRuntime(ModuleRuntime):
 
     # ------------------------------------------------------------------ Device Assignment
 
-    async def _assign_camera(self, command: Dict[str, Any]) -> bool:
-        """Handle camera assignment from main logger."""
+    async def _assign_camera(self, command: Dict[str, Any], *, command_id: str | None = None) -> bool:
+        """Handle camera assignment from main logger.
+
+        Args:
+            command: Command payload with camera configuration
+            command_id: Correlation ID for acknowledgment tracking
+
+        Returns:
+            True if camera was successfully assigned
+        """
         device_id = command.get("device_id")
         camera_type = command.get("camera_type")  # "usb" or "picam"
         stable_id = command.get("camera_stable_id")
@@ -260,6 +274,8 @@ class CamerasRuntime(ModuleRuntime):
         key = camera_id.key
         if key in self.camera_states:
             self.logger.warning("[ASSIGN] Camera %s already assigned", key)
+            # Still send device_ready since the camera is working
+            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
             return True
 
         # Spawn worker for this camera
@@ -285,9 +301,16 @@ class CamerasRuntime(ModuleRuntime):
                 with contextlib.suppress(Exception):
                     self.ctx.view.set_window_title(title)
 
+            # Send acknowledgement to logger that device is ready
+            # This turns the indicator from yellow (CONNECTING) to green (CONNECTED)
+            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
             return True
         except Exception as e:
             self.logger.error("[ASSIGN] Failed to spawn worker for %s: %s", key, e)
+            StatusMessage.send("device_error", {
+                "device_id": device_id,
+                "error": f"Failed to spawn worker: {e}"
+            }, command_id=command_id)
             return False
 
     async def _unassign_camera(self, command: Dict[str, Any]) -> bool:

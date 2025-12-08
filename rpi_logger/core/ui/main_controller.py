@@ -25,11 +25,21 @@ def _get_device_based_modules() -> dict[str, tuple[InterfaceType, DeviceFamily]]
 
     All modules are device-based - they show devices in the panel
     instead of auto-launching when their checkbox is toggled.
+
+    Keys are normalized to uppercase for case-insensitive lookup.
     """
-    return DeviceCatalog.get_module_connection_map()
+    raw_map = DeviceCatalog.get_module_connection_map()
+    # Normalize keys to uppercase for case-insensitive matching
+    return {k.upper(): v for k, v in raw_map.items()}
+
+
+def _lookup_device_module(module_name: str) -> tuple[InterfaceType, DeviceFamily] | None:
+    """Look up a module in DEVICE_BASED_MODULES (case-insensitive)."""
+    return DEVICE_BASED_MODULES.get(module_name.upper())
 
 
 # Cached module connection map (derived from device registry)
+# Keys are uppercase for case-insensitive lookup
 DEVICE_BASED_MODULES = _get_device_based_modules()
 
 
@@ -298,10 +308,11 @@ class MainController:
             action = "enable" if desired_state else "disable"
             await self.logger_system.event_logger.log_button_press(f"module_{module_name}", action)
 
-        # Check if this is a device-based module (Audio, Cameras)
+        # Check if this is a device-based module (DRT, VOG, Audio, Cameras)
         # These modules show devices in the panel instead of auto-launching
-        if module_name in DEVICE_BASED_MODULES:
-            interface, family = DEVICE_BASED_MODULES[module_name]
+        device_module_info = _lookup_device_module(module_name)
+        if device_module_info:
+            interface, family = device_module_info
             self.logger.info(
                 "%s device section: %s (%s > %s)",
                 "Showing" if desired_state else "Hiding",
@@ -389,8 +400,9 @@ class MainController:
         for module_name, enabled in self.logger_system.get_module_enabled_states().items():
             if enabled:
                 # Check if this is a device-based module
-                if module_name in DEVICE_BASED_MODULES:
-                    interface, family = DEVICE_BASED_MODULES[module_name]
+                device_module_info = _lookup_device_module(module_name)
+                if device_module_info:
+                    interface, family = device_module_info
                     self.logger.info("Auto-enabling device section: %s", module_name)
                     # Enable connection type (shows device section in panel)
                     self.logger_system.set_connection_enabled(interface, family, True)

@@ -102,6 +102,9 @@ class VOGModuleRuntime(ModuleRuntime):
 
         self.logger.info("VOG runtime ready; waiting for device assignments")
 
+        # Notify logger that module is ready for commands
+        StatusMessage.send("ready")
+
     async def shutdown(self) -> None:
         """Shutdown the runtime - stop session and disconnect all devices."""
         self.logger.info("Shutting down VOG runtime")
@@ -127,6 +130,7 @@ class VOGModuleRuntime(ModuleRuntime):
         port: str,
         baudrate: int,
         is_wireless: bool = False,
+        command_id: str | None = None,
     ) -> bool:
         """
         Assign a device to this module (called by main logger).
@@ -137,6 +141,7 @@ class VOGModuleRuntime(ModuleRuntime):
             port: Serial port path
             baudrate: Serial baudrate
             is_wireless: Whether this is a wireless device
+            command_id: Correlation ID for acknowledgment tracking
 
         Returns:
             True if device was successfully assigned
@@ -168,6 +173,7 @@ class VOGModuleRuntime(ModuleRuntime):
                 )
                 if not await transport.connect():
                     self.logger.error("Failed to initialize proxy transport for %s", device_id)
+                    StatusMessage.send("device_error", {"device_id": device_id, "error": "Failed to initialize proxy transport"}, command_id=command_id)
                     return False
                 self._proxy_transports[device_id] = transport
                 self._transports[device_id] = transport  # Also store in main dict for handler access
@@ -179,6 +185,7 @@ class VOGModuleRuntime(ModuleRuntime):
 
                 if not transport.is_connected:
                     self.logger.error("Failed to connect to device %s on %s", device_id, port)
+                    StatusMessage.send("device_error", {"device_id": device_id, "error": f"Failed to connect on {port}"}, command_id=command_id)
                     return False
 
                 self._transports[device_id] = transport
@@ -203,6 +210,11 @@ class VOGModuleRuntime(ModuleRuntime):
             # Notify view
             if self.view:
                 self.view.on_device_connected(device_id, vog_device_type)
+
+            # Send acknowledgement to logger that device is ready
+            # Include command_id for correlation tracking
+            # This turns the indicator from yellow (CONNECTING) to green (CONNECTED)
+            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
 
             # If session is active, start experiment on new device
             if self._session_active:
@@ -231,6 +243,7 @@ class VOGModuleRuntime(ModuleRuntime):
             if device_id in self._proxy_transports:
                 transport = self._proxy_transports.pop(device_id)
                 await transport.disconnect()
+            StatusMessage.send("device_error", {"device_id": device_id, "error": str(e)}, command_id=command_id)
             return False
 
     async def unassign_device(self, device_id: str) -> None:
@@ -284,6 +297,7 @@ class VOGModuleRuntime(ModuleRuntime):
                 port=command.get("port", ""),
                 baudrate=command.get("baudrate", 0),
                 is_wireless=command.get("is_wireless", False),
+                command_id=command.get("command_id"),  # Pass correlation ID for ack
             )
 
         if action == "unassign_device":

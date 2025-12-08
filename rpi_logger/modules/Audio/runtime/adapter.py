@@ -51,6 +51,8 @@ class AudioRuntime(ModuleRuntime):
 
     async def start(self) -> None:
         await self.app.start()
+        # Notify logger that module is ready for commands
+        StatusMessage.send("ready")
 
     async def shutdown(self) -> None:
         await self.app.shutdown()
@@ -71,6 +73,7 @@ class AudioRuntime(ModuleRuntime):
         audio_channels: int | None = None,
         audio_sample_rate: float | None = None,
         display_name: str | None = None,
+        command_id: str | None = None,
     ) -> bool:
         """
         Assign an audio device to this module (called by main logger).
@@ -85,17 +88,27 @@ class AudioRuntime(ModuleRuntime):
             audio_channels: Number of input channels
             audio_sample_rate: Sample rate for the device
             display_name: Human-readable device name (e.g., "HD Pro Webcam C920: USB Audio")
+            command_id: Correlation ID for acknowledgment tracking
 
         Returns:
             True if device was successfully assigned
         """
         if sounddevice_index is None:
             self.logger.error("Cannot assign audio device without sounddevice_index")
+            StatusMessage.send("device_error", {
+                "device_id": device_id,
+                "error": "Missing sounddevice_index",
+            }, command_id=command_id)
             return False
 
+        # Check if device is already assigned (same pattern as DRT)
+        if sounddevice_index in self.app.state.selected_devices:
+            self.logger.warning("Device %s (index=%d) already assigned", device_id, sounddevice_index)
+            return True
+
         self.logger.info(
-            "Assigning audio device: id=%s, type=%s, index=%d, channels=%s, rate=%s",
-            device_id, device_type, sounddevice_index, audio_channels, audio_sample_rate
+            "Assigning audio device: id=%s, type=%s, index=%d, channels=%s, rate=%s, cmd_id=%s",
+            device_id, device_type, sounddevice_index, audio_channels, audio_sample_rate, command_id
         )
 
         try:
@@ -109,9 +122,21 @@ class AudioRuntime(ModuleRuntime):
                 sample_rate=audio_sample_rate or self.settings.sample_rate,
             )
 
-            # Add to app's device state and enable it
+            # Add to app's device state
             self.app.state.set_device(sounddevice_index, device_info)
-            await self.app.toggle_device(sounddevice_index, enabled=True)
+
+            # Enable the device (start audio stream)
+            try:
+                await self.app.toggle_device(sounddevice_index, enabled=True)
+            except Exception as enable_err:
+                # Clean up on failure (same pattern as DRT)
+                self.app.state.remove_device(sounddevice_index)
+                self.logger.error("Failed to enable audio device %s: %s", device_id, enable_err)
+                StatusMessage.send("device_error", {
+                    "device_id": device_id,
+                    "error": f"Failed to enable device: {enable_err}",
+                }, command_id=command_id)
+                return False
 
             # Update window title: Audio(USB):device_name
             if hasattr(self.context, 'view') and self.context.view:
@@ -126,10 +151,22 @@ class AudioRuntime(ModuleRuntime):
                     pass
 
             self.logger.info("Audio device %s assigned and enabled (index=%d)", device_id, sounddevice_index)
+
+            # Send acknowledgement to logger that device is ready
+            # Include command_id for correlation tracking
+            # This turns the indicator from yellow (CONNECTING) to green (CONNECTED)
+            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
+
             return True
 
         except Exception as e:
             self.logger.error("Failed to assign audio device %s: %s", device_id, e, exc_info=True)
+            # Clean up on failure
+            self.app.state.remove_device(sounddevice_index)
+            StatusMessage.send("device_error", {
+                "device_id": device_id,
+                "error": str(e),
+            }, command_id=command_id)
             return False
 
     async def unassign_device(self, device_id: str) -> None:
@@ -171,6 +208,7 @@ class AudioRuntime(ModuleRuntime):
                 audio_channels=command.get("audio_channels"),
                 audio_sample_rate=command.get("audio_sample_rate"),
                 display_name=command.get("display_name"),
+                command_id=command.get("command_id"),  # Pass correlation ID
             )
 
         if action == "unassign_device":

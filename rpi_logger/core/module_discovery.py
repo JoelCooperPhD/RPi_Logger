@@ -56,10 +56,20 @@ def extract_module_name_from_entry(entry_point: Path) -> Optional[str]:
 
     name_part = match.group(1)
 
-    parts = name_part.split('_')
-    title_case = ''.join(word if word.isupper() else word.capitalize() for word in parts)
+    # Acronyms that should be uppercase
+    ACRONYMS = {"drt", "vog", "gps"}
 
-    return title_case
+    parts = name_part.split('_')
+    result_parts = []
+    for word in parts:
+        if word.lower() in ACRONYMS:
+            result_parts.append(word.upper())
+        elif word.isupper():
+            result_parts.append(word)
+        else:
+            result_parts.append(word.capitalize())
+
+    return ''.join(result_parts)
 
 
 def extract_module_id(entry_point: Path, fallback_name: str) -> str:

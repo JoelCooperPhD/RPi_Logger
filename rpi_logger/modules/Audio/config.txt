@@ -1,10 +1,10 @@
 display_name = Audio
 enabled = true
-window_geometry = 320x200+115+99
+window_geometry = 614x76+1429+891
 gui_logger_visible = false
 gui_io_stub_visible = false
 view.show_io_panel = false
 view.show_logger = false
-device_connected = true
+device_connected = false
 preview_resolution = auto
-audio.selected_device_names = HD Pro Webcam C920: USB Audio (hw:3,0)
+audio.selected_device_names = HD Pro Webcam C920: USB Audio (hw:3,0)(USB):audio_9

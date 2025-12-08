@@ -293,6 +293,22 @@ class DeviceLifecycleManager:
 
         self._notify_changed()
 
+    def set_device_connecting(self, device_id: str) -> None:
+        """
+        Set device to CONNECTING state (yellow indicator).
+
+        Called when user clicks to connect but before module acknowledges ready.
+        """
+        # Update selection model
+        self._selection.set_device_state(device_id, ConnectionState.CONNECTING)
+
+        # Update device info state
+        device = self._devices.get(device_id)
+        if device:
+            device.state = ConnectionState.CONNECTING
+
+        self._notify_changed()
+
     def get_connected_devices(self) -> list[DeviceInfo]:
         """Get all connected devices."""
         connected_ids = self._selection.get_connected_device_ids()

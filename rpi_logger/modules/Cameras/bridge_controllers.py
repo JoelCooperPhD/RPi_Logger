@@ -50,7 +50,7 @@ class DiscoveryController:
     """
     Handles worker spawning for cameras.
 
-    Note: Discovery is now handled by the main logger's DeviceConnectionManager.
+    Note: Discovery is now handled by the main logger's DeviceSystem.
     This controller only spawns workers when cameras are assigned via the
     assign_device command.
     """

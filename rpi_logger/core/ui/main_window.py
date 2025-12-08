@@ -341,10 +341,9 @@ class MainWindow:
         self._build_info_panel(left_column)
 
     def _build_session_trial_controls(self, parent: ttk.Frame) -> None:
-        # Row 0: Session and Trial buttons side by side
+        # Row 0: Session and Trial buttons side by side, left aligned
         buttons_frame = ttk.Frame(parent)
-        buttons_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 8))
-        buttons_frame.columnconfigure(1, weight=1)
+        buttons_frame.grid(row=0, column=0, sticky=(tk.W, tk.N), pady=(0, 8))
 
         # Session section with label and button
         session_frame = ttk.Frame(buttons_frame)
@@ -365,7 +364,7 @@ class MainWindow:
 
         # Trial section with label and button
         trial_frame = ttk.Frame(buttons_frame)
-        trial_frame.grid(row=0, column=1, sticky=(tk.E, tk.N), padx=(0, 0))
+        trial_frame.grid(row=0, column=1, sticky=(tk.W, tk.N))
 
         trial_label = ttk.Label(trial_frame, text="Trial", font=('TkDefaultFont', 10, 'bold'))
         trial_label.grid(row=0, column=0, sticky=tk.W, pady=(0, 4))
@@ -623,8 +622,11 @@ class MainWindow:
         await self.timer_manager.start_clock()
 
         # Start USB device scanning automatically
-        self._schedule_task(self.controller.on_usb_scan_toggle(True))
+        # IMPORTANT: Must complete before auto_start_modules to ensure
+        # instance_manager is ready to track connections
+        await self.controller.on_usb_scan_toggle(True)
 
+        # Now start modules - instance manager is ready
         self._schedule_task(self.controller.auto_start_modules())
 
         try:

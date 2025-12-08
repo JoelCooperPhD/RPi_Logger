@@ -368,6 +368,10 @@ class NotesRuntime(ModuleRuntime):
         if self.auto_start:
             self._run_async(self._start_recording())
 
+        # Notify logger that module is ready for commands
+        # This is the handshake signal that turns the indicator green
+        StatusMessage.send("ready")
+
     async def shutdown(self) -> None:
         await self.shutdown_guard.start()
         self._stop_event.set()

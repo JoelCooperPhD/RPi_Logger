@@ -12,13 +12,43 @@ logger = get_module_logger("CommandProtocol")
 class CommandMessage:
 
     @staticmethod
-    def create(command: str, **kwargs) -> str:
+    def create(command: str, command_id: Optional[str] = None, **kwargs) -> str:
+        """
+        Create a command message.
+
+        Args:
+            command: The command name
+            command_id: Optional correlation ID for tracking acknowledgments
+            **kwargs: Additional command parameters
+
+        Returns:
+            JSON-formatted command string with newline
+        """
         message = {
             "command": command,
             "timestamp": datetime.datetime.now().isoformat(),
         }
+        if command_id:
+            message["command_id"] = command_id
         message.update(kwargs)
         return json.dumps(message) + "\n"
+
+    @staticmethod
+    def create_with_id(command: str, command_id: str, **kwargs) -> str:
+        """
+        Create a command message with a required correlation ID.
+
+        This is used for commands that require acknowledgment.
+
+        Args:
+            command: The command name
+            command_id: Correlation ID for tracking acknowledgments
+            **kwargs: Additional command parameters
+
+        Returns:
+            JSON-formatted command string with newline
+        """
+        return CommandMessage.create(command, command_id=command_id, **kwargs)
 
     @staticmethod
     def parse(raw_json: str) -> Optional[Dict[str, Any]]:
@@ -122,6 +152,8 @@ class CommandMessage:
         camera_hw_model: str = None,
         camera_location: str = None,
         display_name: str = None,
+        # Correlation ID for acknowledgment tracking
+        command_id: str = None,
     ) -> str:
         """
         Assign a device to the module.
@@ -146,6 +178,7 @@ class CommandMessage:
             camera_hw_model: Hardware model
             camera_location: USB port or CSI connector
             display_name: Display name for the device
+            command_id: Optional correlation ID for tracking acknowledgment
         """
         kwargs = {
             "device_id": device_id,
@@ -182,7 +215,7 @@ class CommandMessage:
             kwargs["camera_location"] = camera_location
         if display_name:
             kwargs["display_name"] = display_name
-        return CommandMessage.create("assign_device", **kwargs)
+        return CommandMessage.create("assign_device", command_id=command_id, **kwargs)
 
     @staticmethod
     def unassign_device(device_id: str) -> str:
@@ -245,7 +278,15 @@ class StatusMessage:
         cls.output_stream = output_stream
 
     @staticmethod
-    def send(status: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def send(status: str, data: Optional[Dict[str, Any]] = None, command_id: Optional[str] = None) -> None:
+        """
+        Send a status message to the parent process.
+
+        Args:
+            status: Status type (e.g., "device_ready", "error")
+            data: Optional data payload
+            command_id: Optional correlation ID to acknowledge a command
+        """
         import sys
         message = {
             "type": "status",
@@ -253,8 +294,25 @@ class StatusMessage:
             "timestamp": datetime.datetime.now().isoformat(),
             "data": data or {}
         }
+        if command_id:
+            message["command_id"] = command_id
         output = StatusMessage.output_stream if StatusMessage.output_stream else sys.stdout
         print(json.dumps(message), file=output, flush=True)
+
+    @staticmethod
+    def send_ack(command_id: str, success: bool = True, data: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Send a command acknowledgment.
+
+        Args:
+            command_id: The correlation ID of the command being acknowledged
+            success: Whether the command succeeded
+            data: Optional additional data
+        """
+        status = "command_ack" if success else "command_nack"
+        payload = data or {}
+        payload["success"] = success
+        StatusMessage.send(status, payload, command_id=command_id)
 
     @staticmethod
     def send_with_timing(status: str, duration_ms: float, data: Optional[Dict[str, Any]] = None) -> None:
@@ -325,6 +383,16 @@ class StatusMessage:
             return self.payload.get("message")
         return None
 
+    def get_command_id(self) -> Optional[str]:
+        """Get the correlation ID if this is a command acknowledgment."""
+        if self.data:
+            return self.data.get("command_id")
+        return None
+
+    def is_acknowledgment(self) -> bool:
+        """Check if this is a command acknowledgment."""
+        return self.status_type in ("command_ack", "command_nack", "device_ready", "device_error")
+
     def __repr__(self) -> str:
         if self.valid:
             return f"StatusMessage(type={self.status_type}, payload={self.payload})"
@@ -362,6 +430,17 @@ class StatusType:
     # XBee wireless communication status
     XBEE_SEND = "xbee_send"              # Module requests to send data via XBee
     XBEE_SEND_RESULT = "xbee_send_result"  # Result of XBee send operation
+
+    # Command acknowledgment status
+    COMMAND_ACK = "command_ack"          # Command succeeded
+    COMMAND_NACK = "command_nack"        # Command failed
+
+    # Health monitoring status
+    HEARTBEAT = "heartbeat"              # Module heartbeat signal
+    READY = "ready"                      # Module ready for commands
+
+    # Device connection status (with correlation ID support)
+    DEVICE_READY = "device_ready"        # Device successfully connected
 
 
 if __name__ == "__main__":

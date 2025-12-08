@@ -11,7 +11,7 @@ acts primarily as a process manager that responds to state change events.
 import asyncio
 from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
-from typing import Dict, List, Optional, Callable, Set
+from typing import Awaitable, Dict, List, Optional, Callable, Set
 
 from .module_discovery import ModuleInfo, discover_modules
 from .module_process import ModuleProcess, ModuleState
@@ -272,6 +272,29 @@ class ModuleManager:
                 self.logger.debug("Module %s disabled in config", module_info.name)
 
     # =========================================================================
+    # Module Info Queries
+    # =========================================================================
+
+    def is_internal_module(self, module_id: str) -> bool:
+        """Check if a module is internal (software-only, no hardware).
+
+        Args:
+            module_id: Module ID or instance ID (e.g., "Notes" or "Notes:default")
+
+        Returns:
+            True if the module is marked as internal in its config
+        """
+        # Extract base module ID from instance ID (e.g., "Notes" from "Notes:default")
+        base_id = module_id.split(":")[0] if ":" in module_id else module_id
+
+        module_info = next(
+            (m for m in self.available_modules
+             if m.name.lower() == base_id.lower() or m.module_id == base_id.lower()),
+            None
+        )
+        return module_info.is_internal if module_info else False
+
+    # =========================================================================
     # Process Management
     # =========================================================================
 
@@ -282,6 +305,246 @@ class ModuleManager:
     async def stop_module(self, module_name: str) -> bool:
         """Stop a module (routes through state machine)."""
         return await self.set_module_enabled(module_name, False)
+
+    async def start_module_instance(
+        self,
+        module_id: str,
+        instance_id: str,
+        window_geometry: Optional[WindowGeometry] = None
+    ) -> bool:
+        """Start a module instance with a specific instance ID.
+
+        This allows multiple instances of the same module to run simultaneously,
+        each with a unique instance ID (e.g., "DRT:ACM0", "DRT:ACM1").
+
+        Args:
+            module_id: Base module ID (e.g., "DRT") - used to find ModuleInfo
+            instance_id: Unique instance ID (e.g., "DRT:ACM0") - used as process key
+            window_geometry: Optional window geometry for the instance
+
+        Returns:
+            True if the instance started successfully
+        """
+        self.logger.info(
+            "Starting module instance: %s (base module: %s)",
+            instance_id, module_id
+        )
+
+        # Find module info using the base module ID
+        # Module names in available_modules use folder names (e.g., "DRT", "VOG")
+        module_info = next(
+            (m for m in self.available_modules
+             if m.name.lower() == module_id.lower() or m.module_id == module_id.lower()),
+            None
+        )
+        if not module_info:
+            self.logger.error("Module info not found for: %s", module_id)
+            return False
+
+        # Cache geometry for this instance
+        if window_geometry:
+            self.window_geometry_cache[instance_id] = window_geometry
+
+        # Start the process with the instance ID as the key
+        return await self._start_module_process_for_instance(
+            module_info, instance_id
+        )
+
+    async def stop_module_instance(self, instance_id: str) -> bool:
+        """Stop a specific module instance.
+
+        Args:
+            instance_id: The instance ID to stop (e.g., "DRT:ACM0")
+
+        Returns:
+            True if the instance was stopped successfully
+        """
+        self.logger.info("Stopping module instance: %s", instance_id)
+
+        lock = self._get_process_lock(instance_id)
+
+        async with lock:
+            process = self.module_processes.get(instance_id)
+
+            if not process:
+                self.logger.debug("Instance %s already stopped (no process)", instance_id)
+                return True
+
+            if not process.is_running():
+                self.logger.debug("Instance %s already stopped", instance_id)
+                self.module_processes.pop(instance_id, None)
+                return True
+
+            try:
+                await process.stop()
+                self.module_processes.pop(instance_id, None)
+                self.logger.info("Instance %s stopped successfully", instance_id)
+                return True
+
+            except Exception as e:
+                self.logger.error(
+                    "Exception stopping instance %s: %s",
+                    instance_id, e, exc_info=True
+                )
+                return False
+
+    async def kill_module_instance(self, instance_id: str) -> bool:
+        """Force kill a module instance.
+
+        Args:
+            instance_id: The instance ID to kill (e.g., "DRT:ACM0")
+
+        Returns:
+            True if the instance was killed successfully
+        """
+        self.logger.warning("Force killing module instance: %s", instance_id)
+
+        lock = self._get_process_lock(instance_id)
+
+        async with lock:
+            process = self.module_processes.get(instance_id)
+
+            if not process:
+                self.logger.debug("Instance %s not found for kill", instance_id)
+                return True
+
+            if not process.is_running():
+                self.logger.debug("Instance %s already stopped", instance_id)
+                self.module_processes.pop(instance_id, None)
+                return True
+
+            try:
+                await process.kill()
+                self.module_processes.pop(instance_id, None)
+                self.logger.info("Instance %s killed", instance_id)
+                return True
+
+            except Exception as e:
+                self.logger.error(
+                    "Exception killing instance %s: %s",
+                    instance_id, e, exc_info=True
+                )
+                return False
+
+    async def _start_module_process_for_instance(
+        self,
+        module_info: ModuleInfo,
+        instance_id: str
+    ) -> bool:
+        """Internal: Start a module process for a specific instance.
+
+        This is similar to _start_module_process but uses an instance_id
+        as the key instead of the module name, allowing multiple instances.
+
+        Args:
+            module_info: The module info (entry point, config, etc.)
+            instance_id: The unique instance ID (e.g., "DRT:ACM0")
+
+        Returns:
+            True if the process started successfully
+        """
+        lock = self._get_process_lock(instance_id)
+
+        async with lock:
+            # Clean up any existing process with this instance ID
+            if instance_id in self.module_processes:
+                process = self.module_processes[instance_id]
+                if process.is_running():
+                    self.logger.info(
+                        "Instance %s still running, stopping first...",
+                        instance_id
+                    )
+                    await process.stop()
+                    await asyncio.sleep(0.1)
+                self.module_processes.pop(instance_id, None)
+
+            self.logger.info(
+                "Starting instance %s (module: %s) with session dir: %s",
+                instance_id, module_info.name, self.session_dir
+            )
+
+            # Get cached geometry for this instance
+            window_geometry = self.window_geometry_cache.get(instance_id)
+
+            # Create and start process
+            process = ModuleProcess(
+                module_info,
+                self.session_dir,
+                session_prefix=self.session_prefix,
+                status_callback=self._make_instance_status_callback(instance_id),
+                log_level=self.log_level,
+                window_geometry=window_geometry,
+            )
+
+            try:
+                success = await process.start()
+
+                if success:
+                    self.module_processes[instance_id] = process
+                    self.forcefully_stopped_modules.discard(instance_id)
+                    self.logger.info("Instance %s started successfully", instance_id)
+                else:
+                    self.logger.error("Instance %s failed to start", instance_id)
+
+                return success
+
+            except Exception as e:
+                self.logger.error(
+                    "Exception starting instance %s: %s",
+                    instance_id, e, exc_info=True
+                )
+                return False
+
+    def _make_instance_status_callback(
+        self,
+        instance_id: str
+    ) -> Callable[[ModuleProcess, Optional[StatusMessage]], Awaitable[None]]:
+        """Create a status callback for a module instance.
+
+        The callback wraps the process to include the instance ID so the
+        main status callback can route it correctly.
+        """
+        async def callback(process: ModuleProcess, status: Optional[StatusMessage]) -> None:
+            # Forward to the main process status callback with instance tracking
+            await self._process_status_callback_for_instance(instance_id, process, status)
+
+        return callback
+
+    async def _process_status_callback_for_instance(
+        self,
+        instance_id: str,
+        process: ModuleProcess,
+        status: Optional[StatusMessage]
+    ) -> None:
+        """Handle status updates from module instance processes.
+
+        Similar to _process_status_callback but uses instance_id for tracking
+        instead of module_info.name.
+        """
+        module_name = process.module_info.name
+
+        if status:
+            self.logger.debug(
+                "Instance %s (module %s) status: %s",
+                instance_id, module_name, status.get_status_type()
+            )
+
+            # Handle quitting status
+            if status.get_status_type() == "quitting":
+                self.logger.info("Instance %s quitting gracefully", instance_id)
+                # Clean up the instance from our tracking
+                self.module_processes.pop(instance_id, None)
+
+        # Check for unexpected process termination
+        if not process.is_running():
+            if instance_id in self.module_processes:
+                self.logger.warning("Instance %s stopped unexpectedly", instance_id)
+                self.module_processes.pop(instance_id, None)
+
+        # Forward to external callback with instance_id
+        if self.status_callback:
+            # Pass instance_id as module_name so LoggerSystem can route correctly
+            await self.status_callback(process, status, instance_id=instance_id)
 
     async def _start_module_process(self, module_name: str) -> bool:
         """
@@ -629,6 +892,9 @@ class ModuleManager:
         except Exception as exc:
             self.logger.error("Failed to send command to %s: %s", module_name, exc)
             return False
+
+    # Alias for compatibility with robust connection patterns
+    send_command_raw = send_command
 
     def cleanup_stopped_process(self, module_name: str) -> None:
         """Remove a stopped process from tracking."""

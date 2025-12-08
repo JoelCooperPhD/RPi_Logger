@@ -73,17 +73,10 @@ from .internal_scanner import (
     DiscoveredInternalDevice,
 )
 
-from .connection_manager import (
-    DeviceConnectionManager,
-    ConnectionState,
-    DeviceInfo,
-    XBeeDongleInfo,
-)
-
 # New architecture components
 from .catalog import DeviceCatalog, FamilyMetadata, InterfaceMetadata
-from .selection import DeviceSelectionModel
-from .lifecycle import DeviceLifecycleManager
+from .selection import DeviceSelectionModel, ConnectionState
+from .lifecycle import DeviceLifecycleManager, DeviceInfo
 from .events import (
     DeviceDiscoveredEvent,
     DeviceLostEvent,
@@ -144,12 +137,9 @@ __all__ = [
     # Internal Scanner (virtual devices)
     "InternalDeviceScanner",
     "DiscoveredInternalDevice",
-    # Connection Manager (legacy)
-    "DeviceConnectionManager",
+    # New Architecture
     "ConnectionState",
     "DeviceInfo",
-    "XBeeDongleInfo",
-    # New Architecture
     "DeviceCatalog",
     "FamilyMetadata",
     "InterfaceMetadata",

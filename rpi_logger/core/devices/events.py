@@ -177,9 +177,8 @@ def discovered_audio_device(
     device_type: DeviceType,
     module_id: str,
     name: str,
-    card_index: int | None = None,
-    device_index: int | None = None,
-    sample_rate: int | None = None,
+    sounddevice_index: int | None = None,
+    sample_rate: float | None = None,
     channels: int | None = None,
 ) -> DeviceDiscoveredEvent:
     """Create a discovery event for an audio device."""
@@ -194,10 +193,9 @@ def discovered_audio_device(
         module_id=module_id,
         metadata={
             "is_audio": True,
-            "card_index": card_index,
-            "device_index": device_index,
-            "sample_rate": sample_rate,
-            "channels": channels,
+            "sounddevice_index": sounddevice_index,
+            "audio_sample_rate": sample_rate,
+            "audio_channels": channels,
         },
     )
 

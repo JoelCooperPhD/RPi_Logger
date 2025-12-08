@@ -5,7 +5,7 @@ Transport implementation for XBee wireless communication with wVOG and wDRT devi
 Wraps digi-xbee library with an interface compatible with module BaseTransport classes.
 
 This is the shared implementation used by all modules. The transport is created and
-managed by DeviceConnectionManager, and message routing is handled by XBeeManager.
+managed by DeviceSystem, and message routing is handled by XBeeManager.
 """
 
 import asyncio
@@ -27,7 +27,7 @@ class XBeeTransport:
     Provides async read/write operations over XBee 802.15.4 network.
     Requires an XBee coordinator (dongle) to communicate with remote devices.
 
-    This transport is created by DeviceConnectionManager and registered with
+    This transport is created by DeviceSystem and registered with
     XBeeManager for message routing. Modules receive a reference to use for
     communication.
     """

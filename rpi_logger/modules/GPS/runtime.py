@@ -51,6 +51,7 @@ except ImportError:
     HAS_THEME = False
 
 from rpi_logger.core.logging_utils import ensure_structured_logger
+from rpi_logger.core.commands import StatusMessage
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
 from rpi_logger.modules.base.preferences import ScopedPreferences
@@ -283,6 +284,10 @@ class GPSPreviewRuntime(ModuleRuntime):
         # The device will be assigned by the main logger when the UART scanner
         # finds the GPS device at /dev/serial0
 
+        # Notify logger that module is ready for commands
+        # This is the handshake signal that turns the indicator green
+        StatusMessage.send("ready")
+
     async def shutdown(self) -> None:
         if self._shutdown.is_set():
             return
@@ -317,7 +322,8 @@ class GPSPreviewRuntime(ModuleRuntime):
         action = (command.get("command") or "").lower()
 
         if action == "assign_device":
-            return await self._handle_assign_device(command)
+            command_id = command.get("command_id")
+            return await self._handle_assign_device(command, command_id=command_id)
 
         if action == "unassign_device":
             return await self._handle_unassign_device(command)
@@ -340,8 +346,16 @@ class GPSPreviewRuntime(ModuleRuntime):
 
         return False
 
-    async def _handle_assign_device(self, command: dict[str, Any]) -> bool:
-        """Handle device assignment from main logger."""
+    async def _handle_assign_device(self, command: dict[str, Any], *, command_id: str | None = None) -> bool:
+        """Handle device assignment from main logger.
+
+        Args:
+            command: Command payload with device_id, port, baudrate
+            command_id: Correlation ID for acknowledgment tracking
+
+        Returns:
+            True if device was successfully assigned
+        """
         device_id = command.get("device_id")
         port = command.get("port")
         baudrate = command.get("baudrate", 9600)
@@ -351,6 +365,10 @@ class GPSPreviewRuntime(ModuleRuntime):
                 "Device already assigned: %s, rejecting %s",
                 self._device_id, device_id
             )
+            StatusMessage.send("device_error", {
+                "device_id": device_id,
+                "error": f"Device already assigned: {self._device_id}"
+            }, command_id=command_id)
             return False
 
         self._device_id = device_id
@@ -382,13 +400,22 @@ class GPSPreviewRuntime(ModuleRuntime):
             if callable(on_connected):
                 on_connected(device_id, port)
 
-        # Now start the serial connection
+        # Check for serial module availability
         if SERIAL_IMPORT_ERROR:
             self._log_event("serial_module_missing", level=logging.ERROR, error=str(SERIAL_IMPORT_ERROR))
             self._set_connection_state(False, error=str(SERIAL_IMPORT_ERROR))
-            return True
+            StatusMessage.send("device_error", {
+                "device_id": device_id,
+                "error": f"Serial module unavailable: {SERIAL_IMPORT_ERROR}"
+            }, command_id=command_id)
+            return False
 
+        # Start the serial connection
         self._serial_task = self._task_manager.create(self._serial_worker(), name="GPSSerialWorker")
+
+        # Send acknowledgement to logger that device is ready
+        # This turns the indicator from yellow (CONNECTING) to green (CONNECTED)
+        StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
         return True
 
     async def _handle_unassign_device(self, command: dict[str, Any]) -> bool:

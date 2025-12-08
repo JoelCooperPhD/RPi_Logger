@@ -380,6 +380,7 @@ class BaseCommandHandler(ABC):
             baudrate: int - Serial baudrate
             session_dir: Optional[str] - Current session directory
             is_wireless: bool - Whether this is a wireless device
+            command_id: Optional[str] - Correlation ID for acknowledgment
         """
         device_id = command_data.get("device_id")
         device_type = command_data.get("device_type")
@@ -387,10 +388,11 @@ class BaseCommandHandler(ABC):
         baudrate = command_data.get("baudrate")
         session_dir = command_data.get("session_dir")
         is_wireless = command_data.get("is_wireless", False)
+        command_id = command_data.get("command_id")  # For acknowledgment tracking
 
         self.logger.info(
-            "assign_device: device_id=%s, type=%s, port=%s, baudrate=%s, wireless=%s",
-            device_id, device_type, port, baudrate, is_wireless
+            "assign_device: device_id=%s, type=%s, port=%s, baudrate=%s, wireless=%s, cmd_id=%s",
+            device_id, device_type, port, baudrate, is_wireless, command_id
         )
 
         # Update session dir if provided
@@ -408,24 +410,28 @@ class BaseCommandHandler(ABC):
                     is_wireless=is_wireless,
                 )
                 if success:
-                    StatusMessage.send("device_assigned", {
+                    # Send device_ready with command_id for acknowledgment tracking
+                    StatusMessage.send("device_ready", {
                         "device_id": device_id,
                         "device_type": device_type,
-                    })
+                    }, command_id=command_id)
                 else:
                     StatusMessage.send("device_error", {
                         "device_id": device_id,
-                        "message": "Failed to assign device",
-                    })
+                        "error": "Failed to assign device",
+                    }, command_id=command_id)
             except Exception as e:
                 self.logger.error("Failed to assign device %s: %s", device_id, e)
                 StatusMessage.send("device_error", {
                     "device_id": device_id,
-                    "message": str(e),
-                })
+                    "error": str(e),
+                }, command_id=command_id)
         else:
             self.logger.warning("System does not implement assign_device")
-            StatusMessage.send("error", {"message": "Module does not support device assignment"})
+            StatusMessage.send("device_error", {
+                "device_id": device_id,
+                "error": "Module does not support device assignment",
+            }, command_id=command_id)
 
     async def handle_unassign_device(self, command_data: Dict[str, Any]) -> None:
         """Handle device unassignment from main logger."""

@@ -19,7 +19,7 @@ The Audio module records synchronized audio from USB microphones
 during experiment sessions. It supports multiple audio input
 devices and provides real-time level monitoring.
 
-Devices are auto-detected when connected via USB.
+Devices are discovered by the main logger and assigned to this module.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -28,7 +28,7 @@ Devices are auto-detected when connected via USB.
 
    1. Connect your USB microphone(s)
    2. Enable the Audio module from the Modules menu
-   3. Wait for device detection (meters appear when ready)
+   3. Wait for device assignment (meters appear when ready)
    4. Start a session to begin recording
 
 
@@ -37,8 +37,8 @@ Devices are auto-detected when connected via USB.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Device Selection
-   The module automatically detects available audio devices.
-   Selected devices show level meters in the control panel.
+   Audio devices are assigned by the main logger.
+   Assigned devices show level meters in the control panel.
 
 Level Meters
    Real-time audio level visualization:

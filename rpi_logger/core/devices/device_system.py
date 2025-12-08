@@ -476,6 +476,18 @@ class DeviceSystem:
         """
         self._lifecycle.set_device_connected(device_id, connected)
 
+    def set_device_connecting(self, device_id: str) -> None:
+        """
+        Set device to CONNECTING state (yellow indicator).
+
+        Called when user clicks to connect but before module acknowledges ready.
+        """
+        self._lifecycle.set_device_connecting(device_id)
+
+    def is_device_connecting(self, device_id: str) -> bool:
+        """Check if device is in CONNECTING state (yellow indicator)."""
+        return self._selection.is_device_connecting(device_id)
+
     # =========================================================================
     # Config Persistence
     # =========================================================================

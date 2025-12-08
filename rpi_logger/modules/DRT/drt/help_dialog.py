@@ -13,150 +13,105 @@ DRT_HELP_TEXT = """
                     DRT MODULE QUICK START GUIDE
 ═══════════════════════════════════════════════════════════════════
 
-OVERVIEW
-
-The DRT (Detection Response Task) module measures secondary task
-response times during driving or other primary tasks. It presents
-a visual or tactile stimulus at random intervals and records how
-quickly participants respond.
-
-Devices are auto-detected when connected via USB.
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. GETTING STARTED
+GETTING STARTED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-   1. Connect your DRT device via USB
+   1. Connect your DRT via USB (or XBee dongle for wireless)
    2. Enable the DRT module from the Modules menu
-   3. Wait for device detection (controls appear when ready)
-   4. Configure timing parameters if needed
-   5. Start a session to begin data collection
+   3. Wait for detection - window title shows connection
+      (e.g., "DRT(USB):ACM0" or "DRT(XBee):wDRT_01")
+   4. Configure parameters via Device > Configure if needed
+   5. Start recording from the main logger to begin trials
 
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-2. USER INTERFACE
+USER INTERFACE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Real-Time Chart
-   Displays stimulus events and reaction times:
-   • Vertical lines mark stimulus presentations
-   • Dots indicate response times
-   • 60-second scrolling window
+   Top panel: Stimulus state (ON/OFF)
+   Bottom panel: Reaction times
+      • Circles = hits
+      • X marks = misses
+      • 60-second rolling window
 
-Stimulus Controls
-   • ON: Manually trigger stimulus (for testing)
-   • OFF: Cancel active stimulus
+Capture Stats Bar
+   • Trial: Current trial number
+   • RT: Last reaction time (ms) or "Miss"
+   • Responses: Button presses this trial
+   • Battery: Charge level (wDRT only)
 
-Results Display
-   • Trial Number: Current trial count
-   • Reaction Time: Last response time (ms) or "Miss"
-   • Response Count: Total button presses
+Device Menu
+   • Stimulus: ON/OFF - Manual trigger for testing
+   • Configure... - Timing parameter settings
 
-Configure Unit
-   Opens device settings dialog for timing parameters.
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-3. RECORDING SESSIONS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Starting a Session
-   When you start a recording session:
-   • DRT enters experiment mode
-   • Chart clears and begins fresh
-   • Trial counter resets to 1
-
-During Recording
-   Each trial captures:
-   • Stimulus onset time
-   • Response time (or miss indicator)
-   • Inter-stimulus interval
-   • All timing synchronized to system clock
-
-Data Output
-   Trial data is saved as CSV:
-   {session_dir}/DRT/{timestamp}_DRT_trial{N}_{port}.csv
+Note: Device menu is disabled during recording.
 
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-4. CONFIGURATION
+CONFIGURATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Click "Configure Unit" to access device settings.
+Access via Device > Configure...
 
-ISO 17488 Parameters:
-   • Lower ISI: Minimum inter-stimulus interval (ms)
-   • Upper ISI: Maximum inter-stimulus interval (ms)
-   • Stimulus Duration: How long stimulus stays on (ms)
-   • Intensity: LED/vibration strength (0-100%)
+   Upper ISI (ms)    Maximum inter-stimulus interval
+   Lower ISI (ms)    Minimum inter-stimulus interval
+   Stim Duration     Response window before timeout
+   Intensity (%)     LED brightness / vibration strength
 
-Use "ISO Preset" button to apply standard values:
-   • Lower ISI: 3000 ms
-   • Upper ISI: 5000 ms
-   • Stimulus Duration: 1000 ms (until response)
+Buttons:
+   • Upload Custom - Send your values to device
+   • Upload ISO - Apply ISO 17488 defaults:
+     Lower ISI: 3000ms, Upper ISI: 5000ms, Duration: 1000ms
 
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-5. DEVICE TYPES
+DATA OUTPUT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-sDRT (Stationary DRT)
-   • USB-connected device
-   • Visual stimulus (LED)
-   • Wired response button
-   • Ideal for laboratory studies
+Files saved to: {session_dir}/DRT/
 
-wDRT (Wireless DRT)
-   • Wireless connection via XBee
-   • Visual or tactile stimulus
-   • Portable response unit
-   • Battery-powered for in-vehicle use
+sDRT columns (7):
+   Device ID, Label, Unix time, Milliseconds Since Record,
+   Trial Number, Responses, Reaction Time
+
+wDRT columns (9):
+   Same as sDRT plus: Battery Percent, Device time in UTC
+
+Example row:
+   sDRT_ttyACM0,baseline,1702000000,5234,1,1,312
+
+Reaction time of -1 indicates a miss (no response).
 
 
+DEVICE TYPES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-6. UNDERSTANDING DRT DATA
+
+sDRT
+   USB at 9600 baud, wired response button
+
+wDRT USB
+   USB at 921600 baud, battery monitoring, RTC sync
+
+wDRT Wireless
+   XBee mesh network, fully wireless, battery-powered
+
+
+TROUBLESHOOTING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Reaction Time
-   Time from stimulus onset to button press (ms).
-   Typical range: 200-800 ms
-
-Miss
-   No response within the allowed window.
-   Indicates high cognitive load or inattention.
-
-Hit Rate
-   Percentage of stimuli with valid responses.
-   Lower hit rates suggest higher task demands.
-
-
-═══════════════════════════════════════════════════════════════════
-                        TROUBLESHOOTING
-═══════════════════════════════════════════════════════════════════
 
 Device not detected:
-   1. Check USB connection
-   2. Verify device is powered on
-   3. Run 'lsusb' to confirm device visible
-   4. Check serial port permissions (/dev/ttyACM*)
+   • Check USB connection and device power
+   • Run 'lsusb' to verify device is visible
+   • Add user to dialout group if permission denied:
+     sudo usermod -a -G dialout $USER
+     (log out and back in after)
 
-No stimulus on button press:
-   1. Verify device is not in experiment mode
-   2. Check that recording is not active
-   3. Use the manual ON/OFF buttons to test
-   4. Review device configuration settings
+No data recording:
+   • Ensure recording is started from main logger
+   • Check session directory is writable
 
-Data not recording:
-   1. Ensure session is started before recording
-   2. Check session directory exists and is writable
-   3. Review module logs for errors
-
-Wireless device connection issues:
-   1. Check XBee dongle is connected
-   2. Verify device batteries are charged
-   3. Ensure device is paired with dongle
-   4. Check for RF interference
+Wireless issues (wDRT):
+   • Verify XBee dongle is connected
+   • Check battery level
+   • Move closer to reduce interference
 
 
 """

@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from rpi_logger.core.commands import StatusMessage, StatusType
+from rpi_logger.core.commands import StatusMessage
 from rpi_logger.core.logging_utils import ensure_structured_logger
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
@@ -107,6 +107,10 @@ class EyeTrackerRuntime(ModuleRuntime):
         if getattr(self.args, "auto_start_recording", False):
             self._auto_start_task = self.task_manager.create(self._auto_start_recording())
 
+        # Notify logger that module is ready for commands
+        # This is the handshake signal that turns the indicator green
+        StatusMessage.send("ready")
+
     async def shutdown(self) -> None:
         if self._shutdown.is_set():
             return
@@ -151,7 +155,8 @@ class EyeTrackerRuntime(ModuleRuntime):
             await self.request_reconnect()
             return True
         if action == "assign_device":
-            return await self._assign_device(command)
+            command_id = command.get("command_id")
+            return await self._assign_device(command, command_id=command_id)
         if action == "unassign_device":
             return await self._unassign_device(command)
         return False
@@ -367,11 +372,18 @@ class EyeTrackerRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
     # Device assignment (from main UI)
 
-    async def _assign_device(self, command: Dict[str, Any]) -> bool:
+    async def _assign_device(self, command: Dict[str, Any], *, command_id: str | None = None) -> bool:
         """Handle device assignment from main UI.
 
         The main UI discovers eye trackers via mDNS and sends us the
         network address to connect to directly (no discovery needed).
+
+        Args:
+            command: Command payload with network_address and network_port
+            command_id: Correlation ID for acknowledgment tracking
+
+        Returns:
+            True if device was successfully assigned
         """
         device_id = command.get("device_id", "")
         network_address = command.get("network_address", "")
@@ -379,10 +391,10 @@ class EyeTrackerRuntime(ModuleRuntime):
 
         if not network_address:
             self.logger.error("assign_device: missing network_address")
-            StatusMessage.send(StatusType.DEVICE_ERROR, {
+            StatusMessage.send("device_error", {
                 "device_id": device_id,
-                "message": "Missing network address",
-            })
+                "error": "Missing network address",
+            }, command_id=command_id)
             return False
 
         self.logger.info(
@@ -420,16 +432,15 @@ class EyeTrackerRuntime(ModuleRuntime):
                 except Exception:
                     pass
 
-            StatusMessage.send(StatusType.DEVICE_ASSIGNED, {
-                "device_id": device_id,
-                "device_type": "Pupil_Labs_Neon",
-            })
+            # Send acknowledgement to logger that device is ready
+            # This turns the indicator from yellow (CONNECTING) to green (CONNECTED)
+            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
             return True
         else:
-            StatusMessage.send(StatusType.DEVICE_ERROR, {
+            StatusMessage.send("device_error", {
                 "device_id": device_id,
-                "message": f"Failed to connect to {network_address}:{network_port}",
-            })
+                "error": f"Failed to connect to {network_address}:{network_port}",
+            }, command_id=command_id)
             return False
 
     async def _unassign_device(self, command: Dict[str, Any]) -> bool:
@@ -460,7 +471,7 @@ class EyeTrackerRuntime(ModuleRuntime):
         if self._view_adapter:
             self._view_adapter.set_device_status("No device assigned", connected=False)
 
-        StatusMessage.send(StatusType.DEVICE_UNASSIGNED, {
+        StatusMessage.send("device_unassigned", {
             "device_id": old_device_id or device_id,
         })
 
@@ -597,14 +608,11 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._session_dir = module_session_dir
         self.model.session_dir = module_session_dir
 
-        StatusMessage.send(
-            StatusType.RECORDING_STARTED,
-            {
-                "module": self.display_name,
-                "session_dir": str(module_session_dir),
-                "trial_number": trial_number,
-            },
-        )
+        StatusMessage.send("recording_started", {
+            "module": self.display_name,
+            "session_dir": str(module_session_dir),
+            "trial_number": trial_number,
+        })
         if self._view_adapter:
             self._view_adapter.set_recording_state(True)
         self.logger.info("Recording started -> %s", module_session_dir)
@@ -620,14 +628,11 @@ class EyeTrackerRuntime(ModuleRuntime):
             self.logger.error("Failed to stop recording: %s", exc, exc_info=exc)
             return False
 
-        StatusMessage.send(
-            StatusType.RECORDING_STOPPED,
-            {
-                "module": self.display_name,
-                "session_dir": str(self._session_dir) if self._session_dir else None,
-                "stats": stats,
-            },
-        )
+        StatusMessage.send("recording_stopped", {
+            "module": self.display_name,
+            "session_dir": str(self._session_dir) if self._session_dir else None,
+            "stats": stats,
+        })
         if self._view_adapter:
             self._view_adapter.set_recording_state(False)
         self.logger.info("Recording stopped")

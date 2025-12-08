@@ -30,13 +30,14 @@ logger = get_module_logger("DevicesPanel")
 
 
 class StatusIndicator(tk.Canvas):
-    """A round status indicator that shows green when connected, dark when disconnected."""
+    """A round status indicator: green=connected, yellow=connecting, dark=disconnected."""
 
     def __init__(
         self,
         parent,
         size: int = 16,
-        active: bool = False,
+        connected: bool = False,
+        connecting: bool = False,
         bg_color: str = Colors.BG_FRAME,
     ):
         super().__init__(
@@ -47,7 +48,8 @@ class StatusIndicator(tk.Canvas):
             bg=bg_color,
         )
         self._size = size
-        self._active = active
+        self._connected = connected
+        self._connecting = connecting
         self._bg_color = bg_color
         self._draw()
 
@@ -56,14 +58,24 @@ class StatusIndicator(tk.Canvas):
         self.delete("all")
         padding = 2
 
-        if self._active:
+        if self._connected:
+            # Green - connected and ready
             self.create_oval(
                 padding, padding,
                 self._size - padding, self._size - padding,
                 fill=Colors.STATUS_CONNECTED,
                 outline=Colors.STATUS_CONNECTED
             )
+        elif self._connecting:
+            # Yellow/orange - connecting, waiting for acknowledgement
+            self.create_oval(
+                padding, padding,
+                self._size - padding, self._size - padding,
+                fill=Colors.STATUS_CONNECTING,
+                outline=Colors.STATUS_CONNECTING
+            )
         else:
+            # Dark - disconnected
             self.create_oval(
                 padding, padding,
                 self._size - padding, self._size - padding,
@@ -72,10 +84,11 @@ class StatusIndicator(tk.Canvas):
                 width=2
             )
 
-    def set_active(self, active: bool) -> None:
+    def set_state(self, connected: bool, connecting: bool) -> None:
         """Set the indicator state."""
-        if self._active != active:
-            self._active = active
+        if self._connected != connected or self._connecting != connecting:
+            self._connected = connected
+            self._connecting = connecting
             self._draw()
 
     def set_bg(self, bg_color: str) -> None:
@@ -105,7 +118,8 @@ class DeviceRow(tk.Frame):
         self._indicator = StatusIndicator(
             self,
             size=16,
-            active=data.connected,
+            connected=data.connected,
+            connecting=data.connecting,
             bg_color=Colors.BG_FRAME,
         )
         self._indicator.grid(row=0, column=0, padx=(4, 6), pady=4)
@@ -149,13 +163,21 @@ class DeviceRow(tk.Frame):
         self._indicator.set_bg(bg)
 
     def _on_click(self, event) -> None:
-        """Handle click - toggle connection."""
-        self._data.on_toggle_connect(not self._data.connected)
+        """Handle click - toggle connection.
+
+        If connected or connecting (green or yellow), clicking disconnects.
+        If disconnected (dark), clicking connects.
+        """
+        # If already connected OR connecting, disconnect
+        if self._data.connected or self._data.connecting:
+            self._data.on_toggle_connect(False)
+        else:
+            self._data.on_toggle_connect(True)
 
     def update_data(self, data: DeviceRowData) -> None:
         """Update the row with new data."""
         self._data = data
-        self._indicator.set_active(data.connected)
+        self._indicator.set_state(data.connected, data.connecting)
         self._name_label.configure(text=data.display_name)
 
 
@@ -170,6 +192,7 @@ class DeviceSection(ttk.Frame):
         super().__init__(parent, style='Inframe.TFrame')
         self._label = label
         self._rows: dict[str, DeviceRow] = {}
+        self._has_devices = False
 
         self.columnconfigure(0, weight=1)
 
@@ -178,38 +201,36 @@ class DeviceSection(ttk.Frame):
         self._header.grid(row=0, column=0, sticky="ew")
         self._header.columnconfigure(0, weight=1)
 
+        # Header label shows "VOG" or "VOG: No Devices"
         self._header_label = ttk.Label(
             self._header,
-            text=label,
+            text=f"{label}: No Devices",
             style='SectionHeader.TLabel',
             font=('TkDefaultFont', 8, 'bold')
         )
         self._header_label.grid(row=0, column=0, sticky="w", padx=6, pady=2)
 
-        # Content frame
+        # Content frame for device rows
         self._content = ttk.Frame(self, style='Inframe.TFrame')
         self._content.grid(row=1, column=0, sticky="ew", padx=2, pady=(0, 2))
         self._content.columnconfigure(0, weight=1)
 
-        # Empty state label
-        self._empty_label = ttk.Label(
-            self._content,
-            text="No devices",
-            style='Inframe.Secondary.TLabel',
-            font=('TkDefaultFont', 8, 'italic')
-        )
-        self._empty_label.grid(row=0, column=0, sticky="w", padx=6, pady=2)
-
     def update_devices(self, devices: list[DeviceRowData]) -> None:
         """Update the section with device data."""
         if not devices:
-            self._empty_label.grid(row=0, column=0, sticky="w", padx=6, pady=2)
+            # Show "VOG: No Devices" in header
+            if self._has_devices:
+                self._header_label.configure(text=f"{self._label}: No Devices")
+                self._has_devices = False
             for row in self._rows.values():
                 row.destroy()
             self._rows.clear()
             return
 
-        self._empty_label.grid_remove()
+        # Show just "VOG" when devices exist
+        if not self._has_devices:
+            self._header_label.configure(text=self._label)
+            self._has_devices = True
 
         # Track current device IDs
         current_ids = {d.device_id for d in devices}

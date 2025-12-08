@@ -197,8 +197,7 @@ class ScannerEventAdapter:
             device_type=DeviceType.USB_MICROPHONE,
             module_id=spec.module_id,
             name=audio_device.name,
-            card_index=getattr(audio_device, 'card_index', None),
-            device_index=getattr(audio_device, 'device_index', None),
+            sounddevice_index=getattr(audio_device, 'sounddevice_index', None),
             sample_rate=getattr(audio_device, 'sample_rate', None),
             channels=getattr(audio_device, 'channels', None),
         )

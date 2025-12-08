@@ -429,6 +429,35 @@ class ModuleProcess:
             self.state = ModuleState.STOPPED
             self.logger.info("Module stopped: %s", self.module_info.name)
 
+    async def kill(self) -> None:
+        """Force kill the module process without graceful shutdown."""
+        if self.process is None:
+            self.logger.debug("Process not running")
+            return
+
+        self.logger.warning("Force killing module: %s", self.module_info.name)
+        self.state = ModuleState.STOPPING
+        self._was_forcefully_stopped = True
+
+        try:
+            self.process.kill()
+            await self.process.wait()
+        except Exception as e:
+            self.logger.error("Error killing process: %s", e)
+        finally:
+            self.shutdown_event.set()
+            for task in [self.stdout_task, self.stderr_task, self.monitor_task]:
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+            self.process = None
+            self.state = ModuleState.STOPPED
+            self.logger.info("Module killed: %s", self.module_info.name)
+
     def get_state(self) -> ModuleState:
         return self.state
 
