@@ -88,6 +88,11 @@ class DiscoveryController:
             resolution, fps = await self._get_capture_settings(key, caps)
             self._logger.info("[SPAWN] Capture config: resolution=%s, fps=%.1f", resolution, fps)
 
+            # Get preview size for Picamera2 lores stream (ISP-scaled preview)
+            preview_size = await self._get_preview_size(key) if camera_type == "picam" else None
+            if preview_size:
+                self._logger.info("[SPAWN] Preview lores size: %s (for Picamera2 ISP scaling)", preview_size)
+
             # Spawn the worker using the stable camera key
             self._logger.info("[SPAWN] Calling worker_manager.spawn_worker()...")
             handle = await runtime.worker_manager.spawn_worker(
@@ -96,6 +101,7 @@ class DiscoveryController:
                 resolution=resolution,
                 fps=fps,
                 key=key,
+                preview_size=preview_size,
             )
             self._logger.info("[SPAWN] Worker process spawned for %s", key)
 
@@ -158,6 +164,25 @@ class DiscoveryController:
             )
 
         return resolution, fps
+
+    async def _get_preview_size(self, key: str) -> Optional[tuple[int, int]]:
+        """Get preview size for Picamera2 lores stream configuration.
+
+        Returns the preview resolution that will be used for ISP-scaled
+        preview frames (lores stream). Returns None if defaults should be used.
+        """
+        from rpi_logger.modules.Cameras.defaults import DEFAULT_PREVIEW_SIZE
+
+        saved = await self._runtime.cache.get_settings(key)
+        preview_cfg = self._runtime.config.preview
+
+        # Get preview resolution from saved settings or config defaults
+        preview_size = parse_resolution(
+            saved.get("preview_resolution") if saved else None,
+            preview_cfg.resolution or DEFAULT_PREVIEW_SIZE
+        )
+
+        return preview_size
 
     def _validate_against_capabilities(
         self,

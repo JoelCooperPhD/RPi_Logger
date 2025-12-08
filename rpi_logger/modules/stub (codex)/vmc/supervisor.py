@@ -68,6 +68,7 @@ class StubCodexSupervisor:
         view_factory: Optional[Callable[..., StubCodexView]] = None,
         view_kwargs: Optional[dict[str, Any]] = None,
         config_path: Optional[Path] = None,
+        help_callback: Optional[Callable[..., None]] = None,
     ) -> None:
         start = time.perf_counter()
 
@@ -82,6 +83,8 @@ class StubCodexSupervisor:
         self.module_dir = module_dir
         self._view_factory = view_factory or StubCodexView
         self._view_kwargs = dict(view_kwargs) if view_kwargs else {}
+        if help_callback:
+            self._view_kwargs.setdefault("help_callback", help_callback)
         explicit_config_path: Optional[Path]
         candidate = config_path or getattr(args, "config_path", None)
         if candidate:

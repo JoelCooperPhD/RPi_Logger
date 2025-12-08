@@ -441,6 +441,13 @@ class CamerasRuntime(ModuleRuntime):
             target_fps=target_fps,
             jpeg_quality=80,
         )
+
+        # Wire up shared memory to preview receiver (if allocated)
+        handle = self.worker_manager.get_worker(key)
+        if handle and handle.preview_shm is not None:
+            self._preview_receiver.set_shared_memory(key, handle.preview_shm)
+            self.logger.info("[PREVIEW START] Shared memory wired to receiver for %s", key)
+
         self.logger.info("[PREVIEW START] Preview started for %s", key)
 
     async def _get_preview_settings(self, key: str) -> tuple[tuple[int, int], float]:

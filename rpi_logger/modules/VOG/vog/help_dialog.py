@@ -74,9 +74,73 @@ During Recording
    • Accumulated open/close durations
    • Timestamps synchronized to system time
 
-Data Output
-   Trial data is saved as CSV files in:
-   {session_dir}/VOG/{timestamp}_VOG_trial{N}_VOG_{port}.csv
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.5. OUTPUT FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+File Naming Convention
+   {timestamp}_VOG_trial{NNN}_{device_type}_{port}.csv
+
+   Example: 20251208_143022_VOG_trial001_sVOG_ttyACM0.csv
+
+Location
+   {session_dir}/VOG/
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.6. CSV FIELD REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+sVOG CSV Columns (7 fields):
+   Device ID             - Device identifier (e.g., "sVOG")
+   Label                 - Device port/label (e.g., "ttyACM0")
+   Unix time in UTC      - Event timestamp (Unix seconds, 6 decimals)
+   Milliseconds Since Record - Time since recording started (ms)
+   Trial Number          - Sequential trial count (1-based)
+   TSOT                  - Total Shutter Open Time (milliseconds)
+   TSCT                  - Total Shutter Close Time (milliseconds)
+
+wVOG CSV Columns (10 fields):
+   [Same first 7 columns as sVOG, plus:]
+   Lens                  - Lens state (Open/Closed/Left/Right)
+   Battery Percent       - Device battery level (0-100%)
+   DRT Reaction Time     - Reaction time if DRT synced (ms, or empty)
+
+Example Rows:
+   sVOG:
+   sVOG,ttyACM0,1733649120.123456,5000,1,1500,3500
+
+   wVOG:
+   wVOG,xbee_002,1733649120.456789,5500,2,3000,2500,Open,85,
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.7. TIMING & SYNCHRONIZATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Timing Precision
+   TSOT/TSCT:            Millisecond precision (device firmware)
+   Unix time in UTC:     Microsecond precision (6 decimals)
+   Lens state changes:   Device-measured (±1-5 ms typical)
+
+Lens State Timing
+   Lens transitions are timestamped by the device firmware.
+   Each row represents a lens state change event.
+   TSOT and TSCT accumulate across the trial.
+
+Cross-Module Synchronization
+   Use "Unix time in UTC" to correlate VOG events with:
+   • Video frames (via camera capture_time_unix)
+   • Audio samples (via audio write_time_unix)
+   • DRT trials (wVOG Lens column syncs with wDRT)
+   • Eye tracking data (via record_time_unix)
+
+DRT Integration (wVOG only)
+   When wVOG is synced with wDRT on the same XBee network:
+   • DRT Reaction Time column shows reaction times
+   • Lens column in DRT CSV shows VOG lens state
+   • Enables combined visual occlusion + reaction time studies
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

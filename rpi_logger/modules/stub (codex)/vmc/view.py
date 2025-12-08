@@ -106,6 +106,7 @@ class StubCodexView:
         *,
         display_name: str,
         logger: Optional[logging.Logger] = None,
+        help_callback: Optional[Callable[["tk.Tk"], None]] = None,
     ) -> None:
         start = time.perf_counter()
 
@@ -114,6 +115,7 @@ class StubCodexView:
         self.action_callback = action_callback
         self.display_name = display_name
         self.logger = logger or _BASE_LOGGER
+        self._help_callback = help_callback
         self._close_requested = False
         self._window_duration_ms: float = 0.0
         self._loop_running = False
@@ -531,8 +533,11 @@ class StubCodexView:
 
     def _show_help(self) -> None:
         try:
-            from rpi_logger.core.ui.dialogs.quick_start import QuickStartDialog
-            QuickStartDialog(self.root)
+            if self._help_callback:
+                self._help_callback(self.root)
+            else:
+                from rpi_logger.core.ui.dialogs.quick_start import QuickStartDialog
+                QuickStartDialog(self.root)
         except Exception as exc:
             self.logger.error("Failed to open help dialog: %s", exc)
 

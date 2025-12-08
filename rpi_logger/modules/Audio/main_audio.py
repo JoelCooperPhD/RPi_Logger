@@ -102,6 +102,10 @@ async def main(argv: list[str] | None = None) -> None:
     config_context = resolve_module_config_path(module_dir, MODULE_ID)
     setattr(args, "config_path", config_context.writable_path)
 
+    def show_audio_help(parent):
+        from rpi_logger.modules.Audio.ui.help_dialog import AudioHelpDialog
+        AudioHelpDialog(parent)
+
     supervisor = StubCodexSupervisor(
         args,
         module_dir,
@@ -110,6 +114,7 @@ async def main(argv: list[str] | None = None) -> None:
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
         config_path=config_context.writable_path,
+        help_callback=show_audio_help,
     )
 
     loop = asyncio.get_running_loop()

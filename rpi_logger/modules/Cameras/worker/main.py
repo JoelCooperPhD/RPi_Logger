@@ -56,6 +56,7 @@ class CameraWorker:
         self._camera_id: Optional[str] = None
         self._capture_resolution: tuple[int, int] = DEFAULT_CAPTURE_RESOLUTION
         self._capture_fps: float = DEFAULT_CAPTURE_FPS
+        self._lores_size: Optional[tuple[int, int]] = None  # For Picamera2 ISP-scaled preview
 
         # Runtime components (initialized after configure)
         self._capture: Any = None  # Capture handle
@@ -68,6 +69,9 @@ class CameraWorker:
         self._preview_target_fps: float = DEFAULT_PREVIEW_FPS
         self._preview_jpeg_quality: int = DEFAULT_PREVIEW_JPEG_QUALITY
         self._last_preview_time: float = 0.0
+        # Shared memory for preview (attached to buffers created by main process)
+        self._preview_shm: Any = None  # PreviewSharedBuffer instance
+        self._use_shared_memory: bool = False
 
         # Recording state
         self._recording = False
@@ -142,7 +146,9 @@ class CameraWorker:
                     self._camera_id = cmd.camera_id
                     self._capture_resolution = cmd.capture_resolution
                     self._capture_fps = cmd.capture_fps
-                    logger.info("Configured: %s/%s", self._camera_type, self._camera_id)
+                    self._lores_size = cmd.preview_size  # For Picamera2 dual-stream
+                    logger.info("Configured: %s/%s (lores=%s)",
+                               self._camera_type, self._camera_id, self._lores_size)
                 elif isinstance(cmd, CmdShutdown):
                     self._running = False
                     return
@@ -154,6 +160,7 @@ class CameraWorker:
             self._camera_id,
             resolution=self._capture_resolution,
             fps=self._capture_fps,
+            lores_size=self._lores_size,  # For Picamera2 ISP-scaled preview
         )
 
     async def _capture_loop(self) -> None:
@@ -190,26 +197,67 @@ class CameraWorker:
                     await self._finalize_recording(encoder)
                     encoder = None
 
-            # Preview: downscale, compress, send
+            # Preview: use lores if available, downscale if needed, send via shm or JPEG
             if self._preview_enabled:
                 preview_interval = 1.0 / self._preview_target_fps
                 if now - self._last_preview_time >= preview_interval:
                     self._last_preview_time = now
                     self._frames_preview_sent += 1
                     preview_times.append(now)
-                    jpeg_bytes = compress_preview(
-                        frame_data.data,
-                        self._preview_size,
-                        quality=self._preview_jpeg_quality,
-                        color_format=frame_data.color_format,
-                    )
-                    self._send(RespPreviewFrame(
-                        frame_data=jpeg_bytes,
-                        width=self._preview_size[0],
-                        height=self._preview_size[1],
-                        timestamp=frame_data.wall_time,
-                        frame_number=frame_data.frame_number,
-                    ))
+
+                    if self._use_shared_memory and self._preview_shm is not None:
+                        # Shared memory path: convert and write directly to shared buffer
+                        import cv2
+                        from .preview import yuv420_to_bgr
+
+                        # Prefer lores frame if available (ISP-scaled, no CPU resize needed)
+                        if frame_data.lores_data is not None:
+                            # Lores available - convert YUV420 to BGR
+                            preview_frame = yuv420_to_bgr(frame_data.lores_data)
+                            # Skip resize - lores is already correct size from ISP
+                        else:
+                            # No lores - use main frame with CPU resize
+                            preview_frame = frame_data.data
+                            # Convert color format to BGR if needed
+                            if frame_data.color_format.lower() == "rgb":
+                                preview_frame = cv2.cvtColor(preview_frame, cv2.COLOR_RGB2BGR)
+                            # Resize to preview size
+                            h, w = preview_frame.shape[:2]
+                            if (w, h) != self._preview_size:
+                                preview_frame = cv2.resize(
+                                    preview_frame,
+                                    self._preview_size,
+                                    interpolation=cv2.INTER_LINEAR,
+                                )
+
+                        # Write to shared memory
+                        buf_id, seq = self._preview_shm.write_frame(preview_frame)
+                        self._send(RespPreviewFrame(
+                            frame_data=b"",  # Empty - using shared memory
+                            width=self._preview_size[0],
+                            height=self._preview_size[1],
+                            timestamp=frame_data.wall_time,
+                            frame_number=frame_data.frame_number,
+                            shm_buffer_id=buf_id,
+                            shm_sequence=seq,
+                        ))
+                    else:
+                        # JPEG fallback path
+                        jpeg_bytes = compress_preview(
+                            frame_data.data,
+                            self._preview_size,
+                            quality=self._preview_jpeg_quality,
+                            color_format=frame_data.color_format,
+                        )
+                        self._send(RespPreviewFrame(
+                            frame_data=jpeg_bytes,
+                            width=self._preview_size[0],
+                            height=self._preview_size[1],
+                            timestamp=frame_data.wall_time,
+                            frame_number=frame_data.frame_number,
+                            shm_buffer_id=0,
+                            shm_sequence=0,  # 0 indicates JPEG mode
+                        ))
 
             # Recording: encode frame
             if self._recording and encoder:
@@ -246,11 +294,51 @@ class CameraWorker:
             self._preview_size = cmd.preview_size
             self._preview_target_fps = cmd.target_fps
             self._preview_jpeg_quality = cmd.jpeg_quality
+            self._use_shared_memory = cmd.use_shared_memory
+
+            # Set up shared memory if provided
+            if cmd.use_shared_memory and cmd.shm_name_a and cmd.shm_name_b:
+                try:
+                    from .shared_preview import PreviewSharedBuffer
+                    # Close existing shared memory if any
+                    if self._preview_shm is not None:
+                        try:
+                            self._preview_shm.close()
+                        except Exception:
+                            pass
+
+                    self._preview_shm = PreviewSharedBuffer(
+                        name_a=cmd.shm_name_a,
+                        name_b=cmd.shm_name_b,
+                        width=cmd.preview_size[0],
+                        height=cmd.preview_size[1],
+                        create=False,  # Attach to existing shared memory
+                    )
+                    logger.info("Preview started (shared memory): %s @ %.1f fps",
+                               self._preview_size, self._preview_target_fps)
+                except Exception as e:
+                    logger.warning("Failed to attach to shared memory, falling back to JPEG: %s", e)
+                    self._use_shared_memory = False
+                    self._preview_shm = None
+                    logger.info("Preview started (JPEG fallback): %s @ %.1f fps",
+                               self._preview_size, self._preview_target_fps)
+            else:
+                self._use_shared_memory = False
+                logger.info("Preview started (JPEG): %s @ %.1f fps",
+                           self._preview_size, self._preview_target_fps)
+
             self._state = WorkerState.PREVIEWING if not self._recording else WorkerState.RECORDING
-            logger.info("Preview started: %s @ %.1f fps", self._preview_size, self._preview_target_fps)
 
         elif isinstance(cmd, CmdStopPreview):
             self._preview_enabled = False
+            # Close shared memory when preview stops
+            if self._preview_shm is not None:
+                try:
+                    self._preview_shm.close()
+                except Exception:
+                    pass
+                self._preview_shm = None
+            self._use_shared_memory = False
             self._state = WorkerState.RECORDING if self._recording else WorkerState.IDLE
             logger.info("Preview stopped")
 

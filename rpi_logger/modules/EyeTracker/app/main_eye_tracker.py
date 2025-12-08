@@ -243,6 +243,10 @@ async def main(argv: Optional[list[str]] = None) -> None:
         logger.error("EyeTracker module must be launched by the logger controller.")
         return
 
+    def show_eyetracker_help(parent):
+        from rpi_logger.modules.EyeTracker.tracker_core.interfaces.gui.help_dialog import EyeTrackerHelpDialog
+        EyeTrackerHelpDialog(parent)
+
     supervisor = StubCodexSupervisor(
         args,
         MODULE_DIR,
@@ -251,6 +255,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
         runtime_retry_policy=RuntimeRetryPolicy(interval=3.0, max_attempts=3),
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
+        help_callback=show_eyetracker_help,
     )
 
     loop = asyncio.get_running_loop()

@@ -32,6 +32,10 @@ class CaptureFrame:
     sensor_timestamp_ns: Optional[int]
     wall_time: float
     color_format: str = "bgr"
+    # Lores (low resolution) frame from ISP (Picamera2 only)
+    # Used for efficient preview without CPU resize
+    lores_data: Optional[np.ndarray] = None
+    lores_format: str = ""  # "yuv420" when lores is available
 
 
 class CaptureHandle:
@@ -51,7 +55,13 @@ class CaptureHandle:
 class PicamCapture(CaptureHandle):
     """Picamera2-based capture for Raspberry Pi cameras."""
 
-    def __init__(self, sensor_id: str, resolution: tuple[int, int], fps: float) -> None:
+    def __init__(
+        self,
+        sensor_id: str,
+        resolution: tuple[int, int],
+        fps: float,
+        lores_size: Optional[Tuple[int, int]] = None,
+    ) -> None:
         if Picamera2 is None:
             raise RuntimeError(
                 "Picamera2 is not available. "
@@ -60,6 +70,7 @@ class PicamCapture(CaptureHandle):
         self._sensor_id = sensor_id
         self._resolution = resolution
         self._fps = fps
+        self._lores_size = lores_size  # If set, enables dual-stream with ISP-scaled lores
         self._cam = None
         self._running = False
         self._frame_number = 0
@@ -94,6 +105,17 @@ class PicamCapture(CaptureHandle):
             main={"size": self._resolution, "format": "RGB888"},
             buffer_count=4,
         )
+
+        # Add lores stream if requested (for efficient ISP-scaled preview)
+        if self._lores_size is not None:
+            # Lores must use YUV420 format (hardware limitation on Pi 4 and earlier)
+            # Pi 5 can use RGB for lores, but YUV420 is more efficient
+            config["lores"] = {
+                "size": self._lores_size,
+                "format": "YUV420",
+            }
+            log.info("Enabling lores stream: %s (YUV420)", self._lores_size)
+
         controls = config.get("controls") or {}
         frame_duration_us = int(1_000_000 / self._fps)
         controls["FrameDurationLimits"] = (frame_duration_us, frame_duration_us)
@@ -119,10 +141,19 @@ class PicamCapture(CaptureHandle):
 
             metadata = {}
             frame = None
+            lores_frame = None
             try:
                 with contextlib.suppress(Exception):
                     metadata = request.get_metadata() or {}
                 frame = request.make_array("main")
+
+                # Capture lores frame if configured
+                if self._lores_size is not None:
+                    try:
+                        lores_frame = request.make_array("lores")
+                    except Exception:
+                        # Lores may not be available (e.g., config failed)
+                        pass
             finally:
                 try:
                     request.release()
@@ -143,6 +174,8 @@ class PicamCapture(CaptureHandle):
                 sensor_timestamp_ns=sensor_ts,
                 wall_time=wall_time,
                 color_format=get_picam_color_format(),
+                lores_data=lores_frame,
+                lores_format="yuv420" if lores_frame is not None else "",
             )
 
     async def stop(self) -> None:
@@ -320,6 +353,7 @@ async def open_capture(
     camera_id: str,
     resolution: tuple[int, int] = DEFAULT_CAPTURE_RESOLUTION,
     fps: float = DEFAULT_CAPTURE_FPS,
+    lores_size: Optional[Tuple[int, int]] = None,
 ) -> Tuple[CaptureHandle, dict]:
     """
     Open a camera and return (capture_handle, capabilities).
@@ -329,12 +363,13 @@ async def open_capture(
         camera_id: sensor ID or device path
         resolution: capture resolution (width, height)
         fps: target frame rate
+        lores_size: optional low-resolution stream size for preview (Picamera2 only)
 
     Returns:
         Tuple of (CaptureHandle, capabilities dict)
     """
     if camera_type == "picam":
-        capture = PicamCapture(camera_id, resolution, fps)
+        capture = PicamCapture(camera_id, resolution, fps, lores_size=lores_size)
     elif camera_type == "usb":
         capture = USBCapture(camera_id, resolution, fps)
     else:
@@ -349,6 +384,7 @@ async def open_capture(
         "resolution": resolution,
         "requested_fps": fps,
         "actual_fps": capture.actual_fps,
+        "lores_size": lores_size if camera_type == "picam" and lores_size else None,
     }
 
     return capture, capabilities

@@ -64,32 +64,124 @@ IO Metrics Bar
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-3. RECORDING SESSIONS
+3. OUTPUT FILES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Starting a Session
-   When you start a recording session:
-   • Recording begins at configured resolution and FPS
-   • Frame timing data is captured for synchronization
-   • Status shows "RECORDING"
+File Naming Convention
+   {prefix}_{camera_id}.avi           - Video file
+   {prefix}_{camera_id}_timing.csv    - Frame timing
+   {prefix}_{camera_id}_metadata.csv  - Recording metadata
 
-During Recording
-   Each trial captures:
-   • MP4 video file with H.264 encoding
-   • CSV timing file with per-frame timestamps
-   • Metadata for post-processing
+   Example: trial_001_usb_0_001.avi
 
-Data Output
-   Video files are saved as:
-   {session_dir}/Cameras/{timestamp}_CAM_trial{N}_{camera}_{res}_{fps}fps.mp4
+Location
+   {session_dir}/Cameras/{camera_id}/
 
-   Timing data for synchronization:
-   {session_dir}/Cameras/{timestamp}_CAMTIMING_trial{N}_{camera}.csv
+Video File Format
+   Container:    AVI
+   Codec:        MJPEG (Motion JPEG)
+   Pixel Format: YUV420P
+   Resolution:   Configurable (default 1280x720)
+   Frame Rate:   Configurable (default 30 fps)
+
+   Timestamp overlay shows: YYYY-MM-DDTHH:MM:SS.mmm #frame
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-4. CONFIGURATION
+4. TIMING CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The timing CSV contains per-frame timing for precise synchronization.
+
+CSV Columns:
+   trial             - Trial number (integer, may be empty)
+   frame_index       - 1-based frame number in video file
+   capture_time_unix - Wall clock when captured (Unix seconds)
+   encode_time_mono  - Monotonic time when encoded (9 decimals)
+   sensor_timestamp_ns - Hardware sensor timestamp (nanoseconds)
+   video_pts         - Presentation timestamp in video stream
+
+Example Row:
+   1,1,1733649120.123456,123.456789012,1733649120123456789,1
+
+Notes:
+   • sensor_timestamp_ns: Only for CSI cameras (Picamera2)
+     USB cameras show empty/None for this field
+   • video_pts: Frame index used as PTS value
+   • CSV row count = number of frames in video file
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. TIMING & SYNCHRONIZATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Timestamp Precision:
+   capture_time_unix   - Microsecond precision (6 decimals)
+   encode_time_mono    - Nanosecond precision (9 decimals)
+   sensor_timestamp_ns - Nanosecond precision (CSI only)
+
+Frame Timing Accuracy:
+   • USB cameras: Actual FPS may differ from requested
+     The encoder uses actual camera FPS, not requested FPS
+     This ensures video playback matches real-world timing
+   • CSI cameras (Picamera2): Hardware-enforced FPS
+
+Synchronization:
+   • Use encode_time_mono for cross-module sync
+   • Frame index in CSV matches video frame position
+   • Periodic flush every 600 frames for data safety
+
+Calculating Video Position:
+   To find frame at time T:
+   1. Search timing CSV for nearest capture_time_unix
+   2. Use frame_index to seek in video file
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. METADATA CSV REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The metadata CSV records session-level information.
+
+CSV Columns:
+   camera_id         - Camera identifier (e.g., "usb_0_001")
+   backend           - Camera type ("usb" or "picam")
+   start_time_unix   - Session start (Unix seconds)
+   end_time_unix     - Session end (Unix seconds)
+   target_fps        - FPS used for encoding
+   resolution_width  - Video frame width (pixels)
+   resolution_height - Video frame height (pixels)
+   video_path        - Path to video file
+   timing_path       - Path to timing CSV
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. CAMERA TYPES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Raspberry Pi Camera Modules (CSI)
+   • IMX296: Global shutter - no motion blur, ideal for
+     fast-moving subjects and precise timing studies
+   • IMX219/IMX477: Rolling shutter - general purpose
+   • Provides hardware sensor timestamps (sensor_timestamp_ns)
+
+USB Cameras
+   • UVC-compatible webcams
+   • No hardware timestamps (use encode_time_mono instead)
+   • Actual FPS may vary from requested
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. CONFIGURATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Default Settings:
+   Capture Resolution:  1280x720
+   Capture FPS:         30.0
+   Record FPS:          30.0
+   Preview Size:        320x180
+   Preview FPS:         10.0
+   JPEG Quality:        80
 
 Preview Settings (for live display)
    • Resolution: Lower = smoother preview (320x240 recommended)
@@ -98,21 +190,6 @@ Preview Settings (for live display)
 Record Settings (for saved video)
    • Resolution: Use native sensor resolution for best quality
    • FPS: Match your experiment requirements (30 or 60 typical)
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-5. CAMERA TYPES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Raspberry Pi Camera Modules (CSI)
-   • IMX296: Global shutter, ideal for motion studies
-   • IMX219/IMX477: Rolling shutter, general purpose
-   • Connected via ribbon cable to CSI port
-
-USB Cameras
-   • UVC-compatible webcams
-   • Lower latency than network cameras
-   • May have limited resolution/FPS options
 
 
 ═══════════════════════════════════════════════════════════════════
@@ -143,6 +220,10 @@ Black or corrupted video:
    2. Verify camera module is seated properly
    3. Test with 'libcamera-still -o test.jpg'
    4. Check permissions on video devices
+
+Empty sensor_timestamp_ns in CSV:
+   This is normal for USB cameras - they don't provide
+   hardware timestamps. Use encode_time_mono instead.
 
 
 """

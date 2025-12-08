@@ -77,23 +77,52 @@ Auto-Recording
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-4. DATA OUTPUT
+4. OUTPUT FILES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Notes are saved as CSV with columns:
-   • Note: Row identifier
-   • trial: Current trial number
-   • Content: Your annotation text
-   • Timestamp: Unix timestamp (seconds)
+File Naming Convention
+   {timestamp}_NOTES_trial{NNN}.csv
 
-File Location
-   {session_dir}/Notes/{timestamp}_NOTES_trial{N}.csv
+   Example: 20251208_143022_NOTES_trial001.csv
 
-Example CSV Content
-   Note,trial,Content,Timestamp
-   Note,1,Participant started task,1699876543.123
-   Note,1,Hesitation observed,1699876567.456
-   Note,2,New condition began,1699876590.789
+Location
+   {session_dir}/Notes/
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4.5. CSV FIELD REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Notes CSV Columns (4 fields):
+   Note              - Row identifier (always "Note")
+   trial             - Trial number (integer, 1-based)
+   Content           - User annotation text (string)
+   Timestamp         - Unix timestamp (seconds, 6 decimals)
+
+Example Row:
+   Note,1,Participant started task,1733649123.456789
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4.6. TIMING & SYNCHRONIZATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Timestamp Precision
+   Unix timestamp:     Microsecond precision (6 decimals)
+   Recorded at:        Moment user presses Enter/Post
+
+Cross-Module Synchronization
+   Use Timestamp to correlate notes with:
+   • Video frames (via camera capture_time_unix)
+   • Audio samples (via audio write_time_unix)
+   • DRT trials (via Unix time in UTC)
+   • Eye tracking data (via record_time_unix)
+   • GPS position (via timestamp_unix)
+
+Example: Finding video frame for a note
+   1. Read note Timestamp (e.g., 1733649123.456789)
+   2. Search camera timing CSV for nearest capture_time_unix
+   3. Use frame_index to locate frame in video file
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

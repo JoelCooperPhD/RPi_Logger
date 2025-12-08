@@ -70,12 +70,134 @@ During Recording
    • Confidence values for gaze estimation
    • Scene video with embedded timestamps
 
-Data Output
-   Gaze data is saved as CSV:
-   {session_dir}/EyeTracker/gaze_data_{timestamp}.csv
 
-   Scene video is saved as:
-   {session_dir}/EyeTracker/scene_video_{timestamp}.mp4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.5. OUTPUT FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+File Naming Convention
+   {timestamp}_EYETRACKER_{type}_trial{NNN}.{ext}
+
+   Types: GAZEDATA, GAZE, EVENT, IMU, FRAME, AUDIO_TIMING,
+          DEVICESTATUS, SCENE
+
+   Example: 20251208_143022_EYETRACKER_GAZEDATA_trial001.csv
+            20251208_143022_EYETRACKER_SCENE_trial001.mp4
+
+Location
+   {session_dir}/EyeTracker/
+
+Scene Video Format
+   Container:    MP4
+   Codec:        H.264
+   Resolution:   Configurable (default 1280x720)
+   Frame Rate:   Configurable (default 5 fps for preview)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.6. CSV FIELD REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+GAZEDATA CSV (Extended Gaze - 11 fields):
+   Module              - Always "EyeTracker"
+   trial               - Trial number (integer)
+   gaze_timestamp      - Device timestamp (Unix seconds, 6 decimals)
+   norm_pos_x          - Normalized X position (0-1, float)
+   norm_pos_y          - Normalized Y position (0-1, float)
+   confidence          - Gaze confidence (0-1, float)
+   worn                - Glasses worn status (boolean)
+   pupil_left_diam     - Left pupil diameter (mm, float)
+   pupil_right_diam    - Right pupil diameter (mm, float)
+   record_time_unix    - System timestamp (Unix seconds, 6 decimals)
+   record_time_mono    - Monotonic time (seconds, 9 decimals)
+
+GAZE CSV (Basic Gaze - 7 fields):
+   Module              - Always "EyeTracker"
+   trial               - Trial number (integer)
+   gaze_timestamp      - Device timestamp (Unix seconds, 6 decimals)
+   norm_pos_x          - Normalized X position (0-1, float)
+   norm_pos_y          - Normalized Y position (0-1, float)
+   confidence          - Gaze confidence (0-1, float)
+   worn                - Glasses worn status (boolean)
+
+EVENT CSV (Eye Events - 9+ fields):
+   Module              - Always "EyeTracker"
+   trial               - Trial number (integer)
+   event_type          - Event type (fixation, blink, saccade)
+   start_timestamp     - Event start (Unix seconds, 6 decimals)
+   end_timestamp       - Event end (Unix seconds, 6 decimals)
+   duration_ms         - Event duration (milliseconds, float)
+   [Additional fields based on event type:]
+   For fixations: centroid_x, centroid_y, dispersion
+   For blinks: left_closed, right_closed
+   For saccades: amplitude, direction
+
+IMU CSV (Inertial Data - 10 fields):
+   Module              - Always "EyeTracker"
+   trial               - Trial number (integer)
+   timestamp           - Device timestamp (Unix seconds, 6 decimals)
+   accel_x             - Accelerometer X (m/s², float)
+   accel_y             - Accelerometer Y (m/s², float)
+   accel_z             - Accelerometer Z (m/s², float)
+   gyro_x              - Gyroscope X (rad/s, float)
+   gyro_y              - Gyroscope Y (rad/s, float)
+   gyro_z              - Gyroscope Z (rad/s, float)
+   record_time_mono    - Monotonic time (seconds, 9 decimals)
+
+FRAME CSV (Frame Timing - 6 fields):
+   Module              - Always "EyeTracker"
+   trial               - Trial number (integer)
+   frame_index         - 1-based frame number
+   capture_timestamp   - Device capture time (Unix seconds)
+   record_time_unix    - System time when recorded (Unix seconds)
+   record_time_mono    - Monotonic time (seconds, 9 decimals)
+
+AUDIO_TIMING CSV (8 fields):
+   Module              - Always "EyeTracker"
+   trial               - Trial number (integer)
+   chunk_index         - Sequential chunk number
+   write_time_unix     - System time (Unix seconds, 6 decimals)
+   write_time_mono     - Monotonic time (seconds, 9 decimals)
+   device_timestamp    - Device audio timestamp
+   frames              - Audio frames in chunk
+   total_frames        - Cumulative frame count
+
+DEVICESTATUS CSV (Telemetry - 8+ fields):
+   Module              - Always "EyeTracker"
+   trial               - Trial number (integer)
+   timestamp           - Sample time (Unix seconds, 6 decimals)
+   battery_level       - Battery percentage (0-100, float)
+   temperature_c       - Device temperature (Celsius, float)
+   worn                - Glasses worn status (boolean)
+   recording_active    - Device recording state (boolean)
+   [Additional device-specific fields]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.7. TIMING & SYNCHRONIZATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Timestamp Types:
+   gaze_timestamp      - Pupil Labs device clock (Unix seconds)
+   record_time_unix    - Host system wall clock (may drift)
+   record_time_mono    - Host monotonic clock (never jumps)
+
+Timing Accuracy:
+   Gaze samples:       ~5-10 ms between samples (device-dependent)
+   Frame timestamps:   Frame-accurate from RTSP stream
+   Audio timestamps:   Chunk-based (typically 1024 samples)
+
+Cross-Module Synchronization:
+   Use record_time_mono for precise cross-module sync:
+   • Correlate with camera encode_time_mono
+   • Correlate with audio write_time_monotonic
+   • Correlate with DRT Unix timestamps
+
+Video-Gaze Alignment:
+   Use FRAME CSV to correlate video frames with gaze data:
+   1. Find frame_index for desired video position
+   2. Match capture_timestamp to gaze_timestamp
+   3. Gaze samples between frames belong to that period
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

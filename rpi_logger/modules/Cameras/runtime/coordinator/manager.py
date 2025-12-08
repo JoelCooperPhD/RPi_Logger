@@ -7,16 +7,22 @@ and provides async interface for preview frames and commands.
 from __future__ import annotations
 
 import asyncio
+import atexit
 import logging
 import multiprocessing
 import sys
 from dataclasses import dataclass, field
 from multiprocessing import Process
 from multiprocessing.connection import Connection
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 # Use spawn context for clean subprocess isolation (avoids fork issues with Tk)
 _mp_context = multiprocessing.get_context('spawn')
+
+from rpi_logger.modules.Cameras.worker.shared_preview import (
+    PreviewSharedBuffer,
+    generate_shm_names,
+)
 
 from rpi_logger.modules.Cameras.defaults import (
     DEFAULT_CAPTURE_RESOLUTION,
@@ -72,6 +78,10 @@ class WorkerHandle:
     video_path: Optional[str] = None
     csv_path: Optional[str] = None
 
+    # Shared memory for preview (created by main process)
+    preview_shm: Optional[PreviewSharedBuffer] = None
+    preview_size: Tuple[int, int] = DEFAULT_PREVIEW_SIZE
+
     # Listener task
     _listener_task: Optional[asyncio.Task] = None
 
@@ -118,6 +128,7 @@ class WorkerManager:
         fps: float = DEFAULT_CAPTURE_FPS,
         *,
         key: str = "",
+        preview_size: Optional[Tuple[int, int]] = None,
     ) -> WorkerHandle:
         """
         Spawn a new camera worker process.
@@ -128,14 +139,15 @@ class WorkerManager:
             resolution: capture resolution
             fps: target frame rate
             key: unique key for this worker (defaults to camera_type:camera_id)
+            preview_size: preview resolution for Picamera2 lores stream (ISP-scaled)
 
         Returns:
             WorkerHandle for the spawned worker
         """
         if not key:
             key = f"{camera_type}:{camera_id}"
-        logger.info("[MANAGER] spawn_worker called: key=%s type=%s id=%s res=%s fps=%.1f",
-                   key, camera_type, camera_id, resolution, fps)
+        logger.info("[MANAGER] spawn_worker called: key=%s type=%s id=%s res=%s fps=%.1f preview=%s",
+                   key, camera_type, camera_id, resolution, fps, preview_size)
 
         if key in self._workers:
             logger.error("[MANAGER] Worker already exists for %s!", key)
@@ -176,6 +188,7 @@ class WorkerManager:
             camera_id=camera_id,
             capture_resolution=resolution,
             capture_fps=fps,
+            preview_size=preview_size,  # For Picamera2 ISP-scaled lores stream
         ))
         logger.debug("[MANAGER] CmdConfigure sent")
 
@@ -279,16 +292,52 @@ class WorkerManager:
         preview_size: tuple[int, int] = DEFAULT_PREVIEW_SIZE,
         target_fps: float = DEFAULT_PREVIEW_FPS,
         jpeg_quality: int = DEFAULT_PREVIEW_JPEG_QUALITY,
+        use_shared_memory: bool = True,
     ) -> None:
         """Start preview streaming from a worker."""
         handle = self._workers.get(key)
         if not handle:
             raise ValueError(f"No worker for {key}")
 
+        shm_name_a = ""
+        shm_name_b = ""
+
+        # Create shared memory buffers if requested
+        if use_shared_memory:
+            # Clean up existing shared memory if size changed
+            if handle.preview_shm is not None and handle.preview_size != preview_size:
+                logger.info("[MANAGER] Preview size changed, recreating shared memory for %s", key)
+                handle.preview_shm.close_and_unlink()
+                handle.preview_shm = None
+
+            # Create shared memory if not exists
+            if handle.preview_shm is None:
+                shm_name_a, shm_name_b = generate_shm_names(key)
+                try:
+                    handle.preview_shm = PreviewSharedBuffer(
+                        name_a=shm_name_a,
+                        name_b=shm_name_b,
+                        width=preview_size[0],
+                        height=preview_size[1],
+                        create=True,
+                    )
+                    handle.preview_size = preview_size
+                    logger.info("[MANAGER] Created shared memory for %s: %s, %s",
+                               key, shm_name_a, shm_name_b)
+                except Exception as e:
+                    logger.warning("[MANAGER] Failed to create shared memory for %s: %s, falling back to JPEG", key, e)
+                    use_shared_memory = False
+            else:
+                shm_name_a = handle.preview_shm.name_a
+                shm_name_b = handle.preview_shm.name_b
+
         handle.cmd_conn.send(CmdStartPreview(
             preview_size=preview_size,
             target_fps=target_fps,
             jpeg_quality=jpeg_quality,
+            use_shared_memory=use_shared_memory,
+            shm_name_a=shm_name_a,
+            shm_name_b=shm_name_b,
         ))
 
     async def stop_preview(self, key: str) -> None:
@@ -359,6 +408,15 @@ class WorkerManager:
             logger.warning("Force killing worker %s", key)
             handle.process.terminate()
             await asyncio.to_thread(handle.process.join, timeout=1.0)
+
+        # Clean up shared memory
+        if handle.preview_shm is not None:
+            try:
+                handle.preview_shm.close_and_unlink()
+                logger.debug("[MANAGER] Cleaned up shared memory for %s", key)
+            except Exception as e:
+                logger.warning("[MANAGER] Error cleaning up shared memory for %s: %s", key, e)
+            handle.preview_shm = None
 
         # Close pipes
         try:

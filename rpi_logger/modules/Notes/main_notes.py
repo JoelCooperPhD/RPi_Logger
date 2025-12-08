@@ -172,6 +172,10 @@ async def main(argv: Optional[list[str]] = None) -> None:
     config_context = resolve_module_config_path(MODULE_DIR, MODULE_ID)
     setattr(args, "config_path", config_context.writable_path)
 
+    def show_notes_help(parent):
+        from rpi_logger.modules.Notes.help_dialog import NotesHelpDialog
+        NotesHelpDialog(parent)
+
     supervisor = StubCodexSupervisor(
         args,
         module_dir,
@@ -181,6 +185,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
         config_path=config_context.writable_path,
+        help_callback=show_notes_help,
     )
 
     loop = asyncio.get_running_loop()

@@ -71,12 +71,81 @@ During Recording
    • Altitude and fix quality
    • Number of satellites
 
-Data Output
-   GPS data is saved as CSV:
-   {session_dir}/GPS/{timestamp}_GPS_trial{N}.csv
 
-   NMEA sentences (raw data):
-   {session_dir}/GPS/{timestamp}_NMEA_trial{N}.txt
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.5. OUTPUT FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+File Naming Convention
+   {timestamp}_GPS_trial{NNN}.csv      - Parsed GPS data
+   {timestamp}_NMEA_trial{NNN}.txt     - Raw NMEA sentences
+
+   Example: 20251208_143022_GPS_trial001.csv
+
+Location
+   {session_dir}/GPS/
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.6. CSV FIELD REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+GPS CSV Columns (21 fields):
+
+   Module                - Always "GPS"
+   trial                 - Trial number (integer)
+   timestamp_utc         - GPS UTC time (ISO 8601 format)
+   timestamp_unix        - Unix timestamp (seconds, 6 decimals)
+   record_time_mono      - Monotonic time (seconds, 9 decimals)
+   latitude              - Latitude (decimal degrees, + = North)
+   longitude             - Longitude (decimal degrees, + = East)
+   altitude_m            - Altitude above MSL (meters, float)
+   geoid_separation_m    - Geoid separation (meters, float)
+   speed_knots           - Speed over ground (knots, float)
+   speed_kmh             - Speed over ground (km/h, float)
+   speed_mph             - Speed over ground (mph, float)
+   heading_true          - True heading (degrees 0-360, float)
+   heading_magnetic      - Magnetic heading (degrees, float)
+   fix_quality           - Fix type (0=None, 1=GPS, 2=DGPS, etc.)
+   fix_type              - Fix mode (1=None, 2=2D, 3=3D)
+   satellites_used       - Satellites in solution (integer)
+   satellites_in_view    - Total satellites visible (integer)
+   hdop                  - Horizontal dilution of precision (float)
+   vdop                  - Vertical dilution of precision (float)
+   pdop                  - Position dilution of precision (float)
+
+Example Row:
+   GPS,1,2024-12-08T14:30:22.500Z,1733665822.500000,12345.678901234,
+   -37.8136,144.9631,42.5,0.0,25.3,46.9,29.1,185.2,184.8,
+   1,3,8,12,1.2,1.8,2.1
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3.7. TIMING & SYNCHRONIZATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Timestamp Types:
+   timestamp_utc         - GPS satellite time (most accurate)
+   timestamp_unix        - Unix seconds from GPS
+   record_time_mono      - Host monotonic clock
+
+Timing Accuracy:
+   GPS UTC time:         ±100 ns (atomic clock derived)
+   Position updates:     1-10 Hz (receiver dependent)
+   Serial latency:       ~10-50 ms from position to host
+
+Cross-Module Synchronization:
+   Use record_time_mono for cross-module sync:
+   • Correlate with camera encode_time_mono
+   • Correlate with audio write_time_monotonic
+   • Use timestamp_unix for absolute time reference
+
+DOP Values (Dilution of Precision):
+   < 1.0:  Ideal accuracy
+   1-2:    Excellent
+   2-5:    Good
+   5-10:   Moderate (position accuracy ~50m)
+   > 10:   Poor (consider waiting for better fix)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

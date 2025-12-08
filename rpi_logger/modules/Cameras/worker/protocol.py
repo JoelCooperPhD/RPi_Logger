@@ -32,6 +32,9 @@ class CmdConfigure:
     camera_id: str  # sensor_id or device path
     capture_resolution: tuple[int, int] = DEFAULT_CAPTURE_RESOLUTION
     capture_fps: float = DEFAULT_CAPTURE_FPS
+    # Preview size for Picamera2 lores stream (ISP-scaled)
+    # If set, enables dual-stream capture with hardware downscaling
+    preview_size: Optional[tuple[int, int]] = None
 
 
 @dataclass(slots=True)
@@ -40,6 +43,10 @@ class CmdStartPreview:
     preview_size: tuple[int, int] = DEFAULT_PREVIEW_SIZE
     target_fps: float = DEFAULT_PREVIEW_FPS
     jpeg_quality: int = DEFAULT_PREVIEW_JPEG_QUALITY
+    # Shared memory fields (set by main process)
+    use_shared_memory: bool = True
+    shm_name_a: str = ""  # Shared memory buffer A name
+    shm_name_b: str = ""  # Shared memory buffer B name
 
 
 @dataclass(slots=True)
@@ -85,11 +92,14 @@ class RespReady:
 @dataclass(slots=True)
 class RespPreviewFrame:
     """A preview frame for display in the UI."""
-    frame_data: bytes  # JPEG-compressed
+    frame_data: bytes  # JPEG-compressed (empty if using shared memory)
     width: int
     height: int
     timestamp: float  # unix time
     frame_number: int
+    # Shared memory fields (set when use_shared_memory=True)
+    shm_buffer_id: int = 0  # Which buffer has the frame (0 or 1)
+    shm_sequence: int = 0   # Monotonic counter (0 means JPEG mode)
 
 
 @dataclass(slots=True)
@@ -107,8 +117,6 @@ class RespStateUpdate:
     target_fps: float = 0.0  # Camera's actual/configured FPS (always available)
     target_record_fps: float = 0.0  # Recording target (only when recording)
     target_preview_fps: float = 0.0
-    capture_queue_depth: int = 0
-    encode_queue_depth: int = 0
     capture_wait_ms: float = 0.0
     error: Optional[str] = None
 

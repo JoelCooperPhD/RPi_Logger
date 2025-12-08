@@ -634,6 +634,7 @@ class DRTView:
         self._bridge.mount(self._build_embedded_gui)
         self._stub_view.set_preview_title("DRT Controls")
         self.model.subscribe(self._on_model_change)
+        self._override_help_menu()
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
         self.logger.info("=== DRTView._build_embedded_gui STARTING ===")
@@ -872,6 +873,31 @@ class DRTView:
     @property
     def window_duration_ms(self) -> float:
         return getattr(self._stub_view, "window_duration_ms", 0.0)
+
+    # ------------------------------------------------------------------
+    # Help menu
+
+    def _override_help_menu(self) -> None:
+        """Replace the generic help menu command with DRT-specific help."""
+        help_menu = getattr(self._stub_view, 'help_menu', None)
+        if help_menu is None:
+            return
+        try:
+            # Delete existing "Quick Start Guide" entry and add DRT-specific one
+            help_menu.delete(0)
+            help_menu.add_command(label="Quick Start Guide", command=self._show_drt_help)
+        except Exception as e:
+            self.logger.debug("Could not override help menu: %s", e)
+
+    def _show_drt_help(self) -> None:
+        """Show DRT-specific help dialog."""
+        try:
+            from .help_dialog import DRTHelpDialog
+            root = getattr(self._stub_view, 'root', None)
+            if root:
+                DRTHelpDialog(root)
+        except Exception as e:
+            self.logger.error("Failed to show DRT help dialog: %s", e)
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -42,45 +42,96 @@ Device Selection
 
 Level Meters
    Real-time audio level visualization:
-   • Green bars indicate normal audio levels
-   • Yellow indicates moderate levels
-   • Red indicates clipping or very high levels
+   • Green bars: Normal levels (below -12 dB)
+   • Yellow bars: Moderate levels (-12 to -6 dB)
+   • Red bars: High levels / clipping (above -6 dB)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-3. RECORDING SESSIONS
+3. OUTPUT FILES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Starting a Session
-   When you start a recording session:
-   • Audio capture begins on all selected devices
-   • Level meters remain active for monitoring
-   • Recording indicator shows "RECORDING" status
+File Naming Convention
+   {timestamp}_AUDIO_trial{NNN}_{device_id}_{device_name}.wav
+   {timestamp}_AUDIOTIMING_trial{NNN}_{device_id}_{device_name}.csv
 
-During Recording
-   Each trial captures:
-   • WAV audio files for each microphone
-   • Timing CSV with sample-accurate timestamps
-   • Metadata for synchronization
+   Example: 20251208_143022_AUDIO_trial001_0_usb-microphone.wav
 
-Data Output
-   Audio data is saved as WAV files:
-   {session_dir}/AudioRecorder/{timestamp}_AUDIO_trial{N}_{device}.wav
+Location
+   {session_dir}/Audio/
 
-   Timing data for synchronization:
-   {session_dir}/AudioRecorder/{timestamp}_AUDIOTIMING_trial{N}_{device}.csv
+WAV Audio File
+   Format:     PCM (uncompressed)
+   Bit Depth:  16-bit signed integer
+   Channels:   Mono (1 channel)
+   Sample Rate: 48,000 Hz default (8-192 kHz supported)
+
+   Multi-channel devices are downmixed to mono (first channel).
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-4. CONFIGURATION
+4. TIMING CSV FIELD REFERENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The AUDIOTIMING CSV contains per-chunk timing data for precise
+synchronization with other modules.
+
+CSV Columns:
+   Module              - Always "Audio"
+   trial               - Trial number (integer)
+   write_time_unix     - System time when written (Unix seconds)
+   chunk_index         - Sequential chunk number (1-based)
+   write_time_monotonic - Monotonic time (seconds, 9 decimals)
+   adc_timestamp       - Hardware ADC timestamp (seconds, 9 decimals)
+   frames              - Audio frames in this chunk
+   total_frames        - Cumulative frame count
+
+Example Row:
+   Audio,1,1702080123.456789,1,12.345678901,12.345678901,2048,2048
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. TIMING & SYNCHRONIZATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Timestamp Types (3 independent sources per chunk):
+
+   write_time_unix      - System clock (may drift/jump)
+                          Precision: microseconds (6 decimals)
+
+   write_time_monotonic - Monotonic clock (never decreases)
+                          Precision: nanoseconds (9 decimals)
+                          Best for relative timing calculations
+
+   adc_timestamp        - Hardware ADC timestamp from device
+                          Precision: nanoseconds (9 decimals)
+                          Most accurate for sample-level sync
+                          May be empty if device doesn't support
+
+Timing Accuracy
+   • Timestamps recorded per audio chunk (typically 1024-4096 samples)
+   • Frame counts allow sample-accurate duration calculation
+   • Use total_frames / sample_rate for precise elapsed time
+
+Calculating Audio Position
+   To find the exact time of any sample:
+   1. Find the chunk containing that sample (use total_frames)
+   2. Use write_time_monotonic for that chunk
+   3. Offset by (sample_position_in_chunk / sample_rate)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. CONFIGURATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Sample Rate
-   Configurable from 8 kHz to 192 kHz depending on device.
-   Higher rates provide better quality but larger files.
+   Default: 48,000 Hz
+   Range: 8 kHz to 192 kHz (device-dependent)
+   Higher rates = better quality but larger files
 
 Channels
-   Mono or stereo depending on microphone capabilities.
+   Fixed: Mono (1 channel)
+   Multi-channel inputs use first channel only
 
 
 ═══════════════════════════════════════════════════════════════════
@@ -104,6 +155,10 @@ Level meter shows no activity:
    2. Check physical mute switches
    3. Verify correct device is selected
    4. Restart the module
+
+Empty adc_timestamp in CSV:
+   This is normal - not all audio devices provide hardware timestamps.
+   Use write_time_monotonic for synchronization instead.
 
 
 """

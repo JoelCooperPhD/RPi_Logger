@@ -367,6 +367,7 @@ class GPSView:
         self._bridge.mount(self._build_embedded_gui)
         self._stub_view.set_preview_title("GPS Preview")
         self.model.subscribe(self._on_model_change)
+        self._override_help_menu()
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
         if not HAS_TK:
@@ -516,6 +517,31 @@ class GPSView:
     @property
     def window_duration_ms(self) -> float:
         return getattr(self._stub_view, "window_duration_ms", 0.0)
+
+    # ------------------------------------------------------------------
+    # Help menu
+
+    def _override_help_menu(self) -> None:
+        """Replace the generic help menu command with GPS-specific help."""
+        help_menu = getattr(self._stub_view, 'help_menu', None)
+        if help_menu is None:
+            return
+        try:
+            # Delete existing "Quick Start Guide" entry and add GPS-specific one
+            help_menu.delete(0)
+            help_menu.add_command(label="Quick Start Guide", command=self._show_gps_help)
+        except Exception as e:
+            self.logger.debug("Could not override help menu: %s", e)
+
+    def _show_gps_help(self) -> None:
+        """Show GPS-specific help dialog."""
+        try:
+            from .help_dialog import GPSHelpDialog
+            root = getattr(self._stub_view, 'root', None)
+            if root:
+                GPSHelpDialog(root)
+        except Exception as e:
+            self.logger.error("Failed to show GPS help dialog: %s", e)
 
     # ------------------------------------------------------------------
     # Internal helpers

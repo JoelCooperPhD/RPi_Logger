@@ -126,7 +126,7 @@ class CamerasView:
         if not callable(builder):
             return
         if not self._io_stub_fields:
-            for key in ("cam", "in_tgt", "pct", "rec", "prv", "wait"):
+            for key in ("cam", "cap_tgt", "cap_pct", "rec_tgt", "rec_pct", "wait"):
                 self._io_stub_fields[key] = tk.StringVar(master=self._root, value="-")
         if not self._io_stub_history:
             self._io_stub_history = {}
@@ -143,10 +143,10 @@ class CamerasView:
 
             fields = [
                 ("cam", "Cam"),
-                ("in_tgt", "In / Tgt"),
-                ("pct", "%"),
-                ("rec", "Rec (out)"),
-                ("prv", "Prv (out)"),
+                ("cap_tgt", "Cap In/Tgt"),
+                ("cap_pct", "%"),
+                ("rec_tgt", "Rec Out/Tgt"),
+                ("rec_pct", "%"),
                 ("wait", "Wait (ms)"),
             ]
             for col, (key, label_text) in enumerate(fields):
@@ -357,38 +357,43 @@ class CamerasView:
             except Exception:
                 return "   --"
 
-        # Get FPS values for combined display and percentage
-        # Use target_fps (camera's actual/configured FPS, always available)
-        fps_in = payload.get("fps_capture")
-        fps_tgt = payload.get("target_fps")
+        def _calc_pct_and_color(actual, target):
+            """Calculate percentage and determine color based on performance."""
+            pct_str = "  --"
+            pct_color = Colors.FG_SECONDARY if HAS_THEME and Colors else None
+            try:
+                if actual is not None and target is not None and float(target) > 0:
+                    pct = (float(actual) / float(target)) * 100
+                    pct_str = f"{pct:3.0f}%"
+                    if HAS_THEME and Colors:
+                        if pct >= 95:
+                            pct_color = Colors.SUCCESS      # Green - good
+                        elif pct >= 80:
+                            pct_color = Colors.WARNING      # Orange - warning
+                        else:
+                            pct_color = Colors.ERROR        # Red - bad
+            except (ValueError, TypeError):
+                pass
+            return pct_str, pct_color
 
-        # Combined In / Tgt field
-        in_tgt_str = f"{_fmt_num(fps_in)} / {_fmt_num(fps_tgt)}"
+        # Capture metrics: fps_capture vs target_fps (camera's configured FPS)
+        cap_actual = payload.get("fps_capture")
+        cap_target = payload.get("target_fps")
+        cap_tgt_str = f"{_fmt_num(cap_actual)} / {_fmt_num(cap_target)}"
+        cap_pct_str, cap_pct_color = _calc_pct_and_color(cap_actual, cap_target)
 
-        # Percentage calculation with color
-        pct_str = "  --"
-        pct_color = Colors.FG_SECONDARY if HAS_THEME and Colors else None
-        try:
-            if fps_in is not None and fps_tgt is not None and float(fps_tgt) > 0:
-                pct = (float(fps_in) / float(fps_tgt)) * 100
-                pct_str = f"{pct:3.0f}%"
-                # Determine color based on percentage
-                if HAS_THEME and Colors:
-                    if pct >= 95:
-                        pct_color = Colors.SUCCESS      # Green - good
-                    elif pct >= 80:
-                        pct_color = Colors.WARNING      # Orange - warning
-                    else:
-                        pct_color = Colors.ERROR        # Red - bad
-        except (ValueError, TypeError):
-            pass
+        # Record metrics: fps_encode vs target_record_fps
+        rec_actual = payload.get("fps_encode")
+        rec_target = payload.get("target_record_fps")
+        rec_tgt_str = f"{_fmt_num(rec_actual)} / {_fmt_num(rec_target)}"
+        rec_pct_str, rec_pct_color = _calc_pct_and_color(rec_actual, rec_target)
 
         values = {
             "cam": cam_id,
-            "in_tgt": in_tgt_str,
-            "pct": pct_str,
-            "rec": _fmt_num(payload.get("fps_encode")),
-            "prv": _fmt_num(payload.get("fps_preview")),
+            "cap_tgt": cap_tgt_str,
+            "cap_pct": cap_pct_str,
+            "rec_tgt": rec_tgt_str,
+            "rec_pct": rec_pct_str,
             "wait": _fmt_num(payload.get("capture_wait_ms")),
         }
         history = self._io_stub_history.setdefault(cam_id, {})
@@ -407,10 +412,17 @@ class CamerasView:
             except Exception:
                 self._logger.debug("Failed to update IO stub field %s", key, exc_info=True)
 
-        # Apply color to percentage label
-        if "pct" in self._io_stub_labels and pct_color:
+        # Apply color to capture percentage label
+        if "cap_pct" in self._io_stub_labels and cap_pct_color:
             try:
-                self._io_stub_labels["pct"].configure(fg=pct_color)
+                self._io_stub_labels["cap_pct"].configure(fg=cap_pct_color)
+            except Exception:
+                pass
+
+        # Apply color to record percentage label
+        if "rec_pct" in self._io_stub_labels and rec_pct_color:
+            try:
+                self._io_stub_labels["rec_pct"].configure(fg=rec_pct_color)
             except Exception:
                 pass
 

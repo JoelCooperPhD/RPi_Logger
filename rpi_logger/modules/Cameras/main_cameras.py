@@ -74,6 +74,10 @@ async def main_async(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
     config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID, filename="config.txt")
 
+    def show_cameras_help(parent):
+        from rpi_logger.modules.Cameras.app.help_dialog import CamerasHelpDialog
+        CamerasHelpDialog(parent)
+
     supervisor = StubCodexSupervisor(
         args,
         module_dir=MODULE_DIR,
@@ -83,6 +87,7 @@ async def main_async(argv: Optional[list[str]] = None) -> None:
         runtime_factory=factory,
         runtime_retry_policy=RuntimeRetryPolicy(),
         config_path=config_ctx.writable_path,
+        help_callback=show_cameras_help,
     )
 
     loop = asyncio.get_running_loop()
