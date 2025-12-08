@@ -1,6 +1,7 @@
-display_name = DRT
-window_geometry = 516x193+1062+619
-preview_resolution = auto
-enabled = true
-view.show_io_panel = true
 view.show_logger = false
+_geometry = 320x200
+preview_resolution = auto
+device_connected = true
+view.show_io_panel = true
+display_name = DRT
+window_geometry = 320x200

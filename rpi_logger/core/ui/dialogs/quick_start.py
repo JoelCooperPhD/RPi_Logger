@@ -30,7 +30,7 @@ tasks, and annotations. All modules are controlled from a single interface.
      • AudioRecorder   - Multi-microphone audio (8-192 kHz)
      • EyeTracker      - Pupil Labs gaze tracking with scene video
      • Notes           - Stub-based annotations during sessions
-     • DRT             - sDRT behavioral task devices
+     • DRT             - DRT behavioral task devices
 
    ▸ Modules launch automatically when checked
    ▸ Wait for green "● Ready" status before recording
@@ -114,7 +114,7 @@ data/session_20251024_120000/
 ├── Notes/
 │   └── session_notes.csv
 └── DRT/
-    └── sDRT_dev_ttyACM0_20251024_120000.csv
+    └── DRT_dev_ttyACM0_20251024_120000.csv
 
 
 ═══════════════════════════════════════════════════════════════════

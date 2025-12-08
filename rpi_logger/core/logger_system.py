@@ -305,6 +305,8 @@ class LoggerSystem:
                     self.instance_manager.on_status_message(
                         effective_id, "device_ready", status.get_payload()
                     )
+                    # Save connection state for auto-connect on next startup
+                    await self._save_device_connection_state(module_name, True)
                 else:
                     self.logger.warning("device_ready status missing device_id")
             elif status.get_status_type() == "device_error":
@@ -931,145 +933,6 @@ class LoggerSystem:
 
         return builder
 
-    def _build_assign_device_command(self, device: DeviceInfo) -> str:
-        """Build an assign_device command for the given device.
-
-        This is the legacy method that builds a command without a correlation ID.
-        Use _build_assign_device_command_builder for the robust connection pattern.
-        """
-        session_dir_str = str(self.session_dir) if self.session_dir else None
-
-        return CommandMessage.assign_device(
-            device_id=device.device_id,
-            device_type=device.device_type.value,
-            port=device.port or "",
-            baudrate=device.baudrate,
-            session_dir=session_dir_str,
-            is_wireless=device.is_wireless,
-            is_network=device.is_network,
-            network_address=device.get_meta("network_address"),
-            network_port=device.get_meta("network_port"),
-            sounddevice_index=device.get_meta("sounddevice_index"),
-            audio_channels=device.get_meta("audio_channels"),
-            audio_sample_rate=device.get_meta("audio_sample_rate"),
-            is_camera=device.is_camera,
-            camera_type=device.get_meta("camera_type"),
-            camera_stable_id=device.get_meta("camera_stable_id"),
-            camera_dev_path=device.get_meta("camera_dev_path"),
-            camera_hw_model=device.get_meta("camera_hw_model"),
-            camera_location=device.get_meta("camera_location"),
-            display_name=device.display_name,
-        )
-
-    async def _on_device_connected(self, device: DeviceInfo) -> None:
-        """Callback when a device is connected.
-
-        Auto-starts the module instance and assigns the device. For multi-instance
-        modules, creates a new instance per device. For wireless devices,
-        creates XBee transport first. Internal devices skip hardware assignment.
-
-        Uses InstanceStateManager for state transitions.
-        """
-        module_id = device.module_id
-        if not module_id:
-            self.logger.warning("Device %s has no module_id", device.device_id)
-            return
-
-        # Generate instance ID for this device
-        instance_id = self._make_instance_id(module_id, device_id=device.device_id)
-        self.logger.info(
-            "Device connected: %s -> instance %s (module %s)",
-            device.device_id, instance_id, module_id
-        )
-
-        if device.is_wireless:
-            transport = await self.device_system.create_wireless_transport(device.device_id)
-            if not transport:
-                self.logger.error("Failed to create wireless transport for %s", device.device_id)
-                self._notify_device_connected(device.device_id, False)
-                return
-
-        # Check if this instance is already running
-        if not self.instance_manager.is_instance_running(instance_id):
-            self.logger.info(
-                "Auto-starting module instance %s for device %s",
-                instance_id, device.device_id
-            )
-
-            if self._is_multi_instance_module(module_id):
-                # Multi-instance module: use instance manager with robust connection
-                window_geometry = await self._load_module_geometry(module_id, instance_id)
-                success = await self.instance_manager.start_instance(
-                    instance_id=instance_id,
-                    module_id=module_id,
-                    device_id=device.device_id,
-                    window_geometry=window_geometry,
-                )
-                if success:
-                    self._register_device_instance(device.device_id, instance_id)
-                    self._setup_xbee_send_callback(instance_id)
-                    # Send assign_device command (non-blocking)
-                    # Connection result comes via status messages
-                    if not device.is_internal:
-                        command_builder = self._build_assign_device_command_builder(device)
-                        await self.instance_manager.connect_device(instance_id, command_builder)
-            else:
-                # Single-instance module: use standard enable flow
-                success = await self.set_module_enabled(module_id, True)
-                if success and not device.is_internal:
-                    # Send assign_device for single-instance modules
-                    command = self._build_assign_device_command(device)
-                    await self.module_manager.send_command(module_id, command)
-                    # For single-instance, update UI directly
-                    self._notify_device_connected(device.device_id, True)
-
-            if not success:
-                self.logger.error("Failed to start module instance %s", instance_id)
-                if device.is_wireless:
-                    await self.device_system.destroy_wireless_transport(device.device_id)
-                return
-
-    async def _on_device_disconnected(self, device_id: str) -> None:
-        """Callback when a device is disconnected.
-
-        For multi-instance modules, stops the specific instance. For single-instance
-        modules, sends unassign_device to all running modules.
-        """
-        self.logger.info("Device disconnected: %s", device_id)
-
-        # Check if we have an instance mapping for this device
-        instance_id = self._get_instance_for_device(device_id)
-
-        if instance_id:
-            # Multi-instance module: stop the specific instance
-            module_id, _ = self._parse_instance_id(instance_id)
-            if self._is_multi_instance_module(module_id):
-                self.logger.info("Stopping instance %s for disconnected device %s", instance_id, device_id)
-                await self.stop_module_instance(instance_id)
-                self._unregister_device_instance(device_id)
-                return
-
-        # Single-instance or unmapped: broadcast unassign to all running modules
-        for module_name in self.module_manager.get_running_modules():
-            command = CommandMessage.unassign_device(device_id)
-            await self.module_manager.send_command(module_name, command)
-
-    async def _send_assign_device(self, device: DeviceInfo) -> bool:
-        """Send assign_device command to the appropriate module."""
-        module_id = device.module_id
-        if not module_id:
-            self.logger.warning("Device %s has no module_id", device.device_id)
-            return False
-
-        if device.is_internal:
-            return True
-
-        command = self._build_assign_device_command(device)
-        success = await self.module_manager.send_command(module_id, command)
-        if not success:
-            self.logger.error("Failed to send assign_device to module %s", module_id)
-        return success
-
     async def connect_device(self, device_id: str) -> bool:
         """Connect a device (called from UI).
 
@@ -1108,17 +971,6 @@ class LoggerSystem:
             self.logger.info("Saved device_connected=%s for module %s", connected, module_id)
         else:
             self.logger.error("Failed to save device_connected for module %s", module_id)
-
-    async def _load_device_connection_state(self, module_id: str) -> bool:
-        """Load device connection state from module config."""
-        modules = self.module_manager.get_available_modules()
-        module_info = next((m for m in modules if m.name == module_id), None)
-
-        if not module_info or not module_info.config_path:
-            return False
-
-        config = await self.config_manager.read_config_async(module_info.config_path)
-        return self.config_manager.get_bool(config, 'device_connected', default=False)
 
     async def _load_pending_auto_connects(self) -> None:
         """Load device connection states and mark modules for auto-connect.
@@ -1221,6 +1073,10 @@ class LoggerSystem:
             command_builder = self._build_assign_device_command_builder(device)
             await self.instance_manager.connect_device(instance_id, command_builder)
             # Connection result will arrive via on_status_message -> device_ready/device_error
+        else:
+            # Internal modules don't send device_ready (no hardware to connect)
+            # Save connection state now for auto-connect on next startup
+            await self._save_device_connection_state(module_id, True)
 
         return True
 
@@ -1269,6 +1125,15 @@ class LoggerSystem:
 
         # Update device state (UI update)
         self._notify_device_connected(device_id, False)
+
+        # Save disconnected state for restart behavior
+        # For multi-instance modules, only save false if no other instances remain
+        other_instances_running = any(
+            inst_id.startswith(f"{module_id}:")
+            for inst_id in self._device_instance_map.values()
+        )
+        if not other_instances_running:
+            await self._save_device_connection_state(module_id, False)
 
         return True
 

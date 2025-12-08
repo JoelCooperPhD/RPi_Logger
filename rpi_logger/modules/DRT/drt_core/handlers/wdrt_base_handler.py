@@ -298,7 +298,7 @@ class WDRTBaseHandler(BaseDRTHandler):
             battery = data.get('battery', 0)
             device_utc = data.get('device_utc', 0)
 
-            label = self._trial_label if self._trial_label else str(trial_number)
+            label = self._trial_label if self._trial_label else "NA"
 
             csv_line = (
                 f"{device_id_csv},{label},{unix_time},{device_timestamp},"

@@ -2,7 +2,7 @@
 DRT Device Types
 
 Defines device types for all supported DRT variants:
-- sDRT (USB only)
+- DRT (USB only)
 - wDRT (USB)
 - wDRT (Wireless via XBee)
 
@@ -16,6 +16,6 @@ from enum import Enum
 
 class DRTDeviceType(Enum):
     """Enumeration of supported DRT device types."""
-    SDRT = "sDRT"
+    SDRT = "DRT"
     WDRT_USB = "wDRT_USB"
     WDRT_WIRELESS = "wDRT_Wireless"

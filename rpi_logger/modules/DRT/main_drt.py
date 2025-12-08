@@ -84,19 +84,19 @@ def parse_args(argv: Optional[list[str]] = None):
         "--device-vid",
         type=lambda value: int(value, 0),
         default=int(config.get('device_vid', 0x239A)),
-        help="USB vendor ID for the sDRT device",
+        help="USB vendor ID for the DRT device",
     )
     parser.add_argument(
         "--device-pid",
         type=lambda value: int(value, 0),
         default=int(config.get('device_pid', 0x801E)),
-        help="USB product ID for the sDRT device",
+        help="USB product ID for the DRT device",
     )
     parser.add_argument(
         "--baudrate",
         type=int,
         default=int(config.get('baudrate', 9600)),
-        help="Serial baudrate for the sDRT device",
+        help="Serial baudrate for the DRT device",
     )
 
     args = parser.parse_args(argv)

@@ -21,7 +21,7 @@ to a red LED stimulus by pressing a button as quickly as possible.
 Degraded reaction times indicate increased cognitive load.
 
 The module supports two device types:
-  • sDRT (Simple DRT)    - USB-connected tactile response device
+  • DRT (USB)            - USB-connected tactile response device
   • wDRT (Wireless DRT)  - XBee wireless response device
 
 Devices are auto-detected when plugged in via USB.
@@ -91,7 +91,7 @@ During Recording
 File Naming Convention
    {timestamp}_DRT_trial{NNN}_{device_id}.csv
 
-   Example: 20251208_143022_DRT_trial001_sDRT_ttyACM0.csv
+   Example: 20251208_143022_DRT_trial001_DRT_ttyACM0.csv
 
 Location
    {session_dir}/DRT/
@@ -101,27 +101,32 @@ Location
 3.6. CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-sDRT CSV Columns (7 fields):
-   Device ID             - Device identifier (e.g., "sDRT")
-   Label                 - Device port/label (e.g., "ttyACM0")
-   Unix time in UTC      - Stimulus onset timestamp (Unix seconds)
-   Milliseconds Since Record - Time since recording started (ms)
+DRT CSV Columns (7 fields):
+   Device ID             - Full device identifier (e.g., "DRT_dev_ttyacm0")
+   Label                 - Trial/condition label, or "NA" if not set
+   Unix time in UTC      - Host timestamp when trial logged (Unix seconds)
+   Milliseconds Since Record - Device timestamp in ms since experiment start
    Trial Number          - Sequential trial count (1-based)
    Responses             - Button press count for this trial
-   Reaction Time         - Response latency in ms (-1 = miss)
+   Reaction Time         - Response latency in ms (-1 = miss/timeout)
 
 wDRT CSV Columns (9 fields):
-   [Same first 7 columns as sDRT, plus:]
-   Total                 - Cumulative response count
-   Lens                  - VOG lens state (if synced, else empty)
+   Device ID             - Full device identifier (e.g., "wDRT_dev_ttyacm0")
+   Label                 - Trial/condition label, or "NA" if not set
+   Unix time in UTC      - Host timestamp when trial logged (Unix seconds)
+   Milliseconds Since Record - Device timestamp in ms since experiment start
+   Trial Number          - Sequential trial count (1-based)
+   Responses             - Button press count for this trial
+   Reaction Time         - Response latency in ms (-1 = miss/timeout)
    Battery Percent       - Device battery level (0-100%)
+   Device time in UTC    - Device's internal RTC timestamp (Unix seconds)
 
 Example Rows:
-   sDRT:
-   sDRT,ttyACM0,1733649120.123,5000,1,1,342
+   DRT:
+   DRT_dev_ttyacm0,NA,1733649120,5000,1,1,342
 
    wDRT:
-   wDRT,xbee_001,1733649120.456,5500,2,1,287,15,,85
+   wDRT_dev_ttyacm0,NA,1733649120,5500,2,1,287,85,1733649118
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -135,8 +140,8 @@ Reaction Time Measurement
    with typical accuracy of ±1-5 ms.
 
 Timestamp Precision
-   Unix time in UTC      - Microsecond precision (6 decimals)
-   Milliseconds Since Record - Integer milliseconds
+   Unix time in UTC      - Integer seconds (host system time)
+   Milliseconds Since Record - Integer milliseconds (device time)
    Reaction Time         - Integer milliseconds
 
 Miss Detection
@@ -203,7 +208,7 @@ Hit Rate
 6. DEVICE TYPES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-sDRT (Simple DRT)
+DRT (USB)
    USB-connected device with:
    • Tactile response button
    • Red LED stimulus
@@ -214,7 +219,7 @@ sDRT (Simple DRT)
 
 wDRT (Wireless DRT)
    XBee-based wireless device with:
-   • Same response mechanism as sDRT
+   • Same response mechanism as USB DRT
    • Battery powered for mobility
    • XBee radio for wireless data
 

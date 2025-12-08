@@ -57,6 +57,11 @@ class SDRTHandler(BaseDRTHandler):
         # Track stimulus state
         self._stimulus_on = False
 
+        # Track device's cumulative click count separately from per-trial count
+        # Device sends cumulative counts; we calculate per-trial by tracking delta
+        self._device_click_count = 0
+        self._trial_start_click_count = 0
+
     @property
     def device_type(self) -> DRTDeviceType:
         """Return the device type."""
@@ -102,6 +107,8 @@ class SDRTHandler(BaseDRTHandler):
             True if experiment started successfully
         """
         self._click_count = 0
+        self._device_click_count = 0
+        self._trial_start_click_count = 0
         self._buffered_trial_data = None
         self._recording = True
         return await self.send_command('start')
@@ -228,10 +235,14 @@ class SDRTHandler(BaseDRTHandler):
             logger.error("Error processing sDRT response '%s': %s", line, e)
 
     def _handle_click(self, value: str) -> None:
-        """Handle click response."""
+        """Handle click response - device sends cumulative count."""
         try:
-            self._click_count = int(value)
-            logger.debug("Click count: %d", self._click_count)
+            # Device sends cumulative click count since experiment start
+            self._device_click_count = int(value)
+            # Calculate per-trial clicks as delta from trial start
+            self._click_count = self._device_click_count - self._trial_start_click_count
+            logger.debug("Click: device=%d, trial_start=%d, per_trial=%d",
+                        self._device_click_count, self._trial_start_click_count, self._click_count)
             self._create_background_task(self._dispatch_data_event('click', {
                 'count': self._click_count
             }))
@@ -251,11 +262,12 @@ class SDRTHandler(BaseDRTHandler):
                 trial_number = int(parts[1])
                 reaction_time = int(parts[2])
 
+                # Don't capture clicks here - capture at logging time when stimulus turns off
+                # This ensures we get the click count AFTER all click messages have arrived
                 self._buffered_trial_data = {
                     'timestamp': timestamp,
                     'trial_number': trial_number,
                     'reaction_time': reaction_time,
-                    'clicks': self._click_count,
                 }
 
                 logger.debug("Trial data: %s", self._buffered_trial_data)
@@ -284,10 +296,18 @@ class SDRTHandler(BaseDRTHandler):
             state = int(value)
             self._stimulus_on = state == 1
 
-            # If stimulus turned off and we have buffered data, log it
-            if not self._stimulus_on and self._buffered_trial_data:
-                self._log_trial_data(self._buffered_trial_data)
-                self._buffered_trial_data = None
+            if self._stimulus_on:
+                # Stimulus ON: start of new trial
+                # Save baseline and reset per-trial count
+                self._trial_start_click_count = self._device_click_count
+                self._click_count = 0
+                logger.debug("Trial start: baseline click count = %d", self._trial_start_click_count)
+            else:
+                # Stimulus OFF: log trial data if we have it
+                # This captures clicks from stimulus ON to stimulus OFF
+                if self._buffered_trial_data:
+                    self._log_trial_data(self._buffered_trial_data)
+                    self._buffered_trial_data = None
 
             logger.debug("Stimulus state: %s", "ON" if self._stimulus_on else "OFF")
             self._create_background_task(self._dispatch_data_event('stimulus', {
@@ -349,7 +369,7 @@ class SDRTHandler(BaseDRTHandler):
 
             # Generate filename
             port_clean = self.device_id.lstrip('/').replace('/', '_').lower()
-            filename = f"sDRT_{port_clean}.csv"
+            filename = f"DRT_{port_clean}.csv"
             filepath = self.output_dir / filename
 
             # Prepare data line
@@ -359,9 +379,9 @@ class SDRTHandler(BaseDRTHandler):
             clicks = data.get('clicks', self._click_count)
             reaction_time = data.get('reaction_time', RT_TIMEOUT_VALUE)
 
-            device_id = f"sDRT_{port_clean}"
-            # Use trial_label if set, otherwise fall back to trial number
-            label = self._trial_label if self._trial_label else str(trial_number)
+            device_id = f"DRT_{port_clean}"
+            # Use trial_label if set, otherwise NA
+            label = self._trial_label if self._trial_label else "NA"
 
             # CSV line: Device ID, Label, Unix time, MSecs, Trial#, Responses, RT
             csv_line = f"{device_id},{label},{unix_time},{device_timestamp},{trial_number},{clicks},{reaction_time}"
@@ -373,8 +393,8 @@ class SDRTHandler(BaseDRTHandler):
                     f.write(self._get_csv_header() + '\n')
                 f.write(csv_line + '\n')
 
-            logger.debug("Logged trial data to %s", filepath)
-            self._click_count = 0
+            logger.debug("Logged trial data to %s (clicks=%d)", filepath, clicks)
+            # Note: click count reset happens in _handle_stimulus when next trial starts
             self._create_background_task(self._dispatch_data_event('trial_logged', {
                 'filepath': str(filepath),
                 'trial_number': trial_number,

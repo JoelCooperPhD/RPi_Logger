@@ -304,6 +304,8 @@ class DRTTkinterGUI:
                 pass
 
         # Handle trial data updates
+        # 'trial' = sDRT (includes RT, updates plot for hits and misses)
+        # 'data' = wDRT end-of-trial packet (only plot misses - hits handled by 'reaction_time')
         elif data_type == 'trial' or data_type == 'data':
             trial_num = data.get('trial_number')
             rt = data.get('reaction_time')
@@ -315,14 +317,21 @@ class DRTTkinterGUI:
             if clicks is not None and self._click_count:
                 self._click_count.set(str(clicks))
             if rt is not None:
+                is_hit = rt >= 0
                 if self._rt_var:
-                    if rt >= 0:
+                    if is_hit:
                         self._rt_var.set(f"{rt:.0f}")
                     else:
                         self._rt_var.set("Miss")
+                # Update plotter:
+                # - sDRT 'trial': plot all (hits and misses)
+                # - wDRT 'data': only plot misses (hits already plotted via 'reaction_time')
                 if self._plotter:
-                    is_hit = rt >= 0
-                    self._plotter.update_trial(port, abs(rt), is_hit=is_hit)
+                    if data_type == 'trial':
+                        self._plotter.update_trial(port, abs(rt), is_hit=is_hit)
+                    elif data_type == 'data' and not is_hit:
+                        # wDRT miss - plot with timeout value
+                        self._plotter.update_trial(port, abs(rt), is_hit=False)
             if battery is not None and self._battery_var:
                 self._battery_var.set(f"{int(battery)}%")
 
@@ -341,14 +350,33 @@ class DRTTkinterGUI:
             if percent is not None and self._battery_var:
                 self._battery_var.set(f"{int(percent)}%")
 
-        # Handle reaction time updates
-        elif data_type == 'reaction_time':
-            rt = data.get('reaction_time')
-            if rt is not None and self._rt_var:
-                if rt >= 0:
-                    self._rt_var.set(f"{rt:.0f}")
+        # Handle experiment state updates (wDRT sends exp> when experiment starts/stops)
+        elif data_type == 'experiment':
+            running = data.get('running', False)
+            if self._plotter:
+                if running:
+                    # New experiment = new session, clear and start fresh
+                    self._plotter.start_session()
+                    self._plotter.start_recording()
                 else:
-                    self._rt_var.set("Miss")
+                    self._plotter.stop_recording()
+
+        # Handle reaction time updates (wDRT sends RT immediately on response)
+        # Note: wDRT 'rt>' response is in microseconds, convert to milliseconds
+        elif data_type == 'reaction_time':
+            rt_us = data.get('reaction_time')
+            if rt_us is not None:
+                # Convert microseconds to milliseconds
+                rt_ms = rt_us / 1000.0
+                if self._rt_var:
+                    if rt_us >= 0:
+                        self._rt_var.set(f"{rt_ms:.0f}")
+                    else:
+                        self._rt_var.set("Miss")
+                # Update plotter immediately when RT is received
+                if self._plotter:
+                    is_hit = rt_us >= 0
+                    self._plotter.update_trial(port, abs(rt_ms), is_hit=is_hit)
 
     def on_xbee_dongle_status_change(self, status: str, detail: str) -> None:
         """Handle XBee dongle status changes (placeholder for compatibility)."""

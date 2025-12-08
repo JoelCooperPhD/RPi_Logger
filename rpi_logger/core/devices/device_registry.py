@@ -41,7 +41,7 @@ class DeviceType(Enum):
     WVOG_WIRELESS = "wVOG_Wireless"
 
     # DRT devices
-    SDRT = "sDRT"
+    SDRT = "DRT"
     WDRT_USB = "wDRT_USB"
     WDRT_WIRELESS = "wDRT_Wireless"
 

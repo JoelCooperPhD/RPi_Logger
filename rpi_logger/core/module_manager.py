@@ -68,10 +68,6 @@ class ModuleManager:
         # Locks for process operations
         self._process_locks: Dict[str, asyncio.Lock] = {}
 
-        # Legacy compatibility (deprecated - use state_manager instead)
-        self._legacy_state_changing: Dict[str, bool] = {}
-        self._legacy_callbacks: List[Callable] = []
-
         # Track forcefully stopped modules
         self.forcefully_stopped_modules: Set[str] = set()
 
@@ -926,15 +922,3 @@ class ModuleManager:
             self.state_manager._desired_state[name] = (
                 DesiredState.ENABLED if enabled else DesiredState.DISABLED
             )
-
-    @property
-    def module_state_changing(self) -> Dict[str, bool]:
-        """Legacy property for state changing check."""
-        return {
-            name: self.is_module_state_changing(name)
-            for name in self.state_manager.get_registered_modules()
-        }
-
-    def register_state_change_callback(self, callback: Callable) -> None:
-        """Legacy: Register a callback for state changes."""
-        self._legacy_callbacks.append(callback)

@@ -172,7 +172,7 @@ class DRTPlotter:
             self._animate,
             init_func=self._init_animation,
             interval=10,
-            blit=True,
+            blit=False,  # Disabled to allow clear_all() to work properly
             cache_frame_data=False
         )
 
@@ -292,8 +292,16 @@ class DRTPlotter:
         if val is not None:
             abs_val = abs(val)
             if abs_val >= self._rt_y_max:
-                self._ax_rt.set_yticks(np.arange(0, abs_val, 1))
-                self._ax_rt.set_ylim(self._rt_y_min - 0.3, abs_val * 1.2)
+                # Choose sensible tick interval based on value range
+                new_max = abs_val * 1.2
+                if new_max <= 1.0:
+                    tick_interval = 0.25
+                elif new_max <= 2.0:
+                    tick_interval = 0.5
+                else:
+                    tick_interval = 1.0
+                self._ax_rt.set_yticks(np.arange(0, new_max + tick_interval, tick_interval))
+                self._ax_rt.set_ylim(self._rt_y_min - 0.1, new_max)
                 self._rt_y_max = abs_val
                 self._ax_rt.figure.canvas.draw_idle()
 
@@ -420,6 +428,7 @@ class DRTPlotter:
             self._state_xy[unit_id][0].set_ydata(self._state_array[unit_id])
 
         for unit_id in self._rt_array.keys():
+            self._rt_now[unit_id] = None  # Clear pending RT values
             self._rt_array[unit_id]['hit'][:] = np.nan
             self._rt_array[unit_id]['miss'][:] = np.nan
             self._rt_index[unit_id] = 0
@@ -430,7 +439,7 @@ class DRTPlotter:
         self._rt_y_max = 1
         self._ax_rt.set_yticks(np.arange(0, 2, 1))
         self._ax_rt.set_ylim(-0.2, 1.2)
-        self._ax_rt.figure.canvas.draw_idle()
+        self._fig.canvas.draw_idle()
 
     @property
     def recording(self) -> bool:

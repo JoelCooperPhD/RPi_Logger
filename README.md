@@ -19,7 +19,7 @@ The RPi Logger is designed for in-vehicle data collection with precise synchroni
 - **Multi-Camera Video**: Up to 2x cameras (tested with IMX296 Global Shutter) at 1-60 FPS
 - **Multi-Channel Audio**: Multiple USB microphones with 8-192 kHz sampling
 - **Eye Tracking**: Pupil Labs device integration with gaze data and scene video
-- **sDRT Devices**: USB serial communication for detection response tasks
+- **DRT Devices**: USB serial communication for detection response tasks
 - **Hot-Plug Support**: Automatic device detection and reconnection
 
 ### Recording Capabilities
@@ -146,7 +146,7 @@ python3 rpi_logger/modules/Notes/main_notes.py --mode gui
 ```
 
 ### DRT (Detection Response Task)
-Multi-device sDRT (Simple Detection Response Task) support with USB serial communication.
+Multi-device DRT (Detection Response Task) support with USB serial communication.
 
 **Key Features:**
 - Automatic USB device detection (VID/PID filtering)
@@ -286,7 +286,7 @@ data/
     │   └── session_notes.csv
     ├── DRT/
     │   ├── session.log
-    │   └── sDRT_dev_ttyACM0_20251024_120000.csv
+    │   └── DRT_dev_ttyACM0_20251024_120000.csv
     └── VOG/
         ├── session.log
         └── 20251024_120000_VOG_trial001_dev_ttyacm1.csv
