@@ -36,6 +36,9 @@ class WDRTBaseHandler(BaseDRTHandler):
     transport type and device type enum.
     """
 
+    # Battery polling interval in seconds (when not recording)
+    BATTERY_POLL_INTERVAL = 10.0
+
     def __init__(
         self,
         device_id: str,
@@ -49,11 +52,50 @@ class WDRTBaseHandler(BaseDRTHandler):
         self._battery_percent: Optional[int] = None
         self._device_utc: Optional[int] = None
         self._rtc_synced = False
+        self._battery_poll_task: Optional[asyncio.Task] = None
 
     @property
     def battery_percent(self) -> Optional[int]:
         """Return the last known battery percentage."""
         return self._battery_percent
+
+    # =========================================================================
+    # Battery Polling
+    # =========================================================================
+
+    def _start_battery_polling(self) -> None:
+        """Start background battery polling task."""
+        if self._battery_poll_task is not None and not self._battery_poll_task.done():
+            return  # Already running
+
+        self._battery_poll_task = asyncio.create_task(
+            self._battery_poll_loop(),
+            name=f"battery_poll_{self.device_id}"
+        )
+        logger.debug("Started battery polling for %s", self.device_id)
+
+    def _stop_battery_polling(self) -> None:
+        """Stop background battery polling task."""
+        if self._battery_poll_task is not None:
+            self._battery_poll_task.cancel()
+            self._battery_poll_task = None
+            logger.debug("Stopped battery polling for %s", self.device_id)
+
+    async def _battery_poll_loop(self) -> None:
+        """Background loop that polls battery every BATTERY_POLL_INTERVAL seconds."""
+        try:
+            while self._running and not self._recording:
+                await self.get_battery()
+                await asyncio.sleep(self.BATTERY_POLL_INTERVAL)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("Error in battery poll loop for %s: %s", self.device_id, e)
+
+    async def stop(self) -> None:
+        """Stop the handler and clean up battery polling."""
+        self._stop_battery_polling()
+        await super().stop()
 
     async def send_command(self, command: str, value: Optional[str] = None) -> bool:
         if command not in WDRT_COMMANDS:
@@ -66,6 +108,9 @@ class WDRTBaseHandler(BaseDRTHandler):
         return await self.transport.write_line(full_cmd, WDRT_LINE_ENDING)
 
     async def start_experiment(self) -> bool:
+        # Stop battery polling during recording
+        self._stop_battery_polling()
+
         self._click_count = 0
         self._buffered_trial_data = None
         self._recording = True
@@ -73,7 +118,13 @@ class WDRTBaseHandler(BaseDRTHandler):
 
     async def stop_experiment(self) -> bool:
         self._recording = False
-        return await self.send_command('stop')
+        result = await self.send_command('stop')
+
+        # Resume battery polling after recording stops
+        if self._running:
+            self._start_battery_polling()
+
+        return result
 
     async def set_stimulus(self, on: bool) -> bool:
         command = 'stim_on' if on else 'stim_off'

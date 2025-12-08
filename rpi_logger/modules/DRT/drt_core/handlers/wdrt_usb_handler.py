@@ -28,12 +28,18 @@ class WDRTUSBHandler(WDRTBaseHandler):
         return DRTDeviceType.WDRT_USB
 
     async def start(self) -> None:
-        """Start the handler and sync RTC on first connection."""
+        """Start the handler, reset device, sync RTC, and begin battery polling."""
         await super().start()
+
+        # Stop any running experiment from a previous session
+        await self.send_command('stop')
 
         if not self._rtc_synced:
             await self.sync_rtc()
             self._rtc_synced = True
+
+        # Start background battery polling
+        self._start_battery_polling()
 
     def _format_device_id_for_csv(self) -> str:
         port_clean = self.device_id.lstrip('/').replace('/', '_').lower()

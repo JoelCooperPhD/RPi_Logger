@@ -182,9 +182,9 @@ class DRTTkinterGUI:
         self._rt_var = tk.StringVar(value="-")
         self._click_count = tk.StringVar(value="0")
 
-        # Battery var for wDRT devices
-        if device_type in (DRTDeviceType.WDRT_USB, DRTDeviceType.WDRT_WIRELESS):
-            self._battery_var = tk.StringVar(value="---%")
+        # Always create battery var - will be populated for wDRT devices
+        # Shows "---%" until battery data is received (or stays hidden for sDRT)
+        self._battery_var = tk.StringVar(value="---%")
 
         self._stats_initialized = True
 
@@ -304,8 +304,9 @@ class DRTTkinterGUI:
                 pass
 
         # Handle trial data updates
-        # 'trial' = sDRT (includes RT, updates plot for hits and misses)
-        # 'data' = wDRT end-of-trial packet (only plot misses - hits handled by 'reaction_time')
+        # 'trial' = sDRT (RT in milliseconds) - plot all RTs here
+        # 'data' = wDRT end-of-trial packet (RT in milliseconds) - only plot MISSES here
+        #          (wDRT hits are plotted immediately by 'reaction_time' event from rt>)
         elif data_type == 'trial' or data_type == 'data':
             trial_num = data.get('trial_number')
             rt = data.get('reaction_time')
@@ -318,20 +319,22 @@ class DRTTkinterGUI:
                 self._click_count.set(str(clicks))
             if rt is not None:
                 is_hit = rt >= 0
-                if self._rt_var:
-                    if is_hit:
-                        self._rt_var.set(f"{rt:.0f}")
-                    else:
-                        self._rt_var.set("Miss")
-                # Update plotter:
-                # - sDRT 'trial': plot all (hits and misses)
-                # - wDRT 'data': only plot misses (hits already plotted via 'reaction_time')
-                if self._plotter:
-                    if data_type == 'trial':
-                        self._plotter.update_trial(port, abs(rt), is_hit=is_hit)
-                    elif data_type == 'data' and not is_hit:
-                        # wDRT miss - plot with timeout value
-                        self._plotter.update_trial(port, abs(rt), is_hit=False)
+                # Both sDRT 'trial' and wDRT 'data' packets have RT in MILLISECONDS
+                rt_ms = rt if is_hit else 0
+
+                if data_type == 'trial':
+                    # sDRT: Always update display and plot
+                    if self._rt_var:
+                        self._rt_var.set(f"{rt_ms:.0f}" if is_hit else "Miss")
+                    if self._plotter:
+                        self._plotter.update_trial(port, rt_ms, is_hit=is_hit)
+                else:
+                    # wDRT 'data': Only plot MISSES (hits already plotted by rt> message)
+                    if not is_hit:
+                        if self._rt_var:
+                            self._rt_var.set("Miss")
+                        if self._plotter:
+                            self._plotter.update_trial(port, 0, is_hit=False)
             if battery is not None and self._battery_var:
                 self._battery_var.set(f"{int(battery)}%")
 
@@ -361,22 +364,20 @@ class DRTTkinterGUI:
                 else:
                     self._plotter.stop_recording()
 
-        # Handle reaction time updates (wDRT sends RT immediately on response)
-        # Note: wDRT 'rt>' response is in microseconds, convert to milliseconds
+        # Handle reaction time updates (real-time RT feedback from wDRT rt> messages)
+        # Note: wDRT rt> sends RT in MICROSECONDS - must convert to milliseconds
+        # rt> is ONLY sent for hits (when user responds), not for misses
+        # Plot immediately here - the 'data' event will NOT re-plot hits
         elif data_type == 'reaction_time':
             rt_us = data.get('reaction_time')
             if rt_us is not None:
-                # Convert microseconds to milliseconds
+                # rt> is only sent for hits, so always treat as hit
                 rt_ms = rt_us / 1000.0
                 if self._rt_var:
-                    if rt_us >= 0:
-                        self._rt_var.set(f"{rt_ms:.0f}")
-                    else:
-                        self._rt_var.set("Miss")
-                # Update plotter immediately when RT is received
+                    self._rt_var.set(f"{rt_ms:.0f}")
+                # Plot immediately on button press
                 if self._plotter:
-                    is_hit = rt_us >= 0
-                    self._plotter.update_trial(port, abs(rt_ms), is_hit=is_hit)
+                    self._plotter.update_trial(port, rt_ms, is_hit=True)
 
     def on_xbee_dongle_status_change(self, status: str, detail: str) -> None:
         """Handle XBee dongle status changes (placeholder for compatibility)."""
@@ -658,6 +659,7 @@ class DRTView:
         self._active_session_dir: Optional[Path] = None
         self._session_visual_active = False
         self._device_menu: Optional[tk.Menu] = None
+        self._battery_frame: Optional[ttk.Frame] = None
 
         self._bridge.mount(self._build_embedded_gui)
         self._stub_view.set_preview_title("DRT Controls")
@@ -722,9 +724,8 @@ class DRTView:
             row_frame = ttk.Frame(parent)
             row_frame.pack(fill=tk.X, expand=True, padx=4, pady=2)
 
-            # Configure equal column weights for spacing
-            num_cols = 4 if self.gui._battery_var else 3
-            for i in range(num_cols):
+            # Configure column weights for spacing (battery column added dynamically)
+            for i in range(3):
                 row_frame.columnconfigure(i, weight=1)
 
             # Trial Number
@@ -745,12 +746,13 @@ class DRTView:
             ttk.Label(resp_frame, text="Responses:", style='TLabel').pack(side=tk.LEFT)
             ttk.Label(resp_frame, textvariable=self.gui._click_count, style='TLabel', width=4).pack(side=tk.LEFT, padx=(4, 0))
 
-            # Battery (for wDRT devices)
+            # Battery (for wDRT devices only - initially hidden)
             if self.gui._battery_var:
                 batt_frame = ttk.Frame(row_frame)
-                batt_frame.grid(row=0, column=3, sticky="nsew", padx=4)
+                # Don't grid it yet - will be shown when wDRT connects
                 ttk.Label(batt_frame, text="Battery:", style='TLabel').pack(side=tk.LEFT)
                 ttk.Label(batt_frame, textvariable=self.gui._battery_var, style='TLabel', width=5).pack(side=tk.LEFT, padx=(4, 0))
+                self._battery_frame = batt_frame
 
         self._stub_view.build_io_stub_content(builder)
 
@@ -798,6 +800,23 @@ class DRTView:
             self._device_menu.entryconfigure("Configure...", state=state)
         except tk.TclError as e:
             self.logger.debug("Failed to update device menu state: %s", e)
+
+    def _update_battery_display(self, device_type: DRTDeviceType = None) -> None:
+        """Show/hide battery display based on device type (wDRT only)."""
+        if not self._battery_frame:
+            return
+
+        is_wireless = device_type and 'wireless' in device_type.value.lower()
+
+        try:
+            if is_wireless:
+                # Show battery frame for wDRT
+                self._battery_frame.grid(row=0, column=3, sticky="nsew", padx=4)
+            else:
+                # Hide battery frame for sDRT or no device
+                self._battery_frame.grid_remove()
+        except tk.TclError as e:
+            self.logger.debug("Failed to update battery display: %s", e)
 
     def _on_lens_on(self) -> None:
         """Handle Lens: ON menu command."""
@@ -850,12 +869,14 @@ class DRTView:
             return
         self.call_in_gui(self.gui.on_device_connected, device_id, device_type)
         self.call_in_gui(self._update_device_menu_state)
+        self.call_in_gui(self._update_battery_display, device_type)
 
     def on_device_disconnected(self, device_id: str, device_type: DRTDeviceType = None) -> None:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_disconnected, device_id, device_type)
         self.call_in_gui(self._update_device_menu_state)
+        self.call_in_gui(self._update_battery_display, None)  # Hide battery on disconnect
 
     def on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if not self.gui:

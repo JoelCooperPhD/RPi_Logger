@@ -1145,12 +1145,9 @@ class LoggerSystem:
         """
         Route incoming XBee data to the appropriate module.
 
-        Called by the connection manager when XBee data is received
-        for a connected device.
-
-        Note: This is the legacy async routing mechanism. The preferred approach
-        is for modules to use get_wireless_transport() to get an XBeeTransport
-        that directly receives data via the registered handler.
+        Called when XBee data is received for a connected wireless device.
+        Data is forwarded to the module subprocess via the command protocol,
+        where XBeeProxyTransport buffers it for the device handler.
         """
         # Find which module owns this device
         device = self.device_system.get_device(node_id)
@@ -1158,33 +1155,22 @@ class LoggerSystem:
             self.logger.debug("XBee data for unknown device: %s", node_id)
             return
 
-        module_id = device.module_id
-        if not module_id:
-            self.logger.debug("XBee device %s has no module_id", node_id)
+        # For multi-instance modules, use the device-to-instance mapping
+        instance_id = self._get_instance_for_device(node_id)
+        if not instance_id:
+            # Fall back to module_id for single-instance modules
+            instance_id = device.module_id
+
+        if not instance_id:
+            self.logger.debug("XBee device %s has no module_id or instance", node_id)
             return
 
         # Get the module process and forward the data
-        module = self.module_manager.get_module(module_id)
+        module = self.module_manager.get_module(instance_id)
         if module and module.is_running():
             await module.send_xbee_data(node_id, data)
         else:
-            self.logger.debug("Module %s not running for XBee device %s", module_id, node_id)
-
-    def get_wireless_transport(self, node_id: str):
-        """
-        Get the wireless transport for a device.
-
-        Modules can call this method to get an XBeeTransport for a wireless device.
-        The transport is created by DeviceSystem when the device is
-        connected and registered for message routing.
-
-        Args:
-            node_id: The wireless device's node ID (e.g., "wVOG_01")
-
-        Returns:
-            XBeeTransport if found, None otherwise
-        """
-        return self.device_system.get_wireless_transport(node_id)
+            self.logger.debug("Module %s not running for XBee device %s", instance_id, node_id)
 
     async def _send_xbee_from_module(self, node_id: str, data: bytes) -> bool:
         """

@@ -584,10 +584,8 @@ class XBeeManager:
                     handler(data)
                 except Exception as e:
                     logger.error(f"Error in data handler for {node_id}: {e}")
-            else:
-                logger.debug(f"No handler registered for {node_id}, message dropped")
 
-            # Also route to async callback if set (for legacy/monitoring purposes)
+            # Route to async callback for module forwarding
             if self.on_data_received and self._loop:
                 def schedule_callback(n=node_id, d=data):
                     if self._loop.is_running():

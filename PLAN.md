@@ -217,42 +217,47 @@ class TrialData:
 ```
 
 #### Step 1.2: Create DRTProtocol ABC
-**File**: `drt_core/protocols/base_protocol.py` (new)
+**File**: `drt_core/protocols/base_protocol.py` (new greenfield file)
 
-Define abstract interface:
-- `commands` property
-- `responses` property
-- `line_ending` property
-- `csv_header` property
-- `rt_to_milliseconds(value: int) -> float`
-- `parse_response(line: str) -> Tuple[str, str]`
+Define abstract interface that **PRESERVES device-specific behavior**:
+- `commands` property - exact command strings as firmware expects
+- `responses` property - exact response prefixes as firmware sends
+- `line_ending` property - device-specific line ending
+- `csv_header` property - **MUST match existing format for data compatibility**
+- `rt_to_milliseconds(value: int) -> float` - unit conversion for internal use only
+- `parse_response(line: str) -> Tuple[str, str]` - parse device-specific format
 - `parse_trial_data(response_type: str, value: str, context: dict) -> Optional[TrialData]`
-- `format_csv_line(trial_data: TrialData, device_id: str, label: str) -> str`
+- `format_csv_line(trial_data: TrialData, device_id: str, label: str) -> str` - **MUST match existing CSV format**
 
 #### Step 1.3: Implement SDRTProtocol
-**File**: `drt_core/protocols/sdrt_protocol.py` (new)
+**File**: `drt_core/protocols/sdrt_protocol.py` (new greenfield file)
 
-Key implementations:
-- RT passthrough (already in ms)
-- Cumulative click delta tracking via context
-- 7-field CSV format
-- Trial data parsing from `trl>` response
+Key implementations that **PRESERVE all sDRT behavior**:
+- Commands: `exp_start`, `exp_stop`, `stim_on`, `stim_off`, etc. (exact strings)
+- Line ending: `\n\r` (as firmware expects)
+- RT passthrough: device sends ms, returns as-is
+- Cumulative click delta tracking via context (preserves firmware behavior)
+- CSV format: **Exactly 7 fields** matching current `SDRT_CSV_HEADER`
+- Trial parsing: `trl>ts,trial,rt` format exactly as device sends
 
 #### Step 1.4: Implement WDRTProtocol
-**File**: `drt_core/protocols/wdrt_protocol.py` (new)
+**File**: `drt_core/protocols/wdrt_protocol.py` (new greenfield file)
 
-Key implementations:
-- RT conversion from μs to ms (`value / 1000.0`)
-- Simple click assignment
-- 9-field CSV format (with battery, device_utc)
-- Trial data parsing from `dta>` response
+Key implementations that **PRESERVE all wDRT behavior**:
+- Commands: `trl>1`, `trl>0`, `dev>1`, `dev>0`, etc. (exact strings)
+- Line ending: `\n` (as firmware expects)
+- RT conversion: device sends μs, convert to ms for internal use only
+- Per-event click count (preserves firmware behavior)
+- CSV format: **Exactly 9 fields** matching current `WDRT_CSV_HEADER`
+- Trial parsing: `dta>blk,trl,clk,rt,bat,utc` format exactly as device sends
+- Extra responses: `bty>`, `exp>`, `rt>` (wDRT-specific events preserved)
 
 ### Phase 2: Unified Handler Implementation
 
 #### Step 2.1: Create unified DRTHandler
-**File**: `drt_core/handlers/drt_handler.py` (new)
+**File**: `drt_core/handlers/drt_handler.py` (new greenfield file)
 
-This becomes the single implementation that handles:
+This is a NEW handler built alongside existing code. It delegates device-specific behavior to the protocol:
 - `send_command()` - uses `protocol.commands` and `protocol.line_ending`
 - `_process_response()` - unified dispatcher using `protocol.responses`
 - `_log_trial_data()` - uses `protocol.format_csv_line()`
@@ -303,22 +308,26 @@ class DRTHandler(BaseDRTHandler):
 ```
 
 #### Step 2.2: Create WDRTHandler subclass
-**File**: `drt_core/handlers/wdrt_handler.py` (new)
+**File**: `drt_core/handlers/wdrt_handler.py` (new greenfield file)
 
-Thin subclass that adds:
-- `battery_percent` property
-- `sync_rtc()` method
-- `get_battery()` method
-- Handling for `experiment` events (session control)
+Thin subclass that adds wDRT-specific features (real hardware differences):
+- `battery_percent` property - wDRT has battery, sDRT doesn't
+- `sync_rtc()` method - wDRT has RTC, sDRT doesn't
+- `get_battery()` method - wDRT-specific command
+- `_handle_experiment()` - wDRT devices can autonomously start/stop
+- `_handle_reaction_time()` - wDRT sends RT immediately (sDRT sends with trial)
 
 #### Step 2.3: Update WDRTUSBHandler and WDRTWirelessHandler
-Modify to extend new `WDRTHandler`:
-- WDRTUSBHandler: Auto RTC sync on start
-- WDRTWirelessHandler: Longer battery delay, node_id property
+**Files**: Modify existing thin subclasses to extend new `WDRTHandler`
+- WDRTUSBHandler: Auto RTC sync on start (USB can sync immediately)
+- WDRTWirelessHandler: Longer battery poll delay (wireless latency), node_id property
 
-#### Step 2.4: Deprecate/Remove old handlers
-- Remove `SDRTHandler` (replaced by `DRTHandler` + `SDRTProtocol`)
-- Remove `WDRTBaseHandler` (replaced by `WDRTHandler` + `WDRTProtocol`)
+#### Step 2.4: Archive old handlers (DO NOT DELETE YET)
+During transition period, keep for A/B testing and rollback:
+- Rename `sdrt_handler.py` → `sdrt_handler_legacy.py`
+- Rename `wdrt_base_handler.py` → `wdrt_base_handler_legacy.py`
+- Runtime config flag to switch between legacy/new handlers
+- Delete only after full validation with real hardware
 
 ### Phase 3: View Simplification
 
@@ -392,32 +401,32 @@ def _create_handler(self, device_type: DRTDeviceType, device_id: str, transport)
 
 ## File Changes Summary
 
-### New Files
+### New Greenfield Files (built alongside existing code)
 | File | Purpose | Est. Lines |
 |------|---------|------------|
-| `drt_core/data_types.py` | TrialData, NormalizedEvent dataclasses | ~50 |
+| `drt_core/data_types.py` | TrialData dataclass (internal use only) | ~50 |
 | `drt_core/protocols/__init__.py` | Protocol exports | ~10 |
 | `drt_core/protocols/base_protocol.py` | DRTProtocol ABC | ~80 |
-| `drt_core/protocols/sdrt_protocol.py` | sDRT protocol implementation | ~120 |
-| `drt_core/protocols/wdrt_protocol.py` | wDRT protocol implementation | ~100 |
-| `drt_core/handlers/drt_handler.py` | Unified handler | ~250 |
-| `drt_core/handlers/wdrt_handler.py` | wDRT-specific additions | ~60 |
+| `drt_core/protocols/sdrt_protocol.py` | sDRT protocol (**preserves all sDRT behavior**) | ~120 |
+| `drt_core/protocols/wdrt_protocol.py` | wDRT protocol (**preserves all wDRT behavior**) | ~100 |
+| `drt_core/handlers/drt_handler.py` | Unified handler (shared orchestration only) | ~250 |
+| `drt_core/handlers/wdrt_handler.py` | wDRT-specific features (battery, RTC, etc.) | ~60 |
 
-### Modified Files
+### Modified Files (after greenfield validated)
 | File | Changes |
 |------|---------|
 | `drt_core/handlers/__init__.py` | Export new handlers |
 | `drt_core/handlers/wdrt_usb_handler.py` | Extend WDRTHandler instead of WDRTBaseHandler |
 | `drt_core/handlers/wdrt_wireless_handler.py` | Extend WDRTHandler instead of WDRTBaseHandler |
-| `drt/view.py` | Simplify on_device_data(), remove config branching |
-| `drt/runtime.py` | Update _create_handler() |
-| `drt_core/protocols.py` | Keep constants, remove from handlers |
+| `drt/view.py` | Simplify on_device_data() to use normalized events |
+| `drt/runtime.py` | Update _create_handler(), add legacy/new toggle |
+| `drt_core/protocols.py` | Keep constants (referenced by protocol classes) |
 
-### Deleted Files
-| File | Reason |
-|------|--------|
-| `drt_core/handlers/sdrt_handler.py` | Replaced by DRTHandler + SDRTProtocol |
-| `drt_core/handlers/wdrt_base_handler.py` | Replaced by WDRTHandler + WDRTProtocol |
+### Archived Files (kept for rollback until validated)
+| File | New Name | Reason |
+|------|----------|--------|
+| `drt_core/handlers/sdrt_handler.py` | `sdrt_handler_legacy.py` | Keep for A/B testing |
+| `drt_core/handlers/wdrt_base_handler.py` | `wdrt_base_handler_legacy.py` | Keep for A/B testing |
 
 ---
 
@@ -432,25 +441,36 @@ The refactoring maintains full backward compatibility:
 
 ### Testing Checkpoints
 
-1. **After Phase 1**: Unit test protocol classes in isolation
-   - Verify RT unit conversion
-   - Verify CSV line formatting
-   - Verify response parsing
+**CRITICAL**: Every test must verify device communication and data output are BYTE-FOR-BYTE IDENTICAL to existing code.
 
-2. **After Phase 2**: Integration test handlers
-   - Connect real sDRT device, verify full trial lifecycle
-   - Connect real wDRT USB device, verify full trial lifecycle
-   - Verify CSV files match previous format exactly
+1. **After Phase 1**: Unit test protocol classes in isolation
+   - **Command strings**: Verify exact bytes sent to device match legacy handler
+   - **Response parsing**: Feed captured device output, verify identical parsing
+   - **CSV format**: Generate lines, diff against golden files from existing code
+   - **RT units**: sDRT passes through ms, wDRT converts μs→ms correctly
+
+2. **After Phase 2**: Integration test handlers with REAL HARDWARE
+   - **sDRT device**:
+     - Capture serial traffic, byte-compare to legacy handler
+     - Run full trial, verify CSV output identical
+     - Verify cumulative click tracking matches legacy behavior
+   - **wDRT USB device**:
+     - Capture serial traffic, byte-compare to legacy handler
+     - Run full trial, verify CSV output identical
+     - Verify battery/RTC features work
+   - **A/B test**: Run legacy and new handlers side-by-side, diff all outputs
 
 3. **After Phase 3**: End-to-end GUI testing
-   - Verify plotter updates correctly for both devices
-   - Verify config dialog works for both devices
-   - Verify all UI elements update correctly
+   - Verify plotter updates correctly for both device types
+   - Verify RT displayed in correct units (always ms in UI)
+   - Verify config dialog works for both device types
+   - Verify all UI stats update correctly
 
-4. **After Phase 4**: Full system test
+4. **After Phase 4**: Full regression + data analysis validation
    - Multi-device scenarios
    - Recording start/stop cycles
    - Session directory changes
+   - **Run existing analysis scripts on new CSV output** - must work unchanged
 
 ---
 

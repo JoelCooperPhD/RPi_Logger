@@ -89,6 +89,7 @@ WDRT_RESPONSES: Dict[str, str] = {
     'rt': 'reaction_time', # Reaction time
     'clk': 'click',        # Click/response detected
     'dta': 'data',         # Data packet (combined trial data)
+    'rtc': 'rtc',          # RTC sync response
 }
 
 # wDRT command line terminator

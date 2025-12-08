@@ -329,69 +329,6 @@ class DeviceSystem:
         return wrapper
 
     # =========================================================================
-    # Scanner Wiring
-    # =========================================================================
-
-    def wire_usb_scanner(self, scanner: Any) -> None:
-        """Wire the USB scanner to use event-based handling."""
-        scanner.set_device_found_callback(self._adapter.on_usb_device_found)
-        scanner.set_device_lost_callback(self._adapter.on_usb_device_lost)
-        logger.info("Wired USB scanner to DeviceSystem")
-
-    def wire_xbee_manager(self, manager: Any, get_dongle_port: Callable[[], str | None]) -> None:
-        """
-        Wire the XBee manager to use event-based handling.
-
-        Args:
-            manager: The XBee manager instance
-            get_dongle_port: Function to get the current dongle port
-        """
-        async def on_wireless_found(device, remote_xbee):
-            port = get_dongle_port()
-            if port:
-                await self._adapter.on_wireless_device_found(device, port)
-
-        manager.set_wireless_device_found_callback(on_wireless_found)
-        manager.set_wireless_device_lost_callback(self._adapter.on_wireless_device_lost)
-        logger.info("Wired XBee manager to DeviceSystem")
-
-    def wire_network_scanner(self, scanner: Any) -> None:
-        """Wire the network scanner to use event-based handling."""
-        scanner.set_device_found_callback(self._adapter.on_network_device_found)
-        scanner.set_device_lost_callback(self._adapter.on_network_device_lost)
-        logger.info("Wired network scanner to DeviceSystem")
-
-    def wire_audio_scanner(self, scanner: Any) -> None:
-        """Wire the audio scanner to use event-based handling."""
-        scanner.set_device_found_callback(self._adapter.on_audio_device_found)
-        scanner.set_device_lost_callback(self._adapter.on_audio_device_lost)
-        logger.info("Wired audio scanner to DeviceSystem")
-
-    def wire_internal_scanner(self, scanner: Any) -> None:
-        """Wire the internal device scanner to use event-based handling."""
-        scanner.set_device_found_callback(self._adapter.on_internal_device_found)
-        scanner.set_device_lost_callback(self._adapter.on_internal_device_lost)
-        logger.info("Wired internal scanner to DeviceSystem")
-
-    def wire_usb_camera_scanner(self, scanner: Any) -> None:
-        """Wire the USB camera scanner to use event-based handling."""
-        scanner.set_device_found_callback(self._adapter.on_usb_camera_found)
-        scanner.set_device_lost_callback(self._adapter.on_usb_camera_lost)
-        logger.info("Wired USB camera scanner to DeviceSystem")
-
-    def wire_csi_scanner(self, scanner: Any) -> None:
-        """Wire the CSI camera scanner to use event-based handling."""
-        scanner.set_device_found_callback(self._adapter.on_csi_camera_found)
-        scanner.set_device_lost_callback(self._adapter.on_csi_camera_lost)
-        logger.info("Wired CSI scanner to DeviceSystem")
-
-    def wire_uart_scanner(self, scanner: Any) -> None:
-        """Wire the UART scanner to use event-based handling."""
-        scanner.set_device_found_callback(self._adapter.on_uart_device_found)
-        scanner.set_device_lost_callback(self._adapter.on_uart_device_lost)
-        logger.info("Wired UART scanner to DeviceSystem")
-
-    # =========================================================================
     # Connection Management
     # =========================================================================
 
@@ -716,49 +653,6 @@ class DeviceSystem:
     # XBee Dongle Management
     # =========================================================================
 
-    async def initialize_xbee_dongle(self, port: str) -> bool:
-        """
-        Initialize XBee dongle on the given port.
-
-        Returns True if successful, False otherwise.
-        """
-        if not self._xbee_manager:
-            logger.warning("XBee not available")
-            return False
-
-        try:
-            # Wire XBee callbacks for wireless device discovery
-            async def on_wireless_found(device, remote_xbee):
-                await self._adapter.on_wireless_device_found(device, port)
-
-            self._xbee_manager.on_device_discovered = on_wireless_found
-            self._xbee_manager.on_device_lost = self._adapter.on_wireless_device_lost
-            self._xbee_manager.on_dongle_connected = self._handle_xbee_dongle_connected
-            self._xbee_manager.on_dongle_disconnected = self._handle_xbee_dongle_disconnected
-
-            await self._xbee_manager.initialize(port)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to initialize XBee dongle: {e}")
-            return False
-
-    async def shutdown_xbee_dongle(self) -> None:
-        """Shutdown the XBee dongle."""
-        if self._xbee_manager:
-            await self._xbee_manager.stop()
-
-    def _handle_xbee_dongle_connected(self, port: str) -> None:
-        """Handle XBee dongle connected."""
-        if self._on_xbee_dongle_connected:
-            result = self._on_xbee_dongle_connected(port)
-            # Can't await here, application handles async
-
-    def _handle_xbee_dongle_disconnected(self, port: str) -> None:
-        """Handle XBee dongle disconnected."""
-        if self._on_xbee_dongle_disconnected:
-            result = self._on_xbee_dongle_disconnected(port)
-            # Can't await here, application handles async
-
     async def _handle_xbee_dongle_connected_internal(self, port: str) -> None:
         """Internal handler for XBee dongle connected.
 
@@ -862,28 +756,11 @@ class DeviceSystem:
             self._ui_controller.set_xbee_scanning(scanning)
 
     # =========================================================================
-    # XBee Transport (for wireless device communication)
+    # XBee Communication
     # =========================================================================
 
-    async def create_wireless_transport(self, node_id: str) -> Any:
-        """Create a transport for communicating with a wireless device."""
-        if not self._xbee_manager:
-            raise RuntimeError("XBee not available")
-        return await self._xbee_manager.create_transport(node_id)
-
-    def get_wireless_transport(self, node_id: str) -> Any:
-        """Get existing transport for a wireless device."""
-        if not self._xbee_manager:
-            return None
-        return self._xbee_manager.get_transport(node_id)
-
-    async def destroy_wireless_transport(self, node_id: str) -> None:
-        """Destroy transport for a wireless device."""
-        if self._xbee_manager:
-            await self._xbee_manager.destroy_transport(node_id)
-
     async def send_to_wireless_device(self, node_id: str, data: bytes) -> bool:
-        """Send data to a wireless device."""
+        """Send data to a wireless device via XBee."""
         if not self._xbee_manager:
             return False
-        return await self._xbee_manager.send_data(node_id, data)
+        return await self._xbee_manager.send_to_device(node_id, data)

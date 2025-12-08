@@ -5,3 +5,5 @@ device_connected = true
 view.show_io_panel = true
 display_name = DRT
 window_geometry = 320x200
+config_dialog_geometry = +636+1065
+enabled = true
