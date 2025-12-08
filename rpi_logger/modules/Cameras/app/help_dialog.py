@@ -29,7 +29,7 @@ Devices panel. Click Connect to launch a camera window.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
    1. Connect your camera (CSI ribbon cable or USB)
-   2. Enable "Cameras" in the Connections menu (USB or CSI)
+   2. Enable "Cameras" in the Modules menu
    3. The camera appears in the Devices panel when detected
    4. Click Connect to launch this camera's window
    5. Adjust settings if needed via the Controls menu
@@ -199,7 +199,7 @@ Record Settings (for saved video)
 Camera not appearing in Devices panel:
    1. Check ribbon cable connection (CSI cameras)
    2. Verify USB connection (USB cameras)
-   3. Enable the connection type in Connections menu
+   3. Enable "Cameras" in the Modules menu
    4. Run 'libcamera-hello' or 'v4l2-ctl --list-devices'
    5. Check camera is enabled in raspi-config
 

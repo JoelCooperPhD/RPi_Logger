@@ -497,7 +497,7 @@ class MainController:
     # =========================================================================
 
     async def on_usb_scan_toggle(self, enabled: bool) -> None:
-        """Handle USB scanning toggle from Connections menu."""
+        """Handle USB scanning toggle triggered by module enable/disable."""
         try:
             if enabled:
                 self.logger.info("Enabling USB device scanning")

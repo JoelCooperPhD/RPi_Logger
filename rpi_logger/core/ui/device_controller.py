@@ -17,7 +17,7 @@ from typing import Callable
 
 from rpi_logger.core.logging_utils import get_module_logger
 from ..devices.catalog import DeviceCatalog
-from ..devices.selection import DeviceSelectionModel, ConnectionState
+from ..devices.selection import DeviceSelectionModel
 from ..devices.lifecycle import DeviceLifecycleManager, DeviceInfo
 from ..devices.device_registry import DeviceFamily, InterfaceType
 
@@ -27,29 +27,6 @@ logger = get_module_logger("DeviceUIController")
 # =========================================================================
 # UI Data Structures - Simple dataclasses for UI rendering
 # =========================================================================
-
-@dataclass
-class MenuItemData:
-    """
-    UI-ready data for a single menu checkbox item.
-
-    The UI component just renders this and wires the callback.
-    """
-    label: str
-    checked: bool
-    on_toggle: Callable[[bool], None]
-
-
-@dataclass
-class MenuSectionData:
-    """
-    UI-ready data for a menu section (family submenu).
-
-    Contains the section label and its menu items.
-    """
-    label: str
-    items: list[MenuItemData] = field(default_factory=list)
-
 
 @dataclass
 class DeviceRowData:
@@ -92,7 +69,7 @@ class DeviceUIController:
     - Notifies UI components when they need to re-render
 
     UI components should:
-    1. Call get_menu_data() or get_panel_data() to get render data
+    1. Call get_panel_data() to get render data
     2. Register via add_ui_observer() to know when to re-render
     3. Wire callbacks from the data structures to their widgets
     """
@@ -148,64 +125,8 @@ class DeviceUIController:
         self._on_connection_changed = callback
 
     # =========================================================================
-    # Menu Data
+    # Connection Toggle Handling
     # =========================================================================
-
-    def get_menu_data(self) -> list[MenuSectionData]:
-        """
-        Get UI-ready data for the Connections menu.
-
-        Returns menu sections organized by device family, with interface
-        checkboxes as items.
-
-        Structure:
-            VOG
-            ├─ ☑ USB
-            └─ ☑ XBee
-            DRT
-            ├─ ☑ USB
-            └─ ☑ XBee
-            ...
-        """
-        available = self._catalog.get_available_connections()
-        sections: list[MenuSectionData] = []
-
-        for family_meta in self._catalog.families_ordered():
-            family = family_meta.family
-            if family not in available:
-                continue
-
-            # Get interfaces for this family in order
-            interfaces = self._catalog.get_interfaces_for_family(family)
-            if not interfaces:
-                continue
-
-            items: list[MenuItemData] = []
-            for interface in interfaces:
-                is_checked = self._selection.is_connection_enabled(interface, family)
-
-                items.append(MenuItemData(
-                    label=self._catalog.get_interface_display_name(interface),
-                    checked=is_checked,
-                    on_toggle=self._make_connection_toggle_callback(interface, family),
-                ))
-
-            sections.append(MenuSectionData(
-                label=family_meta.display_name,
-                items=items,
-            ))
-
-        return sections
-
-    def _make_connection_toggle_callback(
-        self,
-        interface: InterfaceType,
-        family: DeviceFamily
-    ) -> Callable[[bool], None]:
-        """Create a callback for toggling a connection."""
-        def toggle(enabled: bool) -> None:
-            self._handle_connection_toggle(interface, family, enabled)
-        return toggle
 
     def _handle_connection_toggle(
         self,
