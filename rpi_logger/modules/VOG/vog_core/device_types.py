@@ -32,17 +32,3 @@ def device_type_from_string(type_str: str) -> Optional[VOGDeviceType]:
     elif type_lower == 'wvog_wireless':
         return VOGDeviceType.WVOG_WIRELESS
     return None
-
-
-def device_type_to_legacy_string(device_type: VOGDeviceType) -> str:
-    """Convert VOGDeviceType to legacy string format.
-
-    Args:
-        device_type: The VOGDeviceType enum value
-
-    Returns:
-        Legacy string ('svog' or 'wvog')
-    """
-    if device_type == VOGDeviceType.SVOG:
-        return 'svog'
-    return 'wvog'

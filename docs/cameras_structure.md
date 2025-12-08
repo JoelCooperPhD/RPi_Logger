@@ -23,8 +23,8 @@ Quick map of the Cameras spec files and their roles. Implementation is intention
 
 ## Pipelines and Backends
 - `runtime/preview/*` - preview pipeline and UI worker wiring.
-- `runtime/record/*` - record pipeline, overlays, recorder, CSV logger, FPS tracker; includes long-run segmentation/rotation note.
 - `runtime/backends/*` - USB and Pi (Picamera2) capture backends.
+- `worker/*` - subprocess-based video encoding with overlay rendering and CSV timing logs.
 
 ## Discovery
 - `runtime/discovery/*` - USB/CSI probing, capability normalization, cache use, policy/backoff, and merge logic.

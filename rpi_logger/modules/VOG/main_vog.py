@@ -80,15 +80,6 @@ def parse_args(argv: Optional[list[str]] = None):
         include_window_geometry=True,
     )
 
-    # VOG-specific arguments only
-    parser.add_argument(
-        "--close-delay-ms",
-        dest="close_delay_ms",
-        type=int,
-        default=0,
-        help="Optional auto-close delay for placeholder windows (unused)",
-    )
-
     args = parser.parse_args(argv)
     args.config = config
     args.config_file_path = CONFIG_CONTEXT.writable_path

@@ -13,5 +13,4 @@ WVOG_BAUD = 57600
 
 # Timing Constants
 COMMAND_DELAY = 0.05  # Delay after sending command (seconds)
-CONFIG_RESPONSE_WAIT = 0.5  # Wait time for config response (seconds)
 

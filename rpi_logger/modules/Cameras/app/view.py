@@ -42,6 +42,7 @@ class CamerasView:
         self._latest_metrics: Dict[str, Dict[str, Any]] = {}
         self._camera_options: Dict[str, Dict[str, list[str]]] = {}
         self._io_stub_fields: Dict[str, Any] = {}
+        self._io_stub_labels: Dict[str, Any] = {}  # Label widgets for color updates
         self._io_stub_history: Dict[str, Dict[str, str]] = {}
         self._camera_settings: Dict[str, Dict[str, str]] = {}
 
@@ -125,7 +126,7 @@ class CamerasView:
         if not callable(builder):
             return
         if not self._io_stub_fields:
-            for key in ("cam", "in", "rec", "tgt", "prv", "q", "wait"):
+            for key in ("cam", "in_tgt", "pct", "rec", "prv", "wait"):
                 self._io_stub_fields[key] = tk.StringVar(master=self._root, value="-")
         if not self._io_stub_history:
             self._io_stub_history = {}
@@ -142,11 +143,10 @@ class CamerasView:
 
             fields = [
                 ("cam", "Cam"),
-                ("in", "In (avg)"),
+                ("in_tgt", "In / Tgt"),
+                ("pct", "%"),
                 ("rec", "Rec (out)"),
-                ("tgt", "Tgt (rec)"),
                 ("prv", "Prv (out)"),
-                ("q", "Q (p/r)"),
                 ("wait", "Wait (ms)"),
             ]
             for col, (key, label_text) in enumerate(fields):
@@ -164,6 +164,8 @@ class CamerasView:
                         pass
                 name.grid(row=0, column=col, sticky="ew", padx=2)
                 val.grid(row=1, column=col, sticky="ew", padx=2)
+                # Store label reference for color updates (percentage field)
+                self._io_stub_labels[key] = val
 
         try:
             builder(_builder)
@@ -353,27 +355,46 @@ class CamerasView:
             try:
                 return f"{float(value):5.1f}"
             except Exception:
-                return "--.--"
+                return "   --"
 
-        def _fmt_int(value) -> str:
-            try:
-                return f"{int(value):4d}"
-            except Exception:
-                return "--"
+        # Get FPS values for combined display and percentage
+        # Use target_fps (camera's actual/configured FPS, always available)
+        fps_in = payload.get("fps_capture")
+        fps_tgt = payload.get("target_fps")
+
+        # Combined In / Tgt field
+        in_tgt_str = f"{_fmt_num(fps_in)} / {_fmt_num(fps_tgt)}"
+
+        # Percentage calculation with color
+        pct_str = "  --"
+        pct_color = Colors.FG_SECONDARY if HAS_THEME and Colors else None
+        try:
+            if fps_in is not None and fps_tgt is not None and float(fps_tgt) > 0:
+                pct = (float(fps_in) / float(fps_tgt)) * 100
+                pct_str = f"{pct:3.0f}%"
+                # Determine color based on percentage
+                if HAS_THEME and Colors:
+                    if pct >= 95:
+                        pct_color = Colors.SUCCESS      # Green - good
+                    elif pct >= 80:
+                        pct_color = Colors.WARNING      # Orange - warning
+                    else:
+                        pct_color = Colors.ERROR        # Red - bad
+        except (ValueError, TypeError):
+            pass
 
         values = {
             "cam": cam_id,
-            "in": _fmt_num(payload.get("fps_capture")),
+            "in_tgt": in_tgt_str,
+            "pct": pct_str,
             "rec": _fmt_num(payload.get("fps_encode")),
-            "tgt": _fmt_num(payload.get("target_record_fps")),
             "prv": _fmt_num(payload.get("fps_preview")),
-            "q": f"{_fmt_int(payload.get('preview_queue'))}/{_fmt_int(payload.get('record_queue'))}",
             "wait": _fmt_num(payload.get("capture_wait_ms")),
         }
         history = self._io_stub_history.setdefault(cam_id, {})
 
         def _is_placeholder(text: str) -> bool:
-            return text in {"--.--", "--", "-", "--/--", "-/-", "-/-", None}  # type: ignore[arg-type]
+            return text in {"   --", "  --", " --", "--", "-", None} or (text and text.strip() == "--")  # type: ignore[arg-type]
 
         for key, var in self._io_stub_fields.items():
             new_val = values.get(key, "--")
@@ -385,6 +406,13 @@ class CamerasView:
                 var.set(new_val)
             except Exception:
                 self._logger.debug("Failed to update IO stub field %s", key, exc_info=True)
+
+        # Apply color to percentage label
+        if "pct" in self._io_stub_labels and pct_color:
+            try:
+                self._io_stub_labels["pct"].configure(fg=pct_color)
+            except Exception:
+                pass
 
     def _install_settings_menu(self, tk) -> None:
         if self._settings_menu:

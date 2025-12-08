@@ -366,6 +366,8 @@ class CameraWorker:
             self._capture_wait_ms = sum(wait_times) / len(wait_times)
 
     def _send_state_update(self) -> None:
+        # target_fps is the camera's actual FPS (always available after init)
+        target_fps = self._capabilities.get("actual_fps", self._capture_fps)
         self._send(RespStateUpdate(
             state=self._state,
             is_recording=self._recording,
@@ -375,6 +377,7 @@ class CameraWorker:
             frames_captured=self._frames_captured,
             frames_recorded=self._frames_recorded,
             fps_preview=self._fps_preview,
+            target_fps=target_fps,
             target_record_fps=self._record_target_fps,
             target_preview_fps=self._preview_target_fps,
             capture_wait_ms=self._capture_wait_ms,

@@ -222,11 +222,6 @@ class VOGHandler:
         self.logger.debug("Initializing %s device on %s", self.device_type.upper(), self.port)
         return True
 
-    async def close_device(self) -> bool:
-        """Close the VOG device."""
-        self.logger.debug("Closing %s device on %s", self.device_type.upper(), self.port)
-        return True
-
     async def start_experiment(self) -> bool:
         """Send experiment start command.
 
@@ -322,13 +317,6 @@ class VOGHandler:
             self.logger.warning("Unknown config parameter: %s", param)
             return False
         return await self.send_command(command, cmd_value)
-
-    async def get_battery(self) -> int:
-        """Request battery status (wVOG only)."""
-        if not self.supports_battery:
-            return -1
-        await self.send_command('get_battery')
-        return self._battery_percent
 
     async def _read_loop(self):
         """Main async read loop for incoming data."""

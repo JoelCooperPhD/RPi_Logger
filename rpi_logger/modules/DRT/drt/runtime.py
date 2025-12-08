@@ -7,7 +7,6 @@ device assignments via assign_device commands.
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional

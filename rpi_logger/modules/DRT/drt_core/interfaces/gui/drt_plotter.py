@@ -369,13 +369,6 @@ class DRTPlotter:
             self._state_now[port] = np.nan
         self._recording = False
 
-    def pause(self):
-        """Pause recording - creates gap in data, animation keeps marching."""
-        self.logger.info("PAUSE: Creating gap in stimulus line, animation keeps running")
-        for port in list(self._state_now.keys()):
-            self._state_now[port] = np.nan
-        self._recording = False
-
     def stop(self):
         """Stop session completely - freeze animation."""
         self.logger.info("STOP: Freezing animation completely")

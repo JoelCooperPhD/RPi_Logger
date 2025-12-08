@@ -444,16 +444,6 @@ class VOGTkinterGUI:
         if self._plotter:
             self._plotter.stop()
 
-    def show(self):
-        """Show the VOG frame."""
-        if self._frame:
-            self._frame.pack(fill=tk.BOTH, expand=True)
-
-    def hide(self):
-        """Hide the VOG frame."""
-        if self._frame:
-            self._frame.pack_forget()
-
 
 class VOGView:
     """Adapter that exposes the VOG GUI through the stub supervisor interface."""

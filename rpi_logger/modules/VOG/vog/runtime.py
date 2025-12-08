@@ -662,18 +662,6 @@ class VOGModuleRuntime(ModuleRuntime):
     # Utility methods
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _coerce_int(value: Any, default: int) -> int:
-        """Coerce value to int, returning default if not possible."""
-        if isinstance(value, int):
-            return value
-        if value is None:
-            return default
-        try:
-            return int(str(value), 0)
-        except (TypeError, ValueError):
-            return default
-
     def _coerce_trial_number(self, value: Any) -> int:
         """Coerce value to a valid trial number (>= 1)."""
         try:

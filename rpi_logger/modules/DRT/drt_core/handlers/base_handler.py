@@ -99,11 +99,6 @@ class BaseDRTHandler(ABC):
         """Check if recording is active."""
         return self._recording
 
-    @property
-    def circuit_breaker_tripped(self) -> bool:
-        """Check if the circuit breaker has been triggered due to errors."""
-        return self._consecutive_errors >= self._max_consecutive_errors
-
     # =========================================================================
     # Lifecycle Methods
     # =========================================================================

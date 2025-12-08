@@ -65,20 +65,6 @@ class BaseTransport(ABC):
         """
         ...
 
-    async def write_line(self, line: str, ending: str = '\n') -> bool:
-        """
-        Write a line of text to the device.
-
-        Args:
-            line: Text to write
-            ending: Line ending to append
-
-        Returns:
-            True if write was successful
-        """
-        data = f"{line}{ending}".encode('utf-8')
-        return await self.write(data)
-
     async def __aenter__(self):
         """Async context manager entry."""
         await self.connect()

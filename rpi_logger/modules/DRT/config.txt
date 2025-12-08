@@ -2,7 +2,7 @@ view.show_logger = false
 
 view.show_logger = false
 display_name = DRT
-window_geometry = 832x261+253+285
+window_geometry = 320x200
 preview_resolution = auto
 enabled = true
 view.show_io_panel = true

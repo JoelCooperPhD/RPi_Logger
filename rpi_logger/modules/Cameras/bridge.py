@@ -376,9 +376,9 @@ class CamerasRuntime(ModuleRuntime):
         self._preview_receiver.on_preview_frame(key, msg)
 
     def _on_state_update(self, key: str, msg: RespStateUpdate) -> None:
-        self.logger.debug("[STATE] %s: state=%s recording=%s preview=%s fps_cap=%.1f fps_enc=%.1f frames=%d/%d",
+        self.logger.debug("[STATE] %s: state=%s recording=%s preview=%s fps_cap=%.1f fps_enc=%.1f target=%.1f frames=%d/%d",
                          key, msg.state.name, msg.is_recording, msg.is_previewing,
-                         msg.fps_capture, msg.fps_encode, msg.frames_captured, msg.frames_recorded)
+                         msg.fps_capture, msg.fps_encode, msg.target_fps, msg.frames_captured, msg.frames_recorded)
         metrics = CameraMetrics(
             state=msg.state.name,
             is_recording=msg.is_recording,
@@ -387,6 +387,7 @@ class CamerasRuntime(ModuleRuntime):
             fps_preview=msg.fps_preview,
             frames_captured=msg.frames_captured,
             frames_recorded=msg.frames_recorded,
+            target_fps=msg.target_fps,
             target_record_fps=msg.target_record_fps,
             capture_wait_ms=msg.capture_wait_ms,
         )

@@ -104,7 +104,8 @@ class RespStateUpdate:
     frames_recorded: int
     # Extended metrics for UI display
     fps_preview: float = 0.0
-    target_record_fps: float = 0.0
+    target_fps: float = 0.0  # Camera's actual/configured FPS (always available)
+    target_record_fps: float = 0.0  # Recording target (only when recording)
     target_preview_fps: float = 0.0
     capture_queue_depth: int = 0
     encode_queue_depth: int = 0

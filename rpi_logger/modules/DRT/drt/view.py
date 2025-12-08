@@ -34,21 +34,11 @@ class _SystemPlaceholder:
         self.config = getattr(args, 'config', {})
         self.config_file_path = getattr(args, 'config_file_path', None)
 
-    async def start_recording(self) -> bool:
-        return False
-
-    async def stop_recording(self) -> bool:
-        return False
-
     def get_device_handler(self, port: str):
         return None
 
     def get_device_type(self, device_id: str):
         return None
-
-    @property
-    def xbee_connected(self) -> bool:
-        return False
 
 
 class _LoopAsyncBridge:
@@ -606,16 +596,6 @@ class DRTTkinterGUI:
         self._plot_recording_state = None
         if self._plotter:
             self._plotter.stop()
-
-    def show(self):
-        """Show the DRT frame."""
-        if self._frame:
-            self._frame.pack(fill=tk.BOTH, expand=True)
-
-    def hide(self):
-        """Hide the DRT frame."""
-        if self._frame:
-            self._frame.pack_forget()
 
 
 class DRTView:

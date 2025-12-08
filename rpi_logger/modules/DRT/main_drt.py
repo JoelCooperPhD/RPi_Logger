@@ -41,7 +41,7 @@ from drt.runtime import DRTModuleRuntime
 from drt.view import DRTView
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.DRT.drt_core.config import load_config_file
-from rpi_logger.modules.base.config_paths import resolve_module_config_path, resolve_writable_module_config
+from rpi_logger.modules.base.config_paths import resolve_module_config_path
 from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers
 
 logger = get_module_logger("MainDRT")

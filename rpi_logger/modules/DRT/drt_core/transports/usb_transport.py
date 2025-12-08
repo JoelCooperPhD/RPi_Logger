@@ -150,32 +150,3 @@ class USBTransport(BaseTransport):
             logger.error("Unexpected error reading from %s: %s", self.port, e)
             return None
 
-    async def read_bytes(self, size: int) -> Optional[bytes]:
-        """
-        Read a specific number of bytes from the serial port.
-
-        Args:
-            size: Number of bytes to read
-
-        Returns:
-            Bytes read, or None if error/timeout
-        """
-        if not self.is_connected:
-            return None
-
-        try:
-            data = await asyncio.to_thread(self._serial.read, size)
-            return data if data else None
-        except serial.SerialException as e:
-            logger.error("Read error on %s: %s", self.port, e)
-            return None
-
-    @property
-    def bytes_available(self) -> int:
-        """Return the number of bytes available to read."""
-        if not self.is_connected:
-            return 0
-        try:
-            return self._serial.in_waiting
-        except serial.SerialException:
-            return 0

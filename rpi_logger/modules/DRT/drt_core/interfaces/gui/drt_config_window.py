@@ -100,7 +100,6 @@ class DRTConfigWindow:
             'intensity': tk.StringVar(value="100"),
         }
 
-        self._loading = False
         self._build_ui()
 
         # Register close handler to clean up and save position
@@ -278,11 +277,6 @@ class DRTConfigWindow:
         """Clear all input fields."""
         for var in self._vars.values():
             var.set("")
-
-    def _on_get_config(self) -> None:
-        """Handle get config button click."""
-        if self.on_get_config:
-            self.on_get_config()
 
     def update_config(self, config: Dict[str, Any]) -> None:
         """Update the displayed configuration.

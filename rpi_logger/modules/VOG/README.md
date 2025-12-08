@@ -151,8 +151,10 @@ Simple manual control mode for integrating with external equipment or custom exp
 rpi_logger/modules/VOG/
 ├── main_vog.py          # Entry point
 ├── config.txt           # Module configuration
+├── vog/                 # VMC integration layer
+│   ├── runtime.py       # VMC-compatible runtime
+│   └── view.py          # Tkinter GUI
 └── vog_core/            # Core functionality
-    ├── vog_system.py    # Device orchestration
     ├── vog_handler.py   # Per-device communication
     ├── data_logger.py   # CSV output
     └── protocols/       # Device protocol implementations
