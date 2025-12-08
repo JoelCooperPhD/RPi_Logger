@@ -594,6 +594,25 @@ class XBeeManager:
         if self.is_connected:
             await self._start_network_discovery()
 
+    async def rescan_network(self) -> None:
+        """
+        Rescan the XBee network for wireless devices.
+
+        This is called from the UI when the user clicks the Rescan button.
+        Clears all discovered devices first, then rediscovers them fresh.
+        """
+        logger.info("XBee network rescan initiated - clearing existing devices")
+
+        # Clear all discovered devices first (notify lost for each)
+        for node_id in list(self._discovered_devices.keys()):
+            await self._handle_device_lost(node_id)
+
+        # Clear remote device references
+        self._remote_devices.clear()
+
+        # Now trigger fresh discovery
+        await self.trigger_rediscovery()
+
     async def send_to_device(self, node_id: str, data: bytes) -> bool:
         """
         Send data to a wireless device.

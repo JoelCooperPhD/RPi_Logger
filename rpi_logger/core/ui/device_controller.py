@@ -100,6 +100,10 @@ class DeviceUIController:
         self._on_disconnect_device: Callable[[str], None] | None = None
         self._on_connection_changed: Callable[[InterfaceType, DeviceFamily, bool], None] | None = None
 
+        # XBee dongle state
+        self._xbee_dongle_connected = False
+        self._wireless_device_count = 0
+
         # Subscribe to model changes
         selection_model.add_connection_observer(self._on_model_changed)
         selection_model.add_device_state_observer(self._on_model_changed)
@@ -265,3 +269,46 @@ class DeviceUIController:
     def get_connected_device_count(self) -> int:
         """Get number of connected devices."""
         return len(self._lifecycle.get_connected_devices())
+
+    # =========================================================================
+    # XBee Dongle State
+    # =========================================================================
+
+    @property
+    def xbee_dongle_connected(self) -> bool:
+        """Check if XBee dongle is connected."""
+        return self._xbee_dongle_connected
+
+    def set_xbee_dongle_connected(self, connected: bool) -> None:
+        """
+        Update XBee dongle connection state.
+
+        This triggers a UI update so the XBee banner can be shown/hidden.
+
+        Args:
+            connected: True if XBee dongle is connected
+        """
+        if self._xbee_dongle_connected != connected:
+            self._xbee_dongle_connected = connected
+            self._notify_ui_observers()
+
+    def set_xbee_rescan_callback(self, callback: Callable[[], None]) -> None:
+        """Set callback for XBee network rescan requests."""
+        self._on_xbee_rescan = callback
+
+    def request_xbee_rescan(self) -> None:
+        """Request an XBee network rescan."""
+        if hasattr(self, '_on_xbee_rescan') and self._on_xbee_rescan:
+            logger.info("Requesting XBee network rescan")
+            self._on_xbee_rescan()
+
+    @property
+    def wireless_device_count(self) -> int:
+        """Get the number of wireless devices discovered."""
+        return self._wireless_device_count
+
+    def set_wireless_device_count(self, count: int) -> None:
+        """Update the wireless device count."""
+        if self._wireless_device_count != count:
+            self._wireless_device_count = count
+            self._notify_ui_observers()

@@ -119,9 +119,14 @@ class DeviceSystem:
         )
 
         self._xbee_manager: Optional[XBeeManager] = None
+        self._xbee_dongle_connected = False  # Track dongle connection state for UI
         if XBEE_AVAILABLE:
             self._xbee_manager = XBeeManager()
-            # XBee wiring is done via wire_xbee_callbacks() after dongle port is available
+            # Wire XBee callbacks for dongle and device discovery
+            self._xbee_manager.on_dongle_connected = self._handle_xbee_dongle_connected_internal
+            self._xbee_manager.on_dongle_disconnected = self._handle_xbee_dongle_disconnected_internal
+            self._xbee_manager.on_device_discovered = self._handle_xbee_device_discovered
+            self._xbee_manager.on_device_lost = self._handle_xbee_device_lost
 
         self._network_scanner: Optional[NetworkScanner] = None
         if ZEROCONF_AVAILABLE:
@@ -190,6 +195,7 @@ class DeviceSystem:
             self._ui_controller.set_connection_changed_callback(self._handle_ui_connection_toggle)
             self._ui_controller.set_connect_device_callback(self._handle_ui_connect)
             self._ui_controller.set_disconnect_device_callback(self._handle_ui_disconnect)
+            self._ui_controller.set_xbee_rescan_callback(self._handle_xbee_rescan)
 
     def _build_scanner_registry(self) -> None:
         """Build the scanner registry mapping (interface, family) to scanners.
@@ -660,6 +666,10 @@ class DeviceSystem:
         if self._network_scanner:
             await self._network_scanner.start()
 
+        # Start XBee manager (for wireless wVOG/wDRT devices)
+        if self._xbee_manager:
+            await self._xbee_manager.start()
+
         logger.info("Device scanning started")
 
     async def stop_scanning(self) -> None:
@@ -747,6 +757,103 @@ class DeviceSystem:
         if self._on_xbee_dongle_disconnected:
             result = self._on_xbee_dongle_disconnected(port)
             # Can't await here, application handles async
+
+    async def _handle_xbee_dongle_connected_internal(self, port: str) -> None:
+        """Internal handler for XBee dongle connected.
+
+        Updates internal state, UI controller, and forwards to external callback.
+        Also auto-enables XBee connections for families that already have another
+        interface enabled (e.g., if USB:DRT is enabled, also enable XBee:DRT).
+        """
+        logger.info(f"XBee dongle connected on {port}")
+        self._xbee_dongle_connected = True
+
+        # Auto-enable XBee interface for families that already have another interface enabled
+        # This ensures wireless devices show up when the user has enabled that device type
+        self._auto_enable_xbee_connections()
+
+        # Update UI controller
+        if self._ui_controller:
+            self._ui_controller.set_xbee_dongle_connected(True)
+
+        # Notify external callback
+        if self._on_xbee_dongle_connected:
+            result = self._on_xbee_dongle_connected(port)
+            if asyncio.iscoroutine(result):
+                await result
+
+    async def _handle_xbee_dongle_disconnected_internal(self) -> None:
+        """Internal handler for XBee dongle disconnected.
+
+        Updates internal state, UI controller, and forwards to external callback.
+        """
+        logger.info("XBee dongle disconnected")
+        self._xbee_dongle_connected = False
+
+        # Update UI controller
+        if self._ui_controller:
+            self._ui_controller.set_xbee_dongle_connected(False)
+
+        # Notify external callback
+        if self._on_xbee_dongle_disconnected:
+            result = self._on_xbee_dongle_disconnected("")
+            if asyncio.iscoroutine(result):
+                await result
+
+    async def _handle_xbee_device_discovered(self, device, remote_xbee) -> None:
+        """Handle wireless device discovered via XBee.
+
+        Routes to the scanner adapter for unified device handling.
+        """
+        port = self._xbee_manager.coordinator_port if self._xbee_manager else None
+        if port:
+            await self._adapter.on_wireless_device_found(device, port)
+
+        # Update wireless device count in UI
+        self._update_wireless_device_count()
+
+    async def _handle_xbee_device_lost(self, node_id: str) -> None:
+        """Handle wireless device lost via XBee."""
+        await self._adapter.on_wireless_device_lost(node_id)
+
+        # Update wireless device count in UI
+        self._update_wireless_device_count()
+
+    @property
+    def is_xbee_dongle_connected(self) -> bool:
+        """Check if XBee dongle is connected."""
+        return self._xbee_dongle_connected
+
+    def _handle_xbee_rescan(self) -> None:
+        """Handle XBee rescan request from UI."""
+        logger.info("XBee rescan requested")
+        if self._xbee_manager and self._xbee_dongle_connected:
+            asyncio.create_task(self._xbee_manager.rescan_network())
+
+    def _auto_enable_xbee_connections(self) -> None:
+        """Auto-enable XBee interface for families that have other interfaces enabled.
+
+        When the XBee dongle connects, this ensures wireless devices can be discovered
+        for any device family the user has already enabled. For example, if USB:DRT
+        is enabled (user enabled DRT module), this will also enable XBee:DRT so
+        wireless DRT devices will show up.
+        """
+        # Families that support XBee wireless devices
+        xbee_families = {DeviceFamily.DRT, DeviceFamily.VOG}
+
+        for family in xbee_families:
+            # Check if this family has any interface enabled
+            if self._selection.is_family_enabled(family):
+                # Also enable XBee for this family
+                if not self._selection.is_connection_enabled(InterfaceType.XBEE, family):
+                    logger.info(f"Auto-enabling XBee:{family.value} (family already enabled)")
+                    self._selection.set_connection_enabled(InterfaceType.XBEE, family, True)
+
+    def _update_wireless_device_count(self) -> None:
+        """Update the wireless device count in the UI controller."""
+        if self._xbee_manager and self._ui_controller:
+            count = len(self._xbee_manager.discovered_devices)
+            self._ui_controller.set_wireless_device_count(count)
 
     # =========================================================================
     # XBee Transport (for wireless device communication)
