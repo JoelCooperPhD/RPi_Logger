@@ -418,8 +418,12 @@ class Theme:
         style.map(
             'Horizontal.TScale',
             background=[
+                ('disabled', Colors.FG_MUTED),   # Muted when disabled
                 ('active', Colors.FG_PRIMARY),   # Lighter when hovering
                 ('pressed', Colors.PRIMARY)      # Blue when dragging
+            ],
+            troughcolor=[
+                ('disabled', Colors.BG_DARK)     # Darker trough when disabled
             ]
         )
 
@@ -435,8 +439,12 @@ class Theme:
         style.map(
             'Inframe.Horizontal.TScale',
             background=[
+                ('disabled', Colors.FG_MUTED),   # Muted when disabled
                 ('active', Colors.FG_PRIMARY),   # Lighter when hovering
                 ('pressed', Colors.PRIMARY)      # Blue when dragging
+            ],
+            troughcolor=[
+                ('disabled', Colors.BG_DARK)     # Darker trough when disabled
             ]
         )
 

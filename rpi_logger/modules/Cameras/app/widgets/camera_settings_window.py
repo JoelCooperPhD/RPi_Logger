@@ -61,6 +61,17 @@ ESSENTIAL_CONTROLS = [
     "AfMode",
 ]
 
+# Control dependencies: child -> (parent, values_that_enable_child)
+# When parent's value is NOT in the enable set, the child control is disabled
+CONTROL_DEPENDENCIES = {
+    # USB cameras: Gain/Exposure only work in Manual Mode (value starts with "1:")
+    "Gain": ("AutoExposure", lambda v: str(v).startswith("1:") or v is True),
+    "Exposure": ("AutoExposure", lambda v: str(v).startswith("1:") or v is True),
+    # Picam: AnalogueGain/ExposureTime work when AeExposureMode is "Custom" or "Off"
+    "AnalogueGain": ("AeExposureMode", lambda v: v in ("Custom", "Off")),
+    "ExposureTime": ("AeExposureMode", lambda v: v in ("Custom", "Off")),
+}
+
 
 class CameraSettingsWindow:
     """Pop-out window with resolution/FPS settings and interactive camera controls."""
@@ -431,6 +442,9 @@ class CameraSettingsWindow:
         for row_idx, (name, ctrl) in enumerate(available_controls):
             self._build_control_widget(self._controls_frame, row_idx, name, ctrl)
 
+        # Apply initial dependent control states
+        self._update_dependent_control_states()
+
     def _build_control_widget(self, parent, row: int, name: str, ctrl: "ControlInfo") -> None:
         """Build a single control widget based on control type."""
         from rpi_logger.modules.Cameras.runtime.state import ControlType
@@ -522,6 +536,60 @@ class CameraSettingsWindow:
             result.append(char)
         return "".join(result)
 
+    def _update_dependent_control_states(self) -> None:
+        """Enable/disable controls based on their parent control's value."""
+        # Determine label style for disabled state
+        if HAS_THEME and Colors is not None:
+            disabled_fg = Colors.FG_MUTED
+            enabled_fg = Colors.FG_PRIMARY
+        else:
+            disabled_fg = "#6c7a89"
+            enabled_fg = "#ecf0f1"
+
+        for child_name, (parent_name, is_enabled_func) in CONTROL_DEPENDENCIES.items():
+            child_info = self._control_widgets.get(child_name)
+            parent_info = self._control_widgets.get(parent_name)
+
+            if not child_info or not parent_info:
+                continue
+
+            parent_var = parent_info.get("var")
+            if not parent_var:
+                continue
+
+            try:
+                parent_value = parent_var.get()
+            except tk.TclError:
+                continue
+
+            # Determine if child should be enabled
+            should_enable = is_enabled_func(parent_value)
+            state = "normal" if should_enable else "disabled"
+
+            # Update child widget state
+            widget = child_info.get("widget")
+            if widget:
+                try:
+                    widget.config(state=state)
+                except tk.TclError:
+                    pass
+
+            # Update value label appearance (for sliders)
+            value_label = child_info.get("value_label")
+            if value_label:
+                try:
+                    value_label.config(foreground=enabled_fg if should_enable else disabled_fg)
+                except tk.TclError:
+                    pass
+
+            # Update reset button state
+            reset_btn = child_info.get("reset_btn")
+            if reset_btn:
+                try:
+                    reset_btn.config(state=state)
+                except tk.TclError:
+                    pass
+
     def _format_value(self, value: float, ctrl: "ControlInfo") -> str:
         """Format a value for display."""
         from rpi_logger.modules.Cameras.runtime.state import ControlType
@@ -598,6 +666,10 @@ class CameraSettingsWindow:
                 self._on_control_change(self._active_camera, name, value)
             except Exception:
                 self._logger.debug("Control change callback failed", exc_info=True)
+
+        # Update dependent control states if this is a parent control
+        if any(parent == name for parent, _ in CONTROL_DEPENDENCIES.values()):
+            self._update_dependent_control_states()
 
     def _reset_control(self, name: str) -> None:
         """Reset a control to its default value."""

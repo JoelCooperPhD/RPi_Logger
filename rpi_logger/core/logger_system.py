@@ -273,12 +273,16 @@ class LoggerSystem:
 
                 # Route to instance manager for state tracking
                 self.instance_manager.on_status_message(
-                    effective_id, "quitting", status.get_data()
+                    effective_id, "quitting", status.get_payload()
                 )
 
                 # Handle instance vs module cleanup differently
                 if instance_id and self._is_multi_instance_module(module_name):
                     # Multi-instance module: notify only the device for this instance
+                    self.logger.info(
+                        "QUITTING: Multi-instance cleanup for %s (module: %s)",
+                        instance_id, module_name
+                    )
                     self._notify_instance_disconnected(instance_id)
 
                     # Save disconnected state - only if no other instances remain
@@ -289,26 +293,29 @@ class LoggerSystem:
                         inst_id.startswith(module_prefix)
                         for inst_id in self._device_instance_map.values()
                     )
+                    self.logger.info(
+                        "QUITTING: other_instances_running=%s (prefix=%r, map_values=%s)",
+                        other_instances_running, module_prefix, list(self._device_instance_map.values())
+                    )
                     if not other_instances_running:
+                        self.logger.info("QUITTING: Saving disconnected state for %s", module_name)
+                        # Save device_connected=false to prevent auto-launch on restart
+                        # Note: We do NOT change 'enabled' state - that reflects user's
+                        # interest in this module type (checkbox in Modules menu)
                         await self._save_device_connection_state(module_name, False)
-                        # Disable module so it doesn't auto-start on next launch
-                        # Use reconcile=False since module is already quitting
-                        await self.toggle_module_enabled(module_name, False)
-                        await self.state_manager.set_desired_state(
-                            module_name, False, reconcile=False
+                    else:
+                        self.logger.warning(
+                            "QUITTING: SKIPPED saving state for %s - other instances still running",
+                            module_name
                         )
                 else:
                     # Single-instance module: notify all devices
                     self.module_manager.cleanup_stopped_process(module_name)
                     self._notify_device_connected_for_module(module_name, False)
-                    # Save disconnected state
+                    # Save device_connected=false to prevent auto-launch on restart
+                    # Note: We do NOT change 'enabled' state - that reflects user's
+                    # interest in this module type (checkbox in Modules menu)
                     await self._save_device_connection_state(module_name, False)
-                    # Disable module so it doesn't auto-start on next launch
-                    # Use reconcile=False since module is already quitting
-                    await self.toggle_module_enabled(module_name, False)
-                    await self.state_manager.set_desired_state(
-                        module_name, False, reconcile=False
-                    )
 
                 if self.ui_callback:
                     try:
@@ -422,6 +429,10 @@ class LoggerSystem:
         connection state.
         """
         self.logger.info("Instance disconnected: %s", instance_id)
+        self.logger.info(
+            "Current device_instance_map: %s (looking for instance_id=%r)",
+            dict(self._device_instance_map), instance_id
+        )
 
         # Find the device_id for this instance from our mapping
         device_id = None
