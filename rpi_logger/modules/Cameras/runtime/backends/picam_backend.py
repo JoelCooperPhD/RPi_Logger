@@ -269,20 +269,4 @@ def _extract_sensor_timestamp(metadata: dict) -> Optional[int]:
     return None
 
 
-def _to_bgr(frame: np.ndarray) -> np.ndarray:
-    """Ensure frames are in BGR order for downstream OpenCV consumers."""
-
-    if frame is None:
-        return frame
-    if frame.ndim == 3 and frame.shape[2] >= 3:
-        if cv2 is not None:
-            try:
-                return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            except Exception:
-                pass
-        # Fallback channel swap if cv2 is unavailable
-        return frame[..., :3][..., ::-1]
-    return frame
-
-
 __all__ = ["PicamHandle", "PicamFrame", "probe", "open_device", "supports_shared_streams"]

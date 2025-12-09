@@ -17,7 +17,6 @@ class SessionPaths:
     camera_dir: Path
     video_path: Path
     timing_path: Path
-    metadata_csv_path: Path
 
 
 def resolve_session_paths(
@@ -40,14 +39,12 @@ def resolve_session_paths(
 
     video_path = camera_dir / f"{prefix}_{camera_suffix}.avi"
     timing_path = camera_dir / f"{prefix}_{camera_suffix}_timing.csv"
-    metadata_csv_path = camera_dir / f"{prefix}_{camera_suffix}_metadata.csv"
 
     return SessionPaths(
         session_root=session_root,
         camera_dir=camera_dir,
         video_path=video_path,
         timing_path=timing_path,
-        metadata_csv_path=metadata_csv_path,
     )
 
 

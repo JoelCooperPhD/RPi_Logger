@@ -88,57 +88,9 @@ def parse_bool(raw: Any, default: bool) -> bool:
     return str(raw).strip().lower() in ("true", "1", "yes", "on")
 
 
-def extract_settings(
-    saved: Optional[Dict[str, Any]],
-    defaults: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Extract typed settings from saved dict with defaults.
-
-    Handles resolution, fps, and boolean parsing.
-
-    Expected keys in defaults:
-    - preview_resolution: Resolution
-    - preview_fps: float
-    - record_resolution: Resolution
-    - record_fps: float
-    - overlay: bool
-    """
-    if not saved:
-        return dict(defaults)
-
-    result = {}
-
-    # Resolution fields
-    for key in ("preview_resolution", "record_resolution"):
-        if key in defaults:
-            result[key] = parse_resolution(
-                saved.get(key, ""),
-                defaults[key]
-            )
-
-    # FPS fields
-    for key in ("preview_fps", "record_fps"):
-        if key in defaults:
-            result[key] = parse_fps(
-                saved.get(key, ""),
-                defaults[key]
-            )
-
-    # Boolean fields
-    for key in ("overlay",):
-        if key in defaults:
-            result[key] = parse_bool(
-                saved.get(key, ""),
-                defaults[key]
-            )
-
-    return result
-
-
 __all__ = [
     "CameraMetrics",
     "Resolution",
-    "extract_settings",
     "parse_bool",
     "parse_fps",
     "parse_resolution",

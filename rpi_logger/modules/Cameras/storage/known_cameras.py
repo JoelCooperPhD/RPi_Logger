@@ -223,4 +223,4 @@ class KnownCamerasCache:
             self._logger.warning("Failed to write known cameras cache %s", self._path, exc_info=True)
 
 
-__all__ = ["CACHE_SCHEMA_VERSION", "KnownCamerasCache"]
+__all__ = ["KnownCamerasCache"]

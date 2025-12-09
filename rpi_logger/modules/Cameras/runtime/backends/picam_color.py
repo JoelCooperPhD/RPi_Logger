@@ -59,8 +59,3 @@ def get_picam_color_format() -> str:
     See module docstring for full explanation.
     """
     return PICAM_OUTPUT_FORMAT
-
-
-def is_bgr_due_to_kernel_bug() -> bool:
-    """Returns True if we're working around the IMX296 color bug."""
-    return PICAM_OUTPUT_FORMAT == "bgr"

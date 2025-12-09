@@ -1,7 +1,6 @@
 """Runtime core for Cameras."""
 
 from .state import (
-    SCHEMA_VERSION,
     CameraCapabilities,
     CameraDescriptor,
     CameraId,
@@ -10,18 +9,15 @@ from .state import (
     CapabilitySource,
     ModeRequest,
     ModeSelection,
-    parse_preview_fps,
     RuntimeStatus,
     SelectedConfigs,
     deserialize_camera_id,
     deserialize_camera_state,
-    merge_capabilities,
     serialize_camera_id,
     serialize_camera_state,
 )
 
 __all__ = [
-    "SCHEMA_VERSION",
     "CameraCapabilities",
     "CameraDescriptor",
     "CameraId",
@@ -30,12 +26,10 @@ __all__ = [
     "CapabilitySource",
     "ModeRequest",
     "ModeSelection",
-    "parse_preview_fps",
     "RuntimeStatus",
     "SelectedConfigs",
     "deserialize_camera_id",
     "deserialize_camera_state",
-    "merge_capabilities",
     "serialize_camera_id",
     "serialize_camera_state",
 ]

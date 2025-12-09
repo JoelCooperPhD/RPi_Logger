@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -196,55 +196,8 @@ def load_config(
     )
 
 
-def persist_config_sync(preferences: ModulePreferences, config: CamerasConfig) -> bool:
-    """Persist selected config portions back to ModulePreferences synchronously."""
-
-    updates = _flatten_config(config)
-    return preferences.write_sync(updates)
-
-
-async def persist_config_async(preferences: ModulePreferences, config: CamerasConfig) -> bool:
-    """Async version of :func:`persist_config_sync`."""
-
-    updates = _flatten_config(config)
-    return await preferences.write_async(updates)
-
-
 # ---------------------------------------------------------------------------
 # Internal helpers
-
-
-def _flatten_config(config: CamerasConfig) -> Dict[str, Any]:
-    updates: Dict[str, Any] = {}
-    updates["preview.resolution"] = f"{config.preview.resolution[0]}x{config.preview.resolution[1]}"
-    updates["preview.fps_cap"] = config.preview.fps_cap if config.preview.fps_cap is not None else ""
-    updates["preview.format"] = config.preview.pixel_format
-    updates["preview.overlay"] = config.preview.overlay
-    updates["ui.auto_start_preview"] = config.preview.auto_start
-
-    updates["record.resolution"] = f"{config.record.resolution[0]}x{config.record.resolution[1]}"
-    updates["record.fps_cap"] = config.record.fps_cap if config.record.fps_cap is not None else ""
-    updates["record.format"] = config.record.pixel_format
-    updates["record.overlay"] = config.record.overlay
-
-    updates["guard.disk_free_gb_min"] = config.guard.disk_free_gb_min
-    updates["guard.check_interval_ms"] = config.guard.check_interval_ms
-
-    updates["retention.max_sessions"] = config.retention.max_sessions
-    updates["retention.prune_on_start"] = config.retention.prune_on_start
-
-    updates["storage.base_path"] = str(config.storage.base_path)
-    updates["storage.per_camera_subdir"] = config.storage.per_camera_subdir
-
-    updates["telemetry.emit_interval_ms"] = config.telemetry.emit_interval_ms
-    updates["telemetry.include_metrics"] = config.telemetry.include_metrics
-
-    if config.backend.picam_controls:
-        updates["backend.picam_controls"] = json.dumps(config.backend.picam_controls)
-
-    updates["logging.level"] = config.logging.level
-    updates["logging.file"] = str(config.logging.file)
-    return updates
 
 
 def _first_present(data: Dict[str, Any], keys: Tuple[str, ...]) -> Any:
@@ -376,22 +329,6 @@ def _coerce(
     return coercer(raw, default, logger)
 
 
-def as_dict(config: CamerasConfig) -> Dict[str, Any]:
-    """Return a nested dict representation (useful for telemetry/debug UI)."""
-
-    return {
-        "preview": asdict(config.preview),
-        "record": asdict(config.record),
-        "guard": asdict(config.guard),
-        "retention": asdict(config.retention),
-        "storage": {**asdict(config.storage), "base_path": str(config.storage.base_path)},
-        "telemetry": asdict(config.telemetry),
-        "ui": asdict(config.ui),
-        "backend": {"picam_controls": config.backend.picam_controls},
-        "logging": {"level": config.logging.level, "file": str(config.logging.file)},
-    }
-
-
 __all__ = [
     # Settings dataclasses
     "BackendSettings",
@@ -405,10 +342,7 @@ __all__ = [
     "TelemetrySettings",
     "UISettings",
     # Functions
-    "as_dict",
     "load_config",
-    "persist_config_async",
-    "persist_config_sync",
     # Defaults (for worker subprocess imports)
     "DEFAULT_CAPTURE_RESOLUTION",
     "DEFAULT_CAPTURE_FPS",

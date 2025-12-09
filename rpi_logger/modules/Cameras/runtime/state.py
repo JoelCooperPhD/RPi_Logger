@@ -154,50 +154,6 @@ class CameraRuntimeState:
 
 
 # ---------------------------------------------------------------------------
-# Capability helpers
-
-
-def merge_capabilities(
-    probed: Optional[CameraCapabilities],
-    cached: Optional[CameraCapabilities],
-) -> Optional[CameraCapabilities]:
-    """Combine probed + cached capabilities, preferring fresh probe."""
-
-    if not probed and not cached:
-        return None
-
-    base = CameraCapabilities()
-    base.source = CapabilitySource.PROBE if probed else CapabilitySource.CACHE
-
-    if probed:
-        base.modes.extend(probed.modes)
-        base.default_preview_mode = probed.default_preview_mode
-        base.default_record_mode = probed.default_record_mode
-        base.timestamp_ms = probed.timestamp_ms
-        base.limits.update(probed.limits)
-        base.color_formats.extend(probed.color_formats)
-
-    if cached:
-        for mode in cached.modes:
-            if not _contains_mode(base.modes, mode):
-                base.modes.append(mode)
-        base.limits = {**cached.limits, **base.limits}
-        if cached.color_formats:
-            for fmt in cached.color_formats:
-                if fmt not in base.color_formats:
-                    base.color_formats.append(fmt)
-        if not base.default_preview_mode:
-            base.default_preview_mode = cached.default_preview_mode
-        if not base.default_record_mode:
-            base.default_record_mode = cached.default_record_mode
-        if not base.timestamp_ms:
-            base.timestamp_ms = cached.timestamp_ms
-
-    base.dedupe()
-    return base
-
-
-# ---------------------------------------------------------------------------
 # Serialization helpers (used by known_cameras cache)
 
 
@@ -402,82 +358,6 @@ def _contains_mode(collection: Sequence[CapabilityMode], candidate: CapabilityMo
         if item.signature() == sig:
             return True
     return False
-
-
-def _resolve_requested_mode(
-    capabilities: CameraCapabilities,
-    request: Optional[ModeRequest | CapabilityMode],
-) -> tuple[Optional[CapabilityMode], Optional[str]]:
-    if not request:
-        return None, None
-    if isinstance(request, CapabilityMode):
-        return capabilities.find_matching(request) or request, None
-
-    def _matches_format(mode: CapabilityMode) -> bool:
-        return not request.pixel_format or (mode.pixel_format.lower() == request.pixel_format.lower())
-
-    def _fps_distance(mode_fps: float, requested_fps: float) -> tuple[float, int]:
-        """Return (diff, overshoot_flag) preferring at/below requested fps when close."""
-
-        diff = abs(mode_fps - requested_fps)
-        overshoot = 1 if mode_fps > requested_fps else 0
-        return diff, overshoot
-
-    warning: Optional[str] = None
-
-    # Prefer modes that fit within the requested size (largest area under the cap), and
-    # pick fps closest to the requested value (favoring at/below when possible).
-    if request.size:
-        req_w, req_h = request.size
-        candidates = [
-            m
-            for m in capabilities.modes
-            if _matches_format(m) and m.width <= req_w and m.height <= req_h
-        ]
-        if candidates:
-            if request.fps:
-                best = sorted(
-                    candidates,
-                    key=lambda m: (_fps_distance(m.fps, request.fps), -(m.width * m.height)),
-                )[0]
-            else:
-                best = sorted(candidates, key=lambda m: (m.width * m.height, m.fps), reverse=True)[0]
-            if best.size != request.size:
-                warning = f"Requested size {request.size} unavailable; using best fit {best.size}"
-            return best, warning
-
-    # Exact or format/fps match fallback (may exceed requested size).
-    formatted = [m for m in capabilities.modes if _matches_format(m)]
-    if formatted:
-        if request.fps:
-            best = sorted(formatted, key=lambda m: (_fps_distance(m.fps, request.fps), m.width * m.height))[0]
-        else:
-            best = formatted[0]
-        if request.size and best.size != request.size and warning is None:
-            warning = f"Requested size {request.size} unavailable; using {best.size}"
-        return best, warning
-
-    # Last resort: first available mode.
-    return (capabilities.modes[0] if capabilities.modes else None), "No matching mode found; using first available"
-
-
-def parse_preview_fps(value: Any, default_fps: float) -> tuple[Optional[float], Optional[int]]:
-    """Return (fps, keep_every) parsed from user selection.
-
-    - "Full" returns (None, None) for no limiting
-    - Numeric returns (fps, None) for time-based limiting
-    """
-
-    if value is None:
-        return default_fps, None
-    if isinstance(value, str):
-        val = value.strip()
-        if val.lower() == "full":
-            return None, None
-    try:
-        return float(value), None
-    except Exception as exc:
-        raise ValueError(f"Invalid preview fps value: {value}") from exc
 
 
 def _parse_resolution(raw: Any) -> Tuple[int, int]:
