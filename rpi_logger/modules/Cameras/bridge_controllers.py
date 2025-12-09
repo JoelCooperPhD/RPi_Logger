@@ -3,7 +3,7 @@ Controllers for the worker-based Cameras module.
 
 With the multiprocess architecture, most of the old controller logic
 is now handled by the workers themselves. What remains:
-- Discovery: finding cameras and spawning workers
+- Worker spawning: creating worker processes for assigned cameras
 - Recording coordination: session paths, trial info
 """
 from __future__ import annotations
@@ -22,11 +22,6 @@ from rpi_logger.modules.Cameras.runtime import (
     CameraDescriptor,
     CameraId,
     CapabilityMode,
-    ModeRequest,
-    ModeSelection,
-    SelectedConfigs,
-    select_modes,
-    parse_preview_fps,
 )
 from rpi_logger.modules.Cameras.runtime.backends import picam_backend, usb_backend
 from rpi_logger.modules.Cameras.storage import resolve_session_paths
@@ -40,34 +35,56 @@ class CameraWorkerState:
     descriptor: CameraDescriptor
     worker_key: str
     capabilities: Optional[Any] = None
-    selected: Optional[SelectedConfigs] = None
     is_recording: bool = False
     video_path: Optional[str] = None
     csv_path: Optional[str] = None
 
 
-class DiscoveryController:
+class WorkerSpawnController:
     """
     Handles worker spawning for cameras.
 
-    Note: Discovery is now handled by the main logger's DeviceSystem.
-    This controller only spawns workers when cameras are assigned via the
-    assign_device command.
+    Device discovery is handled by the main logger's DeviceSystem.
+    This controller spawns worker processes when cameras are assigned
+    via the assign_device command.
     """
+
+    # Timeout for waiting for a picam worker to report READY (seconds)
+    PICAM_READY_TIMEOUT = 30.0
 
     def __init__(self, runtime: "CamerasRuntime", *, logger: LoggerLike = None) -> None:
         self._runtime = runtime
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
+        # Lock to serialize Picamera2 initialization - libcamera doesn't handle
+        # concurrent camera startup well, causing "Device or resource busy" errors
+        self._picam_init_lock = asyncio.Lock()
+        # Events to signal when workers report READY
+        self._ready_events: Dict[str, asyncio.Event] = {}
+
+    def notify_worker_ready(self, key: str) -> None:
+        """Notify that a worker has reported READY - releases picam init lock if waiting."""
+        event = self._ready_events.pop(key, None)
+        if event:
+            self._logger.debug("[SPAWN] Setting ready event for %s", key)
+            event.set()
 
     async def _spawn_worker_for(self, desc: CameraDescriptor) -> None:
         """Spawn a worker process for a camera."""
         runtime = self._runtime
         key = desc.camera_id.key
+        camera_type = desc.camera_id.backend
 
         self._logger.info("[SPAWN] Starting worker spawn for %s", key)
         self._logger.debug("[SPAWN] Descriptor: backend=%s stable_id=%s dev_path=%s location=%s",
                           desc.camera_id.backend, desc.camera_id.stable_id,
                           desc.camera_id.dev_path, desc.location_hint)
+
+        # For picam cameras, serialize initialization to avoid libcamera resource conflicts
+        use_lock = camera_type == "picam"
+        if use_lock:
+            self._logger.info("[SPAWN] Acquiring picam init lock for %s...", key)
+            await self._picam_init_lock.acquire()
+            self._logger.info("[SPAWN] Acquired picam init lock for %s", key)
 
         try:
             # Probe capabilities first
@@ -76,7 +93,6 @@ class DiscoveryController:
             self._logger.debug("[SPAWN] Capabilities: %s", caps)
 
             # Determine camera type and ID for the worker
-            camera_type = desc.camera_id.backend
             if camera_type == "usb":
                 camera_id = desc.camera_id.dev_path or desc.location_hint or "0"
             else:
@@ -92,6 +108,10 @@ class DiscoveryController:
             preview_size = await self._get_preview_size(key) if camera_type == "picam" else None
             if preview_size:
                 self._logger.info("[SPAWN] Preview lores size: %s (for Picamera2 ISP scaling)", preview_size)
+
+            # Create ready event for picam cameras (to know when init is complete)
+            if use_lock:
+                self._ready_events[key] = asyncio.Event()
 
             # Spawn the worker using the stable camera key
             self._logger.info("[SPAWN] Calling worker_manager.spawn_worker()...")
@@ -112,7 +132,21 @@ class DiscoveryController:
                 capabilities=caps,
             )
 
-            self._logger.info("[SPAWN] Worker spawn complete for %s - waiting for READY signal", key)
+            # For picam cameras, wait for READY before releasing lock
+            # This ensures the camera is fully initialized before starting the next one
+            if use_lock:
+                self._logger.info("[SPAWN] Waiting for READY signal from %s (timeout=%ss)...", key, self.PICAM_READY_TIMEOUT)
+                try:
+                    await asyncio.wait_for(
+                        self._ready_events[key].wait(),
+                        timeout=self.PICAM_READY_TIMEOUT
+                    )
+                    self._logger.info("[SPAWN] Received READY from %s - camera initialized", key)
+                except asyncio.TimeoutError:
+                    self._logger.warning("[SPAWN] Timeout waiting for READY from %s - proceeding anyway", key)
+                    self._ready_events.pop(key, None)
+            else:
+                self._logger.info("[SPAWN] Worker spawn complete for %s - waiting for READY signal", key)
 
         except asyncio.CancelledError:
             raise  # Don't catch cancellation
@@ -120,6 +154,11 @@ class DiscoveryController:
             self._logger.error("[SPAWN] FAILED to spawn worker for %s: %s", key, e)
         except Exception as e:
             self._logger.error("[SPAWN] Unexpected error spawning worker for %s: %s", key, e, exc_info=True)
+        finally:
+            # Always release the lock if we acquired it
+            if use_lock and self._picam_init_lock.locked():
+                self._picam_init_lock.release()
+                self._logger.info("[SPAWN] Released picam init lock for %s", key)
 
     async def _probe_capabilities(self, desc: CameraDescriptor) -> Optional[Any]:
         """Probe camera capabilities (non-blocking)."""
@@ -389,6 +428,6 @@ class RecordingController:
 
 __all__ = [
     "CameraWorkerState",
-    "DiscoveryController",
+    "WorkerSpawnController",
     "RecordingController",
 ]

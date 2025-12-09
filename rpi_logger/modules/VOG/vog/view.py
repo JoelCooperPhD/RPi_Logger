@@ -251,15 +251,6 @@ class VOGTkinterGUI:
         try:
             toplevel = self.root.winfo_toplevel()
 
-            # DEBUG: Log what we have available
-            has_attr = hasattr(self.args, 'instance_id')
-            instance_id_value = getattr(self.args, 'instance_id', None) if has_attr else None
-            self.logger.info("VOG _update_window_title DEBUG: has_instance_id_attr=%s, instance_id=%r, port=%r, device_type=%r",
-                           has_attr, instance_id_value, self._port, self._device_type)
-
-            # Also log all args attributes for debugging
-            self.logger.info("VOG args attributes: %s", dir(self.args))
-
             # Primary: Use instance_id if available (for multi-instance modules)
             if hasattr(self.args, 'instance_id') and self.args.instance_id:
                 title = self.args.instance_id

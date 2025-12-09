@@ -126,7 +126,7 @@ class CamerasView:
         if not callable(builder):
             return
         if not self._io_stub_fields:
-            for key in ("cam", "cap_tgt", "cap_pct", "rec_tgt", "rec_pct", "wait"):
+            for key in ("cam", "cap_tgt", "rec_tgt", "disp_tgt"):
                 self._io_stub_fields[key] = tk.StringVar(master=self._root, value="-")
         if not self._io_stub_history:
             self._io_stub_history = {}
@@ -138,16 +138,14 @@ class CamerasView:
             else:
                 container = ttk.Frame(frame)
             container.grid(row=0, column=0, sticky="ew")
-            for idx in range(6):
+            for idx in range(4):
                 container.columnconfigure(idx, weight=1, uniform="iofields")
 
             fields = [
                 ("cam", "Cam"),
                 ("cap_tgt", "Cap In/Tgt"),
-                ("cap_pct", "%"),
                 ("rec_tgt", "Rec Out/Tgt"),
-                ("rec_pct", "%"),
-                ("wait", "Wait (ms)"),
+                ("disp_tgt", "Disp/Tgt"),
             ]
             for col, (key, label_text) in enumerate(fields):
                 if HAS_THEME and Colors is not None:
@@ -357,44 +355,46 @@ class CamerasView:
             except Exception:
                 return "   --"
 
-        def _calc_pct_and_color(actual, target):
-            """Calculate percentage and determine color based on performance."""
-            pct_str = "  --"
-            pct_color = Colors.FG_SECONDARY if HAS_THEME and Colors else None
+        def _calc_color(actual, target):
+            """Determine color based on how close actual is to target."""
+            color = Colors.FG_PRIMARY if HAS_THEME and Colors else None
             try:
                 if actual is not None and target is not None and float(target) > 0:
                     pct = (float(actual) / float(target)) * 100
-                    pct_str = f"{pct:3.0f}%"
                     if HAS_THEME and Colors:
                         if pct >= 95:
-                            pct_color = Colors.SUCCESS      # Green - good
+                            color = Colors.SUCCESS      # Green - good
                         elif pct >= 80:
-                            pct_color = Colors.WARNING      # Orange - warning
+                            color = Colors.WARNING      # Orange - warning
                         else:
-                            pct_color = Colors.ERROR        # Red - bad
+                            color = Colors.ERROR        # Red - bad
             except (ValueError, TypeError):
                 pass
-            return pct_str, pct_color
+            return color
 
         # Capture metrics: fps_capture vs target_fps (camera's configured FPS)
         cap_actual = payload.get("fps_capture")
         cap_target = payload.get("target_fps")
         cap_tgt_str = f"{_fmt_num(cap_actual)} / {_fmt_num(cap_target)}"
-        cap_pct_str, cap_pct_color = _calc_pct_and_color(cap_actual, cap_target)
+        cap_color = _calc_color(cap_actual, cap_target)
 
         # Record metrics: fps_encode vs target_record_fps
         rec_actual = payload.get("fps_encode")
         rec_target = payload.get("target_record_fps")
         rec_tgt_str = f"{_fmt_num(rec_actual)} / {_fmt_num(rec_target)}"
-        rec_pct_str, rec_pct_color = _calc_pct_and_color(rec_actual, rec_target)
+        rec_color = _calc_color(rec_actual, rec_target)
+
+        # Display metrics: fps_preview vs target_preview_fps
+        disp_actual = payload.get("fps_preview")
+        disp_target = payload.get("target_preview_fps")
+        disp_tgt_str = f"{_fmt_num(disp_actual)} / {_fmt_num(disp_target)}"
+        disp_color = _calc_color(disp_actual, disp_target)
 
         values = {
             "cam": cam_id,
             "cap_tgt": cap_tgt_str,
-            "cap_pct": cap_pct_str,
             "rec_tgt": rec_tgt_str,
-            "rec_pct": rec_pct_str,
-            "wait": _fmt_num(payload.get("capture_wait_ms")),
+            "disp_tgt": disp_tgt_str,
         }
         history = self._io_stub_history.setdefault(cam_id, {})
 
@@ -412,19 +412,13 @@ class CamerasView:
             except Exception:
                 self._logger.debug("Failed to update IO stub field %s", key, exc_info=True)
 
-        # Apply color to capture percentage label
-        if "cap_pct" in self._io_stub_labels and cap_pct_color:
-            try:
-                self._io_stub_labels["cap_pct"].configure(fg=cap_pct_color)
-            except Exception:
-                pass
-
-        # Apply color to record percentage label
-        if "rec_pct" in self._io_stub_labels and rec_pct_color:
-            try:
-                self._io_stub_labels["rec_pct"].configure(fg=rec_pct_color)
-            except Exception:
-                pass
+        # Apply color to ratio labels based on sync status
+        for key, color in [("cap_tgt", cap_color), ("rec_tgt", rec_color), ("disp_tgt", disp_color)]:
+            if key in self._io_stub_labels and color:
+                try:
+                    self._io_stub_labels[key].configure(fg=color)
+                except Exception:
+                    pass
 
     def _install_settings_menu(self, tk) -> None:
         if self._settings_menu:

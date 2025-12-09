@@ -430,29 +430,27 @@ class VOGModuleRuntime(ModuleRuntime):
             self.logger.warning("Cannot start session - no devices connected")
             return False
 
-        successes = []
-        failures = []
-
-        for port, handler in self.handlers.items():
+        # Start all devices in parallel
+        async def start_one(port: str, handler) -> tuple[str, bool]:
             try:
-                started = await handler.start_experiment()
+                return port, await handler.start_experiment()
             except Exception as exc:
                 self.logger.error("start_experiment failed on %s: %s", port, exc)
-                started = False
+                return port, False
 
-            if started:
-                successes.append((port, handler))
-            else:
-                failures.append(port)
+        results = await asyncio.gather(*[
+            start_one(port, handler) for port, handler in self.handlers.items()
+        ])
+
+        successes = [(port, self.handlers[port]) for port, ok in results if ok]
+        failures = [port for port, ok in results if not ok]
 
         if failures:
             self.logger.error("Failed to start session on: %s", ", ".join(failures))
-            # Rollback
-            for port, handler in successes:
-                try:
-                    await handler.stop_experiment()
-                except Exception as exc:
-                    self.logger.warning("Rollback stop_experiment failed on %s: %s", port, exc)
+            # Rollback in parallel
+            await asyncio.gather(*[
+                handler.stop_experiment() for _, handler in successes
+            ], return_exceptions=True)
             return False
 
         self._session_active = True
@@ -468,18 +466,19 @@ class VOGModuleRuntime(ModuleRuntime):
         if self._recording_active:
             await self._stop_recording()
 
-        failures = []
-
-        for port, handler in self.handlers.items():
+        # Stop all devices in parallel
+        async def stop_one(port: str, handler) -> tuple[str, bool]:
             try:
-                stopped = await handler.stop_experiment()
+                return port, await handler.stop_experiment()
             except Exception as exc:
                 self.logger.error("stop_experiment failed on %s: %s", port, exc)
-                stopped = False
+                return port, False
 
-            if not stopped:
-                failures.append(port)
+        results = await asyncio.gather(*[
+            stop_one(port, handler) for port, handler in self.handlers.items()
+        ])
 
+        failures = [port for port, ok in results if not ok]
         if failures:
             self.logger.error("Failed to stop session on: %s", ", ".join(failures))
 
@@ -502,29 +501,27 @@ class VOGModuleRuntime(ModuleRuntime):
             if not session_ok:
                 return False
 
-        successes = []
-        failures = []
-
-        for port, handler in self.handlers.items():
+        # Start trial on all devices in parallel
+        async def start_one(port: str, handler) -> tuple[str, bool]:
             try:
-                started = await handler.start_trial()
+                return port, await handler.start_trial()
             except Exception as exc:
                 self.logger.error("start_trial failed on %s: %s", port, exc)
-                started = False
+                return port, False
 
-            if started:
-                successes.append((port, handler))
-            else:
-                failures.append(port)
+        results = await asyncio.gather(*[
+            start_one(port, handler) for port, handler in self.handlers.items()
+        ])
+
+        successes = [(port, self.handlers[port]) for port, ok in results if ok]
+        failures = [port for port, ok in results if not ok]
 
         if failures:
             self.logger.error("Failed to start recording on: %s", ", ".join(failures))
-            # Rollback
-            for port, handler in successes:
-                try:
-                    await handler.stop_trial()
-                except Exception as exc:
-                    self.logger.warning("Rollback stop_trial failed on %s: %s", port, exc)
+            # Rollback in parallel
+            await asyncio.gather(*[
+                handler.stop_trial() for _, handler in successes
+            ], return_exceptions=True)
             return False
 
         self._recording_active = True
@@ -541,18 +538,19 @@ class VOGModuleRuntime(ModuleRuntime):
         if not self._recording_active:
             return
 
-        failures = []
-
-        for port, handler in self.handlers.items():
+        # Stop trial on all devices in parallel
+        async def stop_one(port: str, handler) -> tuple[str, bool]:
             try:
-                stopped = await handler.stop_trial()
+                return port, await handler.stop_trial()
             except Exception as exc:
                 self.logger.error("stop_trial failed on %s: %s", port, exc)
-                stopped = False
+                return port, False
 
-            if not stopped:
-                failures.append(port)
+        results = await asyncio.gather(*[
+            stop_one(port, handler) for port, handler in self.handlers.items()
+        ])
 
+        failures = [port for port, ok in results if not ok]
         if failures:
             self.logger.error("Failed to stop recording on: %s", ", ".join(failures))
 
@@ -569,14 +567,14 @@ class VOGModuleRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
 
     async def _peek_open_all(self) -> None:
-        """Send peek/open command to all devices."""
-        for handler in self.handlers.values():
-            await handler.peek_open()
+        """Send peek/open command to all devices (in parallel)."""
+        if self.handlers:
+            await asyncio.gather(*[h.peek_open() for h in self.handlers.values()])
 
     async def _peek_close_all(self) -> None:
-        """Send peek/close command to all devices."""
-        for handler in self.handlers.values():
-            await handler.peek_close()
+        """Send peek/close command to all devices (in parallel)."""
+        if self.handlers:
+            await asyncio.gather(*[h.peek_close() for h in self.handlers.values()])
 
     # ------------------------------------------------------------------
     # Window visibility control

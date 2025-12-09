@@ -20,7 +20,6 @@ from .state import (
     serialize_camera_id,
     serialize_camera_state,
 )
-from .tasks import TaskManager
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -35,7 +34,6 @@ __all__ = [
     "parse_preview_fps",
     "RuntimeStatus",
     "SelectedConfigs",
-    "TaskManager",
     "deserialize_camera_id",
     "deserialize_camera_state",
     "merge_capabilities",

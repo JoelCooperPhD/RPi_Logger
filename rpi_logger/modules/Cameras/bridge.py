@@ -18,7 +18,7 @@ from rpi_logger.modules.Cameras.defaults import DEFAULT_PREVIEW_SIZE, DEFAULT_PR
 from rpi_logger.modules.Cameras.utils import parse_resolution, parse_fps, CameraMetrics
 from rpi_logger.modules.Cameras.bridge_controllers import (
     CameraWorkerState,
-    DiscoveryController,
+    WorkerSpawnController,
     RecordingController,
 )
 from rpi_logger.modules.Cameras.config import load_config
@@ -77,7 +77,7 @@ class CamerasRuntime(ModuleRuntime):
         self.camera_states: Dict[str, CameraWorkerState] = {}
 
         # Controllers
-        self.discovery = DiscoveryController(self, logger=self.logger)
+        self.worker_spawner = WorkerSpawnController(self, logger=self.logger)
         self.recording = RecordingController(self, logger=self.logger)
 
         self._telemetry_task: Optional[asyncio.Task] = None
@@ -280,7 +280,7 @@ class CamerasRuntime(ModuleRuntime):
 
         # Spawn worker for this camera
         try:
-            await self.discovery._spawn_worker_for(descriptor)
+            await self.worker_spawner._spawn_worker_for(descriptor)
             self.view.set_status("Camera connected")
 
             # Update window title to show device display name (e.g., "USB: HD PRO Webcam C920")
@@ -346,6 +346,10 @@ class CamerasRuntime(ModuleRuntime):
         self.logger.info("  capabilities: %s", msg.capabilities)
         self.logger.info("=" * 40)
 
+        # Notify discovery controller that this worker is ready
+        # This releases the picam init lock if we were waiting for this camera
+        self.worker_spawner.notify_worker_ready(key)
+
         state = self.camera_states.get(key)
         if state:
             title = state.descriptor.camera_id.friendly_name or key
@@ -389,6 +393,7 @@ class CamerasRuntime(ModuleRuntime):
             frames_recorded=msg.frames_recorded,
             target_fps=msg.target_fps,
             target_record_fps=msg.target_record_fps,
+            target_preview_fps=msg.target_preview_fps,
             capture_wait_ms=msg.capture_wait_ms,
         )
         with contextlib.suppress(Exception):
@@ -534,7 +539,7 @@ class CamerasRuntime(ModuleRuntime):
 
         # Respawn with new settings
         self.logger.info("[CONFIG] Respawning worker for %s", camera_id)
-        await self.discovery._spawn_worker_for(descriptor)
+        await self.worker_spawner._spawn_worker_for(descriptor)
 
     def _push_config_to_settings(self, camera_id: str) -> None:
         """Push config values to settings window for a camera (loads from cache if available)."""

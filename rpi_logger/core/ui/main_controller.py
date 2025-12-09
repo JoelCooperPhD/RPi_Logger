@@ -165,6 +165,10 @@ class MainController:
             self.session_active = True
             self.trial_counter = 0
 
+            # Notify device controller that session is active (disables rescan)
+            if self.logger_system.device_system.ui_controller:
+                self.logger_system.device_system.ui_controller.set_session_active(True)
+
             self.session_button.configure(text="Stop", style='danger')
             self.trial_button.configure(style='success')
 
@@ -195,6 +199,10 @@ class MainController:
             await self.logger_system.stop_session_all()
 
             self.session_active = False
+
+            # Notify device controller that session ended (re-enables rescan)
+            if self.logger_system.device_system.ui_controller:
+                self.logger_system.device_system.ui_controller.set_session_active(False)
 
             self.session_button.configure(text="Start", style='success')
             self.trial_button.configure(style='inactive')

@@ -25,6 +25,7 @@ class CameraMetrics:
     frames_recorded: int
     target_fps: float  # Camera's actual/configured FPS (always available)
     target_record_fps: float
+    target_preview_fps: float
     capture_wait_ms: float
     preview_queue: int = 0
     record_queue: int = 0

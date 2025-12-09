@@ -162,12 +162,12 @@ class VOGPlotter:
         self._plt[1].set_xticks([-60, -50, -40, -30, -20, -10, 0])
         self._plt[1].set_xlim([-62, 2])
 
-        # Start animation
+        # Start animation (interval matches throttle rate for efficiency)
         self._ani = animation.FuncAnimation(
             self._fig,
             self._animate,
             init_func=self._init_animation,
-            interval=10,
+            interval=100,  # Match 100ms throttle rate to reduce CPU wake-ups
             blit=True,
             cache_frame_data=False
         )
@@ -185,9 +185,9 @@ class VOGPlotter:
             # Rescale Y axis if needed
             self._rescale_y(self._tsot_now, self._tsct_now)
 
-            # Roll and update TST arrays
-            self._tsot_array = np.roll(self._tsot_array, -1)
-            self._tsct_array = np.roll(self._tsct_array, -1)
+            # Shift arrays in-place (no allocation, unlike np.roll)
+            self._tsot_array[:-1] = self._tsot_array[1:]
+            self._tsct_array[:-1] = self._tsct_array[1:]
 
             if self._tsot_now is not None:
                 self._tsot_array[-1] = self._tsot_now
@@ -205,8 +205,8 @@ class VOGPlotter:
             self._tsot_now = None
             self._tsct_now = None
 
-            # Roll and update state array
-            self._state_array = np.roll(self._state_array, -1)
+            # Shift state array in-place
+            self._state_array[:-1] = self._state_array[1:]
             self._state_array[-1] = self._state_now
             self._state_line.set_data(self._time_array, self._state_array)
 

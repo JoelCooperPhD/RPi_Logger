@@ -85,20 +85,10 @@ class VOGDataLogger:
             Path to the data file, or None if logging failed
         """
         try:
-            # Ensure output directory exists
-            await asyncio.to_thread(self.output_dir.mkdir, parents=True, exist_ok=True)
-
             # Build filename
             prefix = module_filename_prefix(self.output_dir, "VOG", trial_number, code="VOG")
             port_name = self._sanitize_port_name()
             data_file = self.output_dir / f"{prefix}_{port_name}.csv"
-
-            # Write header if file doesn't exist
-            file_exists = await asyncio.to_thread(data_file.exists)
-            if not file_exists:
-                header = self.protocol.csv_header
-                await asyncio.to_thread(self._write_header, data_file, header)
-                self.logger.info("Created VOG data file: %s", data_file.name)
 
             # Prepare row data
             if label is None:
@@ -109,9 +99,15 @@ class VOGDataLogger:
 
             # Format CSV line using protocol's polymorphic method
             line = self.protocol.format_csv_row(packet, label, unix_time, ms_since_record)
+            header = self.protocol.csv_header
 
-            # Append to file
-            await asyncio.to_thread(self._append_line, data_file, line)
+            # Batch all file I/O into a single thread call
+            created_new = await asyncio.to_thread(
+                self._batch_write, self.output_dir, data_file, header, line
+            )
+            if created_new:
+                self.logger.info("Created VOG data file: %s", data_file.name)
+
             self.logger.debug(
                 "Logged trial: T=%s, Open=%s, Closed=%s",
                 trial_number, packet.shutter_open, packet.shutter_closed
@@ -133,16 +129,31 @@ class VOGDataLogger:
         return 0
 
     @staticmethod
-    def _write_header(data_file: Path, header: str) -> None:
-        """Write CSV header to file (synchronous, run in thread)."""
-        with open(data_file, 'w', encoding='utf-8') as f:
-            f.write(header + '\n')
+    def _batch_write(output_dir: Path, data_file: Path, header: str, line: str) -> bool:
+        """Batch all file I/O into a single synchronous operation (run in thread).
 
-    @staticmethod
-    def _append_line(data_file: Path, line: str) -> None:
-        """Append a line to the CSV file (synchronous, run in thread)."""
-        with open(data_file, 'a', encoding='utf-8') as f:
+        Args:
+            output_dir: Directory to create if needed
+            data_file: Path to CSV file
+            header: CSV header line
+            line: Data line to append
+
+        Returns:
+            True if a new file was created (header written), False if appended to existing
+        """
+        # Ensure directory exists
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check if file exists and write appropriately
+        created_new = not data_file.exists()
+        mode = 'w' if created_new else 'a'
+
+        with open(data_file, mode, encoding='utf-8') as f:
+            if created_new:
+                f.write(header + '\n')
             f.write(line + '\n')
+
+        return created_new
 
     async def _dispatch_logged_event(
         self,

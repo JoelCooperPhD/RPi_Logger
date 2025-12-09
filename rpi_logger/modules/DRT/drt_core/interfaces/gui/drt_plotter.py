@@ -6,7 +6,6 @@ Uses dark theme colors for consistent styling with the modern UI.
 
 from __future__ import annotations
 
-import time
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np
@@ -96,9 +95,7 @@ class DRTPlotter:
         self._rt_y_min = 0
         self._rt_y_max = 1
 
-        # Update throttling
-        self._next_update = time.time()
-        self._interval = 0.1  # 100ms between plot updates
+        # Animation state
 
         self._ani = None
         self.run = False
@@ -171,8 +168,8 @@ class DRTPlotter:
             self._fig,
             self._animate,
             init_func=self._init_animation,
-            interval=10,
-            blit=False,  # Disabled to allow clear_all() to work properly
+            interval=100,  # Match the internal throttle rate (self._interval)
+            blit=True,  # Re-enabled for performance - clear_all() calls draw() explicitly
             cache_frame_data=False
         )
 
@@ -230,20 +227,17 @@ class DRTPlotter:
                 self._plot_lines.extend(self._rt_xy[port]['hit'])
                 self._plot_lines.extend(self._rt_xy[port]['miss'])
 
-    def _ready_to_update(self) -> bool:
-        """Check if enough time has passed for next update."""
-        t = time.time()
-        if t >= self._next_update:
-            if (t - self._next_update) > 0.25:
-                self._next_update = t
-            else:
-                self._next_update += self._interval
-            return True
-        return False
+    def _should_update(self) -> bool:
+        """Check if animation should process this frame.
+
+        Since FuncAnimation now runs at the correct interval (100ms),
+        we just check if the plotter is running.
+        """
+        return self.run
 
     def _animate(self, i):
         """Animation frame callback."""
-        if not self.run or not self._ready_to_update():
+        if not self._should_update():
             return self._plot_lines
 
         for unit_id in list(self._unit_ids):

@@ -200,7 +200,8 @@ class CameraWorker:
             # Preview: use lores if available, downscale if needed, send via shm or JPEG
             if self._preview_enabled:
                 preview_interval = 1.0 / self._preview_target_fps
-                if now - self._last_preview_time >= preview_interval:
+                # Allow 5ms tolerance to avoid missing frames due to timing jitter
+                if now - self._last_preview_time >= preview_interval - 0.005:
                     self._last_preview_time = now
                     self._frames_preview_sent += 1
                     preview_times.append(now)

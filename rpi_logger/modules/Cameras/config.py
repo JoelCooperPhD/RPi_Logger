@@ -28,9 +28,6 @@ DEFAULT_RECORD_RESOLUTION: Resolution = DEFAULT_CAPTURE_RESOLUTION
 DEFAULT_RECORD_FPS = _DEFAULT_RECORD_FPS
 DEFAULT_RECORD_FORMAT = "MJPEG"
 DEFAULT_RECORD_OVERLAY = True
-DEFAULT_DISCOVERY_INTERVAL_MS = 2000
-DEFAULT_DISCOVERY_BACKOFF_MS = 5000
-DEFAULT_DISCOVERY_CACHE_TTL_MS = 600_000
 DEFAULT_GUARD_DISK_FREE_GB = 1.0
 DEFAULT_GUARD_CHECK_INTERVAL_MS = 5000
 DEFAULT_RETENTION_MAX_SESSIONS = 10
@@ -59,13 +56,6 @@ class RecordSettings:
     fps_cap: Optional[float]
     pixel_format: str
     overlay: bool
-
-
-@dataclass(slots=True)
-class DiscoverySettings:
-    interval_ms: int
-    reprobe_backoff_ms: int
-    cache_ttl_ms: int
 
 
 @dataclass(slots=True)
@@ -112,7 +102,6 @@ class LoggingSettings:
 class CamerasConfig:
     preview: PreviewSettings
     record: RecordSettings
-    discovery: DiscoverySettings
     guard: GuardSettings
     retention: RetentionSettings
     storage: StorageSettings
@@ -196,12 +185,6 @@ def load_config(
         ),
     )
 
-    discovery = DiscoverySettings(
-        interval_ms=_coerce_int(merged, ("discovery.interval_ms",), DEFAULT_DISCOVERY_INTERVAL_MS),
-        reprobe_backoff_ms=_coerce_int(merged, ("discovery.reprobe_backoff_ms",), DEFAULT_DISCOVERY_BACKOFF_MS),
-        cache_ttl_ms=_coerce_int(merged, ("discovery.cache_ttl_ms",), DEFAULT_DISCOVERY_CACHE_TTL_MS),
-    )
-
     guard = GuardSettings(
         disk_free_gb_min=_coerce_float(merged, ("guard.disk_free_gb_min",), DEFAULT_GUARD_DISK_FREE_GB),
         check_interval_ms=_coerce_int(merged, ("guard.check_interval_ms",), DEFAULT_GUARD_CHECK_INTERVAL_MS),
@@ -238,7 +221,6 @@ def load_config(
     return CamerasConfig(
         preview=preview,
         record=record,
-        discovery=discovery,
         guard=guard,
         retention=retention,
         storage=storage,
@@ -279,10 +261,6 @@ def _flatten_config(config: CamerasConfig) -> Dict[str, Any]:
     updates["record.fps_cap"] = config.record.fps_cap if config.record.fps_cap is not None else ""
     updates["record.format"] = config.record.pixel_format
     updates["record.overlay"] = config.record.overlay
-
-    updates["discovery.interval_ms"] = config.discovery.interval_ms
-    updates["discovery.reprobe_backoff_ms"] = config.discovery.reprobe_backoff_ms
-    updates["discovery.cache_ttl_ms"] = config.discovery.cache_ttl_ms
 
     updates["guard.disk_free_gb_min"] = config.guard.disk_free_gb_min
     updates["guard.check_interval_ms"] = config.guard.check_interval_ms
@@ -429,7 +407,6 @@ def as_dict(config: CamerasConfig) -> Dict[str, Any]:
     return {
         "preview": asdict(config.preview),
         "record": asdict(config.record),
-        "discovery": asdict(config.discovery),
         "guard": asdict(config.guard),
         "retention": asdict(config.retention),
         "storage": {**asdict(config.storage), "base_path": str(config.storage.base_path)},
@@ -443,7 +420,6 @@ def as_dict(config: CamerasConfig) -> Dict[str, Any]:
 __all__ = [
     "BackendSettings",
     "CamerasConfig",
-    "DiscoverySettings",
     "GuardSettings",
     "LoggingSettings",
     "PreviewSettings",

@@ -180,3 +180,7 @@ class RoundedButton(tk.Canvas):
         super().configure(**kwargs)
 
     config = configure
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable the button."""
+        self.configure(state='normal' if enabled else 'disabled')

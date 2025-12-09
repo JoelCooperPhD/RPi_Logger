@@ -280,10 +280,21 @@ class LoggerSystem:
                 if instance_id and self._is_multi_instance_module(module_name):
                     # Multi-instance module: notify only the device for this instance
                     self._notify_instance_disconnected(instance_id)
+
+                    # Save disconnected state - only if no other instances remain
+                    # (the instance was already removed from map by _notify_instance_disconnected)
+                    other_instances_running = any(
+                        inst_id.startswith(f"{module_name}:")
+                        for inst_id in self._device_instance_map.values()
+                    )
+                    if not other_instances_running:
+                        await self._save_device_connection_state(module_name, False)
                 else:
                     # Single-instance module: notify all devices
                     self.module_manager.cleanup_stopped_process(module_name)
                     self._notify_device_connected_for_module(module_name, False)
+                    # Save disconnected state
+                    await self._save_device_connection_state(module_name, False)
 
                 if self.ui_callback:
                     try:
@@ -830,7 +841,7 @@ class LoggerSystem:
     # =========================================================================
 
     # Modules that support multiple simultaneous instances (one per device)
-    MULTI_INSTANCE_MODULES = {"DRT", "VOG"}
+    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS"}
 
     def _is_multi_instance_module(self, module_id: str) -> bool:
         """Check if a module supports multiple simultaneous instances."""

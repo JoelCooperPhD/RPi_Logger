@@ -130,16 +130,16 @@ class USBTransport(BaseTransport):
             return None
 
         try:
-            # Check if data is available
+            # Check if data is available (non-blocking check)
             if not await asyncio.to_thread(lambda: self._serial.in_waiting > 0):
-                # Small sleep to prevent busy-waiting
-                await asyncio.sleep(0.01)
+                # No sleep here - the caller (handler read loop) manages timing
                 return None
 
             line_bytes = await asyncio.to_thread(self._serial.readline)
             if line_bytes:
                 line = line_bytes.decode('utf-8', errors='replace').strip()
-                logger.debug("Read from %s: %s", self.port, line)
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("Read from %s: %s", self.port, line)
                 return line
             return None
 

@@ -328,7 +328,7 @@ class VOGHandler:
                     self.logger.debug("Read line from %s: %r", self.port, line)
                     await self._process_response(line)
 
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.001)  # 1ms for responsiveness
 
         except asyncio.CancelledError:
             self.logger.debug("Read loop cancelled for %s", self.port)

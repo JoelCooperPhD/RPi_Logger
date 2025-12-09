@@ -151,18 +151,12 @@ class USBTransport(BaseTransport):
             return None
 
         def _read_with_buffer():
-            """Read data and manage line buffer."""
-            # Read any available data (brief lock for serial access)
+            """Read data and manage line buffer (single lock acquisition)."""
             with self._lock:
+                # Read any available data
                 waiting = self._serial.in_waiting
                 if waiting > 0:
                     new_data = self._serial.read(waiting)
-                else:
-                    new_data = b''
-
-            # Update buffer (brief lock for buffer access)
-            with self._lock:
-                if new_data:
                     self._read_buffer += new_data
 
                 # Prevent buffer overflow from malformed devices

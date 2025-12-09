@@ -105,6 +105,9 @@ class DeviceUIController:
         self._wireless_device_count = 0
         self._xbee_scanning = False
 
+        # Session state (used to disable rescan during active sessions)
+        self._session_active = False
+
         # Subscribe to model changes
         selection_model.add_connection_observer(self._on_model_changed)
         selection_model.add_device_state_observer(self._on_model_changed)
@@ -323,4 +326,23 @@ class DeviceUIController:
         """Update the XBee scanning state."""
         if self._xbee_scanning != scanning:
             self._xbee_scanning = scanning
+            self._notify_ui_observers()
+
+    # =========================================================================
+    # Session State
+    # =========================================================================
+
+    @property
+    def session_active(self) -> bool:
+        """Check if a session is currently active."""
+        return self._session_active
+
+    def set_session_active(self, active: bool) -> None:
+        """Update the session active state.
+
+        When a session is active, certain operations like XBee rescan
+        should be disabled to avoid disrupting wireless communications.
+        """
+        if self._session_active != active:
+            self._session_active = active
             self._notify_ui_observers()

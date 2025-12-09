@@ -261,8 +261,10 @@ class BaseDRTHandler(ABC):
                 while lines_processed < 50:  # Limit to prevent infinite loop
                     line = await self.transport.read_line()
                     if line:
-                        logger.debug("Processing line from %s: %s", self.device_id, line.strip())
-                        self._process_response(line.strip())
+                        stripped = line.strip()
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug("Processing line from %s: %s", self.device_id, stripped)
+                        self._process_response(stripped)
                         lines_processed += 1
                     else:
                         break

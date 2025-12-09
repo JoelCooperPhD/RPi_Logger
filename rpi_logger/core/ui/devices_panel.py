@@ -261,6 +261,14 @@ class XBeeBanner(tk.Frame):
         """Check if banner should be visible."""
         return self._visible
 
+    def set_rescan_enabled(self, enabled: bool) -> None:
+        """Enable or disable the rescan button.
+
+        Disabling prevents rescans during active sessions to avoid
+        disrupting wireless device communications.
+        """
+        self._rescan_btn.set_enabled(enabled)
+
 
 class DeviceSection(ttk.Frame):
     """
@@ -487,6 +495,8 @@ class DevicesPanel(ttk.LabelFrame):
         self._xbee_banner.set_visible(self._controller.xbee_dongle_connected)
         self._xbee_banner.set_scanning(self._controller.xbee_scanning)
         self._xbee_banner.set_device_count(self._controller.wireless_device_count)
+        # Disable rescan during active sessions to avoid disrupting wireless comms
+        self._xbee_banner.set_rescan_enabled(not self._controller.session_active)
 
         sections_data = self._controller.get_panel_data()
         self._update_sections(sections_data)

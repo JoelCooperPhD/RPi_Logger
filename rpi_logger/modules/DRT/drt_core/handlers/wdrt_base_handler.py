@@ -54,6 +54,11 @@ class WDRTBaseHandler(BaseDRTHandler):
         self._rtc_synced = False
         self._battery_poll_task: Optional[asyncio.Task] = None
 
+        # CSV file handle caching for reduced I/O overhead
+        self._csv_file = None
+        self._csv_filepath: Optional[Path] = None
+        self._csv_header_written = False
+
     @property
     def battery_percent(self) -> Optional[int]:
         """Return the last known battery percentage."""
@@ -114,10 +119,12 @@ class WDRTBaseHandler(BaseDRTHandler):
         self._click_count = 0
         self._buffered_trial_data = None
         self._recording = True
+        self._open_csv_file()
         return await self.send_command('start')
 
     async def stop_experiment(self) -> bool:
         self._recording = False
+        self._close_csv_file()
         result = await self.send_command('stop')
 
         # Resume battery polling after recording stops
@@ -125,6 +132,45 @@ class WDRTBaseHandler(BaseDRTHandler):
             self._start_battery_polling()
 
         return result
+
+    def _open_csv_file(self) -> None:
+        """Open CSV file for writing trial data (caches handle for session)."""
+        if self._csv_file is not None:
+            return  # Already open
+
+        if not self.output_dir:
+            return
+
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            device_id_csv = self._format_device_id_for_csv()
+            filename = f"{device_id_csv}.csv"
+            self._csv_filepath = self.output_dir / filename
+
+            # Check if we need to write header (file doesn't exist or is empty)
+            self._csv_header_written = self._csv_filepath.exists() and self._csv_filepath.stat().st_size > 0
+
+            self._csv_file = open(self._csv_filepath, 'a', buffering=1)  # Line buffered
+            if not self._csv_header_written:
+                self._csv_file.write(self._get_csv_header() + '\n')
+                self._csv_header_written = True
+
+            logger.debug("Opened CSV file: %s", self._csv_filepath)
+        except Exception as e:
+            logger.error("Failed to open CSV file: %s", e)
+            self._csv_file = None
+
+    def _close_csv_file(self) -> None:
+        """Close the cached CSV file handle."""
+        if self._csv_file is not None:
+            try:
+                self._csv_file.close()
+                logger.debug("Closed CSV file: %s", self._csv_filepath)
+            except Exception as e:
+                logger.error("Error closing CSV file: %s", e)
+            finally:
+                self._csv_file = None
+                self._csv_filepath = None
 
     async def set_stimulus(self, on: bool) -> bool:
         command = 'stim_on' if on else 'stim_off'
@@ -330,17 +376,20 @@ class WDRTBaseHandler(BaseDRTHandler):
         return f"wDRT_{port_clean}"
 
     def _log_trial_data(self, data: Dict[str, Any]) -> None:
+        """Log trial data to CSV file using cached file handle."""
         if not self.output_dir:
             logger.warning("No output directory set, skipping data log")
             return
 
         try:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure file is open (may have been closed unexpectedly)
+            if self._csv_file is None:
+                self._open_csv_file()
+            if self._csv_file is None:
+                logger.warning("Could not open CSV file, skipping data log")
+                return
 
             device_id_csv = self._format_device_id_for_csv()
-            filename = f"{device_id_csv}.csv"
-            filepath = self.output_dir / filename
-
             unix_time = int(datetime.now().timestamp())
             device_timestamp = data.get('timestamp', 0)
             trial_number = data.get('trial_number', 0)
@@ -353,19 +402,17 @@ class WDRTBaseHandler(BaseDRTHandler):
 
             csv_line = (
                 f"{device_id_csv},{label},{unix_time},{device_timestamp},"
-                f"{trial_number},{clicks},{reaction_time},{battery},{device_utc}"
+                f"{trial_number},{clicks},{reaction_time},{battery},{device_utc}\n"
             )
 
-            write_header = not filepath.exists()
-            with open(filepath, 'a') as f:
-                if write_header:
-                    f.write(self._get_csv_header() + '\n')
-                f.write(csv_line + '\n')
+            # Write to cached file handle (line-buffered, so flushes automatically)
+            self._csv_file.write(csv_line)
 
-            logger.debug("Logged trial data to %s", filepath)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Logged trial data to %s", self._csv_filepath)
 
             self._create_background_task(self._dispatch_data_event('trial_logged', {
-                'filepath': str(filepath),
+                'filepath': str(self._csv_filepath),
                 'trial_number': trial_number,
             }))
 
