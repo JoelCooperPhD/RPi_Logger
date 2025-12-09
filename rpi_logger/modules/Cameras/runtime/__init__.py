@@ -16,7 +16,6 @@ from .state import (
     deserialize_camera_id,
     deserialize_camera_state,
     merge_capabilities,
-    select_modes,
     serialize_camera_id,
     serialize_camera_state,
 )
@@ -37,7 +36,6 @@ __all__ = [
     "deserialize_camera_id",
     "deserialize_camera_state",
     "merge_capabilities",
-    "select_modes",
     "serialize_camera_id",
     "serialize_camera_state",
 ]

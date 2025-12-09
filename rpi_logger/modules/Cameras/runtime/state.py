@@ -197,65 +197,6 @@ def merge_capabilities(
     return base
 
 
-def ensure_mode_supported(
-    capabilities: CameraCapabilities,
-    request: Optional[ModeRequest | CapabilityMode],
-    *,
-    prefer_record: bool = False,
-) -> Tuple[CapabilityMode, List[str]]:
-    """Resolve a ModeRequest against capabilities with warnings."""
-
-    warnings: list[str] = []
-    if not capabilities.modes:
-        raise ValueError("No capability modes available")
-
-    target, target_warning = _resolve_requested_mode(capabilities, request)
-    if not target:
-        fallback = capabilities.default_record_mode if prefer_record else capabilities.default_preview_mode
-        target = fallback or capabilities.modes[0]
-        warnings.append(target_warning or "Requested mode unavailable; using default fallback")
-    elif target_warning:
-        warnings.append(target_warning)
-    return target, warnings
-
-
-def select_modes(
-    capabilities: CameraCapabilities,
-    requested_preview: Optional[ModeRequest | CapabilityMode],
-    requested_record: Optional[ModeRequest | CapabilityMode],
-) -> Tuple[SelectedConfigs, List[str]]:
-    """Return SelectedConfigs built from capability set + requested overrides."""
-
-    warnings: list[str] = []
-
-    preview_mode, preview_warnings = ensure_mode_supported(capabilities, requested_preview, prefer_record=False)
-    warnings.extend(preview_warnings)
-
-    record_mode, record_warnings = ensure_mode_supported(capabilities, requested_record, prefer_record=True)
-    warnings.extend(record_warnings)
-
-    preview_flags = _extract_flags(requested_preview)
-    record_flags = _extract_flags(requested_record)
-
-    selected = SelectedConfigs(
-        preview=ModeSelection(
-            mode=preview_mode,
-            target_fps=preview_flags.get("fps_cap"),
-            keep_every=preview_flags.get("keep_every"),
-            overlay=preview_flags.get("overlay", True),
-            color_convert=preview_flags.get("color_convert", True),
-        ),
-        record=ModeSelection(
-            mode=record_mode,
-            target_fps=record_flags.get("fps_cap"),
-            keep_every=record_flags.get("keep_every"),
-            overlay=record_flags.get("overlay", True),
-            color_convert=record_flags.get("color_convert", True),
-        ),
-    )
-    return selected, warnings
-
-
 # ---------------------------------------------------------------------------
 # Serialization helpers (used by known_cameras cache)
 
@@ -518,18 +459,6 @@ def _resolve_requested_mode(
 
     # Last resort: first available mode.
     return (capabilities.modes[0] if capabilities.modes else None), "No matching mode found; using first available"
-
-
-def _extract_flags(request: Optional[ModeRequest | CapabilityMode]) -> Dict[str, Any]:
-    if isinstance(request, ModeRequest):
-        fps_cap = request.fps
-        return {
-            "fps_cap": fps_cap,
-            "keep_every": request.keep_every,
-            "overlay": request.overlay,
-            "color_convert": request.color_convert,
-        }
-    return {"fps_cap": None, "keep_every": None, "overlay": True, "color_convert": True}
 
 
 def parse_preview_fps(value: Any, default_fps: float) -> tuple[Optional[float], Optional[int]]:

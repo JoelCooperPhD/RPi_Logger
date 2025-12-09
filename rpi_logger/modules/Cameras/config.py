@@ -128,78 +128,46 @@ def load_config(
                 merged[key] = value
 
     preview = PreviewSettings(
-        resolution=_coerce_resolution(
-            merged,
-            ("preview.resolution", "preview_resolution", "stub_prefs.preview_resolution"),
-            default=DEFAULT_PREVIEW_RESOLUTION,
-            logger=log,
-        ),
-        fps_cap=_coerce_optional_float(
-            merged,
-            ("preview.fps_cap", "preview_fps", "stub_prefs.preview_fps"),
-            default=DEFAULT_PREVIEW_FPS,
-            logger=log,
-        ),
-        pixel_format=_coerce_str(
-            merged,
-            ("preview.format", "preview_format", "stub_prefs.preview_format"),
-            DEFAULT_PREVIEW_FORMAT,
-        ),
-        overlay=_coerce_bool(
-            merged,
-            ("preview.overlay", "overlay_enabled", "stub_prefs.overlay_enabled"),
-            DEFAULT_PREVIEW_OVERLAY,
-        ),
-        auto_start=_coerce_bool(
-            merged,
-            ("ui.auto_start_preview", "auto_start_preview"),
-            DEFAULT_UI_AUTO_START_PREVIEW,
-        ),
+        resolution=_coerce(merged, ("preview.resolution", "preview_resolution", "stub_prefs.preview_resolution"),
+                          _to_resolution, DEFAULT_PREVIEW_RESOLUTION, log),
+        fps_cap=_coerce(merged, ("preview.fps_cap", "preview_fps", "stub_prefs.preview_fps"),
+                       _to_optional_float, DEFAULT_PREVIEW_FPS, log),
+        pixel_format=_coerce(merged, ("preview.format", "preview_format", "stub_prefs.preview_format"),
+                            _to_str, DEFAULT_PREVIEW_FORMAT),
+        overlay=_coerce(merged, ("preview.overlay", "overlay_enabled", "stub_prefs.overlay_enabled"),
+                       _to_bool, DEFAULT_PREVIEW_OVERLAY),
+        auto_start=_coerce(merged, ("ui.auto_start_preview", "auto_start_preview"),
+                          _to_bool, DEFAULT_UI_AUTO_START_PREVIEW),
     )
 
     record = RecordSettings(
-        resolution=_coerce_resolution(
-            merged,
-            ("record.resolution", "record_resolution", "stub_prefs.record_resolution"),
-            default=DEFAULT_RECORD_RESOLUTION,
-            logger=log,
-        ),
-        fps_cap=_coerce_optional_float(
-            merged,
-            ("record.fps_cap", "record_fps", "stub_prefs.record_fps"),
-            default=DEFAULT_RECORD_FPS,
-            logger=log,
-        ),
-        pixel_format=_coerce_str(
-            merged,
-            ("record.format", "record_format", "stub_prefs.record_format"),
-            DEFAULT_RECORD_FORMAT,
-        ),
-        overlay=_coerce_bool(
-            merged,
-            ("record.overlay",),
-            DEFAULT_RECORD_OVERLAY,
-        ),
+        resolution=_coerce(merged, ("record.resolution", "record_resolution", "stub_prefs.record_resolution"),
+                          _to_resolution, DEFAULT_RECORD_RESOLUTION, log),
+        fps_cap=_coerce(merged, ("record.fps_cap", "record_fps", "stub_prefs.record_fps"),
+                       _to_optional_float, DEFAULT_RECORD_FPS, log),
+        pixel_format=_coerce(merged, ("record.format", "record_format", "stub_prefs.record_format"),
+                            _to_str, DEFAULT_RECORD_FORMAT),
+        overlay=_coerce(merged, ("record.overlay",), _to_bool, DEFAULT_RECORD_OVERLAY),
     )
 
     guard = GuardSettings(
-        disk_free_gb_min=_coerce_float(merged, ("guard.disk_free_gb_min",), DEFAULT_GUARD_DISK_FREE_GB),
-        check_interval_ms=_coerce_int(merged, ("guard.check_interval_ms",), DEFAULT_GUARD_CHECK_INTERVAL_MS),
+        disk_free_gb_min=_coerce(merged, ("guard.disk_free_gb_min",), _to_float, DEFAULT_GUARD_DISK_FREE_GB),
+        check_interval_ms=_coerce(merged, ("guard.check_interval_ms",), _to_int, DEFAULT_GUARD_CHECK_INTERVAL_MS),
     )
 
     retention = RetentionSettings(
-        max_sessions=_coerce_int(merged, ("retention.max_sessions",), DEFAULT_RETENTION_MAX_SESSIONS),
-        prune_on_start=_coerce_bool(merged, ("retention.prune_on_start",), DEFAULT_RETENTION_PRUNE_ON_START),
+        max_sessions=_coerce(merged, ("retention.max_sessions",), _to_int, DEFAULT_RETENTION_MAX_SESSIONS),
+        prune_on_start=_coerce(merged, ("retention.prune_on_start",), _to_bool, DEFAULT_RETENTION_PRUNE_ON_START),
     )
 
     storage = StorageSettings(
-        base_path=_coerce_path(merged, ("storage.base_path", "output_dir"), DEFAULT_STORAGE_BASE_PATH),
-        per_camera_subdir=_coerce_bool(merged, ("storage.per_camera_subdir",), DEFAULT_STORAGE_PER_CAMERA_SUBDIR),
+        base_path=_coerce(merged, ("storage.base_path", "output_dir"), _to_path, DEFAULT_STORAGE_BASE_PATH),
+        per_camera_subdir=_coerce(merged, ("storage.per_camera_subdir",), _to_bool, DEFAULT_STORAGE_PER_CAMERA_SUBDIR),
     )
 
     telemetry = TelemetrySettings(
-        emit_interval_ms=_coerce_int(merged, ("telemetry.emit_interval_ms",), DEFAULT_TELEMETRY_EMIT_INTERVAL_MS),
-        include_metrics=_coerce_bool(merged, ("telemetry.include_metrics",), DEFAULT_TELEMETRY_INCLUDE_METRICS),
+        emit_interval_ms=_coerce(merged, ("telemetry.emit_interval_ms",), _to_int, DEFAULT_TELEMETRY_EMIT_INTERVAL_MS),
+        include_metrics=_coerce(merged, ("telemetry.include_metrics",), _to_bool, DEFAULT_TELEMETRY_INCLUDE_METRICS),
     )
 
     ui = UISettings(
@@ -207,12 +175,12 @@ def load_config(
     )
 
     backend = BackendSettings(
-        picam_controls=_coerce_controls(merged.get("backend.picam_controls")),
+        picam_controls=_to_controls(merged.get("backend.picam_controls"), {}),
     )
 
     logging_settings = LoggingSettings(
-        level=_coerce_str(merged, ("logging.level", "log_level"), DEFAULT_LOG_LEVEL),
-        file=_coerce_path(merged, ("logging.file", "log_file"), DEFAULT_LOG_FILE),
+        level=_coerce(merged, ("logging.level", "log_level"), _to_str, DEFAULT_LOG_LEVEL),
+        file=_coerce(merged, ("logging.file", "log_file"), _to_path, DEFAULT_LOG_FILE),
     )
 
     return CamerasConfig(
@@ -279,8 +247,24 @@ def _flatten_config(config: CamerasConfig) -> Dict[str, Any]:
     return updates
 
 
-def _coerce_bool(data: Dict[str, Any], keys: Tuple[str, ...], default: bool) -> bool:
-    raw = _first_present(data, keys)
+def _first_present(data: Dict[str, Any], keys: Tuple[str, ...]) -> Any:
+    """Return the first present value from data for the given keys."""
+    for key in keys:
+        if key in data:
+            return data.get(key)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Type coercion helpers - each converts a raw value to a specific type
+#
+# These are intentionally minimal. The pattern is:
+#   raw = _first_present(data, keys)
+#   result = _to_<type>(raw, default, logger)
+
+
+def _to_bool(raw: Any, default: bool, logger=None) -> bool:
+    """Coerce a raw value to bool."""
     if raw is None:
         return default
     if isinstance(raw, bool):
@@ -288,95 +272,68 @@ def _coerce_bool(data: Dict[str, Any], keys: Tuple[str, ...], default: bool) -> 
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _coerce_optional_str(data: Dict[str, Any], keys: Tuple[str, ...], default: Optional[str]) -> Optional[str]:
-    raw = _first_present(data, keys)
-    if raw is None:
-        return default
-    text = str(raw).strip()
-    return text if text else default
-
-
-def _coerce_str(data: Dict[str, Any], keys: Tuple[str, ...], default: str) -> str:
-    raw = _first_present(data, keys)
+def _to_str(raw: Any, default: str, logger=None) -> str:
+    """Coerce a raw value to str."""
     if raw is None:
         return default
     text = str(raw).strip()
     return text or default
 
 
-def _coerce_int(data: Dict[str, Any], keys: Tuple[str, ...], default: int) -> int:
-    raw = _first_present(data, keys)
+def _to_int(raw: Any, default: int, logger=None) -> int:
+    """Coerce a raw value to int."""
     if raw is None or raw == "":
         return default
     try:
         return int(raw)
-    except Exception:
+    except (ValueError, TypeError):
         return default
 
 
-def _coerce_float(data: Dict[str, Any], keys: Tuple[str, ...], default: float) -> float:
-    raw = _first_present(data, keys)
+def _to_float(raw: Any, default: float, logger=None) -> float:
+    """Coerce a raw value to float."""
     if raw is None or raw == "":
         return default
     try:
         return float(raw)
-    except Exception:
+    except (ValueError, TypeError):
         return default
 
 
-def _coerce_optional_float(
-    data: Dict[str, Any],
-    keys: Tuple[str, ...],
-    default: Optional[float],
-    *,
-    logger,
-) -> Optional[float]:
-    raw = _first_present(data, keys)
+def _to_optional_float(raw: Any, default: Optional[float], logger=None) -> Optional[float]:
+    """Coerce a raw value to optional float (empty string -> None)."""
     if raw is None:
         return default
     if raw == "" or raw is False:
         return None
     try:
-        value = float(raw)
-        return value
-    except Exception:
-        logger.debug("Failed to parse float from %r, using default %s", raw, default)
+        return float(raw)
+    except (ValueError, TypeError):
+        if logger:
+            logger.debug("Failed to parse float from %r, using default %s", raw, default)
         return default
 
 
-def _coerce_resolution(
-    data: Dict[str, Any],
-    keys: Tuple[str, ...],
-    *,
-    default: Resolution,
-    logger,
-) -> Resolution:
-    raw = _first_present(data, keys)
+def _to_resolution(raw: Any, default: Resolution, logger=None) -> Resolution:
+    """Coerce a raw value to Resolution tuple."""
     if raw is None:
         return default
-    try:
-        return _parse_resolution(raw)
-    except Exception:
-        logger.debug("Failed to parse resolution from %r, using default %s", raw, default)
-        return default
-
-
-def _parse_resolution(raw: Any, default: Resolution = (0, 0)) -> Resolution:
-    """Parse resolution - delegates to shared utility."""
     result = _parse_resolution_util(raw, default)
     if result == default and raw is not None and raw != "":
-        raise ValueError(f"Unsupported resolution value: {raw!r}")
+        if logger:
+            logger.debug("Failed to parse resolution from %r, using default %s", raw, default)
     return result
 
 
-def _coerce_path(data: Dict[str, Any], keys: Tuple[str, ...], default: Path) -> Path:
-    raw = _first_present(data, keys)
+def _to_path(raw: Any, default: Path, logger=None) -> Path:
+    """Coerce a raw value to Path."""
     if raw is None or raw == "":
         return Path(default)
     return Path(str(raw))
 
 
-def _coerce_controls(raw: Any) -> Dict[str, Any]:
+def _to_controls(raw: Any, default: Dict[str, Any] = None, logger=None) -> Dict[str, Any]:
+    """Coerce a raw value to controls dict (JSON string or dict)."""
     if raw is None or raw == "":
         return {}
     if isinstance(raw, dict):
@@ -386,16 +343,37 @@ def _coerce_controls(raw: Any) -> Dict[str, Any]:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 return parsed
-        except Exception:
-            return {}
+        except (json.JSONDecodeError, ValueError):
+            pass
     return {}
 
 
-def _first_present(data: Dict[str, Any], keys: Tuple[str, ...]) -> Any:
-    for key in keys:
-        if key in data:
-            return data.get(key)
-    return None
+# ---------------------------------------------------------------------------
+# Unified coerce function
+
+
+def _coerce(
+    data: Dict[str, Any],
+    keys: Tuple[str, ...],
+    coercer,
+    default,
+    logger=None,
+):
+    """
+    Unified coercion: look up value by keys, then apply type coercer.
+
+    Args:
+        data: Dict to look up values from
+        keys: Tuple of keys to try (first present wins)
+        coercer: Type coercion function (_to_bool, _to_str, etc.)
+        default: Default value if key not found or coercion fails
+        logger: Optional logger for debug messages
+
+    Returns:
+        Coerced value or default
+    """
+    raw = _first_present(data, keys)
+    return coercer(raw, default, logger)
 
 
 def as_dict(config: CamerasConfig) -> Dict[str, Any]:

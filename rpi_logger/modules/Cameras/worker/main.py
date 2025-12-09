@@ -21,6 +21,7 @@ from rpi_logger.modules.Cameras.config import (
 )
 from .protocol import (
     WorkerState,
+    PreviewMode,
     CmdConfigure,
     CmdStartPreview,
     CmdStopPreview,
@@ -239,6 +240,7 @@ class CameraWorker:
                             height=self._preview_size[1],
                             timestamp=frame_data.wall_time,
                             frame_number=frame_data.frame_number,
+                            mode=PreviewMode.SHARED_MEMORY,
                             shm_buffer_id=buf_id,
                             shm_sequence=seq,
                         ))
@@ -256,8 +258,9 @@ class CameraWorker:
                             height=self._preview_size[1],
                             timestamp=frame_data.wall_time,
                             frame_number=frame_data.frame_number,
+                            mode=PreviewMode.JPEG,
                             shm_buffer_id=0,
-                            shm_sequence=0,  # 0 indicates JPEG mode
+                            shm_sequence=0,
                         ))
 
             # Recording: encode frame

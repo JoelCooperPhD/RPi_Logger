@@ -13,7 +13,7 @@ from typing import Callable, Dict, Optional, TYPE_CHECKING
 import cv2
 import numpy as np
 
-from rpi_logger.modules.Cameras.worker.protocol import RespPreviewFrame
+from rpi_logger.modules.Cameras.worker.protocol import RespPreviewFrame, PreviewMode
 
 if TYPE_CHECKING:
     from rpi_logger.modules.Cameras.worker.shared_preview import PreviewSharedBuffer
@@ -121,8 +121,8 @@ class PreviewReceiver:
             frame: Optional[np.ndarray] = None
             using_shm = False
 
-            # Check for shared memory path (shm_sequence > 0 indicates shared memory mode)
-            if msg.shm_sequence > 0:
+            # Check for shared memory path
+            if msg.mode == PreviewMode.SHARED_MEMORY:
                 shm_buf = self._shm_buffers.get(key)
                 if shm_buf is not None:
                     # Check for out-of-order frames

@@ -23,6 +23,12 @@ class WorkerState(Enum):
     ERROR = auto()
 
 
+class PreviewMode(Enum):
+    """How preview frames are transmitted from worker to main process."""
+    JPEG = auto()           # JPEG-encoded bytes in frame_data
+    SHARED_MEMORY = auto()  # Raw BGR data in shared memory buffer
+
+
 # --- Commands (main process → worker) ---
 
 @dataclass(slots=True)
@@ -97,9 +103,10 @@ class RespPreviewFrame:
     height: int
     timestamp: float  # unix time
     frame_number: int
-    # Shared memory fields (set when use_shared_memory=True)
+    mode: PreviewMode = PreviewMode.JPEG  # How the frame is transmitted
+    # Shared memory fields (set when mode=SHARED_MEMORY)
     shm_buffer_id: int = 0  # Which buffer has the frame (0 or 1)
-    shm_sequence: int = 0   # Monotonic counter (0 means JPEG mode)
+    shm_sequence: int = 0   # Monotonic counter for ordering
 
 
 @dataclass(slots=True)

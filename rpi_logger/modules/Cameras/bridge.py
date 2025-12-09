@@ -14,16 +14,18 @@ from typing import Any, Dict, Optional
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.commands import StatusMessage
 from rpi_logger.modules.Cameras.app.view import CamerasView
-from rpi_logger.modules.Cameras.config import DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_FPS
-from rpi_logger.modules.Cameras.utils import parse_resolution, parse_fps, CameraMetrics
+from rpi_logger.modules.Cameras.utils import CameraMetrics
 from rpi_logger.modules.Cameras.bridge_controllers import (
     CameraWorkerState,
     WorkerSpawnController,
     RecordingController,
 )
+from rpi_logger.modules.Cameras.bridge_preview import PreviewController
+from rpi_logger.modules.Cameras.bridge_settings import SettingsController
 from rpi_logger.modules.Cameras.config import load_config
 from rpi_logger.modules.Cameras.runtime.coordinator import WorkerManager, PreviewReceiver
 from rpi_logger.modules.Cameras.runtime import CameraDescriptor, CameraId
+from rpi_logger.modules.Cameras.runtime.task_registry import TaskRegistry
 from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
 from rpi_logger.modules.Cameras.worker.protocol import (
     RespPreviewFrame,
@@ -76,25 +78,27 @@ class CamerasRuntime(ModuleRuntime):
         # Camera state tracking (key -> CameraWorkerState)
         self.camera_states: Dict[str, CameraWorkerState] = {}
 
+        self._tasks = TaskRegistry()
+
         # Controllers
         self.worker_spawner = WorkerSpawnController(self, logger=self.logger)
         self.recording = RecordingController(self, logger=self.logger)
-
-        self._telemetry_task: Optional[asyncio.Task] = None
-        self._preview_frame_counts: Dict[str, int] = {}
-        self._preview_tasks: Dict[str, asyncio.Task] = {}
-        self._settings_tasks: Dict[str, asyncio.Task] = {}
-
-    # ------------------------------------------------------------------ Helpers
-
-    async def _cancel_task(self, tasks: Dict[str, asyncio.Task], key: str) -> None:
-        """Cancel and await an existing task for key if running."""
-        if key in tasks:
-            old_task = tasks.pop(key)
-            if not old_task.done():
-                old_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await old_task
+        self.preview = PreviewController(
+            preview_receiver=self._preview_receiver,
+            worker_manager=self.worker_manager,
+            cache=self.cache,
+            frame_pusher=self.view.push_frame,
+            logger=self.logger,
+        )
+        self.settings = SettingsController(
+            cache=self.cache,
+            config=self.config,
+            view=self.view,
+            tasks=self._tasks,
+            preview=self.preview,
+            respawn_worker=self._respawn_worker,
+            logger=self.logger,
+        )
 
     # ------------------------------------------------------------------ Lifecycle
 
@@ -115,7 +119,7 @@ class CamerasRuntime(ModuleRuntime):
 
         self.logger.debug("[STARTUP] Binding UI handlers...")
         self.view.bind_handlers(
-            apply_config=self._handle_apply_config,
+            apply_config=self.settings.handle_apply_config,
             activate_camera=self._handle_active_camera_changed,
         )
 
@@ -125,7 +129,7 @@ class CamerasRuntime(ModuleRuntime):
 
         self.logger.info("[STARTUP] Cameras module ready - waiting for device assignments from main logger")
 
-        self._telemetry_task = asyncio.create_task(self._telemetry_loop(), name="cameras_telemetry")
+        self._tasks.register("telemetry", asyncio.create_task(self._telemetry_loop(), name="cameras_telemetry"))
         self.logger.info("[STARTUP] Telemetry loop started")
         self.logger.info("=" * 60)
         self.logger.info("CAMERAS RUNTIME STARTED - %d workers active", len(self.worker_manager.workers))
@@ -138,27 +142,8 @@ class CamerasRuntime(ModuleRuntime):
     async def shutdown(self) -> None:
         self.logger.info("Shutting down Cameras runtime")
 
-        if self._telemetry_task:
-            self._telemetry_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._telemetry_task
-            self._telemetry_task = None
-
-        # Cancel preview tasks
-        for key, task in list(self._preview_tasks.items()):
-            if not task.done():
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-        self._preview_tasks.clear()
-
-        # Cancel settings tasks
-        for key, task in list(self._settings_tasks.items()):
-            if not task.done():
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-        self._settings_tasks.clear()
+        # Cancel all managed tasks (telemetry, preview, settings)
+        await self._tasks.cancel_all()
 
         # Stop recordings first
         if self.recording.is_recording:
@@ -363,21 +348,16 @@ class CamerasRuntime(ModuleRuntime):
             self.view.add_camera(key, title=key)
 
         # Populate settings window with actual config values
-        self._push_config_to_settings(key)
+        self.settings.push_config_to_view(key)
 
         # Start preview automatically
         self.logger.info("[WORKER READY] Starting preview for %s...", key)
-        self._preview_tasks[key] = asyncio.create_task(
+        self._tasks.register_keyed("preview", key, asyncio.create_task(
             self._start_preview(key), name=f"preview_{key}"
-        )
+        ))
 
     def _on_preview_frame(self, key: str, msg: RespPreviewFrame) -> None:
-        self._preview_frame_counts[key] = self._preview_frame_counts.get(key, 0) + 1
-        count = self._preview_frame_counts[key]
-        if count == 1 or count % 30 == 0:
-            self.logger.debug("[PREVIEW] %s: frame #%d, %dx%d, %d bytes",
-                            key, count, msg.width, msg.height, len(msg.frame_data))
-        self._preview_receiver.on_preview_frame(key, msg)
+        self.preview.on_preview_frame(key, msg)
 
     def _on_state_update(self, key: str, msg: RespStateUpdate) -> None:
         self.logger.debug("[STATE] %s: state=%s recording=%s preview=%s fps_cap=%.1f fps_enc=%.1f target=%.1f frames=%d/%d",
@@ -421,105 +401,11 @@ class CamerasRuntime(ModuleRuntime):
 
     async def _start_preview(self, key: str) -> None:
         """Start preview streaming for a camera."""
-        self.logger.info("[PREVIEW START] Setting up preview for %s...", key)
-
-        # Track frames pushed to view for debugging
-        frame_count = [0]
-        def consumer(frame):
-            frame_count[0] += 1
-            if frame_count[0] == 1 or frame_count[0] % 30 == 0:
-                self.logger.debug("[PREVIEW PUSH] %s: pushing frame #%d to view, shape=%s",
-                                key, frame_count[0], frame.shape if hasattr(frame, 'shape') else 'unknown')
-            self.view.push_frame(key, frame)
-
-        self._preview_receiver.set_consumer(key, consumer)
-        self.logger.debug("[PREVIEW START] Consumer registered for %s", key)
-
-        # Get per-camera settings (or defaults)
-        preview_size, target_fps = await self._get_preview_settings(key)
-
-        self.logger.info("[PREVIEW START] Sending start_preview command to worker %s (size=%s, fps=%.1f)",
-                        key, preview_size, target_fps)
-        await self.worker_manager.start_preview(
-            key,
-            preview_size=preview_size,
-            target_fps=target_fps,
-            jpeg_quality=80,
-        )
-
-        # Wire up shared memory to preview receiver (if allocated)
-        handle = self.worker_manager.get_worker(key)
-        if handle and handle.preview_shm is not None:
-            self._preview_receiver.set_shared_memory(key, handle.preview_shm)
-            self.logger.info("[PREVIEW START] Shared memory wired to receiver for %s", key)
-
-        self.logger.info("[PREVIEW START] Preview started for %s", key)
-
-    async def _get_preview_settings(self, key: str) -> tuple[tuple[int, int], float]:
-        """Get preview size and fps for a camera from saved settings or defaults."""
-        saved = await self.cache.get_settings(key)
-
-        preview_size = parse_resolution(
-            saved.get("preview_resolution") if saved else None,
-            DEFAULT_PREVIEW_SIZE
-        )
-        target_fps = parse_fps(
-            saved.get("preview_fps") if saved else None,
-            DEFAULT_PREVIEW_FPS
-        )
-
-        return preview_size, target_fps
+        await self.preview.start_preview(key)
 
     def _handle_active_camera_changed(self, camera_id: Optional[str]) -> None:
         """Handle UI tab switch - all workers preview simultaneously."""
         self.logger.debug("Active camera: %s", camera_id)
-
-    def _handle_apply_config(self, camera_id: str, settings: Dict[str, Any]) -> None:
-        """Handle configuration changes from UI - persist and apply settings."""
-        self.logger.info("[CONFIG] Applying settings for %s: %s", camera_id, settings)
-        # Cancel existing settings task if any, then apply new settings
-        self._settings_tasks[camera_id] = asyncio.create_task(
-            self._cancel_and_apply_settings(camera_id, settings),
-            name=f"settings_{camera_id}"
-        )
-
-    async def _cancel_and_apply_settings(self, camera_id: str, settings: Dict[str, Any]) -> None:
-        """Cancel existing settings task and apply new settings."""
-        await self._cancel_task(self._settings_tasks, camera_id)
-        await self._apply_camera_settings(camera_id, settings)
-
-    async def _apply_camera_settings(self, camera_id: str, settings: Dict[str, Any]) -> None:
-        """Persist per-camera settings and restart preview/worker as needed."""
-        try:
-            # Get old settings to detect record setting changes
-            old_settings = await self.cache.get_settings(camera_id) or {}
-
-            # Save to cache
-            await self.cache.set_settings(camera_id, settings)
-            self.logger.debug("[CONFIG] Settings saved for %s", camera_id)
-
-            # Check if record settings changed (requires worker respawn)
-            record_settings_changed = (
-                old_settings.get("record_resolution") != settings.get("record_resolution") or
-                old_settings.get("record_fps") != settings.get("record_fps")
-            )
-
-            if record_settings_changed:
-                self.logger.info("[CONFIG] Record settings changed for %s - respawning worker", camera_id)
-                await self._respawn_worker(camera_id)
-            else:
-                # Only preview settings changed - just restart preview
-                handle = self.worker_manager.get_worker(camera_id)
-                if handle and handle.is_previewing:
-                    self.logger.info("[CONFIG] Restarting preview for %s with new settings", camera_id)
-                    await self.worker_manager.stop_preview(camera_id)
-                    await self._start_preview(camera_id)
-        except asyncio.CancelledError:
-            raise  # Don't catch cancellation
-        except (OSError, ValueError, KeyError) as e:
-            self.logger.warning("[CONFIG] Failed to apply settings for %s: %s", camera_id, e)
-        except Exception as e:
-            self.logger.warning("[CONFIG] Unexpected error applying settings for %s: %s", camera_id, e, exc_info=True)
 
     async def _respawn_worker(self, camera_id: str) -> None:
         """Shutdown and respawn a worker to apply new capture settings."""
@@ -540,48 +426,6 @@ class CamerasRuntime(ModuleRuntime):
         # Respawn with new settings
         self.logger.info("[CONFIG] Respawning worker for %s", camera_id)
         await self.worker_spawner._spawn_worker_for(descriptor)
-
-    def _push_config_to_settings(self, camera_id: str) -> None:
-        """Push config values to settings window for a camera (loads from cache if available)."""
-        # Schedule async load from cache - track task for graceful shutdown
-        self._settings_tasks[camera_id] = asyncio.create_task(
-            self._cancel_and_load_settings(camera_id),
-            name=f"load_settings_{camera_id}"
-        )
-
-    async def _cancel_and_load_settings(self, camera_id: str) -> None:
-        """Cancel existing settings task and load settings."""
-        await self._cancel_task(self._settings_tasks, camera_id)
-        await self._load_and_push_settings(camera_id)
-
-    async def _load_and_push_settings(self, camera_id: str) -> None:
-        """Load per-camera settings from cache, falling back to global config."""
-        # Try to load saved per-camera settings first
-        saved_settings = await self.cache.get_settings(camera_id)
-
-        if saved_settings:
-            self.logger.debug("[CONFIG] Loaded saved settings for %s: %s", camera_id, saved_settings)
-            settings = dict(saved_settings)
-        else:
-            # Fall back to global config defaults
-            preview_cfg = self.config.preview
-            record_cfg = self.config.record
-
-            preview_res = preview_cfg.resolution
-            record_res = record_cfg.resolution
-            preview_fps = preview_cfg.fps_cap
-            record_fps = record_cfg.fps_cap
-
-            settings = {
-                "preview_resolution": f"{preview_res[0]}x{preview_res[1]}" if preview_res else "",
-                "preview_fps": str(int(preview_fps)) if preview_fps and float(preview_fps).is_integer() else str(preview_fps) if preview_fps else "5",
-                "record_resolution": f"{record_res[0]}x{record_res[1]}" if record_res else "",
-                "record_fps": str(int(record_fps)) if record_fps and float(record_fps).is_integer() else str(record_fps) if record_fps else "15",
-                "overlay": "true" if record_cfg.overlay else "false",
-            }
-            self.logger.debug("[CONFIG] Using global config for %s: %s", camera_id, settings)
-
-        self.view.update_camera_settings(camera_id, settings)
 
     # ------------------------------------------------------------------ Metrics
 

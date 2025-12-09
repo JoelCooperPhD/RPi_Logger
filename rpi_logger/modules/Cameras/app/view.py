@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Optional
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.app.views.adapter import ViewAdapter
+from rpi_logger.modules.Cameras.app.widgets.metrics_display import MetricsDisplay
 from rpi_logger.modules.Cameras.app.widgets.settings_panel import DEFAULT_SETTINGS, SettingsWindow
 
 try:
@@ -39,11 +40,8 @@ class CamerasView:
         self._config_handler: Optional[Callable[[str, Dict[str, str]], None]] = None
         self._settings_window: Optional[SettingsWindow] = None
         self._settings_toggle_var: Optional[Any] = None
-        self._latest_metrics: Dict[str, Dict[str, Any]] = {}
+        self._metrics_display: Optional[MetricsDisplay] = None
         self._camera_options: Dict[str, Dict[str, list[str]]] = {}
-        self._io_stub_fields: Dict[str, Any] = {}
-        self._io_stub_labels: Dict[str, Any] = {}  # Label widgets for color updates
-        self._io_stub_history: Dict[str, Dict[str, str]] = {}
         self._camera_settings: Dict[str, Dict[str, str]] = {}
 
     # ------------------------------------------------------------------ GUI wiring
@@ -68,7 +66,8 @@ class CamerasView:
 
         self._adapter.set_root(self._root)
         self._stub_view.build_stub_content(builder)
-        self._install_io_stub_line(tk, ttk)
+        self._metrics_display = MetricsDisplay(self._root, logger=self._logger)
+        self._metrics_display.install(self._stub_view, tk, ttk)
         self._has_ui = True
         self._logger.info("Cameras view attached")
 
@@ -119,58 +118,6 @@ class CamerasView:
         self._install_settings_window(tk)
         self._install_settings_menu(tk)
 
-    def _install_io_stub_line(self, tk, ttk) -> None:
-        if not self._stub_view:
-            return
-        builder = getattr(self._stub_view, "build_io_stub_content", None)
-        if not callable(builder):
-            return
-        if not self._io_stub_fields:
-            for key in ("cam", "cap_tgt", "rec_tgt", "disp_tgt"):
-                self._io_stub_fields[key] = tk.StringVar(master=self._root, value="-")
-        if not self._io_stub_history:
-            self._io_stub_history = {}
-
-        def _builder(frame) -> None:
-            # Use themed colors if available
-            if HAS_THEME and Colors is not None:
-                container = tk.Frame(frame, bg=Colors.BG_FRAME)
-            else:
-                container = ttk.Frame(frame)
-            container.grid(row=0, column=0, sticky="ew")
-            for idx in range(4):
-                container.columnconfigure(idx, weight=1, uniform="iofields")
-
-            fields = [
-                ("cam", "Cam"),
-                ("cap_tgt", "Cap In/Tgt"),
-                ("rec_tgt", "Rec Out/Tgt"),
-                ("disp_tgt", "Disp/Tgt"),
-            ]
-            for col, (key, label_text) in enumerate(fields):
-                if HAS_THEME and Colors is not None:
-                    name = tk.Label(container, text=label_text, anchor="center",
-                                    bg=Colors.BG_FRAME, fg=Colors.FG_SECONDARY)
-                    val = tk.Label(container, textvariable=self._io_stub_fields[key], anchor="center",
-                                   bg=Colors.BG_FRAME, fg=Colors.FG_PRIMARY, font=("TkFixedFont", 9))
-                else:
-                    name = ttk.Label(container, text=label_text, anchor="center")
-                    val = ttk.Label(container, textvariable=self._io_stub_fields[key], anchor="center")
-                    try:
-                        val.configure(font=("TkFixedFont", 9))
-                    except Exception:
-                        pass
-                name.grid(row=0, column=col, sticky="ew", padx=2)
-                val.grid(row=1, column=col, sticky="ew", padx=2)
-                # Store label reference for color updates (percentage field)
-                self._io_stub_labels[key] = val
-
-        try:
-            builder(_builder)
-        except Exception:
-            self._logger.debug("IO stub content build failed", exc_info=True)
-        self._update_io_stub_line()
-
     def bind_handlers(
         self,
         *,
@@ -218,8 +165,8 @@ class CamerasView:
             return
         previous_active = self._active_camera_id
         self._adapter.remove_camera(camera_id)
-        self._latest_metrics.pop(camera_id, None)
-        self._io_stub_history.pop(camera_id, None)
+        if self._metrics_display:
+            self._metrics_display.clear_camera(camera_id)
         if self._settings_window:
             self._settings_window.remove_camera(camera_id)
         if self._active_camera_id == camera_id:
@@ -236,12 +183,13 @@ class CamerasView:
         self._adapter.push_frame(camera_id, frame)
 
     def update_metrics(self, camera_id: str, metrics: Dict[str, Any]) -> None:
-        self._latest_metrics[camera_id] = metrics or {}
+        if not self._metrics_display:
+            return
         if self._root is None or threading.current_thread() is self._ui_thread:
-            self._apply_metrics_update(camera_id)
+            self._metrics_display.update_metrics(camera_id, metrics)
             return
         try:
-            self._root.after(0, lambda: self._apply_metrics_update(camera_id))
+            self._root.after(0, lambda: self._metrics_display.update_metrics(camera_id, metrics))
         except Exception:
             self._logger.debug("Failed to dispatch metrics update", exc_info=True)
 
@@ -295,12 +243,9 @@ class CamerasView:
     def _apply_config_from_tab(self, camera_id: str, settings: Dict[str, str]) -> None:
         self._apply_config(camera_id, settings)
 
-
-    def _apply_metrics_update(self, camera_id: str) -> None:
-        self._update_io_stub_line()
-
     def _sync_metrics_active_camera(self) -> None:
-        self._update_io_stub_line()
+        if self._metrics_display:
+            self._metrics_display.set_active_camera(self._active_camera_id)
 
     def _install_settings_window(self, tk) -> None:
         if self._settings_toggle_var is None:
@@ -340,85 +285,6 @@ class CamerasView:
                         preview_fps_values=opts.get("preview_fps_values"),
                         record_fps_values=opts.get("record_fps_values"),
                     )
-        self._update_io_stub_line()
-
-    def _update_io_stub_line(self) -> None:
-        if not self._io_stub_fields:
-            return
-
-        cam_id = self._active_camera_id or "-"
-        payload = self._latest_metrics.get(cam_id, {}) if self._active_camera_id else {}
-
-        def _fmt_num(value) -> str:
-            try:
-                return f"{float(value):5.1f}"
-            except Exception:
-                return "   --"
-
-        def _calc_color(actual, target):
-            """Determine color based on how close actual is to target."""
-            color = Colors.FG_PRIMARY if HAS_THEME and Colors else None
-            try:
-                if actual is not None and target is not None and float(target) > 0:
-                    pct = (float(actual) / float(target)) * 100
-                    if HAS_THEME and Colors:
-                        if pct >= 95:
-                            color = Colors.SUCCESS      # Green - good
-                        elif pct >= 80:
-                            color = Colors.WARNING      # Orange - warning
-                        else:
-                            color = Colors.ERROR        # Red - bad
-            except (ValueError, TypeError):
-                pass
-            return color
-
-        # Capture metrics: fps_capture vs target_fps (camera's configured FPS)
-        cap_actual = payload.get("fps_capture")
-        cap_target = payload.get("target_fps")
-        cap_tgt_str = f"{_fmt_num(cap_actual)} / {_fmt_num(cap_target)}"
-        cap_color = _calc_color(cap_actual, cap_target)
-
-        # Record metrics: fps_encode vs target_record_fps
-        rec_actual = payload.get("fps_encode")
-        rec_target = payload.get("target_record_fps")
-        rec_tgt_str = f"{_fmt_num(rec_actual)} / {_fmt_num(rec_target)}"
-        rec_color = _calc_color(rec_actual, rec_target)
-
-        # Display metrics: fps_preview vs target_preview_fps
-        disp_actual = payload.get("fps_preview")
-        disp_target = payload.get("target_preview_fps")
-        disp_tgt_str = f"{_fmt_num(disp_actual)} / {_fmt_num(disp_target)}"
-        disp_color = _calc_color(disp_actual, disp_target)
-
-        values = {
-            "cam": cam_id,
-            "cap_tgt": cap_tgt_str,
-            "rec_tgt": rec_tgt_str,
-            "disp_tgt": disp_tgt_str,
-        }
-        history = self._io_stub_history.setdefault(cam_id, {})
-
-        def _is_placeholder(text: str) -> bool:
-            return text in {"   --", "  --", " --", "--", "-", None} or (text and text.strip() == "--")  # type: ignore[arg-type]
-
-        for key, var in self._io_stub_fields.items():
-            new_val = values.get(key, "--")
-            if _is_placeholder(new_val) and history.get(key):
-                new_val = history[key]
-            else:
-                history[key] = new_val
-            try:
-                var.set(new_val)
-            except Exception:
-                self._logger.debug("Failed to update IO stub field %s", key, exc_info=True)
-
-        # Apply color to ratio labels based on sync status
-        for key, color in [("cap_tgt", cap_color), ("rec_tgt", rec_color), ("disp_tgt", disp_color)]:
-            if key in self._io_stub_labels and color:
-                try:
-                    self._io_stub_labels[key].configure(fg=color)
-                except Exception:
-                    pass
 
     def _install_settings_menu(self, tk) -> None:
         if self._settings_menu:
