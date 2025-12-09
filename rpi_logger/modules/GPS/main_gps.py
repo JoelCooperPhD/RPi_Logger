@@ -1,4 +1,8 @@
-"""GPS module that renders the offline map inside the stub view."""
+"""GPS module entry point built on the shared stub VMC framework.
+
+This module manages GPS receivers that output standard NMEA sentences.
+Devices are assigned by TheLogger via the assign_device command.
+"""
 
 from __future__ import annotations
 
@@ -9,137 +13,139 @@ from pathlib import Path
 from typing import Optional
 
 MODULE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = MODULE_DIR.parent.parent.parent
 
+
+def _find_project_root(start: Path) -> Path:
+    """Walk up until we locate the repository root (parent of rpi_logger package)."""
+    for parent in start.parents:
+        if parent.name == "rpi_logger":
+            return parent.parent
+    return start.parents[-1]
+
+
+# Ensure the repository root (containing the rpi_logger package) is importable.
+PROJECT_ROOT = _find_project_root(MODULE_DIR)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-STUB_ROOT = MODULE_DIR.parent / "stub (codex)"
-if STUB_ROOT.exists() and str(STUB_ROOT) not in sys.path:
-    sys.path.insert(0, str(STUB_ROOT))
+# Re-use the stub VMC stack without copying its sources.
+STUB_FRAMEWORK_DIR = MODULE_DIR.parent / "stub (codex)"
+if STUB_FRAMEWORK_DIR.exists() and str(STUB_FRAMEWORK_DIR) not in sys.path:
+    sys.path.insert(0, str(STUB_FRAMEWORK_DIR))
 
-from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers  # noqa: E402
-from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
+# Make sure any local virtual environment site-packages are available.
+_venv_site = PROJECT_ROOT / ".venv" / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+if _venv_site.exists() and str(_venv_site) not in sys.path:
+    sys.path.insert(0, str(_venv_site))
+
 from vmc import StubCodexSupervisor  # noqa: E402
 
-from runtime import GPSPreviewRuntime  # noqa: E402
+from gps.runtime import GPSModuleRuntime  # noqa: E402
 from view import GPSView  # noqa: E402
-from rpi_logger.modules.base.config_paths import resolve_module_config_path
+from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers  # noqa: E402
+from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
+from rpi_logger.modules.base.config_paths import resolve_module_config_path  # noqa: E402
+from rpi_logger.modules.GPS.gps_core.config import load_config_file  # noqa: E402
 
-DISPLAY_NAME = "GPS"
-MODULE_ID = "gps"
-DEFAULT_OUTPUT_SUBDIR = Path("gps")
-DEFAULT_CENTER = (40.7608, -111.8910)
-DEFAULT_ZOOM = 13.0
-DEFAULT_OFFLINE_DB = (MODULE_DIR / "offline_tiles.db").resolve()
-DEFAULT_SERIAL_PORT = "/dev/serial0"
-DEFAULT_BAUD_RATE = 9600
-DEFAULT_RECONNECT_DELAY = 3.0
-DEFAULT_NMEA_HISTORY = 30
-
-logger = get_module_logger(__name__)
+logger = get_module_logger("MainGPS")
+CONFIG_CONTEXT = resolve_module_config_path(MODULE_DIR, "gps")
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} preview module")
+    """Parse command-line arguments."""
+    config = load_config_file(CONFIG_CONTEXT.writable_path)
+
+    default_output = Path(config.get("output_dir", "gps_data"))
+    default_session_prefix = str(config.get("session_prefix", "gps"))
+    default_console = bool(config.get("console_output", False))
+    default_zoom = float(config.get("zoom", 13.0))
+    default_center_lat = float(config.get("center_lat", 40.7608))
+    default_center_lon = float(config.get("center_lon", -111.8910))
+    default_nmea_history = int(config.get("nmea_history", 30))
+
+    parser = argparse.ArgumentParser(description="GPS shell module")
+
+    # Use common CLI arguments for standard options
     add_common_cli_arguments(
         parser,
-        default_output=DEFAULT_OUTPUT_SUBDIR,
-        allowed_modes=("gui", "headless"),
-        default_mode="gui",
-        default_session_prefix=MODULE_ID,
-        default_console_output=False,
-        default_auto_start_recording=False,
+        default_output=default_output,
+        allowed_modes=["gui", "headless"],
+        default_mode=str(config.get("default_mode", "gui")).lower(),
+        include_session_prefix=True,
+        default_session_prefix=default_session_prefix,
+        include_console_control=True,
+        default_console_output=default_console,
+        include_auto_recording=False,  # GPS doesn't use auto-recording
+        include_parent_control=True,
+        include_window_geometry=True,
     )
 
+    # GPS-specific arguments
     parser.add_argument(
         "--offline-db",
         dest="offline_db",
         type=Path,
-        default=DEFAULT_OFFLINE_DB,
-        help="Path to the offline tiles database (defaults to the main GPS cache).",
+        default=config.get("offline_db", "offline_tiles.db"),
+        help="Path to the offline tiles database.",
     )
     parser.add_argument(
         "--center-lat",
         type=float,
-        default=DEFAULT_CENTER[0],
+        default=default_center_lat,
         help="Initial map latitude.",
     )
     parser.add_argument(
         "--center-lon",
         type=float,
-        default=DEFAULT_CENTER[1],
+        default=default_center_lon,
         help="Initial map longitude.",
     )
     parser.add_argument(
         "--zoom",
         type=float,
-        default=DEFAULT_ZOOM,
+        default=default_zoom,
         help="Initial map zoom level.",
-    )
-    parser.add_argument(
-        "--serial-port",
-        dest="serial_port",
-        type=str,
-        default=DEFAULT_SERIAL_PORT,
-        help="Serial device that BerryGPS is wired to (defaults to /dev/serial0).",
-    )
-    parser.add_argument(
-        "--baud-rate",
-        dest="baud_rate",
-        type=int,
-        default=DEFAULT_BAUD_RATE,
-        help="Serial baud rate used by BerryGPS (9600 by default).",
-    )
-    parser.add_argument(
-        "--reconnect-delay",
-        dest="reconnect_delay",
-        type=float,
-        default=DEFAULT_RECONNECT_DELAY,
-        help="Seconds to wait before attempting to reopen the GPS device after a failure.",
     )
     parser.add_argument(
         "--nmea-history",
         dest="nmea_history",
         type=int,
-        default=DEFAULT_NMEA_HISTORY,
+        default=default_nmea_history,
         help="Number of recent NMEA sentences shown in the diagnostics panel.",
     )
-    return parser.parse_args(argv)
 
-
-def build_runtime(context):
-    return GPSPreviewRuntime(context)
+    args = parser.parse_args(argv)
+    args.config = config
+    args.config_file_path = CONFIG_CONTEXT.writable_path
+    return args
 
 
 async def main(argv: Optional[list[str]] = None) -> None:
+    """Main entry point for the GPS module."""
     args = parse_args(argv)
 
-    if not getattr(args, "enable_commands", False):
-        logger.error("GPS module must be launched by the logger controller.")
+    if not args.enable_commands:
+        logger.error("GPS module must be launched by the logger controller (commands disabled).")
         return
 
-    config_context = resolve_module_config_path(MODULE_DIR, MODULE_ID)
-    setattr(args, "config_path", config_context.writable_path)
+    display_name = args.config.get("display_name", "GPS")
+    setattr(args, "config_path", CONFIG_CONTEXT.writable_path)
 
     supervisor = StubCodexSupervisor(
         args,
         MODULE_DIR,
-        logger,
-        runtime_factory=build_runtime,
+        logger.getChild("Supervisor"),
+        runtime_factory=lambda context: GPSModuleRuntime(context),
         view_factory=GPSView,
-        display_name=DISPLAY_NAME,
-        module_id=MODULE_ID,
-        config_path=config_context.writable_path,
+        display_name=display_name,
+        module_id="gps",
+        config_path=CONFIG_CONTEXT.writable_path,
     )
 
     loop = asyncio.get_running_loop()
     install_signal_handlers(supervisor, loop)
 
-    try:
-        await supervisor.run()
-    finally:
-        await supervisor.shutdown()
+    await supervisor.run()
 
 
 if __name__ == "__main__":

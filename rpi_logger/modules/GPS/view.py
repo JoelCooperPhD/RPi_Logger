@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from rpi_logger.core.logging_utils import ensure_structured_logger, get_module_logger
 from vmc import LegacyTkViewBridge, StubCodexView

@@ -7,7 +7,7 @@ following the VOG/DRT config window pattern.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 try:
     import tkinter as tk
