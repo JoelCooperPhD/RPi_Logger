@@ -647,10 +647,6 @@ class VOGModuleRuntime(ModuleRuntime):
         """Get handler for a specific device."""
         return self.handlers.get(device_id)
 
-    def get_device_type(self, device_id: str) -> Optional[VOGDeviceType]:
-        """Get device type for a specific device."""
-        return self.device_types.get(device_id)
-
     @property
     def recording(self) -> bool:
         """Whether recording is active."""

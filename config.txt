@@ -5,7 +5,7 @@
 #
 # OVERVIEW:
 #   The master logger discovers and orchestrates multiple logging modules
-#   (Cameras, AudioRecorder, EyeTracker) through a unified interface.
+#   (Cameras, AudioRecorder, EyeTracker-Neon) through a unified interface.
 #
 #   All module data is saved in a centralized location with organized
 #   subdirectories for each module.
@@ -108,7 +108,7 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 #        │   └── recordings/          # Recordings directly here
 #        │       ├── mic_0_*.wav
 #        │       └── ...
-#        └── EyeTracker/              # Eye tracker directory
+#        └── EyeTracker-Neon/         # Pupil Labs Neon eye tracker directory
 #            ├── eyetracker.log       # Module log file
 #            └── recordings/          # Recordings directly here
 #                ├── gaze_*.csv
@@ -123,7 +123,7 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 gui_logger_visible = false
 camera_1_alias = Camera 1
 camera_2_alias = Camera 2
-enabled_connections = CSI:Camera,Network:EyeTracker,UART:GPS,USB:Camera,USB:DRT,USB:VOG
+enabled_connections = CSI:Camera,Network:EyeTracker-Neon,UART:GPS,USB:Camera,USB:DRT,USB:VOG
 last_trial_label = 
 window_x = 254
 window_y = 513

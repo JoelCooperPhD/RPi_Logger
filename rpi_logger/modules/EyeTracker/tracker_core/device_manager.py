@@ -4,7 +4,6 @@ Device discovery is centralized in the main logger via network_scanner.py.
 This manager handles device connection and stream URLs after assignment.
 """
 
-import logging
 from typing import Optional
 
 from pupil_labs.realtime_api.device import Device

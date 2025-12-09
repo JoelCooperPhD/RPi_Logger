@@ -26,6 +26,17 @@ class RuntimeStatus(Enum):
     ERROR = "error"
 
 
+class ControlType(Enum):
+    """Type classification for camera controls."""
+
+    INTEGER = "int"
+    FLOAT = "float"
+    BOOLEAN = "bool"
+    ENUM = "enum"
+    TUPLE = "tuple"
+    UNKNOWN = "unknown"
+
+
 @dataclass(slots=True, frozen=True)
 class CameraId:
     """Stable identifier for a camera device."""
@@ -50,6 +61,22 @@ class CameraDescriptor:
     hw_model: Optional[str] = None
     location_hint: Optional[str] = None
     seen_at: Optional[float] = None  # monotonic timestamp (ms)
+
+
+@dataclass(slots=True, frozen=True)
+class ControlInfo:
+    """Metadata for a single camera control."""
+
+    name: str
+    control_type: ControlType
+    current_value: Any = None
+    min_value: Optional[Any] = None
+    max_value: Optional[Any] = None
+    default_value: Optional[Any] = None
+    step: Optional[float] = None
+    options: Optional[List[Any]] = None  # For enum types
+    read_only: bool = False
+    backend_id: Optional[Any] = None  # cv2.CAP_PROP_* or picam key
 
 
 @dataclass(slots=True, frozen=True)
@@ -86,6 +113,7 @@ class CameraCapabilities:
     source: CapabilitySource = CapabilitySource.PROBE
     limits: Dict[str, Any] = field(default_factory=dict)
     color_formats: List[str] = field(default_factory=list)
+    controls: Dict[str, ControlInfo] = field(default_factory=dict)  # Camera-level controls
 
     def dedupe(self) -> None:
         """Remove duplicate modes while preserving order (first wins)."""
@@ -244,7 +272,7 @@ def deserialize_camera_id(data: Any) -> Optional[CameraId]:
 
 
 def serialize_capabilities(capabilities: CameraCapabilities) -> Dict[str, Any]:
-    return {
+    data: Dict[str, Any] = {
         "modes": [serialize_mode(mode) for mode in capabilities.modes],
         "default_preview_mode": serialize_mode(capabilities.default_preview_mode) if capabilities.default_preview_mode else None,
         "default_record_mode": serialize_mode(capabilities.default_record_mode) if capabilities.default_record_mode else None,
@@ -253,6 +281,9 @@ def serialize_capabilities(capabilities: CameraCapabilities) -> Dict[str, Any]:
         "limits": dict(capabilities.limits),
         "color_formats": list(capabilities.color_formats),
     }
+    if capabilities.controls:
+        data["controls"] = {name: serialize_control(ctrl) for name, ctrl in capabilities.controls.items()}
+    return data
 
 
 def deserialize_capabilities(data: Any) -> Optional[CameraCapabilities]:
@@ -265,6 +296,14 @@ def deserialize_capabilities(data: Any) -> Optional[CameraCapabilities]:
         if mode:
             if not _contains_mode(modes, mode):
                 modes.append(mode)
+
+    # Deserialize controls
+    controls: Dict[str, ControlInfo] = {}
+    for name, ctrl_data in (data.get("controls") or {}).items():
+        ctrl = deserialize_control(ctrl_data)
+        if ctrl:
+            controls[name] = ctrl
+
     capabilities = CameraCapabilities(
         modes=modes,
         default_preview_mode=deserialize_mode(data.get("default_preview_mode")),
@@ -273,6 +312,7 @@ def deserialize_capabilities(data: Any) -> Optional[CameraCapabilities]:
         source=_safe_capability_source(data.get("source")),
         limits=dict(data.get("limits") or {}),
         color_formats=list(data.get("color_formats") or []),
+        controls=controls,
     )
     capabilities.dedupe()
     return capabilities
@@ -303,6 +343,58 @@ def deserialize_mode(data: Any) -> Optional[CapabilityMode]:
     if not isinstance(controls, dict):
         controls = {}
     return CapabilityMode(size=(width, height), fps=fps, pixel_format=pixel_format, controls=controls)
+
+
+def serialize_control(ctrl: ControlInfo) -> Dict[str, Any]:
+    """Serialize a ControlInfo to JSON-friendly dict."""
+    data: Dict[str, Any] = {
+        "name": ctrl.name,
+        "type": ctrl.control_type.value,
+    }
+    if ctrl.current_value is not None:
+        data["current"] = ctrl.current_value
+    if ctrl.min_value is not None:
+        data["min"] = ctrl.min_value
+    if ctrl.max_value is not None:
+        data["max"] = ctrl.max_value
+    if ctrl.default_value is not None:
+        data["default"] = ctrl.default_value
+    if ctrl.step is not None:
+        data["step"] = ctrl.step
+    if ctrl.options is not None:
+        data["options"] = ctrl.options
+    if ctrl.read_only:
+        data["read_only"] = True
+    if ctrl.backend_id is not None:
+        data["backend_id"] = ctrl.backend_id
+    return data
+
+
+def deserialize_control(data: Any) -> Optional[ControlInfo]:
+    """Deserialize a ControlInfo from JSON data."""
+    if not data or not isinstance(data, dict):
+        return None
+    try:
+        name = data.get("name", "")
+        type_str = data.get("type", "unknown")
+        try:
+            control_type = ControlType(type_str)
+        except ValueError:
+            control_type = ControlType.UNKNOWN
+        return ControlInfo(
+            name=name,
+            control_type=control_type,
+            current_value=data.get("current"),
+            min_value=data.get("min"),
+            max_value=data.get("max"),
+            default_value=data.get("default"),
+            step=data.get("step"),
+            options=data.get("options"),
+            read_only=bool(data.get("read_only", False)),
+            backend_id=data.get("backend_id"),
+        )
+    except Exception:
+        return None
 
 
 def serialize_selected_configs(configs: SelectedConfigs) -> Dict[str, Any]:

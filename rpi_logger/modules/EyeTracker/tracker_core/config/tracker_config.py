@@ -45,6 +45,11 @@ class TrackerConfig:
     enable_device_status_logging: bool = False
     device_status_poll_interval: float = 5.0
 
+    # Phase 3.1: Frame selection mode
+    # "timer" - maintains consistent output FPS, duplicates frames when camera slower (default)
+    # "camera" - only writes unique camera frames, variable timing (for frame-accurate analysis)
+    frame_selection_mode: str = "timer"
+
     def __post_init__(self):
         """Calculate preview height to maintain aspect ratio"""
         if self.preview_height is None:

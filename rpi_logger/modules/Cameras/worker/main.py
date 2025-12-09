@@ -27,6 +27,7 @@ from .protocol import (
     CmdStopPreview,
     CmdStartRecord,
     CmdStopRecord,
+    CmdSetControl,
     CmdShutdown,
     RespReady,
     RespPreviewFrame,
@@ -391,6 +392,17 @@ class CameraWorker:
             self._recording = False
             self._state = WorkerState.PREVIEWING if self._preview_enabled else WorkerState.IDLE
             return "stop_encoder"
+
+        elif isinstance(cmd, CmdSetControl):
+            # Apply camera control change
+            if self._capture and hasattr(self._capture, "set_control"):
+                success = self._capture.set_control(cmd.control_name, cmd.value)
+                if success:
+                    logger.info("Control %s set to %s", cmd.control_name, cmd.value)
+                else:
+                    logger.warning("Failed to set control %s", cmd.control_name)
+            else:
+                logger.warning("Camera does not support set_control")
 
         elif isinstance(cmd, CmdShutdown):
             logger.info("Shutdown requested")

@@ -7,7 +7,7 @@ import concurrent.futures
 import contextlib
 import time
 from dataclasses import dataclass
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 try:
     import cv2  # type: ignore
@@ -24,6 +24,20 @@ except Exception:  # pragma: no cover - picamera2 may be missing on some platfor
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.runtime import CapabilityMode, CameraCapabilities
 from rpi_logger.modules.Cameras.runtime.capabilities import build_capabilities
+from rpi_logger.modules.Cameras.runtime.state import ControlInfo, ControlType
+
+
+# Known Picamera2 enum controls and their options
+PICAM_ENUMS: Dict[str, List[str]] = {
+    "AwbMode": ["Off", "Auto", "Incandescent", "Tungsten", "Fluorescent",
+                "Indoor", "Daylight", "Cloudy", "Custom"],
+    "AeExposureMode": ["Normal", "Short", "Long", "Custom"],
+    "AeMeteringMode": ["CentreWeighted", "Spot", "Average", "Custom"],
+    "NoiseReductionMode": ["Off", "Fast", "HighQuality", "Minimal", "ZSL"],
+    "AfMode": ["Manual", "Auto", "Continuous"],
+    "AfRange": ["Normal", "Macro", "Full"],
+    "AfSpeed": ["Normal", "Fast"],
+}
 
 
 @dataclass(slots=True)
@@ -202,6 +216,104 @@ class PicamHandle:
                 pass
             self._executor = None
 
+    def set_control(self, name: str, value: Any) -> bool:
+        """Set a camera control value. Returns True on success."""
+        if not self._cam:
+            self._logger.warning("Cannot set control %s: camera not open", name)
+            return False
+
+        try:
+            # Handle enum controls - convert string to index if needed
+            if name in PICAM_ENUMS and isinstance(value, str):
+                options = PICAM_ENUMS[name]
+                if value in options:
+                    value = options.index(value)
+                else:
+                    self._logger.warning("Invalid enum value %s for %s", value, name)
+                    return False
+
+            # Apply control via set_controls
+            self._cam.set_controls({name: value})
+            self._logger.debug("Set control %s = %s via Picamera2", name, value)
+            return True
+        except Exception as e:
+            self._logger.warning("Failed to set control %s: %s", name, e)
+            return False
+
+
+# ---------------------------------------------------------------------------
+# Control probing functions
+
+
+def _probe_controls_picam(cam: "Picamera2", log) -> Dict[str, ControlInfo]:
+    """Extract controls from Picamera2.camera_controls."""
+    controls: Dict[str, ControlInfo] = {}
+
+    try:
+        cam_controls = getattr(cam, "camera_controls", None) or {}
+    except Exception as e:
+        log.debug("Failed to get camera_controls: %s", e)
+        return controls
+
+    for name, info in cam_controls.items():
+        try:
+            # info is typically (min, max, default) tuple
+            min_val: Any = None
+            max_val: Any = None
+            default_val: Any = None
+
+            if isinstance(info, tuple):
+                if len(info) >= 1:
+                    min_val = info[0]
+                if len(info) >= 2:
+                    max_val = info[1]
+                if len(info) >= 3:
+                    default_val = info[2]
+            else:
+                default_val = info
+
+            # Determine control type
+            if name in PICAM_ENUMS:
+                control_type = ControlType.ENUM
+                options = PICAM_ENUMS[name]
+            elif name.endswith("Limits"):
+                # e.g., FrameDurationLimits, ExposureTimeLimits
+                control_type = ControlType.TUPLE
+                options = None
+            elif isinstance(default_val, bool):
+                control_type = ControlType.BOOLEAN
+                options = None
+            elif isinstance(default_val, float) and not isinstance(default_val, bool):
+                control_type = ControlType.FLOAT
+                options = None
+            elif isinstance(default_val, int):
+                control_type = ControlType.INTEGER
+                options = None
+            else:
+                control_type = ControlType.UNKNOWN
+                options = None
+
+            controls[name] = ControlInfo(
+                name=name,
+                control_type=control_type,
+                current_value=default_val,  # Use default as "current" at probe time
+                min_value=min_val,
+                max_value=max_val,
+                default_value=default_val,
+                options=options,
+                read_only=False,
+                backend_id=name,  # Picam uses string keys
+            )
+            log.debug(
+                "Picam control %s: type=%s min=%s max=%s default=%s",
+                name, control_type.value, min_val, max_val, default_val,
+            )
+        except Exception as e:
+            log.debug("Failed to parse control %s: %s", name, e)
+            continue
+
+    return controls
+
 
 async def probe(sensor_id: str, *, logger: LoggerLike = None) -> Optional[CameraCapabilities]:
     log = ensure_structured_logger(logger, fallback_name=__name__)
@@ -218,16 +330,67 @@ def _probe_sync(sensor_id: str, log) -> Optional[CameraCapabilities]:
         log.warning("Failed to open Picamera2 sensor %s: %s", sensor_id, exc)
         return None
 
-    modes = []
+    modes: List[Dict[str, Any]] = []
+    controls: Dict[str, ControlInfo] = {}
+    global_limits: Dict[str, Any] = {}
+
     try:
+        # Extract sensor modes with additional metadata
         for cfg in cam.sensor_modes or []:
             size = cfg.get("size") or (cfg.get("width"), cfg.get("height"))
             fps = cfg.get("fps", cfg.get("framerate", 30))
-            modes.append({"size": size, "fps": fps, "pixel_format": "RGB"})
+
+            # Extract per-mode metadata
+            mode_controls: Dict[str, Any] = {}
+
+            # Exposure limits
+            if "exposure_limits" in cfg:
+                exp_limits = cfg["exposure_limits"]
+                mode_controls["ExposureLimits"] = exp_limits
+                # Merge into global limits (take widest range)
+                if exp_limits[0] is not None:
+                    if "exposure_min" not in global_limits or exp_limits[0] < global_limits["exposure_min"]:
+                        global_limits["exposure_min"] = exp_limits[0]
+                if exp_limits[1] is not None:
+                    if "exposure_max" not in global_limits or exp_limits[1] > global_limits.get("exposure_max", 0):
+                        global_limits["exposure_max"] = exp_limits[1]
+
+            # Crop limits
+            if "crop_limits" in cfg:
+                mode_controls["CropLimits"] = cfg["crop_limits"]
+
+            # Bit depth
+            if "bit_depth" in cfg:
+                mode_controls["BitDepth"] = cfg["bit_depth"]
+
+            # Native format
+            if "format" in cfg:
+                mode_controls["NativeFormat"] = str(cfg["format"])
+
+            modes.append({
+                "size": size,
+                "fps": fps,
+                "pixel_format": "RGB",
+                "controls": mode_controls,
+            })
+            log.debug(
+                "Picam mode %s @ %.1f fps, exposure_limits=%s, crop_limits=%s",
+                size, fps, cfg.get("exposure_limits"), cfg.get("crop_limits"),
+            )
+
+        # Probe camera-level controls
+        controls = _probe_controls_picam(cam, log)
+        if controls:
+            log.info("Probed %d controls from Picamera2 for sensor %s", len(controls), sensor_id)
+
     finally:
         cam.close()
 
-    return build_capabilities(modes)
+    # Build capabilities and attach controls/limits
+    caps = build_capabilities(modes)
+    caps.controls = controls
+    caps.limits = global_limits
+    return caps
 
 
 async def open_device(sensor_id: str, mode: CapabilityMode, *, logger: LoggerLike = None) -> Optional[PicamHandle]:

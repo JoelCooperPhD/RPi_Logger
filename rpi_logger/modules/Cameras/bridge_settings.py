@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from rpi_logger.modules.Cameras.app.view import CamerasView
     from rpi_logger.modules.Cameras.bridge_preview import PreviewController
     from rpi_logger.modules.Cameras.config import CamerasConfig
+    from rpi_logger.modules.Cameras.runtime.coordinator.manager import WorkerManager
     from rpi_logger.modules.Cameras.runtime.task_registry import TaskRegistry
     from rpi_logger.modules.Cameras.storage import KnownCamerasCache
 
@@ -35,6 +36,7 @@ class SettingsController:
         tasks: "TaskRegistry",
         preview: "PreviewController",
         respawn_worker: Callable[[str], Any],
+        worker_manager: "WorkerManager",
         logger: LoggerLike = None,
     ) -> None:
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
@@ -44,6 +46,7 @@ class SettingsController:
         self._tasks = tasks
         self._preview = preview
         self._respawn_worker = respawn_worker
+        self._worker_manager = worker_manager
 
     def handle_apply_config(self, camera_id: str, settings: Dict[str, Any]) -> None:
         """Handle configuration changes from UI - persist and apply settings."""
@@ -129,6 +132,28 @@ class SettingsController:
             self._logger.debug("[CONFIG] Using global config for %s: %s", camera_id, settings)
 
         self._view.update_camera_settings(camera_id, settings)
+
+    def set_control(self, camera_id: str, control_name: str, value: Any) -> bool:
+        """Send a control change to a camera worker. Returns True if sent."""
+        # Find the worker key for this camera
+        worker_key = self._find_worker_key(camera_id)
+        if not worker_key:
+            self._logger.warning("[CONFIG] No worker found for camera %s", camera_id)
+            return False
+
+        self._logger.debug("[CONFIG] Setting control %s = %s for %s", control_name, value, camera_id)
+        return self._worker_manager.set_control(worker_key, control_name, value)
+
+    def _find_worker_key(self, camera_id: str) -> Optional[str]:
+        """Find the worker key for a camera ID."""
+        # Worker keys are typically formatted as "backend:stable_id"
+        # camera_id might be formatted similarly, or we need to search
+        # Check if the worker_manager has a worker with this key or a matching camera_id
+        for key in self._worker_manager._workers:
+            handle = self._worker_manager._workers[key]
+            if handle.camera_id == camera_id or key == camera_id:
+                return key
+        return None
 
 
 __all__ = ["SettingsController"]

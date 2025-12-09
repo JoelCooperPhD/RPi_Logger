@@ -27,8 +27,14 @@ from rpi_logger.modules.Cameras.runtime import (
     CameraDescriptor,
     CameraId,
     CapabilityMode,
+    CapabilitySource,
 )
 from rpi_logger.modules.Cameras.runtime.backends import picam_backend, usb_backend
+from rpi_logger.modules.Cameras.camera_models import (
+    CameraModelDatabase,
+    extract_model_name,
+    copy_capabilities,
+)
 from rpi_logger.modules.Cameras.storage import resolve_session_paths
 
 
@@ -71,16 +77,21 @@ class WorkerSpawnController:
             self._logger.debug("[SPAWN] Setting ready event for %s", key)
             event.set()
 
-    async def _spawn_worker_for(self, desc: CameraDescriptor) -> None:
-        """Spawn a worker process for a camera."""
+    async def _spawn_worker_for(self, desc: CameraDescriptor, *, force_probe: bool = False) -> None:
+        """Spawn a worker process for a camera.
+
+        Args:
+            desc: Camera descriptor
+            force_probe: If True, skip model database lookup and probe capabilities
+        """
         runtime = self._runtime
         key = desc.camera_id.key
         camera_type = desc.camera_id.backend
 
-        self._logger.info("[SPAWN] Starting worker spawn for %s", key)
-        self._logger.debug("[SPAWN] Descriptor: backend=%s stable_id=%s dev_path=%s location=%s",
+        self._logger.info("[SPAWN] Starting worker spawn for %s (force_probe=%s)", key, force_probe)
+        self._logger.debug("[SPAWN] Descriptor: backend=%s stable_id=%s dev_path=%s location=%s hw_model=%s",
                           desc.camera_id.backend, desc.camera_id.stable_id,
-                          desc.camera_id.dev_path, desc.location_hint)
+                          desc.camera_id.dev_path, desc.location_hint, desc.hw_model)
 
         # For picam cameras, serialize initialization to avoid libcamera resource conflicts
         use_lock = camera_type == "picam"
@@ -90,10 +101,8 @@ class WorkerSpawnController:
             self._logger.info("[SPAWN] Acquired picam init lock for %s", key)
 
         try:
-            # Probe capabilities first
-            self._logger.debug("[SPAWN] Probing capabilities for %s...", key)
-            caps = await self._probe_capabilities(desc)
-            self._logger.debug("[SPAWN] Capabilities: %s", caps)
+            # Resolve capabilities: check model database first, then probe if unknown
+            caps, model_name = await self._resolve_capabilities(desc, force_probe=force_probe)
 
             # Determine camera type and ID for the worker
             if camera_type == "usb":
@@ -163,7 +172,71 @@ class WorkerSpawnController:
                 self._picam_init_lock.release()
                 self._logger.info("[SPAWN] Released picam init lock for %s", key)
 
-    async def _probe_capabilities(self, desc: CameraDescriptor) -> Optional[Any]:
+    async def _resolve_capabilities(
+        self, desc: CameraDescriptor, *, force_probe: bool = False
+    ) -> tuple[Optional[CameraCapabilities], str]:
+        """
+        Resolve capabilities for a camera.
+
+        Checks the model database first. If the camera model is known,
+        returns a copy of the stored capabilities. Otherwise, probes
+        the camera and saves the result to the database.
+
+        Args:
+            desc: Camera descriptor
+            force_probe: If True, skip database lookup and always probe
+
+        Returns:
+            Tuple of (capabilities, model_name)
+            - capabilities: Fresh copy of capabilities (safe to mutate)
+            - model_name: The model name used for lookup
+        """
+        runtime = self._runtime
+        key = desc.camera_id.key
+        camera_type = desc.camera_id.backend
+
+        # Extract model name from descriptor
+        model_name = extract_model_name(desc)
+        self._logger.debug("[SPAWN] Extracted model name: '%s'", model_name)
+
+        # Check model database (unless force_probe is set)
+        model = None
+        if not force_probe:
+            model = runtime.model_db.lookup(model_name, camera_type) if model_name else None
+
+        if model:
+            # Known camera model - use stored capabilities (copy to avoid mutation)
+            self._logger.info("[SPAWN] Found known model '%s' for %s", model.name, key)
+            caps = copy_capabilities(model.capabilities)
+            caps.source = CapabilitySource.CACHE
+            return caps, model_name
+
+        # Unknown camera (or force_probe) - probe capabilities
+        if force_probe:
+            self._logger.info("[SPAWN] Reprobing camera '%s' (force_probe=True)...", model_name or key)
+            self._runtime.view.set_status("Reprobing camera capabilities...")
+        else:
+            self._logger.info("[SPAWN] Unknown camera model '%s', probing...", model_name or "(empty)")
+            self._runtime.view.set_status("Probing camera capabilities...")
+        caps = await self._probe_capabilities(desc)
+
+        if caps:
+            caps.source = CapabilitySource.PROBE
+
+        # Save to model database for future use (developer workflow)
+        if caps and model_name:
+            if force_probe:
+                self._logger.info("[SPAWN] Updating model in database: '%s'", model_name)
+            else:
+                self._logger.info("[SPAWN] Adding new model to database: '%s'", model_name)
+            runtime.model_db.add_model(model_name, camera_type, caps, force_update=force_probe)
+
+        self._logger.debug("[SPAWN] Capabilities (source=%s): %s",
+                          caps.source.value if caps else "none", caps)
+
+        return caps, model_name
+
+    async def _probe_capabilities(self, desc: CameraDescriptor) -> Optional[CameraCapabilities]:
         """Probe camera capabilities (non-blocking)."""
         backend = desc.camera_id.backend
         try:
@@ -278,6 +351,43 @@ class WorkerSpawnController:
             "[VALIDATE] %s: Using fallback %s @ %.1f fps", key, best.size, best.fps
         )
         return best.size, min(fps, best.fps)
+
+    async def reprobe_camera(self, camera_id: str) -> bool:
+        """Reprobe capabilities for an existing camera.
+
+        Shuts down the worker, reprobes the camera hardware, updates
+        the model database, and respawns the worker with new capabilities.
+
+        Args:
+            camera_id: Camera key (e.g., "usb:usb1-1-2")
+
+        Returns:
+            True if reprobe succeeded
+        """
+        runtime = self._runtime
+        state = runtime.camera_states.get(camera_id)
+        if not state:
+            self._logger.warning("[REPROBE] No state found for %s", camera_id)
+            return False
+
+        descriptor = state.descriptor
+        self._logger.info("[REPROBE] Starting reprobe for %s", camera_id)
+
+        # Stop recording if active
+        if state.is_recording:
+            self._logger.info("[REPROBE] Stopping recording for %s", camera_id)
+            await runtime.worker_manager.stop_recording(camera_id)
+
+        # Shutdown existing worker
+        self._logger.info("[REPROBE] Shutting down worker for %s", camera_id)
+        await runtime.worker_manager.shutdown_worker(camera_id)
+        runtime.camera_states.pop(camera_id, None)
+        runtime.view.remove_camera(camera_id)
+
+        # Respawn with force_probe=True to bypass model database
+        self._logger.info("[REPROBE] Respawning worker for %s with force_probe=True", camera_id)
+        await self._spawn_worker_for(descriptor, force_probe=True)
+        return True
 
     async def shutdown(self) -> None:
         """Shutdown discovery (no background tasks to cancel in this design)."""

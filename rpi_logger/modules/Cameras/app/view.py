@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Optional
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.app.views.adapter import ViewAdapter
 from rpi_logger.modules.Cameras.app.widgets.metrics_display import MetricsDisplay
-from rpi_logger.modules.Cameras.app.widgets.settings_panel import DEFAULT_SETTINGS, SettingsWindow
+from rpi_logger.modules.Cameras.app.widgets.camera_settings_window import CameraSettingsWindow, DEFAULT_SETTINGS
 
 try:
     from rpi_logger.core.ui.theme.styles import Theme
@@ -38,7 +38,9 @@ class CamerasView:
         self._activate_handler: Optional[Callable[[Optional[str]], None]] = None
         self._active_camera_id: Optional[str] = None
         self._config_handler: Optional[Callable[[str, Dict[str, str]], None]] = None
-        self._settings_window: Optional[SettingsWindow] = None
+        self._reprobe_handler: Optional[Callable[[str], None]] = None
+        self._control_change_handler: Optional[Callable[[str, str, Any], None]] = None
+        self._settings_window: Optional[CameraSettingsWindow] = None
         self._settings_toggle_var: Optional[Any] = None
         self._metrics_display: Optional[MetricsDisplay] = None
         self._camera_options: Dict[str, Dict[str, list[str]]] = {}
@@ -123,9 +125,13 @@ class CamerasView:
         *,
         apply_config: Optional[Callable[[str, Dict[str, str]], None]] = None,
         activate_camera: Optional[Callable[[Optional[str]], None]] = None,
+        reprobe_camera: Optional[Callable[[str], None]] = None,
+        control_change: Optional[Callable[[str, str, Any], None]] = None,
     ) -> None:
         self._config_handler = apply_config
         self._activate_handler = activate_camera
+        self._reprobe_handler = reprobe_camera
+        self._control_change_handler = control_change
 
     # ------------------------------------------------------------------ Public API
 
@@ -251,8 +257,24 @@ class CamerasView:
         if self._settings_toggle_var is None:
             self._settings_toggle_var = tk.BooleanVar(master=self._root, value=False)
         if self._settings_window is None:
-            self._settings_window = SettingsWindow(self._root, logger=self._logger, on_apply=self._apply_config)
+            self._settings_window = CameraSettingsWindow(
+                self._root,
+                logger=self._logger,
+                on_apply_resolution=self._apply_config,
+                on_control_change=self._on_control_change,
+                on_reprobe=self._request_reprobe,
+            )
             self._settings_window.bind_toggle_var(self._settings_toggle_var)
+
+    def _on_control_change(self, camera_id: str, control_name: str, value: Any) -> None:
+        """Handle camera control changes from the settings window."""
+        if not self._control_change_handler:
+            self._logger.debug("No control change handler registered")
+            return
+        try:
+            self._control_change_handler(camera_id, control_name, value)
+        except Exception:
+            self._logger.debug("Control change handler failed", exc_info=True)
 
     def _toggle_settings_window(self) -> None:
         if not self._settings_window or not self._settings_toggle_var:
@@ -314,10 +336,30 @@ class CamerasView:
 
         if self._settings_toggle_var is not None:
             menu.add_checkbutton(
-                label="Show Settings Window",
+                label="Configure",
                 variable=self._settings_toggle_var,
                 command=self._toggle_settings_window,
             )
+
+        menu.add_separator()
+        menu.add_command(
+            label="Reprobe Camera",
+            command=self._request_reprobe,
+        )
+
+    def _request_reprobe(self, camera_id: Optional[str] = None) -> None:
+        """Request reprobing of the active camera's capabilities."""
+        target = camera_id or self._active_camera_id
+        if not target:
+            self.set_status("Select a camera before reprobing")
+            return
+        if not self._reprobe_handler:
+            self._logger.warning("No reprobe handler registered")
+            return
+        try:
+            self._reprobe_handler(target)
+        except Exception:
+            self._logger.debug("Reprobe handler failed", exc_info=True)
 
     def _apply_config(self, camera_id: Optional[str], settings: Dict[str, str]) -> None:
         if not camera_id:
@@ -339,7 +381,14 @@ class CamerasView:
             if self._active_camera_id == camera_id and self._settings_window.has_panel():
                 self._settings_window.apply_to_panel(settings)
 
-    def update_camera_capabilities(self, camera_id: str, capabilities: Any) -> None:
+    def update_camera_capabilities(
+        self,
+        camera_id: str,
+        capabilities: Any,
+        *,
+        hw_model: Optional[str] = None,
+        backend: Optional[str] = None,
+    ) -> None:
         """Store per-camera options derived from capabilities and refresh settings UI."""
 
         modes = getattr(capabilities, "modes", None) or []
@@ -426,6 +475,13 @@ class CamerasView:
                 record_resolutions=record_res,
                 preview_fps_values=preview_fps_values,
                 record_fps_values=record_fps_values,
+            )
+            # Also pass full capabilities for camera controls
+            self._settings_window.update_camera_capabilities(
+                camera_id,
+                capabilities,
+                hw_model=hw_model,
+                backend=backend,
             )
             if self._active_camera_id == camera_id and self._settings_window.has_panel():
                 self._settings_window.apply_to_panel(

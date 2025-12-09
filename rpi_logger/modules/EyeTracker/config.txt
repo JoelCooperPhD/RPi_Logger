@@ -3,7 +3,7 @@
 ################################################################################
 # Edit values below, then restart the module. CLI arguments override these defaults.
 ################################################################################
-display_name = EyeTracker
+display_name = EyeTracker-Neon
 
 ################################################################################
 # CORE CAPTURE

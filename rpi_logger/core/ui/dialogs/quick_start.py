@@ -28,7 +28,7 @@ tasks, and annotations. All modules are controlled from a single interface.
    ▸ Check the modules you need:
      • Cameras         - Multi-camera video (up to 2x IMX296 @ 1-60 FPS)
      • AudioRecorder   - Multi-microphone audio (8-192 kHz)
-     • EyeTracker      - Pupil Labs gaze tracking with scene video
+     • EyeTracker-Neon - Pupil Labs Neon gaze tracking with scene video
      • Notes           - Stub-based annotations during sessions
      • DRT             - DRT behavioral task devices
 
@@ -107,7 +107,7 @@ data/session_20251024_120000/
 │   ├── session.log
 │   ├── 20251024_120000_AUDIO_trial001_MIC0_usb-audio.wav
 │   └── 20251024_120000_AUDIOTIMING_trial001_MIC0.csv
-├── EyeTracker/
+├── EyeTracker-Neon/
 │   ├── session.log
 │   ├── scene_video_20251024_120000.mp4
 │   └── gaze_data_20251024_120000.csv

@@ -24,29 +24,32 @@ except ImportError:
     ttk = None
 
 try:
-    from .plotter import VOGPlotter, HAS_MATPLOTLIB
+    # Try relative import first (works when imported as rpi_logger.modules.VOG.vog.view)
+    from ..vog_core.interfaces.gui import VOGPlotter, HAS_MATPLOTLIB
 except ImportError:
-    VOGPlotter = None
-    HAS_MATPLOTLIB = False
+    try:
+        # Fall back to absolute import (works when imported as vog.view from MODULE_DIR)
+        from rpi_logger.modules.VOG.vog_core.interfaces.gui import VOGPlotter, HAS_MATPLOTLIB
+    except ImportError:
+        VOGPlotter = None
+        HAS_MATPLOTLIB = False
 
 try:
     from rpi_logger.core.ui.theme.styles import Theme
-    from rpi_logger.core.ui.theme.widgets import RoundedButton
     from rpi_logger.core.ui.theme.colors import Colors
     HAS_THEME = True
 except ImportError:
     HAS_THEME = False
     Theme = None
-    RoundedButton = None
     Colors = None
 
 try:
     # Try relative import first (works when imported as rpi_logger.modules.VOG.vog.view)
-    from ..vog_core.interfaces.gui.config_window import VOGConfigWindow
+    from ..vog_core.interfaces.gui import VOGConfigWindow
 except ImportError:
     try:
         # Fall back to absolute import (works when imported as vog.view from MODULE_DIR)
-        from rpi_logger.modules.VOG.vog_core.interfaces.gui.config_window import VOGConfigWindow
+        from rpi_logger.modules.VOG.vog_core.interfaces.gui import VOGConfigWindow
     except ImportError:
         VOGConfigWindow = None
 
@@ -62,12 +65,6 @@ class _SystemPlaceholder:
     def __init__(self, args=None):
         self.config = getattr(args, 'config', {})
         self.config_file_path = getattr(args, 'config_file_path', None)
-
-    async def start_recording(self) -> bool:
-        return False
-
-    async def stop_recording(self) -> bool:
-        return False
 
     def get_device_handler(self, port: str):
         return None

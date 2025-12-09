@@ -283,18 +283,32 @@ class LoggerSystem:
 
                     # Save disconnected state - only if no other instances remain
                     # (the instance was already removed from map by _notify_instance_disconnected)
+                    # Instance IDs use uppercase module names (e.g., "CAMERAS:device")
+                    module_prefix = f"{module_name.upper()}:"
                     other_instances_running = any(
-                        inst_id.startswith(f"{module_name}:")
+                        inst_id.startswith(module_prefix)
                         for inst_id in self._device_instance_map.values()
                     )
                     if not other_instances_running:
                         await self._save_device_connection_state(module_name, False)
+                        # Disable module so it doesn't auto-start on next launch
+                        # Use reconcile=False since module is already quitting
+                        await self.toggle_module_enabled(module_name, False)
+                        await self.state_manager.set_desired_state(
+                            module_name, False, reconcile=False
+                        )
                 else:
                     # Single-instance module: notify all devices
                     self.module_manager.cleanup_stopped_process(module_name)
                     self._notify_device_connected_for_module(module_name, False)
                     # Save disconnected state
                     await self._save_device_connection_state(module_name, False)
+                    # Disable module so it doesn't auto-start on next launch
+                    # Use reconcile=False since module is already quitting
+                    await self.toggle_module_enabled(module_name, False)
+                    await self.state_manager.set_desired_state(
+                        module_name, False, reconcile=False
+                    )
 
                 if self.ui_callback:
                     try:
@@ -366,6 +380,18 @@ class LoggerSystem:
                 if effective_id not in self._gracefully_quitting_modules:
                     self.logger.warning("Instance %s stopped unexpectedly", effective_id)
                     self._notify_instance_disconnected(instance_id)
+                    # Disable module on unexpected termination too
+                    module_prefix = f"{module_name.upper()}:"
+                    other_instances_running = any(
+                        inst_id.startswith(module_prefix)
+                        for inst_id in self._device_instance_map.values()
+                    )
+                    if not other_instances_running:
+                        await self._save_device_connection_state(module_name, False)
+                        await self.toggle_module_enabled(module_name, False)
+                        await self.state_manager.set_desired_state(
+                            module_name, False, reconcile=False
+                        )
             elif self.state_manager.is_module_enabled(module_name):
                 # Single-instance: original behavior
                 if module_name not in self._gracefully_quitting_modules:
@@ -373,6 +399,12 @@ class LoggerSystem:
                     self.module_manager.cleanup_stopped_process(module_name)
                     await self.state_manager.set_actual_state(module_name, ActualState.CRASHED)
                     self._notify_device_connected_for_module(module_name, False)
+                    # Disable module on unexpected termination
+                    await self._save_device_connection_state(module_name, False)
+                    await self.toggle_module_enabled(module_name, False)
+                    await self.state_manager.set_desired_state(
+                        module_name, False, reconcile=False
+                    )
 
         if not process.is_running() and effective_id in self._gracefully_quitting_modules:
             self._gracefully_quitting_modules.discard(effective_id)
@@ -410,6 +442,9 @@ class LoggerSystem:
                     "Notifying device %s disconnected (extracted from instance: %s)",
                     extracted_device_id, instance_id
                 )
+                # Also unregister in fallback path to ensure map is cleaned up
+                # This is critical for other_instances_running check to work correctly
+                self._unregister_device_instance(extracted_device_id)
                 self._notify_device_connected(extracted_device_id, False)
 
     def _notify_device_connected(self, device_id: str, connected: bool) -> None:
@@ -1139,12 +1174,19 @@ class LoggerSystem:
 
         # Save disconnected state for restart behavior
         # For multi-instance modules, only save false if no other instances remain
+        # Instance IDs use uppercase module names (e.g., "CAMERAS:device")
+        module_prefix = f"{module_id.upper()}:"
         other_instances_running = any(
-            inst_id.startswith(f"{module_id}:")
+            inst_id.startswith(module_prefix)
             for inst_id in self._device_instance_map.values()
         )
         if not other_instances_running:
             await self._save_device_connection_state(module_id, False)
+            # Disable module so it doesn't auto-start on next launch
+            await self.toggle_module_enabled(module_id, False)
+            await self.state_manager.set_desired_state(
+                module_id, False, reconcile=False
+            )
 
         return True
 

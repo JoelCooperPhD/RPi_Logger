@@ -1,4 +1,4 @@
-"""EyeTracker module entry point leveraging the stub (codex) VMC stack."""
+"""Neon EyeTracker module entry point leveraging the stub (codex) VMC stack."""
 
 from __future__ import annotations
 
@@ -48,21 +48,26 @@ from rpi_logger.cli.common import (
     install_signal_handlers,
 )
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.modules.base.config_paths import resolve_module_config_path
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy
 
 from rpi_logger.modules.EyeTracker.tracker_core.config import load_config_file
 
 from .eye_tracker_runtime import EyeTrackerRuntime
+from .view import NeonEyeTrackerView
 
-DISPLAY_NAME = "EyeTracker"
-MODULE_ID = "eye_tracker"
-DEFAULT_OUTPUT_SUBDIR = Path("eye-tracker")
+DISPLAY_NAME = "EyeTracker-Neon"
+MODULE_ID = "neon_eyetracker"
+DEFAULT_OUTPUT_SUBDIR = Path("neon-eyetracker")
+
+# Resolve writable config path (uses ~/.config/rpi-logger/ if module dir not writable)
+CONFIG_CONTEXT = resolve_module_config_path(MODULE_DIR, MODULE_ID)
 
 logger = get_module_logger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    config_path = MODULE_DIR / "config.txt"
+    config_path = CONFIG_CONTEXT.writable_path
     config = load_config_file(config_path)
 
     default_output = Path(get_config_str(config, "output_dir", DEFAULT_OUTPUT_SUBDIR))
@@ -240,12 +245,15 @@ async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
 
     if not getattr(args, "enable_commands", False):
-        logger.error("EyeTracker module must be launched by the logger controller.")
+        logger.error("EyeTracker-Neon module must be launched by the logger controller.")
         return
 
     def show_eyetracker_help(parent):
         from rpi_logger.modules.EyeTracker.tracker_core.interfaces.gui.help_dialog import EyeTrackerHelpDialog
         EyeTrackerHelpDialog(parent)
+
+    # Store config path for runtime access
+    setattr(args, "config_path", CONFIG_CONTEXT.writable_path)
 
     supervisor = StubCodexSupervisor(
         args,
@@ -255,6 +263,8 @@ async def main(argv: Optional[list[str]] = None) -> None:
         runtime_retry_policy=RuntimeRetryPolicy(interval=3.0, max_attempts=3),
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
+        config_path=CONFIG_CONTEXT.writable_path,
+        view_factory=NeonEyeTrackerView,
         help_callback=show_eyetracker_help,
     )
 

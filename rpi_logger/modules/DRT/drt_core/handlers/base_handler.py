@@ -217,30 +217,6 @@ class BaseDRTHandler(ABC):
         ...
 
     # =========================================================================
-    # Data Logging (Abstract)
-    # =========================================================================
-
-    @abstractmethod
-    def _log_trial_data(self, data: Dict[str, Any]) -> None:
-        """
-        Log trial data to CSV file.
-
-        Args:
-            data: Trial data dictionary
-        """
-        ...
-
-    @abstractmethod
-    def _get_csv_header(self) -> str:
-        """
-        Return the CSV header for this device type.
-
-        Returns:
-            CSV header string
-        """
-        ...
-
-    # =========================================================================
     # Common Implementation
     # =========================================================================
 

@@ -75,12 +75,6 @@ class BaseVOGProtocol(ABC):
 
     @property
     @abstractmethod
-    def baudrate(self) -> int:
-        """Return the baud rate for this device type."""
-        pass
-
-    @property
-    @abstractmethod
     def supports_dual_lens(self) -> bool:
         """Return True if device supports dual lens control (A/B/X)."""
         pass

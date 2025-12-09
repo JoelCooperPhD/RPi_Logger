@@ -1,7 +1,5 @@
-
 import asyncio
-import logging
-from typing import Optional, Any
+from typing import Optional, Any, Tuple, Dict
 import os
 
 # Set cv2 to headless mode before importing to avoid conflicts with Tkinter
@@ -25,33 +23,118 @@ class FrameProcessor:
         self._logged_color_info = False
         self._logged_gaze_debug = False
         self._logged_gaze_error = False
+        # Phase 2.2: Sprite cache for gaze indicators
+        self._gaze_sprite_cache: Dict[tuple, np.ndarray] = {}
+        # Phase 2.3: Duplicate frame detection
+        self._last_frame_hash: Optional[int] = None
+        self._last_processed: Optional[np.ndarray] = None
+        self._last_was_grayscale: bool = False
+        self._duplicate_count = 0
+
+    def _get_gaze_color(self, is_worn: bool) -> Tuple[int, int, int]:
+        """Get gaze indicator color based on worn state."""
+        if is_worn:
+            return (self.config.gaze_color_worn_b, self.config.gaze_color_worn_g, self.config.gaze_color_worn_r)
+        return (self.config.gaze_color_not_worn_b, self.config.gaze_color_not_worn_g, self.config.gaze_color_not_worn_r)
+
+    def _get_gaze_sprite(self, radius: int, thickness: int, color: Tuple[int, int, int],
+                         shape: str, center_radius: int) -> np.ndarray:
+        """Get cached gaze indicator sprite."""
+        cache_key = (radius, thickness, color, shape, center_radius)
+        if cache_key not in self._gaze_sprite_cache:
+            # Create sprite with alpha channel for blending
+            size = radius * 2 + thickness * 2 + 4
+            sprite = np.zeros((size, size, 4), dtype=np.uint8)
+            center = size // 2
+
+            if shape == "cross":
+                # Draw cross on sprite
+                cv2.line(sprite, (center - radius, center), (center + radius, center),
+                        (*color, 255), thickness)
+                cv2.line(sprite, (center, center - radius), (center, center + radius),
+                        (*color, 255), thickness)
+            else:
+                # Draw circle on sprite
+                cv2.circle(sprite, (center, center), radius, (*color, 255), thickness)
+
+            # Draw center dot
+            cv2.circle(sprite, (center, center), center_radius, (*color, 255), -1)
+
+            self._gaze_sprite_cache[cache_key] = sprite
+
+            # Limit cache size
+            if len(self._gaze_sprite_cache) > 20:
+                # Remove oldest entry
+                oldest_key = next(iter(self._gaze_sprite_cache))
+                del self._gaze_sprite_cache[oldest_key]
+
+        return self._gaze_sprite_cache[cache_key]
 
     def _draw_gaze_indicator(self, frame: np.ndarray, gaze_x: int, gaze_y: int, is_worn: bool) -> None:
-        """Draw gaze indicator (circle or cross) at specified location using config settings"""
-        # Get colors from config
-        if is_worn:
-            color = (self.config.gaze_color_worn_b, self.config.gaze_color_worn_g, self.config.gaze_color_worn_r)
-        else:
-            color = (self.config.gaze_color_not_worn_b, self.config.gaze_color_not_worn_g, self.config.gaze_color_not_worn_r)
+        """Draw gaze indicator using cached sprite (faster than cv2.circle every frame)."""
+        color = self._get_gaze_color(is_worn)
+        sprite = self._get_gaze_sprite(
+            self.config.gaze_circle_radius,
+            self.config.gaze_circle_thickness,
+            color,
+            self.config.gaze_shape,
+            self.config.gaze_center_radius,
+        )
 
-        # Draw based on shape config
-        if self.config.gaze_shape == "cross":
-            # Draw cross
-            arm_length = self.config.gaze_circle_radius
-            thickness = self.config.gaze_circle_thickness
-            # Horizontal line
-            cv2.line(frame, (gaze_x - arm_length, gaze_y), (gaze_x + arm_length, gaze_y), color, thickness)
-            # Vertical line
-            cv2.line(frame, (gaze_x, gaze_y - arm_length), (gaze_x, gaze_y + arm_length), color, thickness)
-        else:
-            # Draw circle (default)
-            cv2.circle(frame, (gaze_x, gaze_y), self.config.gaze_circle_radius, color, self.config.gaze_circle_thickness)
+        # Calculate blit region
+        sprite_h, sprite_w = sprite.shape[:2]
+        half_h, half_w = sprite_h // 2, sprite_w // 2
 
-        # Draw center dot
-        cv2.circle(frame, (gaze_x, gaze_y), self.config.gaze_center_radius, color, -1)
+        # Frame bounds
+        frame_h, frame_w = frame.shape[:2]
+
+        # Source and destination regions (handle edge clipping)
+        src_y1 = max(0, half_h - gaze_y)
+        src_y2 = min(sprite_h, half_h + (frame_h - gaze_y))
+        src_x1 = max(0, half_w - gaze_x)
+        src_x2 = min(sprite_w, half_w + (frame_w - gaze_x))
+
+        dst_y1 = max(0, gaze_y - half_h)
+        dst_y2 = min(frame_h, gaze_y + half_h)
+        dst_x1 = max(0, gaze_x - half_w)
+        dst_x2 = min(frame_w, gaze_x + half_w)
+
+        if dst_y2 > dst_y1 and dst_x2 > dst_x1:
+            # Blend sprite onto frame using alpha
+            sprite_region = sprite[src_y1:src_y2, src_x1:src_x2]
+            alpha = sprite_region[:, :, 3:4] / 255.0
+            frame_region = frame[dst_y1:dst_y2, dst_x1:dst_x2]
+            blended = (sprite_region[:, :, :3] * alpha + frame_region * (1 - alpha)).astype(np.uint8)
+            frame[dst_y1:dst_y2, dst_x1:dst_x2] = blended
 
     def process_frame(self, raw_frame: np.ndarray) -> np.ndarray:
+        """Process frame (legacy API - always returns BGR)."""
+        frame, _ = self.process_frame_lazy(raw_frame)
+        return frame
+
+    def process_frame_lazy(self, raw_frame: np.ndarray, *, skip_duplicates: bool = False) -> Tuple[np.ndarray, bool]:
+        """
+        Process raw frame from camera with lazy color conversion.
+
+        Args:
+            raw_frame: Raw frame from camera
+            skip_duplicates: If True, return cached result for duplicate frames
+
+        Returns:
+            Tuple of (processed_frame, is_grayscale)
+            Keeps grayscale frames as-is when possible for efficiency.
+        """
         try:
+            # Phase 2.3: Fast duplicate detection using sparse sampling
+            if skip_duplicates:
+                # Sample every 64th pixel in a grid pattern for fast hash
+                sample = raw_frame[::64, ::64]
+                frame_hash = hash(sample.tobytes())
+
+                if frame_hash == self._last_frame_hash and self._last_processed is not None:
+                    self._duplicate_count += 1
+                    return self._last_processed, self._last_was_grayscale
+
             h, w = raw_frame.shape[:2]
 
             if not self._logged_frame_info:
@@ -71,32 +154,51 @@ class FrameProcessor:
                     logger.info(f"Original: {h}x{w}, Scene: {scene_frame.shape}")
                     self._logged_extraction = True
 
-            if len(scene_frame.shape) == 2:  # Grayscale
-                processed_frame = cv2.cvtColor(scene_frame, cv2.COLOR_GRAY2BGR)
+            processed: np.ndarray
+            is_grayscale: bool
 
+            if len(scene_frame.shape) == 2:  # Grayscale
+                # Phase 2.1: Return grayscale directly, let caller convert if needed
                 if not self._logged_color_info:
-                    logger.info("Scene camera is grayscale/monochrome - this is normal for Pupil Labs devices")
+                    logger.info("Scene camera is grayscale - deferring BGR conversion")
                     self._logged_color_info = True
+                processed, is_grayscale = scene_frame, True
 
             elif len(scene_frame.shape) == 3:
                 if scene_frame.shape[2] == 1:  # Single channel in 3D array
-                    processed_frame = cv2.cvtColor(scene_frame.squeeze(), cv2.COLOR_GRAY2BGR)
-                elif scene_frame.shape[2] == 3:  # Already 3 channels
-                    processed_frame = scene_frame
+                    processed, is_grayscale = scene_frame.squeeze(), True  # Still grayscale
+                elif scene_frame.shape[2] == 3:  # Already BGR
+                    processed, is_grayscale = scene_frame, False
                 elif scene_frame.shape[2] == 4:  # RGBA
-                    processed_frame = cv2.cvtColor(scene_frame, cv2.COLOR_RGBA2BGR)
+                    processed, is_grayscale = cv2.cvtColor(scene_frame, cv2.COLOR_RGBA2BGR), False
                 else:
                     logger.warning(f"Unexpected channel count: {scene_frame.shape[2]}")
-                    processed_frame = scene_frame
+                    processed, is_grayscale = scene_frame, False
             else:
                 logger.warning(f"Unexpected scene frame shape: {scene_frame.shape}")
-                processed_frame = scene_frame
+                processed, is_grayscale = scene_frame, len(scene_frame.shape) == 2
 
-            return processed_frame
+            # Cache for next comparison
+            if skip_duplicates:
+                self._last_frame_hash = frame_hash
+                self._last_processed = processed
+                self._last_was_grayscale = is_grayscale
+
+            return processed, is_grayscale
 
         except Exception as e:
             logger.error(f"Error processing frame: {e}")
-            return raw_frame
+            return raw_frame, len(raw_frame.shape) == 2
+
+    @property
+    def duplicate_frames_skipped(self) -> int:
+        return self._duplicate_count
+
+    def ensure_bgr(self, frame: np.ndarray, is_grayscale: bool) -> np.ndarray:
+        """Convert to BGR only when needed (for overlay drawing)."""
+        if is_grayscale:
+            return cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        return frame
 
     def add_display_overlays(
         self,
@@ -240,44 +342,8 @@ class FrameProcessor:
             return frame  # Already at preview size
 
         preview_size = (self.config.preview_width, self.config.preview_height)
-        scaled = cv2.resize(frame, preview_size, interpolation=cv2.INTER_LINEAR)
+        scaled = cv2.resize(frame, preview_size, interpolation=cv2.INTER_AREA)
         return scaled
-
-    def scale_gaze_coords(self, gaze_x: float, gaze_y: float,
-                         from_resolution: tuple, to_resolution: tuple) -> tuple:
-        """
-        Scale gaze coordinates from one resolution to another.
-
-        Args:
-            gaze_x, gaze_y: Gaze coordinates (may be normalized [0-1] or absolute)
-            from_resolution: (width, height) of source frame
-            to_resolution: (width, height) of target frame
-
-        Returns:
-            (scaled_x, scaled_y) in pixel coordinates for target resolution
-        """
-        from_width, from_height = from_resolution
-        to_width, to_height = to_resolution
-
-        # Handle both normalized and absolute coordinates
-        if gaze_x > 1.0 or gaze_y > 1.0:
-            # Absolute coordinates - need special handling for tiled frames
-            pixel_x = (gaze_x / 1600.0) * from_width
-            scene_y = gaze_y
-            if scene_y <= 1200:
-                pixel_y = (scene_y / 1200.0) * from_height
-            else:
-                pixel_y = from_height - 1
-        else:
-            # Normalized coordinates
-            pixel_x = gaze_x * from_width
-            pixel_y = gaze_y * from_height
-
-        # Scale to target resolution
-        scale_x = to_width / from_width
-        scale_y = to_height / from_height
-
-        return int(pixel_x * scale_x), int(pixel_y * scale_y)
 
     def display_frame(self, frame: np.ndarray):
         h, w = frame.shape[:2]
@@ -314,37 +380,5 @@ class FrameProcessor:
     async def process_frame_async(self, raw_frame: np.ndarray) -> np.ndarray:
         return await asyncio.to_thread(self.process_frame, raw_frame)
 
-    async def add_display_overlays_async(
-        self,
-        frame: np.ndarray,
-        frame_count: int,
-        camera_frames: int,
-        start_time: Optional[float],
-        recording: bool,
-        last_gaze: Optional[Any],
-        rolling_camera_fps: Optional[float] = None,
-        dropped_frames: int = 0,
-        duplicates: int = 0,
-        requested_fps: float = 30.0,
-        experiment_label: Optional[str] = None,
-    ) -> np.ndarray:
-        return await asyncio.to_thread(
-            self.add_display_overlays,
-            frame,
-            frame_count,
-            camera_frames,
-            start_time,
-            recording,
-            last_gaze,
-            rolling_camera_fps,
-            dropped_frames,
-            duplicates,
-            requested_fps,
-            experiment_label,
-        )
-
-    async def display_frame_async(self, frame: np.ndarray) -> None:
-        await asyncio.to_thread(self.display_frame, frame)
-
-    async def check_keyboard_async(self) -> Optional[str]:
-        return await asyncio.to_thread(self.check_keyboard)
+    async def process_frame_lazy_async(self, raw_frame: np.ndarray) -> Tuple[np.ndarray, bool]:
+        return await asyncio.to_thread(self.process_frame_lazy, raw_frame)

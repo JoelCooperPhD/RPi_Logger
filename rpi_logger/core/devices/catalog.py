@@ -67,9 +67,9 @@ class DeviceCatalog:
         ),
         FamilyMetadata(
             DeviceFamily.EYE_TRACKER,
-            "EyeTracker",
+            "EyeTracker-Neon",
             3,
-            "Network eye trackers"
+            "Pupil Labs Neon eye tracker"
         ),
         FamilyMetadata(
             DeviceFamily.AUDIO,

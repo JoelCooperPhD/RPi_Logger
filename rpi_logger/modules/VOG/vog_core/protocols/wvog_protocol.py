@@ -13,7 +13,6 @@ from .base_protocol import (
     VOGResponse,
     ResponseType,
 )
-from ..constants import WVOG_BAUD
 
 
 class WVOGProtocol(BaseVOGProtocol):
@@ -101,10 +100,6 @@ class WVOGProtocol(BaseVOGProtocol):
     @property
     def device_type(self) -> str:
         return 'wvog'
-
-    @property
-    def baudrate(self) -> int:
-        return WVOG_BAUD
 
     @property
     def supports_dual_lens(self) -> bool:

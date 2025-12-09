@@ -1,4 +1,4 @@
-"""Eye tracker runtime that adapts tracker_core onto the stub (codex) stack."""
+"""Neon EyeTracker runtime that adapts tracker_core onto the stub (codex) VMC stack."""
 
 from __future__ import annotations
 
@@ -7,14 +7,19 @@ import contextlib
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import numpy as np
 
 from rpi_logger.core.commands import StatusMessage
 from rpi_logger.core.logging_utils import ensure_structured_logger
+from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
+
+if TYPE_CHECKING:
+    from .view import NeonEyeTrackerView
+
 
 class TrackerInitializationError(RuntimeError):
     """Raised when eye tracker initialization fails."""
@@ -39,25 +44,37 @@ except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - missing 
 else:
     TRACKER_IMPORT_ERROR = None
 
-from .view_adapter import EyeTrackerViewAdapter
+# Module constants
+MODULE_SUBDIR = "NeonEyeTracker"
 
 
 class EyeTrackerRuntime(ModuleRuntime):
-    """Glue layer between the logger stub stack and tracker_core."""
+    """VMC-compatible runtime for Neon EyeTracker module.
+
+    This runtime manages device connection, streaming, and recording for
+    Pupil Labs Neon eye trackers. Device discovery is handled by the main
+    logger; this runtime receives device assignments via commands.
+    """
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
         self.model = context.model
         self.controller = context.controller
-        base_logger = ensure_structured_logger(getattr(context, "logger", None), fallback_name="EyeTrackerRuntime")
+        base_logger = ensure_structured_logger(getattr(context, "logger", None), fallback_name="NeonEyeTrackerRuntime")
         self.logger = base_logger.getChild("Runtime")
-        self.view = context.view
+        self.view: Optional["NeonEyeTrackerView"] = context.view
         self.display_name = context.display_name
         self.module_dir = context.module_dir
 
-        self.task_manager = BackgroundTaskManager("EyeTrackerTasks", self.logger)
+        # Config path for runtime access
+        self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
+
+        self.task_manager = BackgroundTaskManager("NeonEyeTrackerTasks", self.logger)
         timeout = getattr(self.args, "shutdown_timeout", 20.0)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=max(5.0, float(timeout)))
+
+        # Event loop reference for model callbacks
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         self._shutdown = asyncio.Event()
         self._device_connected = False
@@ -70,8 +87,8 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._tracker_task: Optional[asyncio.Task] = None
         self._device_task: Optional[asyncio.Task] = None
         self._device_ready_event: Optional[asyncio.Event] = None
-        self._view_adapter: Optional[EyeTrackerViewAdapter] = None
         self._session_dir: Optional[Path] = None
+        self._module_data_dir: Optional[Path] = None
         self._import_error = TRACKER_IMPORT_ERROR
         self._auto_start_task: Optional[asyncio.Task] = None
 
@@ -79,6 +96,10 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._assigned_device_id: Optional[str] = None
         self._assigned_network_address: Optional[str] = None
         self._assigned_network_port: Optional[int] = None
+
+        # Recording state
+        self._trial_label: str = ""
+        self._recording_active: bool = False
 
         self.model.subscribe(self._on_model_change)
 
@@ -88,21 +109,21 @@ class EyeTrackerRuntime(ModuleRuntime):
     async def start(self) -> None:
         self.logger.info("Starting %s runtime", self.display_name)
 
+        # Store event loop reference for model callbacks
+        self._loop = asyncio.get_running_loop()
+
         if self._import_error:
             self.logger.error("tracker_core dependencies unavailable: %s", self._import_error)
-            if self.view:
-                self._attach_view(disabled_message=str(self._import_error))
             return
 
         self._build_tracker_components()
-        self._attach_view()
+
+        # Bind runtime to view (DRT pattern)
+        if self.view:
+            self.view.bind_runtime(self)
+            self.view.set_device_status("Waiting for device assignment...", connected=False)
 
         self._device_ready_event = asyncio.Event()
-
-        # Don't auto-start device discovery - wait for assign_device from main UI
-        # The main UI handles mDNS discovery and will assign devices via command
-        if self._view_adapter:
-            self._view_adapter.set_device_status("Waiting for device assignment...", connected=False)
 
         if getattr(self.args, "auto_start_recording", False):
             self._auto_start_task = self.task_manager.create(self._auto_start_recording())
@@ -141,16 +162,17 @@ class EyeTrackerRuntime(ModuleRuntime):
         if self._device_manager and hasattr(self._device_manager, "cleanup"):
             with contextlib.suppress(Exception):
                 await self._device_manager.cleanup()  # type: ignore[misc]
-        if self._view_adapter:
-            self._view_adapter.close()
-            self._view_adapter = None
 
     async def handle_command(self, command: Dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
+
+        # Recording commands
         if action == "start_recording":
             return await self._start_recording_flow(command)
         if action == "stop_recording":
             return await self._stop_recording_flow()
+
+        # Device commands
         if action in {"reconnect", "refresh_device", "eye_tracker_reconnect"}:
             await self.request_reconnect()
             return True
@@ -159,7 +181,37 @@ class EyeTrackerRuntime(ModuleRuntime):
             return await self._assign_device(command, command_id=command_id)
         if action == "unassign_device":
             return await self._unassign_device(command)
+        if action == "unassign_all_devices":
+            # Single-device module: unassign current device if any
+            if self._assigned_device_id:
+                await self._unassign_device({"device_id": self._assigned_device_id})
+            return True
+
+        # Window commands
+        if action == "show_window":
+            self._show_window()
+            return True
+        if action == "hide_window":
+            self._hide_window()
+            return True
+
         return False
+
+    def _show_window(self) -> None:
+        """Show module window (delegated to stub view)."""
+        if self.view and hasattr(self.view, '_stub_view'):
+            stub_view = getattr(self.view, '_stub_view', None)
+            if stub_view and hasattr(stub_view, 'show_window'):
+                stub_view.show_window()
+                self.logger.info("Window shown")
+
+    def _hide_window(self) -> None:
+        """Hide module window (delegated to stub view)."""
+        if self.view and hasattr(self.view, '_stub_view'):
+            stub_view = getattr(self.view, '_stub_view', None)
+            if stub_view and hasattr(stub_view, 'hide_window'):
+                stub_view.hide_window()
+                self.logger.info("Window hidden")
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
         normalized = (action or "").lower()
@@ -228,22 +280,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             self._recording_manager,
         )
 
-    def _attach_view(self, disabled_message: Optional[str] = None) -> None:
-        if not self.view:
-            return
-        preview_hz = max(1, int(getattr(self.args, "gui_preview_update_hz", 10)))
-        self._view_adapter = EyeTrackerViewAdapter(
-            self.view,
-            model=self.model,
-            logger=self.logger.getChild("ViewAdapter"),
-            frame_provider=self._get_latest_frame,
-            preview_hz=preview_hz,
-            disabled_message=disabled_message,
-            runtime=self,
-        )
-        # Bind runtime for button callbacks
-        self._view_adapter.bind_runtime(self)
-
     def _clear_device_task(self, completed_task: asyncio.Task) -> None:
         """Clear device task reference only if it matches the completed task."""
         if self._device_task is completed_task:
@@ -266,8 +302,8 @@ class EyeTrackerRuntime(ModuleRuntime):
         # Only reconnect if we have an assigned device
         if not self._assigned_network_address:
             self.logger.debug("No assigned device to reconnect to")
-            if self._view_adapter:
-                self._view_adapter.set_device_status("Waiting for device assignment...", connected=False)
+            if self.view:
+                self.view.set_device_status("Waiting for device assignment...", connected=False)
             return
 
         if self._device_task and not self._device_task.done():
@@ -288,8 +324,8 @@ class EyeTrackerRuntime(ModuleRuntime):
         if not self._assigned_network_address or self._shutdown.is_set():
             return
 
-        if self._view_adapter:
-            self._view_adapter.set_device_status(
+        if self.view:
+            self.view.set_device_status(
                 f"Reconnecting to {self._assigned_network_address}...", connected=False
             )
 
@@ -299,8 +335,8 @@ class EyeTrackerRuntime(ModuleRuntime):
             self.logger.info("Reconnected to eye tracker")
         else:
             self.logger.warning("Failed to reconnect to assigned device")
-            if self._view_adapter:
-                self._view_adapter.set_device_status("Reconnect failed", connected=False)
+            if self.view:
+                self.view.set_device_status("Reconnect failed", connected=False)
 
     async def _start_tracker_background(self) -> None:
         if not self._tracker_handler:
@@ -312,13 +348,13 @@ class EyeTrackerRuntime(ModuleRuntime):
                 self._tracker_task = self.task_manager.add(task)
                 task.add_done_callback(lambda _: self._on_tracker_stopped())
             self.logger.info("Gaze tracker loop started")
-            if self._view_adapter:
-                self._view_adapter.set_device_status("Streaming", connected=True)
+            if self.view:
+                self.view.set_device_status("Streaming", connected=True)
         except Exception as exc:
             self.logger.exception("Failed to start gaze tracker: %s", exc)
             self._device_connected = False
-            if self._view_adapter:
-                self._view_adapter.set_device_status("Tracker error", connected=False)
+            if self.view:
+                self.view.set_device_status("Tracker error", connected=False)
             raise TrackerInitializationError(str(exc)) from exc
 
     def _on_tracker_stopped(self) -> None:
@@ -326,8 +362,8 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._device_connected = False
         if self._device_ready_event:
             self._device_ready_event.clear()
-        if self._view_adapter:
-            self._view_adapter.set_device_status("Disconnected", connected=False)
+        if self.view:
+            self.view.set_device_status("Disconnected", connected=False)
         if not self._shutdown.is_set():
             self._attempt_reconnect_to_assigned()
 
@@ -339,8 +375,8 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._device_connected = False
         if self._device_ready_event:
             self._device_ready_event.clear()
-        if self._view_adapter:
-            self._view_adapter.set_device_status("Stopped", connected=False)
+        if self.view:
+            self.view.set_device_status("Stopped", connected=False)
 
     async def request_reconnect(self) -> None:
         """Request reconnection to the assigned device."""
@@ -360,14 +396,14 @@ class EyeTrackerRuntime(ModuleRuntime):
             self._device_task = None
 
         if self._assigned_network_address:
-            if self._view_adapter:
-                self._view_adapter.set_device_status(
+            if self.view:
+                self.view.set_device_status(
                     f"Reconnecting to {self._assigned_network_address}...", connected=False
                 )
             self._attempt_reconnect_to_assigned()
         else:
-            if self._view_adapter:
-                self._view_adapter.set_device_status("Waiting for device assignment...", connected=False)
+            if self.view:
+                self.view.set_device_status("Waiting for device assignment...", connected=False)
 
     # ------------------------------------------------------------------
     # Device assignment (from main UI)
@@ -415,8 +451,8 @@ class EyeTrackerRuntime(ModuleRuntime):
                 await self._device_manager.cleanup()
 
         # Connect using the assigned address
-        if self._view_adapter:
-            self._view_adapter.set_device_status(f"Connecting to {network_address}...", connected=False)
+        if self.view:
+            self.view.set_device_status(f"Connecting to {network_address}...", connected=False)
 
         success = await self._connect_to_assigned_device()
 
@@ -426,7 +462,7 @@ class EyeTrackerRuntime(ModuleRuntime):
                 short_addr = network_address
                 if len(short_addr) > 15:
                     short_addr = short_addr[:12] + "..."
-                title = f"EyeTracker(Network):{short_addr}"
+                title = f"EyeTracker-Neon(Network):{short_addr}"
                 try:
                     self.view.set_window_title(title)
                 except Exception:
@@ -468,8 +504,8 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._assigned_network_address = None
         self._assigned_network_port = None
 
-        if self._view_adapter:
-            self._view_adapter.set_device_status("No device assigned", connected=False)
+        if self.view:
+            self.view.set_device_status("No device assigned", connected=False)
 
         StatusMessage.send("device_unassigned", {
             "device_id": old_device_id or device_id,
@@ -521,10 +557,10 @@ class EyeTrackerRuntime(ModuleRuntime):
             self.logger.info("Connected to eye tracker at %s:%s", address, port)
 
             # Update view with device info
-            if self._view_adapter:
-                self._view_adapter.set_device_status("Connected", connected=True)
+            if self.view:
+                self.view.set_device_status("Connected", connected=True)
                 device_name = f"Neon @ {address}"
-                self._view_adapter.set_device_info(device_name)
+                self.view.set_device_info(device_name)
 
             # Start the tracker background task
             await self._start_tracker_background()
@@ -546,10 +582,10 @@ class EyeTrackerRuntime(ModuleRuntime):
                 self._device_ready_event.clear()
 
             # Update view
-            if self._view_adapter:
+            if self.view:
                 error_msg = str(exc)[:50] if len(str(exc)) > 50 else str(exc)
-                self._view_adapter.set_device_status(f"Failed: {error_msg}", connected=False)
-                self._view_adapter.set_device_info("None")
+                self.view.set_device_status(f"Failed: {error_msg}", connected=False)
+                self.view.set_device_info("None")
 
             return False
 
@@ -590,31 +626,41 @@ class EyeTrackerRuntime(ModuleRuntime):
         else:
             session_path = await self._generate_session_dir()
 
-        session_path.mkdir(parents=True, exist_ok=True)
+        # Use shared utility to ensure module subdirectory exists
+        module_data_dir = ensure_module_data_dir(session_path, MODULE_SUBDIR)
+        self._module_data_dir = module_data_dir
+
         trial_number = int(payload.get("trial_number") or (self.model.trial_number or 1))
-        self._recording_manager.set_session_context(session_path, trial_number)
+        self._trial_label = str(payload.get("trial_label", "") or "")
+        self._recording_manager.set_session_context(
+            module_data_dir,
+            trial_number,
+            trial_label=self._trial_label
+        )
         self.model.trial_number = trial_number
 
         try:
-            await self._recording_manager.start_recording(session_path, trial_number)
+            await self._recording_manager.start_recording(module_data_dir, trial_number)
         except Exception as exc:
             self.logger.error("Failed to start recording: %s", exc, exc_info=exc)
             self.model.recording = False
-            if self._view_adapter:
-                self._view_adapter.set_recording_state(False)
+            if self.view:
+                self.view.set_recording_state(False)
             return False
 
-        module_session_dir = self._recording_manager.current_session_dir or session_path
-        self._session_dir = module_session_dir
-        self.model.session_dir = module_session_dir
+        module_session_dir = self._recording_manager.current_session_dir or module_data_dir
+        self._session_dir = session_path
+        self.model.session_dir = session_path
 
         StatusMessage.send("recording_started", {
             "module": self.display_name,
+            "device_id": self._assigned_device_id,
             "session_dir": str(module_session_dir),
             "trial_number": trial_number,
+            "trial_label": self._trial_label,
         })
-        if self._view_adapter:
-            self._view_adapter.set_recording_state(True)
+        if self.view:
+            self.view.set_recording_state(True)
         self.logger.info("Recording started -> %s", module_session_dir)
         self.model.recording = True
         return True
@@ -630,11 +676,14 @@ class EyeTrackerRuntime(ModuleRuntime):
 
         StatusMessage.send("recording_stopped", {
             "module": self.display_name,
-            "session_dir": str(self._session_dir) if self._session_dir else None,
+            "device_id": self._assigned_device_id,
+            "session_dir": str(self._module_data_dir) if self._module_data_dir else None,
             "stats": stats,
+            "duration": stats.get("duration") if stats else None,
+            "frames_written": stats.get("frames_written") if stats else None,
         })
-        if self._view_adapter:
-            self._view_adapter.set_recording_state(False)
+        if self.view:
+            self.view.set_recording_state(False)
         self.logger.info("Recording stopped")
         self.model.recording = False
         return True
@@ -673,16 +722,8 @@ class EyeTrackerRuntime(ModuleRuntime):
     # Model observer
 
     def _on_model_change(self, prop: str, value: Any) -> None:
-        if self._view_adapter is None:
-            return
         if prop == "recording":
-            self._view_adapter.set_recording_state(bool(value))
+            if self.view:
+                self.view.set_recording_state(bool(value))
         elif prop == "session_dir" and isinstance(value, Path):
             self._session_dir = value
-
-    # ------------------------------------------------------------------
-    # Properties
-
-    @property
-    def view_adapter(self) -> Optional[EyeTrackerViewAdapter]:
-        return self._view_adapter

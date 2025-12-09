@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from typing import Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
@@ -43,10 +42,6 @@ class TrackerHandler:
 
         self._run_task = asyncio.create_task(tracker.run(), name="gaze-tracker-run")
         return tracker
-
-    async def run_foreground(self, *, display_enabled: bool) -> None:
-        tracker = self.ensure_tracker(display_enabled=display_enabled)
-        await tracker.run()
 
     async def pause(self) -> None:
         if self.gaze_tracker is None:

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -16,9 +17,14 @@ class VideoEncoder:
 
         self._process: Optional[asyncio.subprocess.Process] = None
         self._writer: Optional[cv2.VideoWriter] = None
+        self._output_path: Optional[Path] = None
+        self._flush_interval = 600  # frames (2 minutes at 5fps)
+        self._frames_since_flush = 0
 
     async def start(self, output_path: Path) -> None:
         width, height = self.resolution
+        self._output_path = output_path
+        self._frames_since_flush = 0
 
         if self.use_ffmpeg:
             cmd = [
@@ -75,7 +81,7 @@ class VideoEncoder:
         if self.use_ffmpeg:
             # Offload resize and byte conversion to thread
             frame_bytes = await asyncio.to_thread(self._resize_and_encode, frame, self.resolution)
-            
+
             if not self._process or self._process.returncode is not None:
                 return
             assert self._process.stdin is not None
@@ -84,9 +90,30 @@ class VideoEncoder:
         else:
             # Offload resize to thread
             processed_frame = await asyncio.to_thread(self._resize_only, frame, self.resolution)
-            
+
             if self._writer is not None:
                 self._writer.write(processed_frame)
+
+        # Periodic fsync for crash safety
+        self._frames_since_flush += 1
+        if self._frames_since_flush >= self._flush_interval:
+            self._frames_since_flush = 0
+            await self._fsync()
+
+    async def _fsync(self) -> None:
+        """Sync file to disk for crash safety."""
+        if self._output_path is None:
+            return
+        try:
+            # For FFmpeg subprocess, we can't directly fsync the pipe
+            # but we can fsync the output file periodically
+            fd = os.open(str(self._output_path), os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        except (OSError, FileNotFoundError):
+            pass  # File may not exist yet or be locked
 
     async def stop(self) -> None:
         if self.use_ffmpeg:

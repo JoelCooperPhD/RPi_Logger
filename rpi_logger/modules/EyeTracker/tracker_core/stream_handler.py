@@ -1,7 +1,5 @@
-
 import asyncio
 import contextlib
-import logging
 import time
 from dataclasses import dataclass
 from typing import Optional, Any, List, Callable
@@ -27,6 +25,7 @@ class FramePacket:
     received_monotonic: float
     timestamp_unix_seconds: Optional[float]
     camera_frame_index: int
+    wait_ms: float = 0.0  # Time spent waiting for frame
 
 
 class StreamHandler:
@@ -50,6 +49,8 @@ class StreamHandler:
         self._event_task_active = False
         self._audio_task_active = False
         self.camera_fps_tracker = RollingFPS(window_seconds=5.0)
+        self._dropped_frames = 0
+        self._total_wait_ms = 0.0
         self._frame_queue: asyncio.Queue[FramePacket] = asyncio.Queue(maxsize=6)
         self._gaze_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=32)
         self._imu_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
@@ -158,7 +159,11 @@ class StreamHandler:
                         pixel_data = frame.bgr_buffer()
 
                         if pixel_data is not None:
-                            frame_array = np.ascontiguousarray(pixel_data)
+                            # Conditional array copy - avoid copy if already contiguous
+                            if pixel_data.flags['C_CONTIGUOUS']:
+                                frame_array = pixel_data
+                            else:
+                                frame_array = np.ascontiguousarray(pixel_data)
                             self.camera_frames += 1
                             self.last_frame = frame_array
                             packet = FramePacket(
@@ -169,7 +174,7 @@ class StreamHandler:
                             )
                             self._last_frame_packet = packet
                             self.camera_fps_tracker.add_frame()
-                            self._enqueue_latest(self._frame_queue, packet)
+                            self._enqueue_latest(self._frame_queue, packet, track_drops=True)
                             self._frame_ready_event.set()  # Signal frame available
 
                             if self.camera_frames == 1:
@@ -371,6 +376,16 @@ class StreamHandler:
     def get_camera_fps(self) -> float:
         return self.camera_fps_tracker.get_fps()
 
+    @property
+    def dropped_frames(self) -> int:
+        return self._dropped_frames
+
+    @property
+    def avg_wait_ms(self) -> float:
+        if self.camera_frames == 0:
+            return 0.0
+        return self._total_wait_ms / self.camera_frames
+
     async def next_frame(self, timeout: Optional[float] = None) -> Optional[FramePacket]:
         return await self._dequeue_with_timeout(self._frame_queue, timeout)
 
@@ -389,11 +404,23 @@ class StreamHandler:
     # Event-driven methods (Phase 1.1 optimization)
     async def wait_for_frame(self, timeout: Optional[float] = None) -> Optional[FramePacket]:
         """Wait for frame to be available, then retrieve it (event-driven)"""
+        wait_start = time.perf_counter()
         try:
             await asyncio.wait_for(self._frame_ready_event.wait(), timeout=timeout)
             self._frame_ready_event.clear()
-            # Return the last frame packet directly (set at the same time as the event)
-            return self._last_frame_packet
+            packet = self._last_frame_packet
+            if packet is not None:
+                wait_ms = (time.perf_counter() - wait_start) * 1000
+                self._total_wait_ms += wait_ms
+                # Return packet with wait_ms populated
+                return FramePacket(
+                    image=packet.image,
+                    received_monotonic=packet.received_monotonic,
+                    timestamp_unix_seconds=packet.timestamp_unix_seconds,
+                    camera_frame_index=packet.camera_frame_index,
+                    wait_ms=wait_ms,
+                )
+            return None
         except asyncio.TimeoutError:
             return None
 
@@ -415,13 +442,14 @@ class StreamHandler:
         except asyncio.TimeoutError:
             return None
 
-    @staticmethod
-    def _enqueue_latest(queue: asyncio.Queue, item: Any) -> None:
+    def _enqueue_latest(self, queue: asyncio.Queue, item: Any, *, track_drops: bool = False) -> None:
         try:
             queue.put_nowait(item)
         except asyncio.QueueFull:
             with contextlib.suppress(asyncio.QueueEmpty):
                 _ = queue.get_nowait()
+            if track_drops:
+                self._dropped_frames += 1
             queue.put_nowait(item)
 
     @staticmethod

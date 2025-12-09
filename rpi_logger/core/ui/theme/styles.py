@@ -266,6 +266,23 @@ class Theme:
             ]
         )
 
+        # Inframe checkbutton (for checkbuttons inside labelframes)
+        style.configure(
+            'Inframe.TCheckbutton',
+            background=Colors.BG_FRAME,
+            foreground=Colors.FG_PRIMARY,
+            indicatorbackground=Colors.BG_INPUT,
+            indicatorforeground=Colors.SUCCESS
+        )
+        style.map(
+            'Inframe.TCheckbutton',
+            background=[('active', Colors.BG_FRAME)],
+            indicatorbackground=[
+                ('selected', Colors.SUCCESS),
+                ('!selected', Colors.BG_INPUT)
+            ]
+        )
+
         # Switch style checkbutton (for toggle switches in device tiles)
         style.configure(
             'Switch.TCheckbutton',
@@ -355,6 +372,22 @@ class Theme:
             selectforeground=[('readonly', Colors.FG_PRIMARY)]
         )
 
+        # Inframe combobox (for comboboxes inside labelframes)
+        style.configure(
+            'Inframe.TCombobox',
+            fieldbackground=Colors.BG_INPUT,
+            background=Colors.BG_FRAME,
+            foreground=Colors.FG_PRIMARY,
+            arrowcolor=Colors.FG_SECONDARY,
+            bordercolor=Colors.BORDER
+        )
+        style.map(
+            'Inframe.TCombobox',
+            fieldbackground=[('readonly', Colors.BG_INPUT)],
+            selectbackground=[('readonly', Colors.PRIMARY)],
+            selectforeground=[('readonly', Colors.FG_PRIMARY)]
+        )
+
         # TSpinbox
         style.configure(
             'TSpinbox',
@@ -371,6 +404,40 @@ class Theme:
             background=Colors.SUCCESS,
             troughcolor=Colors.BG_DARKER,
             bordercolor=Colors.BORDER
+        )
+
+        # Horizontal.TScale (slider)
+        style.configure(
+            'Horizontal.TScale',
+            background=Colors.FG_SECONDARY,  # Slider handle - visible gray
+            troughcolor=Colors.BG_DARKER,    # Trough - darker for contrast
+            bordercolor=Colors.BORDER,
+            sliderlength=20,
+            sliderthickness=12
+        )
+        style.map(
+            'Horizontal.TScale',
+            background=[
+                ('active', Colors.FG_PRIMARY),   # Lighter when hovering
+                ('pressed', Colors.PRIMARY)      # Blue when dragging
+            ]
+        )
+
+        # Inframe scale (for sliders inside labelframes)
+        style.configure(
+            'Inframe.Horizontal.TScale',
+            background=Colors.FG_SECONDARY,  # Slider handle - visible gray
+            troughcolor=Colors.BG_DARKER,    # Trough - darker for contrast against BG_FRAME
+            bordercolor=Colors.BORDER,
+            sliderlength=20,
+            sliderthickness=12
+        )
+        style.map(
+            'Inframe.Horizontal.TScale',
+            background=[
+                ('active', Colors.FG_PRIMARY),   # Lighter when hovering
+                ('pressed', Colors.PRIMARY)      # Blue when dragging
+            ]
         )
 
         # Treeview (if used)

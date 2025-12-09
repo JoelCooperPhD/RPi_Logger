@@ -27,6 +27,7 @@ from rpi_logger.modules.Cameras.runtime.coordinator import WorkerManager, Previe
 from rpi_logger.modules.Cameras.runtime import CameraDescriptor, CameraId
 from rpi_logger.modules.Cameras.runtime.task_registry import TaskRegistry
 from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
+from rpi_logger.modules.Cameras.camera_models import CameraModelDatabase
 from rpi_logger.modules.Cameras.worker.protocol import (
     RespPreviewFrame,
     RespStateUpdate,
@@ -60,6 +61,7 @@ class CamerasRuntime(ModuleRuntime):
         self.module_dir = ctx.module_dir
         self.config = load_config(ctx.model.preferences, overrides=None, logger=self.logger)
         self.cache = KnownCamerasCache(self.module_dir / "storage" / "known_cameras.json", logger=self.logger)
+        self.model_db = CameraModelDatabase(logger=self.logger)
         self.disk_guard = DiskGuard(threshold_gb=self.config.guard.disk_free_gb_min, logger=self.logger)
         self.view = CamerasView(ctx.view, logger=self.logger)
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -97,6 +99,7 @@ class CamerasRuntime(ModuleRuntime):
             tasks=self._tasks,
             preview=self.preview,
             respawn_worker=self._respawn_worker,
+            worker_manager=self.worker_manager,
             logger=self.logger,
         )
 
@@ -121,6 +124,8 @@ class CamerasRuntime(ModuleRuntime):
         self.view.bind_handlers(
             apply_config=self.settings.handle_apply_config,
             activate_camera=self._handle_active_camera_changed,
+            reprobe_camera=self._handle_reprobe_camera,
+            control_change=self.settings.set_control,
         )
 
         self.logger.debug("[STARTUP] Attaching view...")
@@ -309,16 +314,28 @@ class CamerasRuntime(ModuleRuntime):
         return True
 
     def _find_key_for_device(self, device_id: str) -> Optional[str]:
-        """Find camera state key matching device_id."""
-        # device_id format is "usb:stable_id" or "picam:stable_id"
-        # camera_states key format is "backend:stable_id"
-        # They should match directly
+        """Find camera state key matching device_id.
+
+        Both device_id and camera_states keys use the same format:
+        "backend:stable_id" (e.g., "usb:usb1-1-2" or "picam:0").
+        Direct matching should always work; the fallback is defensive.
+        """
+        # Direct match (expected case)
         if device_id in self.camera_states:
             return device_id
-        # Fallback: search by matching stable_id part
+
+        # Fallback: search by matching stable_id suffix
+        # This handles potential edge cases where formats might differ
+        stable_id_part = device_id.split(":")[-1] if ":" in device_id else device_id
         for key in self.camera_states:
-            if key == device_id or key.endswith(device_id.split(":")[-1] if ":" in device_id else device_id):
+            if key.endswith(stable_id_part):
+                self.logger.warning(
+                    "[FIND KEY] Fallback match used: device_id=%s matched key=%s "
+                    "(this may indicate an ID format inconsistency)",
+                    device_id, key
+                )
                 return key
+
         return None
 
     # ------------------------------------------------------------------ Worker Callbacks
@@ -341,8 +358,19 @@ class CamerasRuntime(ModuleRuntime):
             self.logger.info("[WORKER READY] Adding camera tab: key=%s title=%s", key, title)
             self.view.add_camera(key, title=title)
             if state.capabilities:
-                self.logger.debug("[WORKER READY] Updating capabilities for %s", key)
-                self.view.update_camera_capabilities(key, state.capabilities)
+                ctrl_count = len(state.capabilities.controls) if state.capabilities.controls else 0
+                self.logger.info("[WORKER READY] Updating capabilities for %s (controls=%d)", key, ctrl_count)
+                # Pass descriptor info along with capabilities for the info panel
+                # For USB cameras, friendly_name has the actual model; hw_model is just "USB Camera"
+                display_model = state.descriptor.camera_id.friendly_name or state.descriptor.hw_model
+                self.view.update_camera_capabilities(
+                    key,
+                    state.capabilities,
+                    hw_model=display_model,
+                    backend=state.descriptor.camera_id.backend,
+                )
+            else:
+                self.logger.warning("[WORKER READY] No capabilities in state for %s", key)
         else:
             self.logger.warning("[WORKER READY] No state found for %s - creating tab anyway", key)
             self.view.add_camera(key, title=key)
@@ -426,6 +454,15 @@ class CamerasRuntime(ModuleRuntime):
         # Respawn with new settings
         self.logger.info("[CONFIG] Respawning worker for %s", camera_id)
         await self.worker_spawner._spawn_worker_for(descriptor)
+
+    def _handle_reprobe_camera(self, camera_id: str) -> None:
+        """Handle reprobe request from UI (schedules async reprobe)."""
+        self.logger.info("[REPROBE] Reprobe requested for %s", camera_id)
+        if self.loop:
+            asyncio.run_coroutine_threadsafe(
+                self.worker_spawner.reprobe_camera(camera_id),
+                self.loop
+            )
 
     # ------------------------------------------------------------------ Metrics
 

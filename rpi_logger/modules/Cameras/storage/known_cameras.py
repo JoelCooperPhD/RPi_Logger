@@ -39,8 +39,17 @@ class KnownCamerasCache:
             if self._loaded:
                 return
             data = await self._read_file()
-            self._entries = data
+            # Clean up legacy entries with unstable IDs
+            cleaned, removed = self._cleanup_legacy_entries(data)
+            self._entries = cleaned
             self._loaded = True
+            if removed:
+                self._logger.info(
+                    "Removed %d legacy cache entries with unstable IDs: %s",
+                    len(removed), removed
+                )
+                # Persist the cleanup
+                await self._write_file(self._entries)
             self._logger.debug("Known cameras cache loaded (%d entries)", len(self._entries))
 
     async def save(self) -> None:
@@ -158,6 +167,47 @@ class KnownCamerasCache:
                 self._entries[camera_key]["settings"] = settings
                 self._entries[camera_key]["updated_at"] = time.time()
                 await self._write_file(self._entries)
+
+    def _cleanup_legacy_entries(self, entries: Dict[str, dict]) -> tuple[Dict[str, dict], list[str]]:
+        """Remove entries with legacy/unstable camera IDs.
+
+        Legacy entries include:
+        - usb:/dev/video* - Uses unstable device path instead of USB bus path
+        - picam:<sensor_model> - Uses sensor model instead of sensor index
+
+        These entries were created by older code and will never match current
+        camera assignments, so they just waste space.
+
+        Returns:
+            Tuple of (cleaned_entries, removed_keys)
+        """
+        cleaned: Dict[str, dict] = {}
+        removed: list[str] = []
+
+        for key, payload in entries.items():
+            if self._is_legacy_key(key):
+                removed.append(key)
+            else:
+                cleaned[key] = payload
+
+        return cleaned, removed
+
+    @staticmethod
+    def _is_legacy_key(key: str) -> bool:
+        """Check if a cache key uses a legacy/unstable ID format."""
+        # Legacy USB format: usb:/dev/video* (device paths are not stable)
+        if key.startswith("usb:/dev/"):
+            return True
+
+        # Legacy picam format: picam:<sensor_model> instead of picam:<index>
+        # Current format uses numeric indices like "picam:0", "picam:1"
+        if key.startswith("picam:"):
+            stable_id = key[6:]  # Remove "picam:" prefix
+            # If stable_id is not a digit, it's a legacy sensor model name
+            if stable_id and not stable_id.isdigit():
+                return True
+
+        return False
 
     async def set_settings(self, camera_key: str, settings: Dict[str, Any]) -> None:
         """Store settings for a camera."""

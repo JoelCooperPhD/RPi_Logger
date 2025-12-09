@@ -1,8 +1,7 @@
-
 import asyncio
 import time
-import logging
 from typing import Optional
+
 from rpi_logger.core.logging_utils import get_module_logger
 from .config.tracker_config import TrackerConfig as Config
 from .device_manager import DeviceManager
@@ -31,6 +30,8 @@ class GazeTracker:
 
         # Phase 1.4: Pause state
         self._paused = False
+        # Phase 1.6: Reduced processing mode (when window not visible)
+        self._reduced_processing = False
 
         self.frame_count = 0
         self.start_time = None
@@ -82,6 +83,19 @@ class GazeTracker:
     def is_paused(self) -> bool:
         """Check if currently paused"""
         return self._paused
+
+    def set_reduced_processing(self, enabled: bool) -> None:
+        """Enable reduced processing when window not visible."""
+        self._reduced_processing = enabled
+        if enabled:
+            logger.info("Eye tracker entering reduced processing mode")
+        else:
+            logger.info("Eye tracker resuming full processing")
+
+    @property
+    def is_reduced_processing(self) -> bool:
+        """Check if in reduced processing mode"""
+        return self._reduced_processing
 
     async def run(self):
         if not self.device_manager.is_connected:
@@ -151,6 +165,14 @@ class GazeTracker:
                     # Update deadline to avoid burst processing on resume
                     next_frame_deadline = time.perf_counter() + frame_interval
                     continue
+
+                # Phase 1.6: Reduced processing mode when not visible and not recording
+                if self._reduced_processing and not self.recording_manager.is_recording:
+                    # Only update frame occasionally for UI thumbnail (every 10 frames)
+                    if self.frame_count % 10 != 0:
+                        await asyncio.sleep(frame_interval)
+                        next_frame_deadline = time.perf_counter() + frame_interval
+                        continue
 
                 wait_timeout = max(0.0, next_frame_deadline - time.perf_counter())
                 # Phase 1.1: Use event-driven wait instead of polling

@@ -10,25 +10,25 @@ from rpi_logger.core.ui.theme.styles import Theme
 
 EYETRACKER_HELP_TEXT = """
 ═══════════════════════════════════════════════════════════════════
-               EYE TRACKER MODULE QUICK START GUIDE
+             EYETRACKER-NEON MODULE QUICK START GUIDE
 ═══════════════════════════════════════════════════════════════════
 
 OVERVIEW
 
-The Eye Tracker module captures gaze data and scene video from
-Pupil Labs eye tracking glasses. It records where participants
+The EyeTracker-Neon module captures gaze data and scene video from
+Pupil Labs Neon eye tracking glasses. It records where participants
 are looking in real-time, synchronized with other data streams.
 
-The tracker connects via USB or network.
+The Neon tracker connects via network (WiFi or USB tethering).
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. GETTING STARTED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-   1. Power on your Pupil Labs glasses
-   2. Connect via USB cable
-   3. Enable the Eye Tracker module from the Modules menu
+   1. Power on your Pupil Labs Neon glasses
+   2. Connect via WiFi (same network as host) or USB tethering
+   3. Enable the EyeTracker-Neon module from the Modules menu
    4. Wait for device connection (status shows "Connected")
    5. Calibrate if needed using Pupil Capture
    6. Start a session to begin recording
@@ -76,16 +76,16 @@ During Recording
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 File Naming Convention
-   {timestamp}_EYETRACKER_{type}_trial{NNN}.{ext}
+   {timestamp}_EYETRACKER-NEON_{type}_trial{NNN}.{ext}
 
    Types: GAZEDATA, GAZE, EVENT, IMU, FRAME, AUDIO_TIMING,
           DEVICESTATUS, SCENE
 
-   Example: 20251208_143022_EYETRACKER_GAZEDATA_trial001.csv
-            20251208_143022_EYETRACKER_SCENE_trial001.mp4
+   Example: 20251208_143022_EYETRACKER-NEON_GAZEDATA_trial001.csv
+            20251208_143022_EYETRACKER-NEON_SCENE_trial001.mp4
 
 Location
-   {session_dir}/EyeTracker/
+   {session_dir}/EyeTracker-Neon/
 
 Scene Video Format
    Container:    MP4
@@ -99,7 +99,7 @@ Scene Video Format
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 GAZEDATA CSV (Extended Gaze - 11 fields):
-   Module              - Always "EyeTracker"
+   Module              - Always "EyeTracker-Neon"
    trial               - Trial number (integer)
    gaze_timestamp      - Device timestamp (Unix seconds, 6 decimals)
    norm_pos_x          - Normalized X position (0-1, float)
@@ -112,7 +112,7 @@ GAZEDATA CSV (Extended Gaze - 11 fields):
    record_time_mono    - Monotonic time (seconds, 9 decimals)
 
 GAZE CSV (Basic Gaze - 7 fields):
-   Module              - Always "EyeTracker"
+   Module              - Always "EyeTracker-Neon"
    trial               - Trial number (integer)
    gaze_timestamp      - Device timestamp (Unix seconds, 6 decimals)
    norm_pos_x          - Normalized X position (0-1, float)
@@ -121,7 +121,7 @@ GAZE CSV (Basic Gaze - 7 fields):
    worn                - Glasses worn status (boolean)
 
 EVENT CSV (Eye Events - 9+ fields):
-   Module              - Always "EyeTracker"
+   Module              - Always "EyeTracker-Neon"
    trial               - Trial number (integer)
    event_type          - Event type (fixation, blink, saccade)
    start_timestamp     - Event start (Unix seconds, 6 decimals)
@@ -133,7 +133,7 @@ EVENT CSV (Eye Events - 9+ fields):
    For saccades: amplitude, direction
 
 IMU CSV (Inertial Data - 10 fields):
-   Module              - Always "EyeTracker"
+   Module              - Always "EyeTracker-Neon"
    trial               - Trial number (integer)
    timestamp           - Device timestamp (Unix seconds, 6 decimals)
    accel_x             - Accelerometer X (m/s², float)
@@ -145,7 +145,7 @@ IMU CSV (Inertial Data - 10 fields):
    record_time_mono    - Monotonic time (seconds, 9 decimals)
 
 FRAME CSV (Frame Timing - 6 fields):
-   Module              - Always "EyeTracker"
+   Module              - Always "EyeTracker-Neon"
    trial               - Trial number (integer)
    frame_index         - 1-based frame number
    capture_timestamp   - Device capture time (Unix seconds)
@@ -153,7 +153,7 @@ FRAME CSV (Frame Timing - 6 fields):
    record_time_mono    - Monotonic time (seconds, 9 decimals)
 
 AUDIO_TIMING CSV (8 fields):
-   Module              - Always "EyeTracker"
+   Module              - Always "EyeTracker-Neon"
    trial               - Trial number (integer)
    chunk_index         - Sequential chunk number
    write_time_unix     - System time (Unix seconds, 6 decimals)
@@ -163,7 +163,7 @@ AUDIO_TIMING CSV (8 fields):
    total_frames        - Cumulative frame count
 
 DEVICESTATUS CSV (Telemetry - 8+ fields):
-   Module              - Always "EyeTracker"
+   Module              - Always "EyeTracker-Neon"
    trial               - Trial number (integer)
    timestamp           - Sample time (Unix seconds, 6 decimals)
    battery_level       - Battery percentage (0-100, float)
@@ -280,11 +280,11 @@ Poor gaze accuracy:
 
 
 class EyeTrackerHelpDialog:
-    """Dialog showing Eye Tracker quick start guide."""
+    """Dialog showing EyeTracker-Neon quick start guide."""
 
     def __init__(self, parent):
         self.dialog = tk.Toplevel(parent)
-        self.dialog.title("Eye Tracker Quick Start Guide")
+        self.dialog.title("EyeTracker-Neon Quick Start Guide")
         self.dialog.transient(parent)
         self.dialog.grab_set()
         Theme.configure_toplevel(self.dialog)
@@ -296,7 +296,7 @@ class EyeTrackerHelpDialog:
 
         title_label = ttk.Label(
             main_frame,
-            text="Eye Tracker Quick Start Guide"
+            text="EyeTracker-Neon Quick Start Guide"
         )
         title_label.pack(pady=(0, 10))
 

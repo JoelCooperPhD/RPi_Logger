@@ -53,7 +53,7 @@ class EyeTrackerConfigWindow:
         # Create modal dialog with full geometry immediately
         self.dialog = tk.Toplevel(parent)
         self.dialog.geometry(f"{width}x{height}+{x}+{y}")
-        self.dialog.title("Configure Eye Tracker")
+        self.dialog.title("Configure EyeTracker-Neon")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()

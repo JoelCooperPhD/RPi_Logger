@@ -1,4 +1,4 @@
-"""Compatibility shim for the moved EyeTracker entry point."""
+"""Compatibility shim for the Neon EyeTracker entry point."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ logger.debug("main_eye_tracker shim imported")
 
 async def main(argv: Optional[list[str]] = None) -> None:
     """Entry point invoked by the module manager discovery logic."""
-    logger.debug("Delegating EyeTracker entry point to app layer")
+    logger.debug("Delegating Neon EyeTracker entry point to app layer")
     await _app_main(argv)
 
 if __name__ == "__main__":

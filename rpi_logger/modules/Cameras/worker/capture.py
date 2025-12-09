@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import AsyncIterator, Optional, Tuple
+from typing import Any, AsyncIterator, Optional, Tuple
 
 import numpy as np
 
@@ -50,6 +50,10 @@ class CaptureHandle:
 
     async def stop(self) -> None:
         raise NotImplementedError
+
+    def set_control(self, name: str, value: Any) -> bool:
+        """Set a camera control value. Returns True on success."""
+        return False
 
 
 class PicamCapture(CaptureHandle):
@@ -201,6 +205,33 @@ class PicamCapture(CaptureHandle):
                 return None
         return None
 
+    def set_control(self, name: str, value: Any) -> bool:
+        """Set a Picamera2 control value."""
+        import logging
+        log = logging.getLogger(__name__)
+
+        if not self._cam:
+            log.warning("Cannot set control %s: camera not open", name)
+            return False
+
+        try:
+            # Handle enum controls - convert string to index if needed
+            from rpi_logger.modules.Cameras.runtime.backends.picam_backend import PICAM_ENUMS
+            if name in PICAM_ENUMS and isinstance(value, str):
+                options = PICAM_ENUMS[name]
+                if value in options:
+                    value = options.index(value)
+                else:
+                    log.warning("Invalid enum value %s for %s", value, name)
+                    return False
+
+            self._cam.set_controls({name: value})
+            log.debug("Set Picam control %s = %s", name, value)
+            return True
+        except Exception as e:
+            log.warning("Failed to set Picam control %s: %s", name, e)
+            return False
+
 
 class USBCapture(CaptureHandle):
     """OpenCV-based capture for USB cameras."""
@@ -346,6 +377,100 @@ class USBCapture(CaptureHandle):
             except Exception:
                 pass
             self._cap = None
+
+    def set_control(self, name: str, value: Any) -> bool:
+        """Set a USB camera control value via OpenCV or v4l2-ctl."""
+        import logging
+        import sys
+        import subprocess
+
+        log = logging.getLogger(__name__)
+
+        if not self._cap or not self._cap.isOpened():
+            log.warning("Cannot set control %s: camera not open", name)
+            return False
+
+        # Map of control names to OpenCV property IDs
+        import cv2
+        CV_CONTROL_PROPS = {
+            "Brightness": cv2.CAP_PROP_BRIGHTNESS,
+            "Contrast": cv2.CAP_PROP_CONTRAST,
+            "Saturation": cv2.CAP_PROP_SATURATION,
+            "Hue": cv2.CAP_PROP_HUE,
+            "Gain": cv2.CAP_PROP_GAIN,
+            "Gamma": cv2.CAP_PROP_GAMMA,
+            "Exposure": cv2.CAP_PROP_EXPOSURE,
+            "AutoExposure": cv2.CAP_PROP_AUTO_EXPOSURE,
+            "WhiteBalanceBlueU": cv2.CAP_PROP_WHITE_BALANCE_BLUE_U,
+            "WhiteBalanceRedV": cv2.CAP_PROP_WHITE_BALANCE_RED_V,
+            "Focus": cv2.CAP_PROP_FOCUS,
+            "AutoFocus": cv2.CAP_PROP_AUTOFOCUS,
+            "Zoom": cv2.CAP_PROP_ZOOM,
+            "Backlight": cv2.CAP_PROP_BACKLIGHT,
+            "Pan": cv2.CAP_PROP_PAN,
+            "Tilt": cv2.CAP_PROP_TILT,
+        }
+
+        # Controls that OpenCV reports success for but don't actually work
+        # on many V4L2 cameras - skip OpenCV and use v4l2-ctl directly
+        OPENCV_UNRELIABLE_CONTROLS = {"Gain", "AutoExposure", "Exposure"}
+
+        cv_value = int(value) if isinstance(value, bool) else value
+
+        # Try OpenCV first (for controls that work reliably)
+        prop_id = CV_CONTROL_PROPS.get(name)
+        if prop_id is not None and name not in OPENCV_UNRELIABLE_CONTROLS:
+            try:
+                old_value = self._cap.get(prop_id)
+                result = self._cap.set(prop_id, cv_value)
+                if result:
+                    # Verify the value actually changed
+                    new_value = self._cap.get(prop_id)
+                    # Allow some tolerance for float comparisons
+                    if abs(new_value - cv_value) < 1.0:
+                        log.debug("Set USB control %s = %s via OpenCV (verified)", name, value)
+                        return True
+                    else:
+                        log.debug("OpenCV set %s returned True but value unchanged (old=%s, new=%s, target=%s)",
+                                 name, old_value, new_value, cv_value)
+            except Exception as e:
+                log.debug("OpenCV set error for %s: %s", name, e)
+
+        # Use v4l2-ctl on Linux (primary method for unreliable controls, fallback for others)
+        if sys.platform == "linux" and self._dev_path.startswith("/dev/video"):
+            # Convert PascalCase to snake_case for v4l2
+            v4l2_name = self._to_snake_case(name)
+            try:
+                result = subprocess.run(
+                    ["v4l2-ctl", "-d", self._dev_path, f"--set-ctrl={v4l2_name}={int(cv_value)}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=2.0,
+                )
+                if result.returncode == 0:
+                    log.debug("Set USB control %s = %s via v4l2-ctl", name, value)
+                    return True
+                else:
+                    log.debug("v4l2-ctl set failed for %s: %s", name, result.stderr.strip())
+            except FileNotFoundError:
+                log.debug("v4l2-ctl not found")
+            except subprocess.TimeoutExpired:
+                log.debug("v4l2-ctl timed out setting %s", name)
+            except Exception as e:
+                log.debug("v4l2-ctl error setting %s: %s", name, e)
+
+        log.warning("Unable to set USB control %s", name)
+        return False
+
+    @staticmethod
+    def _to_snake_case(name: str) -> str:
+        """Convert PascalCase to snake_case for v4l2."""
+        result = []
+        for i, char in enumerate(name):
+            if i > 0 and char.isupper():
+                result.append("_")
+            result.append(char.lower())
+        return "".join(result)
 
 
 async def open_capture(

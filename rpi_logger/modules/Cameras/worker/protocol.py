@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+from typing import Any, Optional
 
 from rpi_logger.modules.Cameras.config import (
     DEFAULT_CAPTURE_RESOLUTION,
@@ -83,6 +83,13 @@ class CmdStopRecord:
 class CmdShutdown:
     """Gracefully shut down the worker process."""
     timeout_sec: float = 5.0
+
+
+@dataclass(slots=True)
+class CmdSetControl:
+    """Set a camera control value (e.g., brightness, exposure)."""
+    control_name: str
+    value: Any
 
 
 # --- Responses (worker → main process) ---
@@ -167,6 +174,7 @@ Command = (
     | CmdStopPreview
     | CmdStartRecord
     | CmdStopRecord
+    | CmdSetControl
     | CmdShutdown
 )
 

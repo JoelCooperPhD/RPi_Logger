@@ -26,7 +26,7 @@ class DeviceFamily(Enum):
     """Device family classification (what type of device)."""
     VOG = "VOG"
     DRT = "DRT"
-    EYE_TRACKER = "EyeTracker"
+    EYE_TRACKER = "EyeTracker-Neon"
     AUDIO = "Audio"          # Microphones
     CAMERA = "Camera"        # USB cameras and Pi CSI cameras
     INTERNAL = "Internal"    # Software-only modules (no hardware)
@@ -173,7 +173,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         vid=None,
         pid=None,
         baudrate=0,  # Not applicable for network devices
-        display_name="Eye Tracker",
+        display_name="EyeTracker-Neon",
         module_id="EyeTracker",
         is_network=True,
     ),
@@ -396,7 +396,7 @@ def get_connection_display_name(family: DeviceFamily) -> str:
     display_names = {
         DeviceFamily.VOG: "VOG",
         DeviceFamily.DRT: "DRT",
-        DeviceFamily.EYE_TRACKER: "Eye Tracker",
+        DeviceFamily.EYE_TRACKER: "EyeTracker-Neon",
         DeviceFamily.AUDIO: "Microphone",
         DeviceFamily.INTERNAL: "Notes",
         DeviceFamily.CAMERA: "Camera",

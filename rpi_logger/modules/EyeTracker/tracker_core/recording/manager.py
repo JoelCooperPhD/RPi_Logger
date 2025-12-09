@@ -58,7 +58,7 @@ class _QueuedFrame:
 
 class RecordingManager(RecordingManagerBase):
 
-    MODULE_SUBDIR_NAME = "EyeTracker"
+    MODULE_SUBDIR_NAME = "EyeTracker-Neon"
 
     def __init__(self, config: Config, *, use_ffmpeg: bool = True, device_manager: Optional["DeviceManager"] = None):
         super().__init__(device_id="eye_tracker")
@@ -75,6 +75,7 @@ class RecordingManager(RecordingManagerBase):
         self.device_status_filename: Optional[str] = None
 
         self._frame_timing_file: Optional[TextIO] = None
+        self._timing_rows_since_flush: int = 0
         self._last_gaze_timestamp: Optional[float] = None
         self._last_write_monotonic: Optional[float] = None
         self._written_frames = 0
@@ -121,9 +122,24 @@ class RecordingManager(RecordingManagerBase):
         else:
             await self.start_recording()
 
-    def set_session_context(self, session_dir: Path, trial_number: int = 1):
+    def set_session_context(
+        self,
+        session_dir: Path,
+        trial_number: int = 1,
+        *,
+        trial_label: str = ""
+    ):
+        """Set session context for recording.
+
+        Args:
+            session_dir: Directory for session data (module subdir already applied by caller)
+            trial_number: Current trial number
+            trial_label: Optional experiment/condition label
+        """
+        # Session dir should already be the module subdirectory from runtime
         module_dir = self._ensure_module_subdir(session_dir)
         super().set_session_context(module_dir, trial_number)
+        self._current_experiment_label = trial_label or None
 
     async def start_recording(self, session_dir: Optional[Path] = None, trial_number: int = 1) -> Path:
         if self._is_recording:
@@ -284,6 +300,7 @@ class RecordingManager(RecordingManagerBase):
             self._duplicated_frames = 0
             self._imu_samples_written = 0
             self._event_samples_written = 0
+            self._timing_rows_since_flush = 0
             self._recording_start_time = time.perf_counter()
             self._next_frame_time = self._recording_start_time
             self._latest_frame = None
@@ -293,7 +310,11 @@ class RecordingManager(RecordingManagerBase):
             max_video_queue = max(int(self.config.fps * 2), 30)
             self._frame_queue = asyncio.Queue(maxsize=max_video_queue)
             self._frame_writer_task = asyncio.create_task(self._frame_writer_loop())
-            self._frame_timer_task = asyncio.create_task(self._frame_timer_loop())
+            # Phase 3.1: Use appropriate frame selection based on config
+            if self.config.frame_selection_mode == "camera":
+                self._frame_timer_task = asyncio.create_task(self._frame_camera_loop())
+            else:
+                self._frame_timer_task = asyncio.create_task(self._frame_timer_loop())
             logger.info("Recording started: %s", self.recording_filename)
             if self._current_experiment_dir is not None:
                 self._recordings_this_experiment += 1
@@ -1114,6 +1135,70 @@ class RecordingManager(RecordingManagerBase):
             if not is_duplicate:
                 self._latest_frame = None
 
+    async def _frame_camera_loop(self) -> None:
+        """
+        Camera-based frame selection (Phase 3.1).
+
+        Only writes unique camera frames (no duplicates).
+        Variable timing in output, but frame-accurate analysis.
+        """
+        if self.config.fps <= 0:
+            return
+
+        last_camera_index = -1
+        frame_interval = 1.0 / self.config.fps
+
+        while True:
+            if not self._is_recording:
+                break
+
+            frame_queue = self._frame_queue
+            if frame_queue is None:
+                break
+
+            if self._latest_frame is None:
+                await asyncio.sleep(0.01)
+                continue
+
+            metadata = self._latest_frame_metadata
+            if metadata is None:
+                await asyncio.sleep(0.01)
+                continue
+
+            # Only process new camera frames
+            camera_frame_index = metadata.camera_frame_index
+            if camera_frame_index is None or camera_frame_index == last_camera_index:
+                await asyncio.sleep(0.001)
+                continue
+
+            last_camera_index = camera_frame_index
+
+            # Apply frame rate limiting
+            camera_fps = metadata.available_camera_fps or 30.0
+            recording_fps = self.config.fps
+            frame_ratio = max(1, int(camera_fps / recording_fps))
+
+            if camera_frame_index % frame_ratio != 0:
+                self._skipped_frames += 1
+                continue
+
+            current_time = time.perf_counter()
+            queued = _QueuedFrame(
+                frame=self._latest_frame,
+                enqueued_monotonic=current_time,
+                metadata=metadata,
+            )
+
+            try:
+                frame_queue.put_nowait(queued)
+            except asyncio.QueueFull:
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    _ = frame_queue.get_nowait()
+                frame_queue.put_nowait(queued)
+
+            # Clear latest frame
+            self._latest_frame = None
+
     def _ensure_module_subdir(self, base_dir: Path) -> Path:
         return ensure_module_data_dir(base_dir, self.MODULE_SUBDIR_NAME)
 
@@ -1155,4 +1240,8 @@ class RecordingManager(RecordingManagerBase):
 
         # Offload blocking file I/O to thread pool
         await asyncio.to_thread(self._frame_timing_file.write, row)
-        await asyncio.to_thread(self._frame_timing_file.flush)
+        # Batch flushes: flush every 30 frames (~6 seconds at 5fps) to reduce I/O
+        self._timing_rows_since_flush += 1
+        if self._timing_rows_since_flush >= 30:
+            await asyncio.to_thread(self._frame_timing_file.flush)
+            self._timing_rows_since_flush = 0

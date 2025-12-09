@@ -39,6 +39,7 @@ from rpi_logger.modules.Cameras.worker.protocol import (
     CmdStopPreview,
     CmdStartRecord,
     CmdStopRecord,
+    CmdSetControl,
     CmdShutdown,
     RespReady,
     RespPreviewFrame,
@@ -379,6 +380,20 @@ class WorkerManager:
         if not handle:
             return
         handle.cmd_conn.send(CmdStopRecord())
+
+    def set_control(self, key: str, control_name: str, value: Any) -> bool:
+        """Send a control change command to a worker. Returns True if sent."""
+        handle = self._workers.get(key)
+        if not handle:
+            logger.warning("[MANAGER] No worker found for %s", key)
+            return False
+        try:
+            handle.cmd_conn.send(CmdSetControl(control_name=control_name, value=value))
+            logger.debug("[MANAGER] Sent CmdSetControl(%s=%s) to %s", control_name, value, key)
+            return True
+        except Exception as e:
+            logger.warning("[MANAGER] Failed to send control command to %s: %s", key, e)
+            return False
 
     async def shutdown_worker(self, key: str, timeout: float = 5.0) -> None:
         """Gracefully shut down a worker."""
