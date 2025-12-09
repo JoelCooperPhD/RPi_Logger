@@ -8,8 +8,7 @@ from PIL import Image
 import io
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.app.media.color_convert import to_rgb
-from rpi_logger.modules.Cameras.app.media.frame_convert import ensure_uint8
+from rpi_logger.modules.Cameras.app.media import to_rgb, ensure_uint8
 
 try:  # pragma: no cover - GUI availability depends on host
     import tkinter as tk  # type: ignore

@@ -813,9 +813,9 @@
         "preview_fps": "5",
         "preview_resolution": "320x240",
         "record_fps": "10",
-        "record_resolution": "1920x1080"
+        "record_resolution": "1280x720"
       },
-      "updated_at": 1765237543.9519098
+      "updated_at": 1765240282.571616
     }
   },
   "schema": 2

@@ -9,23 +9,20 @@ from typing import Any, Dict, Optional, Tuple
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.base.preferences import ModulePreferences
-from rpi_logger.modules.Cameras.defaults import (
-    DEFAULT_CAPTURE_RESOLUTION,
-    DEFAULT_CAPTURE_FPS,
-    DEFAULT_RECORD_FPS as _DEFAULT_RECORD_FPS,
-    DEFAULT_PREVIEW_SIZE,
-    DEFAULT_PREVIEW_FPS as _DEFAULT_PREVIEW_FPS,
-)
-from rpi_logger.modules.Cameras.utils import parse_resolution as _parse_resolution_util
+from rpi_logger.modules.Cameras.utils import parse_resolution as _parse_resolution_util, Resolution
 
-Resolution = Tuple[int, int]
+# Core defaults (previously in defaults.py - kept lightweight for worker subprocess imports)
+DEFAULT_CAPTURE_RESOLUTION: Resolution = (1280, 720)
+DEFAULT_CAPTURE_FPS = 30.0
+DEFAULT_RECORD_FPS = 30.0
+DEFAULT_PREVIEW_SIZE: Resolution = (320, 180)
+DEFAULT_PREVIEW_FPS = 10.0
+DEFAULT_PREVIEW_JPEG_QUALITY = 80
 
 DEFAULT_PREVIEW_RESOLUTION: Resolution = DEFAULT_PREVIEW_SIZE
-DEFAULT_PREVIEW_FPS = _DEFAULT_PREVIEW_FPS
 DEFAULT_PREVIEW_FORMAT = "RGB"
 DEFAULT_PREVIEW_OVERLAY = True
 DEFAULT_RECORD_RESOLUTION: Resolution = DEFAULT_CAPTURE_RESOLUTION
-DEFAULT_RECORD_FPS = _DEFAULT_RECORD_FPS
 DEFAULT_RECORD_FORMAT = "MJPEG"
 DEFAULT_RECORD_OVERLAY = True
 DEFAULT_GUARD_DISK_FREE_GB = 1.0
@@ -418,6 +415,7 @@ def as_dict(config: CamerasConfig) -> Dict[str, Any]:
 
 
 __all__ = [
+    # Settings dataclasses
     "BackendSettings",
     "CamerasConfig",
     "GuardSettings",
@@ -428,8 +426,16 @@ __all__ = [
     "StorageSettings",
     "TelemetrySettings",
     "UISettings",
+    # Functions
     "as_dict",
     "load_config",
     "persist_config_async",
     "persist_config_sync",
+    # Defaults (for worker subprocess imports)
+    "DEFAULT_CAPTURE_RESOLUTION",
+    "DEFAULT_CAPTURE_FPS",
+    "DEFAULT_RECORD_FPS",
+    "DEFAULT_PREVIEW_SIZE",
+    "DEFAULT_PREVIEW_FPS",
+    "DEFAULT_PREVIEW_JPEG_QUALITY",
 ]

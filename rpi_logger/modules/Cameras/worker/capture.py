@@ -12,7 +12,7 @@ from typing import AsyncIterator, Optional, Tuple
 
 import numpy as np
 
-from rpi_logger.modules.Cameras.defaults import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
+from rpi_logger.modules.Cameras.config import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
 from rpi_logger.modules.Cameras.runtime.backends.picam_color import get_picam_color_format
 
 # Try to import Picamera2 - may not be available on non-Pi platforms

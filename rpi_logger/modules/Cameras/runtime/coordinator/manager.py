@@ -24,7 +24,7 @@ from rpi_logger.modules.Cameras.worker.shared_preview import (
     generate_shm_names,
 )
 
-from rpi_logger.modules.Cameras.defaults import (
+from rpi_logger.modules.Cameras.config import (
     DEFAULT_CAPTURE_RESOLUTION,
     DEFAULT_CAPTURE_FPS,
     DEFAULT_RECORD_FPS,

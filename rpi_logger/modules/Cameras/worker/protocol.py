@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Optional
 
-from rpi_logger.modules.Cameras.defaults import (
+from rpi_logger.modules.Cameras.config import (
     DEFAULT_CAPTURE_RESOLUTION,
     DEFAULT_CAPTURE_FPS,
     DEFAULT_RECORD_FPS,

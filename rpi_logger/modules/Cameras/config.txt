@@ -4,4 +4,4 @@ view.show_logger = true
 display_name = Cameras
 preview_resolution = auto
 device_connected = true
-window_geometry = 768x602+436+599
+window_geometry = 768x602+1527+627

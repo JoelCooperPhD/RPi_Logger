@@ -1,4 +1,4 @@
-"""Color conversion helpers."""
+"""Media utilities for Cameras - color and frame conversion."""
 
 from __future__ import annotations
 
@@ -60,3 +60,18 @@ def to_rgb(frame, *, assume_rgb: bool = False) -> np.ndarray:
 
     # If shape is unexpected, return as-is to avoid crashing the pipeline.
     return data
+
+
+def ensure_uint8(frame) -> np.ndarray:
+    """Ensure frame data is uint8 numpy array."""
+
+    if isinstance(frame, np.ndarray):
+        data = frame
+    else:
+        data = frame.data if hasattr(frame, "data") else frame
+    if isinstance(data, np.ndarray):
+        return data.astype(np.uint8, copy=False) if data.dtype != np.uint8 else data
+    return np.array(data, dtype=np.uint8)
+
+
+__all__ = ["to_rgb", "ensure_uint8"]

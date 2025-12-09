@@ -12,7 +12,7 @@ import time
 from multiprocessing.connection import Connection
 from typing import Any, Optional
 
-from rpi_logger.modules.Cameras.defaults import (
+from rpi_logger.modules.Cameras.config import (
     DEFAULT_CAPTURE_RESOLUTION,
     DEFAULT_CAPTURE_FPS,
     DEFAULT_PREVIEW_SIZE,

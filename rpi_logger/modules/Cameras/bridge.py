@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.commands import StatusMessage
 from rpi_logger.modules.Cameras.app.view import CamerasView
-from rpi_logger.modules.Cameras.defaults import DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_FPS
+from rpi_logger.modules.Cameras.config import DEFAULT_PREVIEW_SIZE, DEFAULT_PREVIEW_FPS
 from rpi_logger.modules.Cameras.utils import parse_resolution, parse_fps, CameraMetrics
 from rpi_logger.modules.Cameras.bridge_controllers import (
     CameraWorkerState,

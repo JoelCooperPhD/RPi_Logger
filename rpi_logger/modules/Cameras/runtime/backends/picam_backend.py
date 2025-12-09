@@ -23,7 +23,7 @@ except Exception:  # pragma: no cover - picamera2 may be missing on some platfor
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.runtime import CapabilityMode, CameraCapabilities
-from rpi_logger.modules.Cameras.runtime.discovery.capabilities import build_capabilities
+from rpi_logger.modules.Cameras.runtime.capabilities import build_capabilities
 
 
 @dataclass(slots=True)

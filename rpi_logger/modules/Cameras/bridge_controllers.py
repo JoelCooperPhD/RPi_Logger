@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.defaults import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
+from rpi_logger.modules.Cameras.config import (
+    DEFAULT_CAPTURE_RESOLUTION,
+    DEFAULT_CAPTURE_FPS,
+    DEFAULT_PREVIEW_SIZE,
+    DEFAULT_PREVIEW_FPS,
+)
 from rpi_logger.modules.Cameras.utils import parse_resolution, parse_fps, parse_bool
 from rpi_logger.modules.Cameras.runtime import (
     CameraCapabilities,
@@ -25,8 +30,6 @@ from rpi_logger.modules.Cameras.runtime import (
 )
 from rpi_logger.modules.Cameras.runtime.backends import picam_backend, usb_backend
 from rpi_logger.modules.Cameras.storage import resolve_session_paths
-
-DEFAULT_PREVIEW_FPS = 10.0
 
 
 @dataclass(slots=True)
@@ -210,8 +213,6 @@ class WorkerSpawnController:
         Returns the preview resolution that will be used for ISP-scaled
         preview frames (lores stream). Returns None if defaults should be used.
         """
-        from rpi_logger.modules.Cameras.defaults import DEFAULT_PREVIEW_SIZE
-
         saved = await self._runtime.cache.get_settings(key)
         preview_cfg = self._runtime.config.preview
 

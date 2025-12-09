@@ -13,7 +13,7 @@ import numpy as np
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.runtime import CapabilityMode, CameraCapabilities
-from rpi_logger.modules.Cameras.runtime.discovery.capabilities import build_capabilities
+from rpi_logger.modules.Cameras.runtime.capabilities import build_capabilities
 
 
 class DeviceLost(Exception):
