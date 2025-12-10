@@ -1,9 +1,11 @@
-"""
-Cameras runtime bridge - multiprocess worker architecture.
+"""Single-camera runtime for Cameras module.
 
-Each camera runs in its own subprocess with independent GIL.
-Communication happens via multiprocessing pipes.
+Each Cameras instance handles exactly ONE camera. Device assignment
+comes from the main logger via assign_device command.
+
+This follows the same pattern as DRT, VOG, and EyeTracker modules.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -11,31 +13,29 @@ import contextlib
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.commands import StatusMessage
-from rpi_logger.modules.Cameras.app.view import CamerasView
-from rpi_logger.modules.Cameras.utils import CameraMetrics
-from rpi_logger.modules.Cameras.bridge_controllers import (
-    CameraWorkerState,
-    WorkerSpawnController,
-    RecordingController,
+from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.modules.Cameras.camera_core import (
+    CameraId,
+    CameraDescriptor,
+    CameraCapabilities,
+    CaptureHandle,
+    CaptureFrame,
+    PicamCapture,
+    USBCapture,
+    Encoder,
+    yuv420_to_bgr,
 )
-from rpi_logger.modules.Cameras.bridge_preview import PreviewController
-from rpi_logger.modules.Cameras.bridge_settings import SettingsController
+from rpi_logger.modules.Cameras.camera_core.backends import picam_backend, usb_backend
+from rpi_logger.modules.Cameras.camera_models import (
+    CameraModelDatabase,
+    extract_model_name,
+    copy_capabilities,
+)
 from rpi_logger.modules.Cameras.config import load_config
-from rpi_logger.modules.Cameras.runtime.coordinator import WorkerManager, PreviewReceiver
-from rpi_logger.modules.Cameras.runtime import CameraDescriptor, CameraId
-from rpi_logger.modules.Cameras.runtime.task_registry import TaskRegistry
 from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
-from rpi_logger.modules.Cameras.camera_models import CameraModelDatabase
-from rpi_logger.modules.Cameras.worker.protocol import (
-    RespPreviewFrame,
-    RespStateUpdate,
-    RespRecordingStarted,
-    RespRecordingComplete,
-    RespReady,
-    RespError,
-)
+from rpi_logger.modules.Cameras.storage.session_paths import resolve_session_paths
+from rpi_logger.modules.Cameras.app.view import CameraView
 
 try:
     from vmc.runtime import ModuleRuntime, RuntimeContext
@@ -47,454 +47,709 @@ logger = get_module_logger(__name__)
 
 
 class CamerasRuntime(ModuleRuntime):
-    """
-    Multiprocess ModuleRuntime for Cameras.
+    """Single-camera runtime - one camera per module instance.
 
-    Each camera instance runs in its own module window. The camera
-    worker runs in a separate process with its own GIL for optimal
-    performance during recording.
+    Follows the same pattern as DRT, VOG, and EyeTracker modules.
+    Device discovery happens in the main logger; this runtime receives
+    a single assign_device command with camera details.
     """
 
-    def __init__(self, ctx: RuntimeContext, config_path: Optional[Path] = None) -> None:
+    def __init__(self, ctx: RuntimeContext) -> None:
         self.ctx = ctx
         self.logger = ctx.logger.getChild("Cameras") if hasattr(ctx, "logger") else logger
         self.module_dir = ctx.module_dir
         self.config = load_config(ctx.model.preferences, overrides=None, logger=self.logger)
-        self.cache = KnownCamerasCache(self.module_dir / "storage" / "known_cameras.json", logger=self.logger)
-        self.model_db = CameraModelDatabase(logger=self.logger)
-        self.disk_guard = DiskGuard(threshold_gb=self.config.guard.disk_free_gb_min, logger=self.logger)
-        self.view = CamerasView(ctx.view, logger=self.logger)
-        self.loop: Optional[asyncio.AbstractEventLoop] = None
 
-        # Worker management
-        self._preview_receiver = PreviewReceiver()
-        self.worker_manager = WorkerManager(
-            on_preview_frame=self._on_preview_frame,
-            on_state_update=self._on_state_update,
-            on_worker_ready=self._on_worker_ready,
-            on_recording_started=self._on_recording_started,
-            on_recording_complete=self._on_recording_complete,
-            on_error=self._on_error,
+        # Single camera state
+        self._camera_id: Optional[CameraId] = None
+        self._descriptor: Optional[CameraDescriptor] = None
+        self._capabilities: Optional[CameraCapabilities] = None
+        self._capture: Optional[CaptureHandle] = None
+        self._encoder: Optional[Encoder] = None
+        self._is_assigned: bool = False
+        self._is_recording: bool = False
+        self._camera_name: Optional[str] = None
+
+        # Capture settings (for recording)
+        self._resolution: tuple[int, int] = (1280, 720)
+        self._fps: float = 30.0
+        self._overlay_enabled: bool = True
+
+        # Preview settings (for display only)
+        self._preview_resolution: tuple[int, int] = (640, 480)
+        self._preview_fps: float = 5.0
+
+        # Session/recording state
+        self._session_dir: Optional[Path] = None
+        self._trial_number: int = 1
+        self._trial_label: str = ""
+
+        # Background tasks
+        self._capture_task: Optional[asyncio.Task] = None
+
+        # Storage
+        self.cache = KnownCamerasCache(
+            self.module_dir / "storage" / "known_cameras.json",
+            logger=self.logger
+        )
+        self.model_db = CameraModelDatabase(
+            self.module_dir / "storage" / "camera_models.json",
+            logger=self.logger
+        )
+        self.disk_guard = DiskGuard(
+            threshold_gb=self.config.guard.disk_free_gb_min,
+            logger=self.logger
         )
 
-        # Camera state tracking (key -> CameraWorkerState)
-        self.camera_states: Dict[str, CameraWorkerState] = {}
-
-        self._tasks = TaskRegistry()
-
-        # Controllers
-        self.worker_spawner = WorkerSpawnController(self, logger=self.logger)
-        self.recording = RecordingController(self, logger=self.logger)
-        self.preview = PreviewController(
-            preview_receiver=self._preview_receiver,
-            worker_manager=self.worker_manager,
-            cache=self.cache,
-            frame_pusher=self.view.push_frame,
-            logger=self.logger,
-        )
-        self.settings = SettingsController(
-            cache=self.cache,
-            config=self.config,
-            view=self.view,
-            tasks=self._tasks,
-            preview=self.preview,
-            respawn_worker=self._respawn_worker,
-            worker_manager=self.worker_manager,
-            logger=self.logger,
-        )
+        # View
+        self.view = CameraView(ctx.view, logger=self.logger)
 
     # ------------------------------------------------------------------ Lifecycle
 
     async def start(self) -> None:
+        """Start runtime - wait for camera assignment."""
         self.logger.info("=" * 60)
-        self.logger.info("CAMERAS RUNTIME STARTING (multiprocess worker architecture)")
+        self.logger.info("CAMERAS RUNTIME STARTING (single-camera architecture)")
         self.logger.info("=" * 60)
-        self.loop = asyncio.get_running_loop()
 
-        self.logger.debug("[STARTUP] Loading camera cache...")
         await self.cache.load()
-        self.logger.debug("[STARTUP] Cache loaded")
 
         if self.ctx.view:
-            self.logger.debug("[STARTUP] Setting preview title...")
             with contextlib.suppress(Exception):
-                self.ctx.view.set_preview_title("Cameras Preview")
+                self.ctx.view.set_preview_title("Camera")
 
-        self.logger.debug("[STARTUP] Binding UI handlers...")
-        self.view.bind_handlers(
-            apply_config=self.settings.handle_apply_config,
-            activate_camera=self._handle_active_camera_changed,
-            reprobe_camera=self._handle_reprobe_camera,
-            control_change=self.settings.set_control,
-        )
-
-        self.logger.debug("[STARTUP] Attaching view...")
         self.view.attach()
+        self.view.bind_handlers(
+            apply_config=self._on_apply_config,
+            control_change=self._on_control_change,
+            reprobe=self._on_reprobe,
+        )
         self.view.set_status("Waiting for camera assignment...")
 
-        self.logger.info("[STARTUP] Cameras module ready - waiting for device assignments from main logger")
-
-        self._tasks.register("telemetry", asyncio.create_task(self._telemetry_loop(), name="cameras_telemetry"))
-        self.logger.info("[STARTUP] Telemetry loop started")
-        self.logger.info("=" * 60)
-        self.logger.info("CAMERAS RUNTIME STARTED - %d workers active", len(self.worker_manager.workers))
-        self.logger.info("=" * 60)
-
-        # Notify logger that module is ready for commands
-        # This is the handshake signal that turns the indicator green
+        self.logger.info("Cameras runtime ready - waiting for device assignment")
         StatusMessage.send("ready")
 
     async def shutdown(self) -> None:
+        """Shutdown runtime - stop recording and release camera."""
         self.logger.info("Shutting down Cameras runtime")
 
-        # Cancel all managed tasks (telemetry, preview, settings)
-        await self._tasks.cancel_all()
+        if self._is_recording:
+            await self._stop_recording()
 
-        # Stop recordings first
-        if self.recording.is_recording:
-            await self.recording.stop_recording()
-
-        # Shutdown all workers
-        await self.worker_manager.shutdown_all()
+        if self._capture:
+            await self._release_camera()
 
     async def cleanup(self) -> None:
-        self.logger.debug("Cameras runtime cleanup")
+        """Final cleanup."""
+        self.logger.debug("Cameras runtime cleanup complete")
 
     # ------------------------------------------------------------------ Commands
 
     async def handle_command(self, command: Dict[str, Any]) -> bool:
+        """Handle commands from main logger."""
         action = (command.get("command") or "").lower()
+        self.logger.info("Received command: %s (keys: %s)", action, list(command.keys()))
 
         if action == "assign_device":
-            command_id = command.get("command_id")
-            return await self._assign_camera(command, command_id=command_id)
+            self.logger.info("Processing assign_device command")
+            return await self._assign_camera(command)
 
         if action == "unassign_device":
-            return await self._unassign_camera(command)
+            await self._release_camera()
+            return True
 
         if action in {"start_recording", "record"}:
             session_dir = command.get("session_dir")
-            trial_number = command.get("trial_number")
-            trial_label = str(command.get("trial_label") or "").strip()
-
-            if trial_label:
-                self.recording.update_trial_info(trial_label=trial_label)
-                setattr(self.ctx.model, "trial_label", trial_label)
             if session_dir:
-                with contextlib.suppress(Exception):
-                    self.recording.update_session_dir(Path(session_dir))
+                self._session_dir = Path(session_dir)
+            trial_number = command.get("trial_number")
             if trial_number is not None:
-                try:
-                    numeric_trial = int(trial_number)
-                    setattr(self.ctx.model, "trial_number", numeric_trial)
-                    self.recording.update_trial_info(trial_number=numeric_trial)
-                except Exception:
-                    self.logger.warning("Invalid trial_number: %s", trial_number)
-
-            await self.recording.start_recording()
+                self._trial_number = int(trial_number)
+            self._trial_label = str(command.get("trial_label", ""))
+            await self._start_recording()
             return True
 
         if action in {"stop_recording", "pause", "pause_recording"}:
-            await self.recording.stop_recording()
+            await self._stop_recording()
             return True
 
         if action == "resume_recording":
-            await self.recording.start_recording()
+            await self._start_recording()
             return True
 
         if action == "start_session":
             session_dir = command.get("session_dir")
             if session_dir:
-                with contextlib.suppress(Exception):
-                    self.recording.update_session_dir(Path(session_dir))
+                self._session_dir = Path(session_dir)
             return True
 
         if action == "stop_session":
-            await self.recording.handle_stop_session_command()
+            if self._is_recording:
+                await self._stop_recording()
             return True
 
         return False
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
-        return await self.handle_command({"command": action})
+        """Handle user actions from UI."""
+        return await self.handle_command({"command": action, **kwargs})
 
     async def healthcheck(self) -> Dict[str, Any]:
-        return {"cameras": len(self.worker_manager.workers)}
+        """Return health status."""
+        return {
+            "assigned": self._is_assigned,
+            "recording": self._is_recording,
+            "camera_id": self._camera_id.key if self._camera_id else None,
+        }
 
     async def on_session_dir_available(self, path: Path) -> None:
-        with contextlib.suppress(Exception):
-            self.recording.update_session_dir(path)
+        """Called when session directory becomes available."""
+        self._session_dir = path
 
-    # ------------------------------------------------------------------ Device Assignment
+    # ------------------------------------------------------------------ Camera Assignment
 
-    async def _assign_camera(self, command: Dict[str, Any], *, command_id: str | None = None) -> bool:
+    async def _assign_camera(self, command: Dict[str, Any]) -> bool:
         """Handle camera assignment from main logger.
 
-        Args:
-            command: Command payload with camera configuration
-            command_id: Correlation ID for acknowledgment tracking
-
-        Returns:
-            True if camera was successfully assigned
+        This is called ONCE per instance with the camera to use.
         """
+        if self._is_assigned:
+            self.logger.warning("Camera already assigned - rejecting new assignment")
+            # Still acknowledge since this camera is working
+            device_id = command.get("device_id")
+            command_id = command.get("command_id")
+            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
+            return True
+
+        command_id = command.get("command_id")
         device_id = command.get("device_id")
         camera_type = command.get("camera_type")  # "usb" or "picam"
         stable_id = command.get("camera_stable_id")
         dev_path = command.get("camera_dev_path")
-        hw_model = command.get("camera_hw_model")
-        location = command.get("camera_location")
         display_name = command.get("display_name", "")
 
-        self.logger.info("[ASSIGN] Received camera assignment: %s (type=%s)", device_id, camera_type)
+        self.logger.info("Assigning camera: %s (type=%s, stable_id=%s)",
+                        device_id, camera_type, stable_id)
 
-        # Build CameraDescriptor from assignment data
-        camera_id = CameraId(
+        # Build camera ID and descriptor
+        self._camera_id = CameraId(
             backend=camera_type,
             stable_id=stable_id,
             friendly_name=display_name,
             dev_path=dev_path,
         )
-        descriptor = CameraDescriptor(
-            camera_id=camera_id,
-            hw_model=hw_model,
-            location_hint=location,
+        self._descriptor = CameraDescriptor(
+            camera_id=self._camera_id,
+            hw_model=command.get("camera_hw_model"),
+            location_hint=command.get("camera_location"),
         )
 
-        # Check if already assigned
-        key = camera_id.key
-        if key in self.camera_states:
-            self.logger.warning("[ASSIGN] Camera %s already assigned", key)
-            # Still send device_ready since the camera is working
-            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
-            return True
-
-        # Spawn worker for this camera
         try:
-            await self.worker_spawner._spawn_worker_for(descriptor)
-            self.view.set_status("Camera connected")
+            # Check model database for cached capabilities
+            model_name = extract_model_name(self._descriptor)
+            known_model = self.model_db.lookup(model_name, camera_type) if model_name else None
 
-            # Update window title to show device display name (e.g., "USB: HD PRO Webcam C920")
+            if known_model:
+                # Use cached capabilities - skip probing
+                self._capabilities = copy_capabilities(known_model.capabilities)
+                self.logger.info(
+                    "Using cached capabilities for '%s' (model: %s)",
+                    model_name, known_model.key
+                )
+            else:
+                # Probe camera and cache for future
+                self._capabilities = await self._probe_camera(camera_type, stable_id, dev_path)
+                if self._capabilities and model_name:
+                    self.model_db.add_model(model_name, camera_type, self._capabilities)
+                    self.logger.info("Cached new camera model: %s", model_name)
+
+            # Determine capture settings from capabilities or cache
+            self._resolution, self._fps = await self._get_capture_settings()
+
+            # Initialize capture
+            await self._init_capture(camera_type, stable_id, dev_path)
+
+            self._is_assigned = True
+            self._camera_name = display_name or device_id
+
+            # Update view with camera info
+            self.view.set_camera_id(self._camera_id.key)
+            self.view.set_camera_info(self._camera_name, self._capabilities)
+            if self._capabilities:
+                self.view.update_camera_capabilities(
+                    self._capabilities,
+                    hw_model=self._descriptor.hw_model if self._descriptor else None,
+                    backend=camera_type,
+                )
+            self.view.set_status(f"Camera ready: {self._camera_name}")
+
+            # Update window title
             if self.ctx.view and display_name:
                 with contextlib.suppress(Exception):
                     self.ctx.view.set_window_title(display_name)
 
-            # Send acknowledgement to logger that device is ready
-            # This turns the indicator from yellow (CONNECTING) to green (CONNECTED)
+            # Start capture/preview loop
+            self._capture_task = asyncio.create_task(
+                self._capture_loop(),
+                name="camera_capture_loop"
+            )
+
+            # Acknowledge assignment
             StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
+            self.logger.info("Camera assigned successfully: %s", self._camera_id.key)
             return True
+
         except Exception as e:
-            self.logger.error("[ASSIGN] Failed to spawn worker for %s: %s", key, e)
+            self.logger.error("Failed to assign camera: %s", e, exc_info=True)
             StatusMessage.send("device_error", {
                 "device_id": device_id,
-                "error": f"Failed to spawn worker: {e}"
+                "error": str(e)
             }, command_id=command_id)
             return False
 
-    async def _unassign_camera(self, command: Dict[str, Any]) -> bool:
-        """Handle camera unassignment from main logger."""
-        device_id = command.get("device_id")
-        self.logger.info("[UNASSIGN] Received camera unassignment: %s", device_id)
-
-        # Find the key for this device_id
-        key = self._find_key_for_device(device_id)
-        if not key:
-            self.logger.warning("[UNASSIGN] Camera %s not found in states", device_id)
-            return True
-
-        # Stop recording if active
-        state = self.camera_states.get(key)
-        if state and state.is_recording:
-            await self.worker_manager.stop_recording(key)
-
-        # Shutdown worker
-        await self.worker_manager.shutdown_worker(key)
-        self.camera_states.pop(key, None)
-        self.view.remove_camera(key)
-        self.view.set_status("Camera disconnected")
-        return True
-
-    def _find_key_for_device(self, device_id: str) -> Optional[str]:
-        """Find camera state key matching device_id.
-
-        Both device_id and camera_states keys use the same format:
-        "backend:stable_id" (e.g., "usb:usb1-1-2" or "picam:0").
-        Direct matching should always work; the fallback is defensive.
-        """
-        # Direct match (expected case)
-        if device_id in self.camera_states:
-            return device_id
-
-        # Fallback: search by matching stable_id suffix
-        # This handles potential edge cases where formats might differ
-        stable_id_part = device_id.split(":")[-1] if ":" in device_id else device_id
-        for key in self.camera_states:
-            if key.endswith(stable_id_part):
-                self.logger.warning(
-                    "[FIND KEY] Fallback match used: device_id=%s matched key=%s "
-                    "(this may indicate an ID format inconsistency)",
-                    device_id, key
-                )
-                return key
-
-        return None
-
-    # ------------------------------------------------------------------ Worker Callbacks
-
-    def _on_worker_ready(self, key: str, msg: RespReady) -> None:
-        self.logger.info("=" * 40)
-        self.logger.info("[WORKER READY] %s", key)
-        self.logger.info("  camera_type: %s", msg.camera_type)
-        self.logger.info("  camera_id: %s", msg.camera_id)
-        self.logger.info("  capabilities: %s", msg.capabilities)
-        self.logger.info("=" * 40)
-
-        # Notify discovery controller that this worker is ready
-        # This releases the picam init lock if we were waiting for this camera
-        self.worker_spawner.notify_worker_ready(key)
-
-        state = self.camera_states.get(key)
-        if state:
-            title = state.descriptor.camera_id.friendly_name or key
-            self.logger.info("[WORKER READY] Adding camera tab: key=%s title=%s", key, title)
-            self.view.add_camera(key, title=title)
-            if state.capabilities:
-                ctrl_count = len(state.capabilities.controls) if state.capabilities.controls else 0
-                self.logger.info("[WORKER READY] Updating capabilities for %s (controls=%d)", key, ctrl_count)
-                # Pass descriptor info along with capabilities for the info panel
-                # For USB cameras, friendly_name has the actual model; hw_model is just "USB Camera"
-                display_model = state.descriptor.camera_id.friendly_name or state.descriptor.hw_model
-                self.view.update_camera_capabilities(
-                    key,
-                    state.capabilities,
-                    hw_model=display_model,
-                    backend=state.descriptor.camera_id.backend,
-                )
-            else:
-                self.logger.warning("[WORKER READY] No capabilities in state for %s", key)
-        else:
-            self.logger.warning("[WORKER READY] No state found for %s - creating tab anyway", key)
-            self.view.add_camera(key, title=key)
-
-        # Populate settings window with actual config values
-        self.settings.push_config_to_view(key)
-
-        # Start preview automatically
-        self.logger.info("[WORKER READY] Starting preview for %s...", key)
-        self._tasks.register_keyed("preview", key, asyncio.create_task(
-            self._start_preview(key), name=f"preview_{key}"
-        ))
-
-    def _on_preview_frame(self, key: str, msg: RespPreviewFrame) -> None:
-        self.preview.on_preview_frame(key, msg)
-
-    def _on_state_update(self, key: str, msg: RespStateUpdate) -> None:
-        self.logger.debug("[STATE] %s: state=%s recording=%s preview=%s fps_cap=%.1f fps_enc=%.1f target=%.1f frames=%d/%d",
-                         key, msg.state.name, msg.is_recording, msg.is_previewing,
-                         msg.fps_capture, msg.fps_encode, msg.target_fps, msg.frames_captured, msg.frames_recorded)
-        metrics = CameraMetrics(
-            state=msg.state.name,
-            is_recording=msg.is_recording,
-            fps_capture=msg.fps_capture,
-            fps_encode=msg.fps_encode,
-            fps_preview=msg.fps_preview,
-            frames_captured=msg.frames_captured,
-            frames_recorded=msg.frames_recorded,
-            target_fps=msg.target_fps,
-            target_record_fps=msg.target_record_fps,
-            target_preview_fps=msg.target_preview_fps,
-            capture_wait_ms=msg.capture_wait_ms,
-        )
-        with contextlib.suppress(Exception):
-            self.view.update_metrics(key, metrics.to_dict())
-
-    def _on_recording_started(self, key: str, msg: RespRecordingStarted) -> None:
-        self.logger.info("[RECORDING STARTED] %s -> %s", key, msg.video_path)
-        state = self.camera_states.get(key)
-        if state:
-            state.video_path = msg.video_path
-            state.csv_path = msg.csv_path
-
-    def _on_recording_complete(self, key: str, msg: RespRecordingComplete) -> None:
-        self.logger.info("[RECORDING COMPLETE] %s: %d frames, %.1fs", key, msg.frames_total, msg.duration_sec)
-        state = self.camera_states.get(key)
-        if state:
-            state.is_recording = False
-
-    def _on_error(self, key: str, msg: RespError) -> None:
-        self.logger.error("[WORKER ERROR] %s: %s (fatal=%s)", key, msg.message, msg.fatal)
-        if msg.fatal:
-            self.view.set_status(f"Error: {msg.message}")
-
-    # ------------------------------------------------------------------ Preview
-
-    async def _start_preview(self, key: str) -> None:
-        """Start preview streaming for a camera."""
-        await self.preview.start_preview(key)
-
-    def _handle_active_camera_changed(self, camera_id: Optional[str]) -> None:
-        """Handle UI tab switch - all workers preview simultaneously."""
-        self.logger.debug("Active camera: %s", camera_id)
-
-    async def _respawn_worker(self, camera_id: str) -> None:
-        """Shutdown and respawn a worker to apply new capture settings."""
-        state = self.camera_states.get(camera_id)
-        if not state:
-            self.logger.warning("[CONFIG] No state found for %s, cannot respawn", camera_id)
-            return
-
-        # Remember the descriptor for respawning
-        descriptor = state.descriptor
-
-        # Shutdown existing worker
-        self.logger.info("[CONFIG] Shutting down worker for %s", camera_id)
-        await self.worker_manager.shutdown_worker(camera_id)
-        self.camera_states.pop(camera_id, None)
-        self.view.remove_camera(camera_id)
-
-        # Respawn with new settings
-        self.logger.info("[CONFIG] Respawning worker for %s", camera_id)
-        await self.worker_spawner._spawn_worker_for(descriptor)
-
-    def _handle_reprobe_camera(self, camera_id: str) -> None:
-        """Handle reprobe request from UI (schedules async reprobe)."""
-        self.logger.info("[REPROBE] Reprobe requested for %s", camera_id)
-        if self.loop:
-            asyncio.run_coroutine_threadsafe(
-                self.worker_spawner.reprobe_camera(camera_id),
-                self.loop
-            )
-
-    # ------------------------------------------------------------------ Metrics
-
-    def collect_metrics(self, camera_key: str) -> Dict[str, Any]:
-        """Collect metrics for a camera (used by telemetry)."""
-        handle = self.worker_manager.get_worker(camera_key)
-        if not handle:
-            return {}
-
-        return {
-            "state": handle.state.name,
-            "is_recording": handle.is_recording,
-            "is_previewing": handle.is_previewing,
-            "fps_capture": handle.fps_capture,
-            "fps_encode": handle.fps_encode,
-            "frames_captured": handle.frames_captured,
-            "frames_recorded": handle.frames_recorded,
-        }
-
-    async def _telemetry_loop(self) -> None:
-        """Periodic telemetry emission."""
-        interval = max(0.5, self.config.telemetry.emit_interval_ms / 1000.0)
+    async def _probe_camera(
+        self,
+        camera_type: str,
+        stable_id: str,
+        dev_path: str
+    ) -> Optional[CameraCapabilities]:
+        """Probe camera capabilities."""
+        self.logger.info("Probing camera capabilities...")
         try:
-            while True:
-                await asyncio.sleep(interval)
-                # Metrics are pushed via callbacks, but we can log snapshots
-                if self.config.telemetry.include_metrics:
-                    snapshot = {k: self.collect_metrics(k) for k in self.worker_manager.workers}
-                    if snapshot:
-                        self.logger.debug("Telemetry: %s", snapshot)
-        except asyncio.CancelledError:
+            if camera_type == "picam":
+                return await picam_backend.probe(stable_id, logger=self.logger)
+            else:
+                return await usb_backend.probe(dev_path, logger=self.logger)
+        except Exception as e:
+            self.logger.warning("Failed to probe camera: %s", e)
+            return None
+
+    async def _get_capture_settings(self) -> tuple[tuple[int, int], float]:
+        """Determine resolution and FPS from capabilities or cache."""
+        # Try cached settings first
+        if self._camera_id:
+            cached = await self.cache.get_settings(self._camera_id.key)
+            if cached:
+                res_str = cached.get("record_resolution")
+                fps_str = cached.get("record_fps")
+                if res_str and "x" in res_str:
+                    try:
+                        w, h = map(int, res_str.split("x"))
+                        resolution = (w, h)
+                        fps = float(fps_str) if fps_str else 30.0
+                        self.logger.info("Using cached settings: %dx%d @ %.1f fps",
+                                        w, h, fps)
+                        return resolution, fps
+                    except Exception:
+                        pass
+
+        # Fall back to capabilities
+        if self._capabilities and self._capabilities.modes:
+            # Pick highest resolution mode
+            best = max(self._capabilities.modes, key=lambda m: m.width * m.height)
+            resolution = (best.width, best.height)
+
+            # Pick highest FPS for that resolution
+            matching = [m for m in self._capabilities.modes
+                       if (m.width, m.height) == resolution]
+            if matching:
+                fps = max(m.fps for m in matching)
+            else:
+                fps = best.fps
+
+            self.logger.info("Using probed settings: %dx%d @ %.1f fps",
+                            resolution[0], resolution[1], fps)
+            return resolution, fps
+
+        # Default fallback
+        self.logger.info("Using default settings: 1280x720 @ 30 fps")
+        return (1280, 720), 30.0
+
+    async def _init_capture(
+        self,
+        camera_type: str,
+        stable_id: str,
+        dev_path: str,
+    ) -> None:
+        """Initialize camera capture."""
+        self.logger.info("Initializing capture: %s @ %dx%d %.1f fps",
+                        camera_type, self._resolution[0], self._resolution[1], self._fps)
+
+        if camera_type == "picam":
+            # Picam with lores stream for efficient preview
+            lores_size = (320, 240)
+            self._capture = PicamCapture(
+                stable_id,
+                self._resolution,
+                self._fps,
+                lores_size=lores_size
+            )
+        else:
+            self._capture = USBCapture(dev_path, self._resolution, self._fps)
+
+        await self._capture.start()
+        self.logger.info("Capture initialized successfully")
+
+    async def _release_camera(self) -> None:
+        """Release camera and cleanup."""
+        self.logger.info("Releasing camera")
+
+        # Cancel capture task
+        if self._capture_task:
+            self._capture_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._capture_task
+            self._capture_task = None
+
+        # Stop capture
+        if self._capture:
+            await self._capture.stop()
+            self._capture = None
+
+        self._is_assigned = False
+        self.view.set_status("Camera disconnected")
+
+    # ------------------------------------------------------------------ Recording
+
+    async def _start_recording(self) -> None:
+        """Start video recording."""
+        if self._is_recording:
+            self.logger.debug("Already recording")
             return
+
+        if not self._capture or not self._session_dir or not self._camera_id:
+            self.logger.warning("Cannot start recording: camera not ready or no session")
+            return
+
+        # Check disk space
+        disk_ok = await asyncio.to_thread(self.disk_guard.check, self._session_dir)
+        if not disk_ok:
+            self.logger.error("Insufficient disk space - cannot start recording")
+            return
+
+        # Resolve output paths
+        paths = resolve_session_paths(
+            session_dir=self._session_dir,
+            camera_id=self._camera_id,
+            trial_number=self._trial_number,
+        )
+
+        # Initialize encoder
+        self._encoder = Encoder(
+            video_path=str(paths.video_path),
+            resolution=self._resolution,
+            fps=self._fps,
+            overlay_enabled=self._overlay_enabled,
+            csv_path=str(paths.timing_path),
+            trial_number=self._trial_number,
+        )
+
+        await asyncio.to_thread(self._encoder.start)
+
+        self._is_recording = True
+        self.view.set_recording(True)
+        self.logger.info("Recording started: %s", paths.video_path)
+        StatusMessage.send("recording_started", {
+            "video_path": str(paths.video_path),
+            "camera_id": self._camera_id.key,
+        })
+
+    async def _stop_recording(self) -> None:
+        """Stop video recording."""
+        if not self._is_recording:
+            return
+
+        self._is_recording = False
+        self.view.set_recording(False)
+
+        if self._encoder:
+            await asyncio.to_thread(self._encoder.stop)
+            frame_count = self._encoder.frame_count
+            duration = self._encoder.duration_sec
+            self._encoder = None
+            self.logger.info("Recording stopped: %d frames, %.1fs", frame_count, duration)
+
+        StatusMessage.send("recording_stopped", {
+            "camera_id": self._camera_id.key if self._camera_id else None,
+        })
+
+    # ------------------------------------------------------------------ Settings Handlers
+
+    def _on_apply_config(self, camera_id: str, settings: Dict[str, str]) -> None:
+        """Handle resolution/FPS config change from settings window."""
+        self.logger.info("_on_apply_config called: camera_id=%s, self._camera_id=%s",
+                        camera_id, self._camera_id.key if self._camera_id else None)
+        if camera_id != (self._camera_id.key if self._camera_id else None):
+            self.logger.warning("Config apply for wrong camera: %s (expected %s)",
+                              camera_id, self._camera_id.key if self._camera_id else None)
+            return
+
+        self.logger.info("Applying config: %s", settings)
+
+        # Parse record resolution and FPS (affects capture/recording)
+        res_str = settings.get("record_resolution", "")
+        fps_str = settings.get("record_fps", "")
+
+        if res_str and "x" in res_str:
+            try:
+                w, h = map(int, res_str.split("x"))
+                self._resolution = (w, h)
+                self.logger.info("Record resolution updated to %dx%d", w, h)
+            except ValueError:
+                self.logger.warning("Invalid record resolution: %s", res_str)
+
+        if fps_str:
+            try:
+                self._fps = float(fps_str)
+                self.logger.info("Record FPS updated to %.1f", self._fps)
+            except ValueError:
+                self.logger.warning("Invalid record FPS: %s", fps_str)
+
+        # Parse preview settings (affects display only)
+        preview_res_str = settings.get("preview_resolution", "")
+        preview_fps_str = settings.get("preview_fps", "")
+
+        if preview_res_str and "x" in preview_res_str:
+            try:
+                w, h = map(int, preview_res_str.split("x"))
+                self._preview_resolution = (w, h)
+                self.logger.info("Preview resolution updated to %dx%d", w, h)
+            except ValueError:
+                self.logger.warning("Invalid preview resolution: %s", preview_res_str)
+
+        if preview_fps_str:
+            try:
+                self._preview_fps = float(preview_fps_str)
+                self.logger.info("Preview FPS updated to %.1f", self._preview_fps)
+            except ValueError:
+                self.logger.warning("Invalid preview FPS: %s", preview_fps_str)
+
+        self._overlay_enabled = settings.get("overlay", "true").lower() == "true"
+
+        # Save to cache
+        asyncio.create_task(self._save_settings_to_cache(settings))
+
+        # Reinitialize capture only if record settings changed (resolution/fps affect capture)
+        # Preview settings don't require reinit - they're applied on-the-fly
+        if self._is_assigned and self._capture and (res_str or fps_str):
+            asyncio.create_task(self._reinit_capture())
+
+    async def _save_settings_to_cache(self, settings: Dict[str, str]) -> None:
+        """Save settings to known cameras cache."""
+        if not self._camera_id:
+            return
+        try:
+            await self.cache.set_settings(self._camera_id.key, settings)
+            self.logger.debug("Settings saved to cache: %s", self._camera_id.key)
+        except Exception as e:
+            self.logger.warning("Failed to save settings: %s", e)
+
+    async def _reinit_capture(self) -> None:
+        """Reinitialize capture with current settings."""
+        if not self._camera_id or not self._descriptor:
+            return
+
+        self.logger.info("Reinitializing capture: %dx%d @ %.1f fps",
+                        self._resolution[0], self._resolution[1], self._fps)
+
+        # Stop current capture task
+        if self._capture_task:
+            self._capture_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._capture_task
+            self._capture_task = None
+
+        # Stop and restart capture
+        if self._capture:
+            await self._capture.stop()
+            self._capture = None
+
+        camera_type = self._camera_id.backend
+        stable_id = self._camera_id.stable_id
+        dev_path = self._camera_id.dev_path
+
+        await self._init_capture(camera_type, stable_id, dev_path)
+
+        # Restart capture loop
+        self._capture_task = asyncio.create_task(
+            self._capture_loop(),
+            name="camera_capture_loop"
+        )
+
+        self.view.set_status(f"Resolution: {self._resolution[0]}x{self._resolution[1]} @ {self._fps:.0f} fps")
+
+    def _on_control_change(self, camera_id: str, control_name: str, value: Any) -> None:
+        """Handle camera control change (brightness, contrast, etc.)."""
+        if camera_id != (self._camera_id.key if self._camera_id else None):
+            self.logger.warning("Control change for wrong camera: %s", camera_id)
+            return
+
+        self.logger.info("Control change: %s = %s", control_name, value)
+
+        if not self._capture:
+            self.logger.warning("Cannot apply control - no capture active")
+            return
+
+        # Apply control to capture backend
+        try:
+            if hasattr(self._capture, "set_control"):
+                self._capture.set_control(control_name, value)
+            else:
+                self.logger.debug("Capture backend doesn't support set_control")
+        except Exception as e:
+            self.logger.warning("Failed to set control %s: %s", control_name, e)
+
+    def _on_reprobe(self, camera_id: str) -> None:
+        """Handle reprobe request from settings window."""
+        if camera_id != (self._camera_id.key if self._camera_id else None):
+            self.logger.warning("Reprobe for wrong camera: %s", camera_id)
+            return
+
+        self.logger.info("Reprobing camera capabilities")
+        asyncio.create_task(self._do_reprobe())
+
+    async def _do_reprobe(self) -> None:
+        """Perform camera reprobe."""
+        if not self._camera_id:
+            return
+
+        self.view.set_status("Reprobing camera...")
+
+        camera_type = self._camera_id.backend
+        stable_id = self._camera_id.stable_id
+        dev_path = self._camera_id.dev_path
+
+        try:
+            self._capabilities = await self._probe_camera(camera_type, stable_id, dev_path)
+            if self._capabilities:
+                self.view.set_camera_info(self._camera_name or self._camera_id.key, self._capabilities)
+                self.view.set_camera_id(self._camera_id.key)
+                self.view.update_camera_capabilities(
+                    self._capabilities,
+                    hw_model=self._descriptor.hw_model if self._descriptor else None,
+                    backend=camera_type,
+                )
+                self.view.set_status("Camera reprobed successfully")
+            else:
+                self.view.set_status("Reprobe failed - no capabilities returned")
+        except Exception as e:
+            self.logger.error("Reprobe failed: %s", e)
+            self.view.set_status(f"Reprobe failed: {e}")
+
+    # ------------------------------------------------------------------ Capture Loop
+
+    async def _capture_loop(self) -> None:
+        """Main capture and preview loop."""
+        import time
+
+        if not self._capture:
+            return
+
+        frame_count = 0
+        preview_count = 0
+        encode_count = 0
+
+        # Calculate preview interval based on capture FPS and desired preview FPS
+        # e.g., if capture is 30fps and preview is 5fps, show every 6th frame
+        preview_interval = max(1, int(self._fps / self._preview_fps)) if self._preview_fps > 0 else 2
+
+        # FPS tracking state
+        fps_window_start = time.monotonic()
+        fps_window_frames = 0
+        fps_preview_frames = 0
+        fps_encode_frames = 0
+        fps_capture = 0.0
+        fps_preview = 0.0
+        fps_encode = 0.0
+
+        self.logger.info("Starting capture loop")
+
+        try:
+            async for frame in self._capture.frames():
+                frame_count += 1
+                fps_window_frames += 1
+                now = time.monotonic()
+
+                # Recording: encode frame
+                if self._is_recording and self._encoder:
+                    try:
+                        await asyncio.to_thread(
+                            self._encoder.write_frame,
+                            frame.data,
+                            timestamp=frame.wall_time,
+                            pts_time_ns=frame.sensor_timestamp_ns,
+                            color_format=frame.color_format,
+                        )
+                        encode_count += 1
+                        fps_encode_frames += 1
+                    except Exception as e:
+                        self.logger.warning("Encode error: %s", e)
+
+                # Preview: display frame (throttled)
+                if frame_count % preview_interval == 0:
+                    preview_frame = self._make_preview_frame(frame)
+                    if preview_frame is not None:
+                        self.view.push_frame(preview_frame)
+                        preview_count += 1
+                        fps_preview_frames += 1
+
+                # Calculate FPS every second
+                elapsed = now - fps_window_start
+                if elapsed >= 1.0:
+                    fps_capture = fps_window_frames / elapsed
+                    fps_preview = fps_preview_frames / elapsed
+                    fps_encode = fps_encode_frames / elapsed
+                    fps_window_start = now
+                    fps_window_frames = 0
+                    fps_preview_frames = 0
+                    fps_encode_frames = 0
+
+                # Update metrics periodically
+                if frame_count % 30 == 0:
+                    self.view.update_metrics({
+                        "frames_captured": frame_count,
+                        "frames_recorded": encode_count,
+                        "is_recording": self._is_recording,
+                        # FPS metrics for MetricsDisplay
+                        "fps_capture": fps_capture,
+                        "fps_encode": fps_encode if self._is_recording else None,
+                        "fps_preview": fps_preview,
+                        "target_fps": self._fps,
+                        "target_record_fps": self._fps if self._is_recording else None,
+                        "target_preview_fps": self._fps / preview_interval,
+                    })
+
+        except asyncio.CancelledError:
+            self.logger.info("Capture loop cancelled")
+        except Exception as e:
+            self.logger.error("Capture loop error: %s", e, exc_info=True)
+
+    def _make_preview_frame(self, frame: CaptureFrame):
+        """Create preview frame from capture frame."""
+        import cv2
+
+        try:
+            # Use lores stream if available (Picam with YUV420)
+            if frame.lores_data is not None and frame.lores_format == "yuv420":
+                return yuv420_to_bgr(frame.lores_data)
+
+            # Resize main frame to configured preview resolution
+            h, w = frame.data.shape[:2]
+            target_w, target_h = self._preview_resolution
+
+            # Only resize if different from source
+            if w != target_w or h != target_h:
+                # Maintain aspect ratio - fit within target dimensions
+                scale = min(target_w / w, target_h / h)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                return cv2.resize(frame.data, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+            return frame.data
+
+        except Exception as e:
+            self.logger.debug("Preview frame error: %s", e)
+            return None
 
 
 def factory(ctx: RuntimeContext) -> CamerasRuntime:

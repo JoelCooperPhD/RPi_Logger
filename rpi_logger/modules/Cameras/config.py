@@ -11,7 +11,7 @@ from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.base.preferences import ModulePreferences
 from rpi_logger.modules.Cameras.utils import parse_resolution as _parse_resolution_util, Resolution
 
-# Core defaults (previously in defaults.py - kept lightweight for worker subprocess imports)
+# Core defaults
 DEFAULT_CAPTURE_RESOLUTION: Resolution = (1280, 720)
 DEFAULT_CAPTURE_FPS = 30.0
 DEFAULT_RECORD_FPS = 30.0
@@ -343,7 +343,7 @@ __all__ = [
     "UISettings",
     # Functions
     "load_config",
-    # Defaults (for worker subprocess imports)
+    # Defaults
     "DEFAULT_CAPTURE_RESOLUTION",
     "DEFAULT_CAPTURE_FPS",
     "DEFAULT_RECORD_FPS",

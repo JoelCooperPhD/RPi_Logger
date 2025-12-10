@@ -11,7 +11,8 @@ logger's DeviceSystem.
 ### Key Design Points
 
 - **No discovery**: Camera discovery is handled by the main logger (`usb_camera_scanner.py`, `csi_scanner.py`). This module only receives pre-identified camera assignments.
-- **Worker subprocess**: Each camera runs in its own subprocess with an independent GIL for optimal recording performance.
+- **In-process capture**: Camera capture runs directly in the module process using async I/O.
+- **Model-based caching**: Known camera models (e.g., "C920", "imx296") have their capabilities cached in `camera_models.json` to skip probing on subsequent launches.
 - **Dual pipelines**: Preview (low-res, UI-facing) and record (full-quality) streams run concurrently.
 
 ## Data Flow
@@ -26,22 +27,12 @@ Main Logger DeviceSystem
 |   (bridge.py)      |
 +--------+-----------+
          |
-         v
-+------------------------+
-| WorkerSpawnController  |
-| (bridge_controllers.py)|
-+--------+---------------+
-         |
+         | Check CameraModelDatabase
+         | (skip probe if known model)
          v
 +--------------------+
-|   WorkerManager    |
-| (coordinator/)     |
-+--------+-----------+
-         |
-         v
-+--------------------+
-|  Camera subprocess |
-|  (worker/)         |
+|   camera_core/     |
+|   capture, encode  |
 +--------------------+
 ```
 
@@ -50,34 +41,28 @@ Main Logger DeviceSystem
 ```
 Cameras/
 ├── bridge.py                 # Main runtime, handles commands
-├── bridge_controllers.py     # WorkerSpawnController, RecordingController
+├── camera_models.py          # Model database for capability caching
 ├── config.py                 # Typed configuration
-├── defaults.py               # Default values
-├── main_cameras.py           # Entry point
 ├── utils.py                  # Parsing utilities
 │
 ├── app/                      # UI components
 │   ├── view.py               # View adapter
-│   └── widgets/              # Camera tab, settings panel
+│   └── widgets/              # Camera settings window
 │
-├── runtime/
+├── camera_core/              # Core capture functionality
 │   ├── state.py              # State dataclasses (CameraId, etc.)
-│   ├── backends/             # picam_backend, usb_backend
-│   ├── coordinator/          # WorkerManager, PreviewReceiver
-│   └── discovery/            # Capability probing utilities
+│   ├── capture.py            # PicamCapture, USBCapture
+│   ├── encoder.py            # Video encoding
+│   ├── preview.py            # Preview frame conversion
+│   ├── capabilities.py       # Capability building
+│   └── backends/             # picam_backend, usb_backend
 │
-├── storage/
-│   ├── disk_guard.py         # Free space checks
-│   ├── known_cameras.py      # Per-camera settings cache
-│   ├── session_paths.py      # Recording path generation
-│   └── retention.py          # Session cleanup
-│
-└── worker/                   # Subprocess implementation
-    ├── main.py               # CameraWorker entry
-    ├── capture.py            # Frame capture
-    ├── encoder.py            # Video encoding
-    ├── preview.py            # Preview streaming
-    └── protocol.py           # IPC messages
+└── storage/
+    ├── camera_models.json    # Cached camera capabilities by model
+    ├── known_cameras.json    # Per-instance settings cache
+    ├── disk_guard.py         # Free space checks
+    ├── known_cameras.py      # Settings cache implementation
+    └── session_paths.py      # Recording path generation
 ```
 
 ## Commands
@@ -93,7 +78,15 @@ Cameras/
 
 ## Configuration
 
-Per-camera settings are cached in `storage/known_cameras.json` and include:
+### Model Database (`camera_models.json`)
+
+Capabilities are cached by hardware model name (e.g., "Logitech C920", "imx296").
+When a known model is connected, probing is skipped and cached capabilities are used.
+New cameras are probed once, then added to the database for future launches.
+
+### Per-Instance Settings (`known_cameras.json`)
+
+User settings are cached per camera instance (by port/path):
 - `preview_resolution`, `preview_fps`
 - `record_resolution`, `record_fps`
 - `overlay` (timestamp overlay)

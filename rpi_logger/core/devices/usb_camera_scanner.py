@@ -223,7 +223,7 @@ class USBCameraScanner:
                 stable_id=stable_id,
                 dev_path=dev_path,
                 friendly_name=friendly,
-                hw_model="USB Camera",
+                hw_model=base_name,  # Use actual sysfs name for model lookup
                 location_hint=str(device_root),
             ))
 
