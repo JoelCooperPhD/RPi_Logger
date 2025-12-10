@@ -1,3 +1,9 @@
+"""
+DEPRECATED: BaseGUIMode is a legacy base class for GUI-based module modes.
+
+For new modules, use the VMC architecture with vmc.StubCodexView instead.
+See stub (codex)/vmc/ for the complete VMC framework.
+"""
 
 import asyncio
 import io
@@ -5,6 +11,7 @@ import logging
 import os
 import sys
 import time
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -17,8 +24,15 @@ from rpi_logger.core.async_bridge import AsyncBridge
 
 
 class BaseGUIMode(BaseMode, ABC):
+    """
+    DEPRECATED: Legacy base class for GUI module modes.
+
+    Use vmc.StubCodexView instead for new module development.
+    This class is retained for backward compatibility only.
+    """
 
     def __init__(self, system: Any, enable_commands: bool = False):
+        # Note: BaseMode.__init__ already emits deprecation warning
         super().__init__(system)
         self.enable_commands = enable_commands
         self.gui: Optional[Any] = None
@@ -362,23 +376,76 @@ class BaseGUIMode(BaseMode, ABC):
 
             # Stop async bridge event loop
             if self.async_bridge:
-                self.async_bridge.stop()
+                shutdown_clean = self.async_bridge.stop(timeout=5.0)
 
-                # Join thread with timeout (allows background cleanup to complete)
+                # Two-stage thread join with diagnostics
                 if self.async_bridge.thread and self.async_bridge.thread.is_alive():
                     join_start = time.perf_counter()
+
+                    # Stage 1: Graceful join (3s)
                     self.async_bridge.thread.join(timeout=3.0)
-                    join_duration = time.perf_counter() - join_start
+                    stage1_duration = time.perf_counter() - join_start
 
                     if self.async_bridge.thread.is_alive():
                         self.logger.warning(
-                            "Async thread still running after %.1fs, exiting anyway",
-                            join_duration
+                            "Async thread still running after graceful join (%.1fs), "
+                            "extending timeout...",
+                            stage1_duration
                         )
+                        self._log_thread_diagnostic()
+
+                        # Stage 2: Extended join (2s more)
+                        self.async_bridge.thread.join(timeout=2.0)
+                        total_duration = time.perf_counter() - join_start
+
+                        if self.async_bridge.thread.is_alive():
+                            self.logger.error(
+                                "Async thread leaked after %.1fs total - "
+                                "daemon thread will be terminated on exit",
+                                total_duration
+                            )
+                        else:
+                            self.logger.info(
+                                "Async thread joined on extended timeout (%.1fs)",
+                                total_duration
+                            )
                     else:
-                        self.logger.info("Async thread joined cleanly (%.1fs)", join_duration)
+                        self.logger.info("Async thread joined cleanly (%.1fs)", stage1_duration)
+
+                if not shutdown_clean:
+                    self.logger.warning("AsyncBridge shutdown was not clean")
 
             self.logger.info("Shutdown complete")
+
+    def _log_thread_diagnostic(self) -> None:
+        """Log diagnostic information about the async bridge thread."""
+        import sys
+        import traceback
+
+        if not self.async_bridge or not self.async_bridge.thread:
+            return
+
+        thread = self.async_bridge.thread
+        thread_id = thread.ident
+
+        self.logger.warning("Thread diagnostic for async bridge (id=%s):", thread_id)
+
+        # Try to get thread stack trace
+        if thread_id is not None:
+            frame = sys._current_frames().get(thread_id)
+            if frame:
+                self.logger.warning("Current stack trace:")
+                for line in traceback.format_stack(frame):
+                    for subline in line.strip().split('\n'):
+                        self.logger.warning("  %s", subline)
+            else:
+                self.logger.warning("  No frame available for thread")
+
+        # Log loop state if available
+        if self.async_bridge.loop:
+            loop = self.async_bridge.loop
+            self.logger.warning("Loop state: running=%s, closed=%s",
+                              loop.is_running(), loop.is_closed())
 
     def _run_gui_sync(self) -> None:
         """

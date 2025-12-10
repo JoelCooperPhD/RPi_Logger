@@ -3,6 +3,10 @@
 Abstract base class defining the interface for all GPS device handlers.
 Each GPS device gets its own handler instance managing parsing, logging,
 and data callbacks.
+
+Implements self-healing circuit breaker via ReconnectingMixin - instead of
+permanently exiting after N consecutive errors, the handler will attempt
+reconnection with exponential backoff.
 """
 
 from __future__ import annotations
@@ -13,9 +17,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
+from rpi_logger.core.connection import ReconnectingMixin, ReconnectConfig
 from ..parsers.nmea_parser import NMEAParser
 from ..parsers.nmea_types import GPSFixSnapshot
-from ..transports.base_transport import BaseGPSTransport
+from ..transports import BaseGPSTransport
 from ..data_logger import GPSDataLogger
 
 logger = logging.getLogger(__name__)
@@ -33,7 +38,7 @@ def _task_exception_handler(task: asyncio.Task) -> None:
         pass
 
 
-class BaseGPSHandler(ABC):
+class BaseGPSHandler(ABC, ReconnectingMixin):
     """Abstract base class for GPS device handlers.
 
     Defines the common interface that all GPS handlers must implement.
@@ -41,6 +46,10 @@ class BaseGPSHandler(ABC):
 
     Each GPS device gets its own handler instance, enabling multi-instance
     support where multiple GPS receivers can be used simultaneously.
+
+    Inherits ReconnectingMixin to provide self-healing circuit breaker behavior.
+    Instead of permanently exiting after consecutive errors, the handler will
+    attempt to reconnect with exponential backoff.
     """
 
     def __init__(
@@ -78,11 +87,14 @@ class BaseGPSHandler(ABC):
         self._read_task: Optional[asyncio.Task] = None
         self._trial_number: int = 1
 
-        # Circuit breaker for error recovery
+        # Circuit breaker error tracking (used by ReconnectingMixin)
         self._consecutive_errors = 0
-        self._max_consecutive_errors = 10
-        self._error_backoff = 0.1
-        self._max_error_backoff = 2.0
+
+        # Initialize reconnection mixin for self-healing circuit breaker
+        self._init_reconnect(
+            device_id=device_id,
+            config=ReconnectConfig.default(),
+        )
 
         # Track pending background tasks for cleanup
         self._pending_tasks: Set[asyncio.Task] = set()
@@ -222,12 +234,22 @@ class BaseGPSHandler(ABC):
         """Main read loop for receiving NMEA data.
 
         Continuously reads from the transport and processes sentences.
-        Implements circuit breaker pattern for error recovery.
+        Implements self-healing circuit breaker - instead of permanently exiting
+        after N consecutive errors, attempts reconnection with exponential backoff.
         """
         logger.debug("Read loop started for %s", self.device_id)
         self._consecutive_errors = 0
 
-        while self._running and self.is_connected:
+        while self._running:
+            # Check connection status - attempt reconnect if disconnected
+            if not self.is_connected:
+                logger.warning("GPS device %s disconnected, attempting reconnect", self.device_id)
+                should_continue = await self._on_circuit_breaker_triggered()
+                if not should_continue:
+                    logger.error("Reconnection failed for %s - exiting read loop", self.device_id)
+                    break
+                continue
+
             try:
                 # Read a line from the transport
                 line = await self.transport.read_line(timeout=1.0)
@@ -247,29 +269,75 @@ class BaseGPSHandler(ABC):
                 break
             except Exception as e:
                 self._consecutive_errors += 1
+                config = self._reconnect_config
                 backoff = min(
-                    self._error_backoff * (2 ** (self._consecutive_errors - 1)),
-                    self._max_error_backoff
+                    config.error_backoff * (2 ** (self._consecutive_errors - 1)),
+                    config.max_error_backoff
                 )
                 logger.error(
                     "Error in GPS read loop for %s (%d/%d): %s",
-                    self.device_id, self._consecutive_errors, self._max_consecutive_errors, e
+                    self.device_id,
+                    self._consecutive_errors,
+                    config.max_consecutive_errors,
+                    e
                 )
 
-                # Circuit breaker: exit if too many consecutive errors
-                if self._consecutive_errors >= self._max_consecutive_errors:
-                    logger.error(
-                        "Circuit breaker triggered for %s: %d consecutive errors",
-                        self.device_id, self._consecutive_errors
+                # Self-healing circuit breaker: attempt reconnection instead of hard exit
+                if self._consecutive_errors >= config.max_consecutive_errors:
+                    logger.warning(
+                        "Circuit breaker triggered for %s - attempting reconnection",
+                        self.device_id
                     )
-                    break
+                    should_continue = await self._on_circuit_breaker_triggered()
+                    if not should_continue:
+                        logger.error("Reconnection failed for %s - exiting read loop", self.device_id)
+                        break
+                    # Reconnected successfully, continue loop
+                    continue
 
                 await asyncio.sleep(backoff)
 
         logger.debug(
-            "Read loop ended for %s (running=%s, connected=%s, errors=%d)",
-            self.device_id, self._running, self.is_connected, self._consecutive_errors
+            "Read loop ended for %s (running=%s, connected=%s, errors=%d, reconnect_state=%s)",
+            self.device_id,
+            self._running,
+            self.is_connected,
+            self._consecutive_errors,
+            self._reconnect_state.value if hasattr(self, '_reconnect_state') else 'N/A'
         )
+
+    async def _attempt_reconnect(self) -> bool:
+        """Attempt to reconnect the transport.
+
+        This is called by ReconnectingMixin when circuit breaker triggers.
+        Disconnects the transport and attempts to reconnect.
+
+        Returns:
+            True if reconnection succeeded, False otherwise
+        """
+        try:
+            # First disconnect cleanly
+            if self.transport:
+                await self.transport.disconnect()
+
+            # Brief delay to let the OS release the port
+            await asyncio.sleep(0.2)
+
+            # Attempt to reconnect
+            if self.transport:
+                success = await self.transport.connect()
+                if success:
+                    logger.info("GPS transport reconnected for %s", self.device_id)
+                    return True
+                else:
+                    logger.warning("GPS transport reconnect failed for %s", self.device_id)
+                    return False
+
+            return False
+
+        except Exception as e:
+            logger.error("Error during GPS reconnect attempt for %s: %s", self.device_id, e)
+            return False
 
     @abstractmethod
     def _process_sentence(self, sentence: str) -> None:

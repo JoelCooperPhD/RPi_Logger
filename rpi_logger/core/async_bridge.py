@@ -6,7 +6,7 @@ import tkinter as tk
 from typing import Optional
 from rpi_logger.core.logging_utils import get_module_logger
 
-# Removed: logger = logging.getLogger(__name__)
+logger = get_module_logger("AsyncBridge")
 
 
 class AsyncBridge:
@@ -110,26 +110,101 @@ class AsyncBridge:
 
         return await future
 
-    def stop(self) -> None:
-        """Stop the AsyncIO event loop and cancel all tasks."""
-        if self.loop and self._running:
-            logger.info("Stopping AsyncIO bridge")
-            self._running = False
+    def stop(self, timeout: float = 5.0) -> bool:
+        """
+        Stop the AsyncIO event loop and cancel all tasks.
 
-            asyncio.run_coroutine_threadsafe(self._shutdown(), self.loop)
+        Args:
+            timeout: Maximum time to wait for shutdown (seconds)
 
-    async def _shutdown(self) -> None:
-        """Cancel all tasks and stop the loop (runs in background thread)."""
+        Returns:
+            True if shutdown completed cleanly, False if timed out
+        """
+        if not self.loop or not self._running:
+            return True
+
+        logger.info("Stopping AsyncIO bridge")
+        self._running = False
+
+        # Schedule shutdown and wait for completion
+        shutdown_complete = threading.Event()
+
+        async def shutdown_wrapper():
+            try:
+                await self._shutdown()
+            finally:
+                shutdown_complete.set()
+
+        asyncio.run_coroutine_threadsafe(shutdown_wrapper(), self.loop)
+
+        # Wait for shutdown with timeout
+        if not shutdown_complete.wait(timeout=timeout):
+            logger.error(
+                "AsyncIO bridge shutdown timed out after %.1fs - forcing loop stop",
+                timeout
+            )
+            # Force stop the loop
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            return False
+
+        logger.info("AsyncIO bridge shutdown completed")
+        return True
+
+    async def _shutdown(self, task_timeout: float = 3.0) -> None:
+        """
+        Cancel all tasks and stop the loop (runs in background thread).
+
+        Args:
+            task_timeout: Maximum time to wait for tasks to cancel
+        """
         tasks = [task for task in asyncio.all_tasks(self.loop)
                  if task is not asyncio.current_task()]
 
+        if not tasks:
+            logger.info("No pending tasks to cancel")
+            self.loop.stop()
+            return
+
         logger.info("Cancelling %d pending tasks", len(tasks))
 
+        # Log task names for diagnostics
+        for task in tasks:
+            task_name = task.get_name() if hasattr(task, 'get_name') else str(task)
+            logger.debug("Pending task: %s", task_name)
+
+        # Cancel all tasks
         for task in tasks:
             task.cancel()
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        # Wait with timeout
+        try:
+            done, pending = await asyncio.wait(
+                tasks,
+                timeout=task_timeout,
+                return_when=asyncio.ALL_COMPLETED
+            )
+
+            if pending:
+                logger.warning(
+                    "%d tasks did not complete within %.1fs:",
+                    len(pending), task_timeout
+                )
+                for task in pending:
+                    task_name = task.get_name() if hasattr(task, 'get_name') else str(task)
+                    logger.warning("  - %s", task_name)
+
+            # Check for exceptions in completed tasks
+            for task in done:
+                try:
+                    exc = task.exception()
+                    if exc and not isinstance(exc, asyncio.CancelledError):
+                        task_name = task.get_name() if hasattr(task, 'get_name') else str(task)
+                        logger.error("Task %s raised exception: %s", task_name, exc)
+                except asyncio.CancelledError:
+                    pass
+
+        except Exception as e:
+            logger.error("Error during task cleanup: %s", e)
 
         self.loop.stop()
         logger.info("AsyncIO loop stopped cleanly")

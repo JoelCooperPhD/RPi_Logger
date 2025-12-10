@@ -11,7 +11,7 @@ from typing import Optional
 
 import serial
 
-from .base_transport import BaseTransport
+from rpi_logger.core.devices.transports import BaseTransport
 from rpi_logger.core.logging_utils import get_module_logger
 
 # Default timeout values
@@ -99,15 +99,25 @@ class USBTransport(BaseTransport):
 
     async def disconnect(self) -> None:
         """Close the serial connection."""
-        if self._serial:
-            try:
-                await asyncio.to_thread(self._serial.close)
-                self.logger.info(f"Disconnected from {self.port}")
-            except Exception as e:
-                self.logger.error(f"Error disconnecting from {self.port}: {e}")
-            finally:
-                self._serial = None
-                self._connected = False
+        if not self._serial:
+            return
+
+        def _close_with_lock():
+            """Close serial port while holding lock to prevent read/write races."""
+            with self._lock:
+                if self._serial and self._serial.is_open:
+                    self._serial.close()
+                # Clear any buffered data
+                self._read_buffer = b''
+
+        try:
+            await asyncio.to_thread(_close_with_lock)
+            self.logger.info(f"Disconnected from {self.port}")
+        except Exception as e:
+            self.logger.error(f"Error disconnecting from {self.port}: {e}")
+        finally:
+            self._serial = None
+            self._connected = False
 
     async def write(self, data: bytes) -> bool:
         """

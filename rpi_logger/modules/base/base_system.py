@@ -1,8 +1,28 @@
+"""
+DEPRECATED: BaseSystem is a legacy base class for module systems.
+
+For new modules, use vmc.ModuleRuntime instead:
+
+    from vmc import ModuleRuntime, RuntimeContext
+
+    class MyRuntime(ModuleRuntime):
+        def __init__(self, ctx: RuntimeContext):
+            self.ctx = ctx
+
+        async def start(self):
+            pass
+
+        async def shutdown(self):
+            pass
+
+See stub (codex)/vmc/ for the complete VMC framework.
+"""
 
 import asyncio
 import os
 import sys
 import traceback
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, List, Optional, TYPE_CHECKING
@@ -21,11 +41,23 @@ class ModuleInitializationError(RuntimeError):
 
 
 class BaseSystem(ABC):
+    """
+    DEPRECATED: Legacy base class for module systems.
+
+    Use vmc.ModuleRuntime instead for new module development.
+    This class is retained for backward compatibility only.
+    """
 
     # When True, device initialization is deferred until after GUI is created
     DEFER_DEVICE_INIT_IN_GUI = False
 
     def __init__(self, args: Any):
+        warnings.warn(
+            "BaseSystem is deprecated. Use vmc.ModuleRuntime instead. "
+            "See stub (codex)/vmc/ for the VMC framework.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.args = args
         self.logger = ensure_structured_logger(getattr(args, "logger", None), fallback_name=self.__class__.__name__)
         self.running = False
@@ -292,8 +324,14 @@ class BaseSystem(ABC):
 
         self.initialized = False
 
+        # Shutdown task manager with timeout and diagnostics
         try:
-            await self.task_manager.shutdown()
+            await asyncio.wait_for(self.task_manager.shutdown(), timeout=6.0)
+        except asyncio.TimeoutError:
+            self.logger.error(
+                "Task manager shutdown timed out after 6s - pending tasks: %s",
+                self.task_manager.active_names() if hasattr(self.task_manager, 'active_names') else "unknown"
+            )
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.error("Error shutting down background tasks: %s", exc, exc_info=True)
 

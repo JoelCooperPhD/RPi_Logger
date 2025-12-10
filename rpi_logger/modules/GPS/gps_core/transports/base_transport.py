@@ -1,67 +1,23 @@
-"""Base transport interface for GPS communication.
+"""
+DEPRECATED: Base GPS Transport
 
-This module defines the abstract transport interface that all GPS transport
-implementations must follow. This allows the handler to work with different
-transport mechanisms (UART serial, USB serial, network, etc.).
+This module is deprecated. Use rpi_logger.core.devices.transports.BaseReadOnlyTransport instead.
+
+This file is kept for backward compatibility only. All imports have been
+redirected to the shared implementation in core.
 """
 
-from abc import ABC, abstractmethod
-from typing import Optional
-import logging
+import warnings
 
-logger = logging.getLogger(__name__)
+warnings.warn(
+    "Importing BaseGPSTransport from gps_core.transports.base_transport is deprecated. "
+    "Use 'from rpi_logger.core.devices.transports import BaseReadOnlyTransport' "
+    "or 'from rpi_logger.modules.GPS.gps_core.transports import BaseGPSTransport' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
 
+# Re-export from core for backward compatibility (aliased as BaseGPSTransport)
+from rpi_logger.core.devices.transports import BaseReadOnlyTransport as BaseGPSTransport
 
-class BaseGPSTransport(ABC):
-    """Abstract base class for GPS transport layers.
-
-    Provides a common interface for receiving NMEA sentences from GPS devices
-    regardless of the underlying transport mechanism.
-
-    GPS transports are read-only (no write capability needed for most receivers).
-    """
-
-    def __init__(self):
-        """Initialize the transport."""
-        self._connected = False
-
-    @property
-    def is_connected(self) -> bool:
-        """Check if the transport is connected."""
-        return self._connected
-
-    @abstractmethod
-    async def connect(self) -> bool:
-        """Establish connection to the GPS device.
-
-        Returns:
-            True if connection was successful
-        """
-        ...
-
-    @abstractmethod
-    async def disconnect(self) -> None:
-        """Close the connection to the GPS device."""
-        ...
-
-    @abstractmethod
-    async def read_line(self, timeout: float = 1.0) -> Optional[str]:
-        """Read a line from the GPS device.
-
-        Args:
-            timeout: Maximum time to wait for data in seconds
-
-        Returns:
-            The line read (without line ending), or None if timeout/no data
-        """
-        ...
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.connect()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        await self.disconnect()
-        return False
+__all__ = ["BaseGPSTransport"]

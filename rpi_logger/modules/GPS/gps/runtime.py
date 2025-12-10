@@ -167,9 +167,22 @@ class GPSModuleRuntime(ModuleRuntime):
             return True
 
         if action == "unassign_all_devices":
-            self.logger.info("Unassigning all devices before shutdown")
-            for device_id in list(self.handlers.keys()):
+            command_id = command.get("command_id")
+            self.logger.info("Unassigning all devices before shutdown (command_id=%s)", command_id)
+
+            device_ids = list(self.handlers.keys())
+            for device_id in device_ids:
                 await self.unassign_device(device_id)
+
+            # Send ACK to confirm port release
+            StatusMessage.send(
+                StatusType.DEVICE_UNASSIGNED,
+                {
+                    "device_ids": device_ids,
+                    "port_released": True,
+                },
+                command_id=command_id,
+            )
             return True
 
         if action == "start_recording":

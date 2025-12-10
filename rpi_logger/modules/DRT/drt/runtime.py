@@ -134,9 +134,23 @@ class DRTModuleRuntime(ModuleRuntime):
 
         if action == "unassign_all_devices":
             # Disconnect device before shutdown to release serial port
-            self.logger.info("Unassigning device before shutdown")
+            command_id = command.get("command_id")
+            self.logger.info("Unassigning device before shutdown (command_id=%s)", command_id)
+
+            port_released = False
             if self.handler:
                 await self.unassign_device(self.device_id)
+                port_released = True
+
+            # Send ACK to confirm port release
+            StatusMessage.send(
+                StatusType.DEVICE_UNASSIGNED,
+                {
+                    "device_id": self.device_id or "",
+                    "port_released": port_released,
+                },
+                command_id=command_id,
+            )
             return True
 
         if action == "start_recording":

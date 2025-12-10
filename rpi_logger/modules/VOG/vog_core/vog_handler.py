@@ -1,4 +1,9 @@
-"""VOG device handler for serial communication with protocol abstraction."""
+"""VOG device handler for serial communication with protocol abstraction.
+
+Implements self-healing circuit breaker via ReconnectingMixin - instead of
+permanently exiting after N consecutive errors, the handler will attempt
+reconnection with exponential backoff.
+"""
 
 import asyncio
 from pathlib import Path
@@ -6,6 +11,7 @@ from typing import Optional, Dict, Any, Callable
 
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.commands import StatusMessage
+from rpi_logger.core.connection import ReconnectingMixin, ReconnectConfig
 from .transports import BaseTransport
 
 from .protocols import BaseVOGProtocol, VOGDataPacket, VOGResponse
@@ -14,11 +20,15 @@ from .constants import COMMAND_DELAY
 from .data_logger import VOGDataLogger
 
 
-class VOGHandler:
+class VOGHandler(ReconnectingMixin):
     """Per-device handler for VOG serial communication.
 
     Uses protocol abstraction to support both sVOG (wired) and wVOG (wireless) devices.
     Protocol is provided by the runtime based on device type from main logger.
+
+    Inherits ReconnectingMixin to provide self-healing circuit breaker behavior.
+    Instead of permanently exiting after consecutive errors, the handler will
+    attempt to reconnect with exponential backoff.
     """
 
     def __init__(
@@ -48,6 +58,15 @@ class VOGHandler:
         self._config_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
         self.logger = get_module_logger(f"VOGHandler[{self.protocol.device_type}]")
+
+        # Circuit breaker error tracking (used by ReconnectingMixin)
+        self._consecutive_errors = 0
+
+        # Initialize reconnection mixin for self-healing circuit breaker
+        self._init_reconnect(
+            device_id=port,
+            config=ReconnectConfig.default(),
+        )
 
         # Data logger for CSV output
         self._data_logger = VOGDataLogger(
@@ -313,21 +332,109 @@ class VOGHandler:
         return await self.send_command(command, cmd_value)
 
     async def _read_loop(self):
-        """Main async read loop for incoming data."""
-        try:
-            while self._running and self.device.is_connected:
+        """Main async read loop for incoming data.
+
+        Implements self-healing circuit breaker - instead of permanently exiting
+        after N consecutive errors, attempts reconnection with exponential backoff.
+        """
+        self.logger.debug("Read loop started for %s", self.port)
+        self._consecutive_errors = 0
+
+        while self._running:
+            # Check connection status - attempt reconnect if disconnected
+            if not self.device.is_connected:
+                self.logger.warning("VOG device %s disconnected, attempting reconnect", self.port)
+                should_continue = await self._on_circuit_breaker_triggered()
+                if not should_continue:
+                    self.logger.error("Reconnection failed for %s - exiting read loop", self.port)
+                    break
+                continue
+
+            try:
                 line = await self.device.read_line()
 
                 if line:
+                    # Reset error counter on successful read
+                    self._consecutive_errors = 0
                     self.logger.debug("Read line from %s: %r", self.port, line)
                     await self._process_response(line)
 
                 await asyncio.sleep(0.001)  # 1ms for responsiveness
 
-        except asyncio.CancelledError:
-            self.logger.debug("Read loop cancelled for %s", self.port)
+            except asyncio.CancelledError:
+                self.logger.debug("Read loop cancelled for %s", self.port)
+                break
+            except Exception as e:
+                self._consecutive_errors += 1
+                config = self._reconnect_config
+                backoff = min(
+                    config.error_backoff * (2 ** (self._consecutive_errors - 1)),
+                    config.max_error_backoff
+                )
+                self.logger.error(
+                    "Error in VOG read loop for %s (%d/%d): %s",
+                    self.port,
+                    self._consecutive_errors,
+                    config.max_consecutive_errors,
+                    e
+                )
+
+                # Self-healing circuit breaker: attempt reconnection instead of hard exit
+                if self._consecutive_errors >= config.max_consecutive_errors:
+                    self.logger.warning(
+                        "Circuit breaker triggered for %s - attempting reconnection",
+                        self.port
+                    )
+                    should_continue = await self._on_circuit_breaker_triggered()
+                    if not should_continue:
+                        self.logger.error("Reconnection failed for %s - exiting read loop", self.port)
+                        break
+                    # Reconnected successfully, continue loop
+                    continue
+
+                await asyncio.sleep(backoff)
+
+        self.logger.debug(
+            "Read loop ended for %s (running=%s, connected=%s, errors=%d, reconnect_state=%s)",
+            self.port,
+            self._running,
+            self.device.is_connected if self.device else False,
+            self._consecutive_errors,
+            self._reconnect_state.value if hasattr(self, '_reconnect_state') else 'N/A'
+        )
+
+    async def _attempt_reconnect(self) -> bool:
+        """Attempt to reconnect the transport.
+
+        This is called by ReconnectingMixin when circuit breaker triggers.
+        Disconnects the transport and attempts to reconnect.
+
+        Returns:
+            True if reconnection succeeded, False otherwise
+        """
+        try:
+            # First disconnect cleanly
+            if self.device:
+                await self.device.disconnect()
+
+            # Brief delay to let the OS release the port
+            await asyncio.sleep(0.2)
+
+            # Attempt to reconnect
+            if self.device:
+                success = await self.device.connect()
+                if success:
+                    self.logger.info("VOG transport reconnected for %s", self.port)
+                    return True
+                else:
+                    self.logger.warning("VOG transport reconnect failed for %s", self.port)
+                    return False
+
+            return False
+
         except Exception as e:
-            self.logger.error("Error in read loop for %s: %s", self.port, e, exc_info=True)
+            self.logger.error("Error during VOG reconnect attempt for %s: %s", self.port, e)
+            return False
 
     async def _process_response(self, response: str):
         """Process a response line from the device."""

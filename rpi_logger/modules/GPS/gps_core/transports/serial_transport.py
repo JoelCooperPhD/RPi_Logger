@@ -7,11 +7,11 @@ non-blocking I/O with UART-based GPS receivers like the BerryGPS.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import Optional
 import logging
 
-from .base_transport import BaseGPSTransport
+# Import as BaseGPSTransport for consistency with GPS naming convention
+from rpi_logger.core.devices.transports import BaseReadOnlyTransport as BaseGPSTransport
 from ..constants import DEFAULT_BAUD_RATE, DEFAULT_RECONNECT_DELAY
 
 logger = logging.getLogger(__name__)
@@ -115,7 +115,7 @@ class SerialGPSTransport(BaseGPSTransport):
             return False
 
     async def disconnect(self) -> None:
-        """Close the serial connection."""
+        """Close the serial connection with verification."""
         if self._writer is None:
             self._connected = False
             return
@@ -125,16 +125,32 @@ class SerialGPSTransport(BaseGPSTransport):
         self._reader = None
         self._connected = False
 
-        with contextlib.suppress(Exception):
+        # Close the writer - log actual errors instead of suppressing
+        try:
             writer.close()
+        except OSError as e:
+            # OSError is expected if port is already closed/disconnected
+            logger.debug("Expected error closing serial writer on %s: %s", self.port, e)
+        except Exception as e:
+            # Unexpected errors should be logged at warning level
+            logger.warning("Error closing serial writer on %s: %s", self.port, e)
 
+        # Wait for close to complete with extended timeout
         if hasattr(writer, "wait_closed"):
             try:
-                await asyncio.wait_for(writer.wait_closed(), timeout=1.0)
+                await asyncio.wait_for(writer.wait_closed(), timeout=2.0)
             except asyncio.TimeoutError:
-                logger.debug("Timeout waiting for serial close on %s", self.port)
-            except Exception:
-                logger.debug("Error closing serial on %s", self.port)
+                logger.warning(
+                    "Timeout waiting for serial close on %s (port may still be held)",
+                    self.port
+                )
+                # Add small delay to give OS time to release port
+                await asyncio.sleep(0.2)
+            except Exception as e:
+                logger.debug("Error in wait_closed for serial on %s: %s", self.port, e)
+        else:
+            # No wait_closed available - add delay to let OS release port
+            await asyncio.sleep(0.1)
 
         logger.info("Disconnected from GPS on %s", self.port)
 

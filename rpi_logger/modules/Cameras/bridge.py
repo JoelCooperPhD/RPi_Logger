@@ -13,7 +13,7 @@ import contextlib
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from rpi_logger.core.commands import StatusMessage
+from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.Cameras.camera_core import (
     CameraId,
@@ -69,6 +69,7 @@ class CamerasRuntime(ModuleRuntime):
         self._is_assigned: bool = False
         self._is_recording: bool = False
         self._camera_name: Optional[str] = None
+        self._known_model = None  # CameraModel from database (has sensor_info)
 
         # Capture settings (for recording)
         self._resolution: tuple[int, int] = (1280, 720)
@@ -156,6 +157,27 @@ class CamerasRuntime(ModuleRuntime):
 
         if action == "unassign_device":
             await self._release_camera()
+            return True
+
+        if action == "unassign_all_devices":
+            # Single-camera module: release current camera if any
+            command_id = command.get("command_id")
+            self.logger.info("Unassigning camera before shutdown (command_id=%s)", command_id)
+
+            port_released = False
+            if self._capture:
+                await self._release_camera()
+                port_released = True
+
+            # Send ACK to confirm camera release
+            StatusMessage.send(
+                StatusType.DEVICE_UNASSIGNED,
+                {
+                    "device_id": self._camera_id.stable_id if self._camera_id else "",
+                    "port_released": port_released,
+                },
+                command_id=command_id,
+            )
             return True
 
         if action in {"start_recording", "record"}:
@@ -252,6 +274,7 @@ class CamerasRuntime(ModuleRuntime):
             if known_model:
                 # Use cached capabilities - skip probing
                 self._capabilities = copy_capabilities(known_model.capabilities)
+                self._known_model = known_model
                 self.logger.info(
                     "Using cached capabilities for '%s' (model: %s)",
                     model_name, known_model.key
@@ -260,7 +283,7 @@ class CamerasRuntime(ModuleRuntime):
                 # Probe camera and cache for future
                 self._capabilities = await self._probe_camera(camera_type, stable_id, dev_path)
                 if self._capabilities and model_name:
-                    self.model_db.add_model(model_name, camera_type, self._capabilities)
+                    self._known_model = self.model_db.add_model(model_name, camera_type, self._capabilities)
                     self.logger.info("Cached new camera model: %s", model_name)
 
             # Determine capture settings from capabilities or cache
@@ -280,6 +303,7 @@ class CamerasRuntime(ModuleRuntime):
                     self._capabilities,
                     hw_model=self._descriptor.hw_model if self._descriptor else None,
                     backend=camera_type,
+                    sensor_info=self._known_model.sensor_info if self._known_model else None,
                 )
             self.view.set_status(f"Camera ready: {self._camera_name}")
 
@@ -628,6 +652,7 @@ class CamerasRuntime(ModuleRuntime):
                     self._capabilities,
                     hw_model=self._descriptor.hw_model if self._descriptor else None,
                     backend=camera_type,
+                    sensor_info=self._known_model.sensor_info if self._known_model else None,
                 )
                 self.view.set_status("Camera reprobed successfully")
             else:

@@ -65,6 +65,9 @@ class ModuleProcess:
         # XBee send callback (set by logger system for routing XBee sends)
         self._xbee_send_callback: Optional[Callable[[str, bytes], Awaitable[bool]]] = None
 
+        # Shutdown coordinator (active only during stop())
+        self._shutdown_coordinator = None
+
     async def start(self) -> bool:
         if self.process is not None:
             self.logger.warning("Process already running")
@@ -322,6 +325,14 @@ class ModuleProcess:
         elif status_type == StatusType.XBEE_SEND:
             # Module wants to send data via XBee
             await self._handle_xbee_send(status.get_payload())
+        elif status_type == StatusType.DEVICE_UNASSIGNED:
+            # Route to shutdown coordinator if active
+            command_id = status.get_command_id()
+            if command_id and hasattr(self, '_shutdown_coordinator') and self._shutdown_coordinator:
+                self._shutdown_coordinator.on_device_unassigned(
+                    command_id=command_id,
+                    data=status.get_payload(),
+                )
 
         if self.status_callback:
             try:
@@ -393,6 +404,18 @@ class ModuleProcess:
         await self.send_command(CommandMessage.xbee_send_result(node_id, success))
 
     async def stop(self, timeout: float = 10.0) -> None:
+        """
+        Stop the module process with ACK-based device unassignment.
+
+        This replaces the previous blind sleep with proper acknowledgment:
+        1. Send unassign_all_devices with command_id
+        2. Wait for device_unassigned ACK (or timeout)
+        3. Send quit command
+        4. Wait for graceful exit, escalate to SIGTERM/SIGKILL if needed
+        5. Drain pipes and clean up reader tasks
+        """
+        from rpi_logger.core.connection import ShutdownCoordinator
+
         if self.process is None:
             self.logger.debug("Process not running")
             return
@@ -400,46 +423,81 @@ class ModuleProcess:
         self.logger.info("Stopping module: %s", self.module_info.name)
         self.state = ModuleState.STOPPING
 
-        try:
-            # First, request device disconnection to release serial ports
-            # This gives the module a chance to properly close USB connections
-            await self.send_command(CommandMessage.unassign_all_devices())
-            await asyncio.sleep(0.5)  # Brief wait for ports to close
+        # Create shutdown coordinator for ACK-based unassignment
+        self._shutdown_coordinator = ShutdownCoordinator()
 
-            # Then send quit command
-            await self.send_command(CommandMessage.quit())
+        try:
+            # Phase 1: Request device unassignment with ACK
+            unassign_timeout = min(3.0, timeout * 0.3)
+            self.logger.debug("Phase 1: Requesting device unassignment (timeout=%.1fs)", unassign_timeout)
 
             try:
-                await asyncio.wait_for(self.process.wait(), timeout=timeout)
+                acknowledged, ack_data = await self._shutdown_coordinator.request_device_unassign(
+                    send_func=self.send_command,
+                    timeout=unassign_timeout,
+                    instance_id=self.instance_id or self.module_info.name,
+                )
+                if acknowledged:
+                    port_released = ack_data.get("port_released", False) if ack_data else False
+                    self.logger.info("Device unassignment confirmed (port_released=%s)", port_released)
+                else:
+                    self.logger.warning("Device unassign not acknowledged, continuing shutdown")
+            except Exception as e:
+                self.logger.warning("Error during device unassign: %s", e)
+
+            # Phase 2: Send quit command
+            self.logger.debug("Phase 2: Sending quit command")
+            try:
+                await self.send_command(CommandMessage.quit())
+            except Exception as e:
+                self.logger.warning("Error sending quit command: %s", e)
+
+            # Phase 3: Wait for graceful exit
+            quit_timeout = timeout - unassign_timeout - 2.0  # Reserve time for SIGTERM
+            quit_timeout = max(quit_timeout, 2.0)
+            self.logger.debug("Phase 3: Waiting for graceful exit (timeout=%.1fs)", quit_timeout)
+
+            try:
+                await asyncio.wait_for(self.process.wait(), timeout=quit_timeout)
                 self.logger.info("Process stopped gracefully")
             except asyncio.TimeoutError:
-                self.logger.warning("Process did not exit gracefully, terminating...")
+                # Phase 4: SIGTERM
+                self.logger.warning("Process did not exit gracefully, sending SIGTERM")
                 self._was_forcefully_stopped = True
                 self.process.terminate()
+
                 try:
                     await asyncio.wait_for(self.process.wait(), timeout=2.0)
+                    self.logger.info("Process terminated after SIGTERM")
                 except asyncio.TimeoutError:
-                    self.logger.error("Process did not terminate, killing...")
-                    self._was_forcefully_stopped = True
+                    # Phase 5: SIGKILL
+                    self.logger.error("Process did not terminate, sending SIGKILL")
                     self.process.kill()
                     await self.process.wait()
+                    self.logger.info("Process killed")
 
         except Exception as e:
-            self.logger.error("Error stopping process: %s", e)
+            self.logger.error("Error stopping process: %s", e, exc_info=True)
             self._was_forcefully_stopped = True
         finally:
             self.shutdown_event.set()
-            for task in [self.stdout_task, self.stderr_task, self.monitor_task]:
-                if task and not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
+            await self._cleanup_reader_tasks()
+            self._shutdown_coordinator = None
             self.process = None
             self.state = ModuleState.STOPPED
             self.logger.info("Module stopped: %s", self.module_info.name)
+
+    async def _cleanup_reader_tasks(self) -> None:
+        """Clean up reader tasks with proper error handling."""
+        for task in [self.stdout_task, self.stderr_task, self.monitor_task]:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await asyncio.wait_for(task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                except Exception as e:
+                    self.logger.debug("Error cleaning up task: %s", e)
 
     async def kill(self) -> None:
         """Force kill the module process without graceful shutdown."""
@@ -458,14 +516,7 @@ class ModuleProcess:
             self.logger.error("Error killing process: %s", e)
         finally:
             self.shutdown_event.set()
-            for task in [self.stdout_task, self.stderr_task, self.monitor_task]:
-                if task and not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-
+            await self._cleanup_reader_tasks()
             self.process = None
             self.state = ModuleState.STOPPED
             self.logger.info("Module killed: %s", self.module_info.name)

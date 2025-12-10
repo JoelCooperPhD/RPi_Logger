@@ -4,6 +4,10 @@ Base DRT Handler
 Abstract base class defining the interface for all DRT device handlers.
 Each device type (sDRT, wDRT USB, wDRT Wireless) implements this interface
 with their specific protocol.
+
+Implements self-healing circuit breaker via ReconnectingMixin - instead of
+permanently exiting after N consecutive errors, the handler will attempt
+reconnection with exponential backoff.
 """
 
 from abc import ABC, abstractmethod
@@ -12,6 +16,7 @@ from pathlib import Path
 import asyncio
 import logging
 
+from rpi_logger.core.connection import ReconnectingMixin, ReconnectConfig
 from ..device_types import DRTDeviceType
 
 logger = logging.getLogger(__name__)
@@ -29,12 +34,16 @@ def _task_exception_handler(task: asyncio.Task) -> None:
         pass
 
 
-class BaseDRTHandler(ABC):
+class BaseDRTHandler(ABC, ReconnectingMixin):
     """
     Abstract base class for DRT device handlers.
 
     Defines the common interface that all DRT handlers must implement.
     Handles device communication, experiment control, and data logging.
+
+    Inherits ReconnectingMixin to provide self-healing circuit breaker behavior.
+    Instead of permanently exiting after consecutive errors, the handler will
+    attempt to reconnect with exponential backoff.
     """
 
     def __init__(
@@ -63,11 +72,14 @@ class BaseDRTHandler(ABC):
         self._recording = False
         self._read_task: Optional[asyncio.Task] = None
 
-        # Circuit breaker for error recovery
+        # Circuit breaker error tracking (used by ReconnectingMixin)
         self._consecutive_errors = 0
-        self._max_consecutive_errors = 10  # Trigger disconnect after this many errors
-        self._error_backoff = 0.1  # Initial backoff in seconds
-        self._max_error_backoff = 2.0  # Maximum backoff
+
+        # Initialize reconnection mixin for self-healing circuit breaker
+        self._init_reconnect(
+            device_id=device_id,
+            config=ReconnectConfig.default(),
+        )
 
         # Trial data tracking
         self._click_count = 0
@@ -225,12 +237,22 @@ class BaseDRTHandler(ABC):
         Main read loop for receiving device data.
 
         Continuously reads from the transport and processes responses.
-        Implements circuit breaker pattern - exits after too many consecutive errors.
+        Implements self-healing circuit breaker - instead of permanently exiting
+        after N consecutive errors, attempts reconnection with exponential backoff.
         """
         logger.debug("Read loop started for %s", self.device_id)
         self._consecutive_errors = 0
 
-        while self._running and self.is_connected:
+        while self._running:
+            # Check connection status - attempt reconnect if disconnected
+            if not self.is_connected:
+                logger.warning("Device %s disconnected, attempting reconnect", self.device_id)
+                should_continue = await self._on_circuit_breaker_triggered()
+                if not should_continue:
+                    logger.error("Reconnection failed for %s - exiting read loop", self.device_id)
+                    break
+                continue
+
             try:
                 # Process all available data in the buffer
                 lines_processed = 0
@@ -251,33 +273,81 @@ class BaseDRTHandler(ABC):
 
                 # Yield to other tasks
                 await asyncio.sleep(0.01)
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self._consecutive_errors += 1
+                config = self._reconnect_config
                 backoff = min(
-                    self._error_backoff * (2 ** (self._consecutive_errors - 1)),
-                    self._max_error_backoff
+                    config.error_backoff * (2 ** (self._consecutive_errors - 1)),
+                    config.max_error_backoff
                 )
                 logger.error(
                     "Error in read loop for %s (%d/%d): %s",
-                    self.device_id, self._consecutive_errors, self._max_consecutive_errors, e
+                    self.device_id,
+                    self._consecutive_errors,
+                    config.max_consecutive_errors,
+                    e
                 )
 
-                # Circuit breaker: exit if too many consecutive errors
-                if self._consecutive_errors >= self._max_consecutive_errors:
-                    logger.error(
-                        "Circuit breaker triggered for %s: %d consecutive errors",
-                        self.device_id, self._consecutive_errors
+                # Self-healing circuit breaker: attempt reconnection instead of hard exit
+                if self._consecutive_errors >= config.max_consecutive_errors:
+                    logger.warning(
+                        "Circuit breaker triggered for %s - attempting reconnection",
+                        self.device_id
                     )
-                    break
+                    should_continue = await self._on_circuit_breaker_triggered()
+                    if not should_continue:
+                        logger.error("Reconnection failed for %s - exiting read loop", self.device_id)
+                        break
+                    # Reconnected successfully, continue loop
+                    continue
 
                 await asyncio.sleep(backoff)
 
         logger.debug(
-            "Read loop ended for %s (running=%s, connected=%s, errors=%d)",
-            self.device_id, self._running, self.is_connected, self._consecutive_errors
+            "Read loop ended for %s (running=%s, connected=%s, errors=%d, reconnect_state=%s)",
+            self.device_id,
+            self._running,
+            self.is_connected,
+            self._consecutive_errors,
+            self._reconnect_state.value if hasattr(self, '_reconnect_state') else 'N/A'
         )
+
+    async def _attempt_reconnect(self) -> bool:
+        """
+        Attempt to reconnect the transport.
+
+        This is called by ReconnectingMixin when circuit breaker triggers.
+        Disconnects the transport and attempts to reconnect.
+
+        Returns:
+            True if reconnection succeeded, False otherwise
+        """
+        try:
+            # First disconnect cleanly
+            if self.transport:
+                await self.transport.disconnect()
+
+            # Brief delay to let the OS release the port
+            await asyncio.sleep(0.2)
+
+            # Attempt to reconnect
+            if self.transport:
+                success = await self.transport.connect()
+                if success:
+                    logger.info("Transport reconnected for %s", self.device_id)
+                    return True
+                else:
+                    logger.warning("Transport reconnect failed for %s", self.device_id)
+                    return False
+
+            return False
+
+        except Exception as e:
+            logger.error("Error during reconnect attempt for %s: %s", self.device_id, e)
+            return False
 
     def _create_background_task(self, coro) -> asyncio.Task:
         """

@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import numpy as np
 
-from rpi_logger.core.commands import StatusMessage
+from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import ensure_structured_logger
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from vmc import ModuleRuntime, RuntimeContext
@@ -183,8 +183,23 @@ class EyeTrackerRuntime(ModuleRuntime):
             return await self._unassign_device(command)
         if action == "unassign_all_devices":
             # Single-device module: unassign current device if any
+            command_id = command.get("command_id")
+            self.logger.info("Unassigning device before shutdown (command_id=%s)", command_id)
+
+            port_released = False
             if self._assigned_device_id:
                 await self._unassign_device({"device_id": self._assigned_device_id})
+                port_released = True
+
+            # Send ACK to confirm device release
+            StatusMessage.send(
+                StatusType.DEVICE_UNASSIGNED,
+                {
+                    "device_id": self._assigned_device_id or "",
+                    "port_released": port_released,
+                },
+                command_id=command_id,
+            )
             return True
 
         # Window commands

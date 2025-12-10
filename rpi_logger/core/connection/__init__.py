@@ -6,12 +6,15 @@ This package provides reliable connection handling with:
 - Retry policies with exponential backoff
 - Heartbeat monitoring for connection health
 - Unified connection coordination
+- ACK-based shutdown protocol
 """
 
 from .command_tracker import CommandTracker, CommandResult, PendingCommand, CommandStatus
 from .retry_policy import RetryPolicy, RetryResult
 from .heartbeat_monitor import HeartbeatMonitor
 from .connection_coordinator import ConnectionCoordinator, ConnectionState, ConnectionEvent
+from .shutdown_coordinator import ShutdownCoordinator, ShutdownResult, ShutdownPhase
+from .reconnect_handler import ReconnectingMixin, ReconnectConfig, ReconnectState, ReconnectResult
 
 __all__ = [
     # Command tracking
@@ -28,4 +31,13 @@ __all__ = [
     'ConnectionCoordinator',
     'ConnectionState',
     'ConnectionEvent',
+    # Shutdown
+    'ShutdownCoordinator',
+    'ShutdownResult',
+    'ShutdownPhase',
+    # Reconnection
+    'ReconnectingMixin',
+    'ReconnectConfig',
+    'ReconnectState',
+    'ReconnectResult',
 ]

@@ -373,7 +373,7 @@ class ConnectionCoordinator:
             instance_id: The instance to disconnect
             command_json: The unassign command JSON
             send_func: Async function to send the command
-            timeout: Timeout for the operation
+            timeout: Timeout for sending the command
 
         Returns:
             True if disconnected successfully
@@ -389,14 +389,15 @@ class ConnectionCoordinator:
         await self._transition(instance_id, ConnectionEvent.DISCONNECT_REQUESTED)
 
         try:
-            await send_func(command_json)
-            # Wait briefly for acknowledgment
-            await asyncio.sleep(0.5)
+            await asyncio.wait_for(send_func(command_json), timeout=timeout)
+            await self._transition(instance_id, ConnectionEvent.DEVICE_DISCONNECTED)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning("Disconnect command timed out for %s", instance_id)
             await self._transition(instance_id, ConnectionEvent.DEVICE_DISCONNECTED)
             return True
         except Exception as e:
             logger.error("Disconnect error for %s: %s", instance_id, e)
-            # Force to running state
             await self._transition(instance_id, ConnectionEvent.DEVICE_DISCONNECTED)
             return True
 
