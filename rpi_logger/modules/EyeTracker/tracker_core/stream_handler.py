@@ -28,6 +28,17 @@ class FramePacket:
     wait_ms: float = 0.0  # Time spent waiting for frame
 
 
+@dataclass(slots=True)
+class EyesFramePacket:
+    """Packet for eyes camera frames (384x192 combined left+right)."""
+
+    image: np.ndarray
+    received_monotonic: float
+    timestamp_unix_seconds: Optional[float]
+    timestamp_unix_ns: Optional[int]
+    frame_index: int
+
+
 class StreamHandler:
 
     def __init__(self):
@@ -59,6 +70,7 @@ class StreamHandler:
         self._imu_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
         self._event_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
         self._audio_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=128)
+        self._eyes_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=64)
 
         # Event-driven coordination (Phase 1.1 optimization)
         self._frame_ready_event = asyncio.Event()
@@ -66,6 +78,7 @@ class StreamHandler:
         self._imu_ready_event = asyncio.Event()
         self._event_ready_event = asyncio.Event()
         self._audio_ready_event = asyncio.Event()
+        self._eyes_ready_event = asyncio.Event()
 
     def _update_running_flag(self) -> None:
         self.running = any(
@@ -389,7 +402,19 @@ class StreamHandler:
                             self._eyes_frames += 1
                             self.last_eyes_frame = frame_array
 
+                            # Create packet for recording
+                            packet = EyesFramePacket(
+                                image=frame_array,
+                                received_monotonic=time.perf_counter(),
+                                timestamp_unix_seconds=getattr(frame, "timestamp_unix_seconds", None),
+                                timestamp_unix_ns=getattr(frame, "timestamp_unix_ns", None),
+                                frame_index=self._eyes_frames,
+                            )
+                            self._enqueue_latest(self._eyes_queue, packet)
+                            self._eyes_ready_event.set()
+
                             if self._eyes_frames == 1:
+                                logger.info("First eyes frame queued (queue size: %d)", self._eyes_queue.qsize())
                                 logger.info(f"Eyes frame shape: {pixel_data.shape}")
                                 logger.info(f"Eyes frame dtype: {pixel_data.dtype}")
 
@@ -462,6 +487,9 @@ class StreamHandler:
     async def next_audio(self, timeout: Optional[float] = None) -> Optional[Any]:
         return await self._dequeue_with_timeout(self._audio_queue, timeout)
 
+    async def next_eyes(self, timeout: Optional[float] = None) -> Optional[EyesFramePacket]:
+        return await self._dequeue_with_timeout(self._eyes_queue, timeout)
+
     # Event-driven methods (Phase 1.1 optimization)
     async def wait_for_frame(self, timeout: Optional[float] = None) -> Optional[FramePacket]:
         """Wait for frame to be available, then retrieve it (event-driven)"""
@@ -531,6 +559,7 @@ class StreamHandler:
             self._imu_queue,
             self._event_queue,
             self._audio_queue,
+            self._eyes_queue,
         ):
             while True:
                 try:

@@ -431,22 +431,6 @@ class IMUViewer(BaseStreamViewer):
             fill="#808080", outline=""
         )
 
-        # Heading text below compass
-        cardinal_name = self._heading_to_cardinal(heading)
-        canvas.create_text(
-            center_x, height - 4,
-            text=f"{heading:.0f}° {cardinal_name}",
-            fill="#909090", font=("Consolas", 8), anchor="s"
-        )
-
-    def _heading_to_cardinal(self, heading: float) -> str:
-        """Convert heading in degrees to cardinal/intercardinal direction name."""
-        # 8-point compass: N, NE, E, SE, S, SW, W, NW
-        directions = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-        # Each sector is 45°, centered on the cardinal direction
-        index = int((heading + 22.5) / 45) % 8
-        return directions[index]
-
     def _draw_sparkline(self) -> None:
         """Draw the acceleration history sparkline with auto-scaling.
 

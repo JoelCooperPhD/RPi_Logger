@@ -273,8 +273,8 @@ class ConnectionCoordinator:
                     self._heartbeat_monitor.register(instance_id)
 
                 # Wait for ready status or timeout
-                # For now, assume ready after start
-                # TODO: Wait for explicit "ready" status
+                # Currently assumes ready after start - future enhancement could
+                # wait for explicit "ready" status message from the module
                 await self._transition(instance_id, ConnectionEvent.PROCESS_READY)
                 return True
             else:

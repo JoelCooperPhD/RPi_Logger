@@ -38,9 +38,9 @@ gui_preview_update_hz = 5
 stream_video_enabled = true
 stream_gaze_enabled = true
 stream_eyes_enabled = true
-stream_imu_enabled = false
-stream_events_enabled = false
-stream_audio_enabled = false
+stream_imu_enabled = true
+stream_events_enabled = true
+stream_audio_enabled = true
 
 ################################################################################
 # RECORDING OVERLAY (APPLIED TO SAVED VIDEO)
@@ -58,25 +58,20 @@ overlay_margin_left = 10
 overlay_line_start_y = 30
 
 # Gaze indicator appearance (used for preview + recording)
-gaze_circle_radius = 10
-gaze_circle_thickness = 1
-gaze_center_radius = 1
+gaze_circle_radius = 60
+gaze_circle_thickness = 6
+gaze_center_radius = 4
 gaze_shape = circle        # circle | cross
-gaze_color_worn_b = 255    # Glasses worn → yellow indicator
-gaze_color_worn_g = 255
-gaze_color_worn_r = 0
-gaze_color_not_worn_b = 0  # Glasses off → red indicator
-gaze_color_not_worn_g = 0
-gaze_color_not_worn_r = 255
+gaze_color_worn_b = 0
+gaze_color_worn_g = 0
+gaze_color_worn_r = 255
 
 ################################################################################
 # DATA EXPORT OPTIONS
 ################################################################################
 enable_advanced_gaze_logging = false      # Extra per-eye metrics CSV
 expand_eye_event_details = true           # Detailed fixation/blink fields
-enable_audio_recording = false            # Capture headset microphone audio
 audio_stream_param = audio=scene          # RTSP query for audio stream
-enable_device_status_logging = false      # Battery / storage telemetry log
 device_status_poll_interval = 5.0
 
 ################################################################################
@@ -94,11 +89,11 @@ discovery_retry = 3.0     # Seconds between retries
 ################################################################################
 # MASTER LOGGER INTEGRATION
 ################################################################################
-enabled = true
+enabled = false
 preview_resolution = auto
 gui_io_stub_visible = false
 view.show_io_panel = false
-view.show_logger = false
+view.show_logger = true
 window_geometry = 320x200
 device_connected = false
 eyetracker_config_dialog_geometry = +392+790

@@ -1,8 +1,16 @@
+"""
+Base module utilities for TheLogger modules.
+
+This module provides shared utilities and base classes for module development.
+
+For new modules, use:
+    from vmc import ModuleRuntime, RuntimeContext, StubCodexSupervisor
+
+See stub (codex)/vmc/ for the VMC framework implementation.
+"""
 
 from .base_supervisor import BaseSupervisor
-from .base_system import BaseSystem, ModuleInitializationError
 from .config_loader import ConfigLoader, load_config_file
-from .modes import BaseMode, BaseGUIMode
 from .task_manager import AsyncTaskManager
 from .recording_mixin import RecordingStateMixin
 from .async_utils import (
@@ -61,10 +69,6 @@ from .status import (
 
 __all__ = [
     'BaseSupervisor',
-    'BaseSystem',
-    'ModuleInitializationError',
-    'BaseMode',
-    'BaseGUIMode',
     'RecordingStateMixin',
     'AsyncTaskManager',
     'save_file_async',

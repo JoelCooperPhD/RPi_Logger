@@ -1,6 +1,7 @@
 
 import logging
 import re
+from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -286,7 +287,9 @@ class TkinterGUIBase:
                 super().__init__()
                 self.text_widget = text_widget
                 self._closed = False
-                self._pending_after_ids: list[str] = []
+                # Use a bounded deque to prevent unbounded memory growth
+                # 100 pending callbacks is more than enough for normal operation
+                self._pending_after_ids: deque[str] = deque(maxlen=100)
                 self.setFormatter(
                     logging.Formatter(
                         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',

@@ -6,9 +6,12 @@ from typing import Optional
 
 class RollingFPS:
 
-    def __init__(self, window_seconds: float = 5.0):
+    def __init__(self, window_seconds: float = 5.0, max_fps: float = 1000.0):
         self.window_seconds = window_seconds
-        self.frame_timestamps = deque()
+        # Bound the deque to prevent unbounded growth under high load
+        # maxlen = window_seconds * max_fps provides headroom for high frame rates
+        max_frames = int(window_seconds * max_fps)
+        self.frame_timestamps = deque(maxlen=max_frames)
         self._last_fps = 0.0
 
     def add_frame(self, timestamp: Optional[float] = None) -> None:

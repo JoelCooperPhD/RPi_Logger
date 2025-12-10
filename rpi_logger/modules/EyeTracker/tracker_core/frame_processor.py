@@ -31,33 +31,45 @@ class FrameProcessor:
         self._last_was_grayscale: bool = False
         self._duplicate_count = 0
 
-    def _get_gaze_color(self, is_worn: bool) -> Tuple[int, int, int]:
-        """Get gaze indicator color based on worn state."""
-        if is_worn:
-            return (self.config.gaze_color_worn_b, self.config.gaze_color_worn_g, self.config.gaze_color_worn_r)
-        return (self.config.gaze_color_not_worn_b, self.config.gaze_color_not_worn_g, self.config.gaze_color_not_worn_r)
+    def _get_gaze_color(self) -> Tuple[int, int, int]:
+        """Get gaze indicator color."""
+        return (self.config.gaze_color_worn_b, self.config.gaze_color_worn_g, self.config.gaze_color_worn_r)
 
     def _get_gaze_sprite(self, radius: int, thickness: int, color: Tuple[int, int, int],
                          shape: str, center_radius: int) -> np.ndarray:
-        """Get cached gaze indicator sprite."""
+        """Get cached gaze indicator sprite with contrasting outline for visibility."""
         cache_key = (radius, thickness, color, shape, center_radius)
         if cache_key not in self._gaze_sprite_cache:
             # Create sprite with alpha channel for blending
-            size = radius * 2 + thickness * 2 + 4
+            # Extra padding for outline
+            outline_thickness = thickness + 2
+            size = radius * 2 + outline_thickness * 2 + 8
             sprite = np.zeros((size, size, 4), dtype=np.uint8)
             center = size // 2
 
+            # Determine contrasting outline color (black or white based on main color brightness)
+            brightness = (color[0] + color[1] + color[2]) / 3
+            outline_color = (0, 0, 0) if brightness > 127 else (255, 255, 255)
+
             if shape == "cross":
-                # Draw cross on sprite
+                # Draw outline first (thicker, contrasting color)
+                cv2.line(sprite, (center - radius, center), (center + radius, center),
+                        (*outline_color, 255), outline_thickness)
+                cv2.line(sprite, (center, center - radius), (center, center + radius),
+                        (*outline_color, 255), outline_thickness)
+                # Draw main cross on top
                 cv2.line(sprite, (center - radius, center), (center + radius, center),
                         (*color, 255), thickness)
                 cv2.line(sprite, (center, center - radius), (center, center + radius),
                         (*color, 255), thickness)
             else:
-                # Draw circle on sprite
+                # Draw outline circle first (thicker, contrasting color)
+                cv2.circle(sprite, (center, center), radius, (*outline_color, 255), outline_thickness)
+                # Draw main circle on top
                 cv2.circle(sprite, (center, center), radius, (*color, 255), thickness)
 
-            # Draw center dot
+            # Draw center dot with outline
+            cv2.circle(sprite, (center, center), center_radius + 1, (*outline_color, 255), -1)
             cv2.circle(sprite, (center, center), center_radius, (*color, 255), -1)
 
             self._gaze_sprite_cache[cache_key] = sprite
@@ -70,9 +82,9 @@ class FrameProcessor:
 
         return self._gaze_sprite_cache[cache_key]
 
-    def _draw_gaze_indicator(self, frame: np.ndarray, gaze_x: int, gaze_y: int, is_worn: bool) -> None:
+    def _draw_gaze_indicator(self, frame: np.ndarray, gaze_x: int, gaze_y: int) -> None:
         """Draw gaze indicator using cached sprite (faster than cv2.circle every frame)."""
-        color = self._get_gaze_color(is_worn)
+        color = self._get_gaze_color()
         sprite = self._get_gaze_sprite(
             self.config.gaze_circle_radius,
             self.config.gaze_circle_thickness,
@@ -244,9 +256,7 @@ class FrameProcessor:
             if gaze_x is not None and gaze_y is not None:
                 gaze_x = max(0, min(gaze_x, w - 1))
                 gaze_y = max(0, min(gaze_y, h - 1))
-
-                is_worn = not (hasattr(last_gaze, 'worn') and not last_gaze.worn)
-                self._draw_gaze_indicator(frame, gaze_x, gaze_y, is_worn)
+                self._draw_gaze_indicator(frame, gaze_x, gaze_y)
 
         return frame
 
@@ -326,9 +336,7 @@ class FrameProcessor:
             if gaze_x is not None and gaze_y is not None:
                 gaze_x = max(0, min(gaze_x, w - 1))
                 gaze_y = max(0, min(gaze_y, h - 1))
-
-                is_worn = not (hasattr(last_gaze, 'worn') and not last_gaze.worn)
-                self._draw_gaze_indicator(frame, gaze_x, gaze_y, is_worn)
+                self._draw_gaze_indicator(frame, gaze_x, gaze_y)
 
         return frame
 

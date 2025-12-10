@@ -8,7 +8,7 @@ from rpi_logger.modules.GPS.gps_core.transports.serial_transport import (
     SerialGPSTransport,
     SERIAL_AVAILABLE,
 )
-from rpi_logger.modules.GPS.gps_core.transports.base_transport import BaseGPSTransport
+from rpi_logger.modules.GPS.gps_core.transports import BaseGPSTransport
 
 
 class TestBaseGPSTransport:

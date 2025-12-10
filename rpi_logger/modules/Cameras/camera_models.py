@@ -100,6 +100,7 @@ class CameraModel:
     capabilities: CameraCapabilities
     tested: Optional[str] = None  # ISO date when tested
     notes: Optional[str] = None  # Developer notes
+    sensor_info: Optional[Dict[str, Any]] = None  # Detailed sensor/hardware info
 
 
 @dataclass
@@ -374,6 +375,7 @@ class CameraModelDatabase:
             capabilities=capabilities,
             tested=data.get("tested"),
             notes=data.get("notes"),
+            sensor_info=data.get("sensor_info"),
         )
 
     def _parse_capabilities(self, data: Dict[str, Any]) -> CameraCapabilities:
@@ -443,6 +445,8 @@ class CameraModelDatabase:
             data["tested"] = model.tested
         if model.notes:
             data["notes"] = model.notes
+        if model.sensor_info:
+            data["sensor_info"] = model.sensor_info
         return data
 
     def _serialize_capabilities(self, caps: CameraCapabilities) -> Dict[str, Any]:

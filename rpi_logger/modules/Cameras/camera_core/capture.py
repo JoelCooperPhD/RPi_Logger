@@ -15,6 +15,7 @@ import numpy as np
 
 from rpi_logger.modules.Cameras.config import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
 from rpi_logger.modules.Cameras.camera_core.backends.picam_color import get_picam_color_format
+from rpi_logger.modules.Cameras.camera_core.utils import to_snake_case
 
 # Try to import Picamera2 - may not be available on non-Pi platforms
 try:
@@ -351,27 +352,38 @@ class USBCapture(CaptureHandle):
         import threading
         thread = threading.Thread(target=capture_thread, daemon=True)
         thread.start()
+        self._capture_thread = thread  # Store reference for cleanup
 
-        while self._running:
-            try:
-                item = await asyncio.to_thread(frame_queue.get, timeout=1.0)
-            except Exception:
-                continue
-            if item is None:
-                break
-            frame, monotonic_ns, wall_time = item
-            yield CaptureFrame(
-                data=frame,
-                timestamp=monotonic_ns / 1_000_000_000,
-                frame_number=self._frame_number,
-                monotonic_ns=monotonic_ns,
-                sensor_timestamp_ns=None,
-                wall_time=wall_time,
-                color_format="bgr",
-            )
+        try:
+            while self._running:
+                try:
+                    item = await asyncio.to_thread(frame_queue.get, timeout=1.0)
+                except Exception:
+                    continue
+                if item is None:
+                    break
+                frame, monotonic_ns, wall_time = item
+                yield CaptureFrame(
+                    data=frame,
+                    timestamp=monotonic_ns / 1_000_000_000,
+                    frame_number=self._frame_number,
+                    monotonic_ns=monotonic_ns,
+                    sensor_timestamp_ns=None,
+                    wall_time=wall_time,
+                    color_format="bgr",
+                )
+        finally:
+            # Ensure thread cleanup even if iterator is abandoned
+            self._running = False
+            if thread.is_alive():
+                thread.join(timeout=2.0)
 
     async def stop(self) -> None:
         self._running = False
+        # Wait for capture thread to finish
+        if hasattr(self, '_capture_thread') and self._capture_thread is not None:
+            await asyncio.to_thread(self._capture_thread.join, timeout=2.0)
+            self._capture_thread = None
         if self._cap:
             try:
                 self._cap.release()
@@ -440,7 +452,7 @@ class USBCapture(CaptureHandle):
         # Use v4l2-ctl on Linux (primary method for unreliable controls, fallback for others)
         if sys.platform == "linux" and self._dev_path.startswith("/dev/video"):
             # Convert PascalCase to snake_case for v4l2
-            v4l2_name = self._to_snake_case(name)
+            v4l2_name = to_snake_case(name)
             try:
                 result = subprocess.run(
                     ["v4l2-ctl", "-d", self._dev_path, f"--set-ctrl={v4l2_name}={int(cv_value)}"],
@@ -462,16 +474,6 @@ class USBCapture(CaptureHandle):
 
         log.warning("Unable to set USB control %s", name)
         return False
-
-    @staticmethod
-    def _to_snake_case(name: str) -> str:
-        """Convert PascalCase to snake_case for v4l2."""
-        result = []
-        for i, char in enumerate(name):
-            if i > 0 and char.isupper():
-                result.append("_")
-            result.append(char.lower())
-        return "".join(result)
 
 
 async def open_capture(

@@ -73,6 +73,8 @@ class RecordingManager(RecordingManagerBase):
         self.audio_filename: Optional[str] = None
         self.audio_timing_filename: Optional[str] = None
         self.device_status_filename: Optional[str] = None
+        self.eyes_video_filename: Optional[str] = None
+        self.eyes_timing_filename: Optional[str] = None
 
         self._frame_timing_file: Optional[TextIO] = None
         self._timing_rows_since_flush: int = 0
@@ -105,6 +107,14 @@ class RecordingManager(RecordingManagerBase):
         self._audio_writer_task: Optional[asyncio.Task] = None
         self._audio_queue_sentinel: object = object()
         self._device_status_task: Optional[asyncio.Task] = None
+
+        # Eyes video recording
+        self._eyes_video_encoder: Optional[VideoEncoder] = None
+        self._eyes_frame_queue: Optional[asyncio.Queue[Any]] = None
+        self._eyes_writer_task: Optional[asyncio.Task] = None
+        self._eyes_queue_sentinel: object = object()
+        self._eyes_timing_writer: Optional[AsyncCSVWriter] = None
+        self._eyes_frames_written = 0
 
         self._imu_samples_written = 0
         self._event_samples_written = 0
@@ -181,21 +191,18 @@ class RecordingManager(RecordingManagerBase):
             if self.config.enable_advanced_gaze_logging
             else None
         )
-        self.audio_filename = (
-            str(target_dir / f"{prefix}_AUDIO.wav")
-            if self.config.enable_audio_recording
-            else None
-        )
-        self.audio_timing_filename = (
-            str(target_dir / f"{prefix}_AUDIO_TIMING.csv")
-            if self.config.enable_audio_recording
-            else None
-        )
+        # Audio recording always enabled when stream available
+        self.audio_filename = str(target_dir / f"{prefix}_AUDIO.wav")
+        self.audio_timing_filename = str(target_dir / f"{prefix}_AUDIO_TIMING.csv")
+        # Device status logging always enabled when device_manager available
         self.device_status_filename = (
             str(target_dir / f"{prefix}_DEVICESTATUS.csv")
-            if self.config.enable_device_status_logging and self.device_manager is not None
+            if self.device_manager is not None
             else None
         )
+        # Eyes video: 384x192 combined left+right @ ~200Hz from Neon
+        self.eyes_video_filename = str(target_dir / f"{prefix}_EYES_384x192.mp4")
+        self.eyes_timing_filename = str(target_dir / f"{prefix}_EYES_TIMING.csv")
 
         try:
             await self._video_encoder.start(Path(self.recording_filename))
@@ -267,16 +274,16 @@ class RecordingManager(RecordingManagerBase):
             )
             await self._event_writer.start(Path(self.events_filename))
 
-            if self.audio_filename and self.audio_timing_filename:
-                self._audio_frame_queue = asyncio.Queue(maxsize=max(int(self.config.fps * 6), 240))
-                self._audio_writer_task = asyncio.create_task(self._audio_writer_loop())
+            # Audio recording always started (stream availability determines data)
+            self._audio_frame_queue = asyncio.Queue(maxsize=max(int(self.config.fps * 6), 240))
+            self._audio_writer_task = asyncio.create_task(self._audio_writer_loop())
 
-                self._audio_timing_writer = AsyncCSVWriter(
-                    header="timestamp,timestamp_ns,sample_rate,num_samples,channels",
-                    flush_threshold=64,
-                    queue_size=512,
-                )
-                await self._audio_timing_writer.start(Path(self.audio_timing_filename))
+            self._audio_timing_writer = AsyncCSVWriter(
+                header="timestamp,timestamp_ns,sample_rate,num_samples,channels",
+                flush_threshold=64,
+                queue_size=512,
+            )
+            await self._audio_timing_writer.start(Path(self.audio_timing_filename))
 
             if self.device_status_filename:
                 self._device_status_writer = AsyncCSVWriter(
@@ -291,6 +298,26 @@ class RecordingManager(RecordingManagerBase):
                 )
                 await self._device_status_writer.start(Path(self.device_status_filename))
                 self._device_status_task = asyncio.create_task(self._device_status_loop())
+
+            # Eyes video recording (384x192 @ ~200Hz - high frame rate requires larger queue)
+            self._eyes_video_encoder = VideoEncoder(
+                (384, 192),  # Fixed resolution for Neon eyes camera
+                fps=30.0,    # Downsample from 200Hz to 30fps for manageable file size
+                use_ffmpeg=self.use_ffmpeg,
+            )
+            await self._eyes_video_encoder.start(Path(self.eyes_video_filename))
+
+            self._eyes_timing_writer = AsyncCSVWriter(
+                header="frame_number,timestamp_unix,timestamp_ns,write_time_unix",
+                flush_threshold=64,
+                queue_size=1024,
+            )
+            await self._eyes_timing_writer.start(Path(self.eyes_timing_filename))
+
+            # Eyes stream is ~200Hz, use larger queue to handle bursts
+            self._eyes_frame_queue = asyncio.Queue(maxsize=120)
+            self._eyes_writer_task = asyncio.create_task(self._eyes_writer_loop())
+            self._eyes_frames_written = 0
 
             self._last_gaze_timestamp = None
             self._last_write_monotonic = None
@@ -395,6 +422,14 @@ class RecordingManager(RecordingManagerBase):
             await self._device_status_writer.cleanup()
             self._device_status_writer = None
 
+        if self._eyes_video_encoder:
+            await self._eyes_video_encoder.cleanup()
+            self._eyes_video_encoder = None
+
+        if self._eyes_timing_writer:
+            await self._eyes_timing_writer.cleanup()
+            self._eyes_timing_writer = None
+
         self.gaze_filename = None
         self.frame_timing_filename = None
         self.imu_filename = None
@@ -403,8 +438,11 @@ class RecordingManager(RecordingManagerBase):
         self.audio_filename = None
         self.audio_timing_filename = None
         self.device_status_filename = None
+        self.eyes_video_filename = None
+        self.eyes_timing_filename = None
         self._imu_samples_written = 0
         self._event_samples_written = 0
+        self._eyes_frames_written = 0
         if self._frame_writer_task:
             self._frame_writer_task.cancel()
         self._frame_writer_task = None
@@ -420,6 +458,10 @@ class RecordingManager(RecordingManagerBase):
         if self._device_status_task:
             self._device_status_task.cancel()
         self._device_status_task = None
+        if self._eyes_writer_task:
+            self._eyes_writer_task.cancel()
+        self._eyes_writer_task = None
+        self._eyes_frame_queue = None
         self._is_recording = False
 
     async def stop_recording(self) -> dict:
@@ -529,6 +571,37 @@ class RecordingManager(RecordingManagerBase):
                 output_files.append(Path(self.device_status_filename))
             self._device_status_writer = None
 
+        # Stop eyes video recording
+        if self._eyes_frame_queue is not None:
+            try:
+                self._eyes_frame_queue.put_nowait(self._eyes_queue_sentinel)
+            except asyncio.QueueFull:
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    self._eyes_frame_queue.get_nowait()
+                self._eyes_frame_queue.put_nowait(self._eyes_queue_sentinel)
+
+        if self._eyes_writer_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._eyes_writer_task
+        self._eyes_writer_task = None
+        self._eyes_frame_queue = None
+
+        if self._eyes_video_encoder is not None:
+            await self._eyes_video_encoder.stop()
+            if self.eyes_video_filename and Path(self.eyes_video_filename).exists():
+                logger.info("Eyes video saved (%d frames): %s", self._eyes_frames_written, self.eyes_video_filename)
+                output_files.append(Path(self.eyes_video_filename))
+            elif self.eyes_video_filename:
+                logger.info("No eyes frames captured; skipping %s", self.eyes_video_filename)
+            self._eyes_video_encoder = None
+
+        if self._eyes_timing_writer:
+            await self._eyes_timing_writer.stop()
+            logger.info("Eyes timing saved: %s", self.eyes_timing_filename)
+            if self.eyes_timing_filename:
+                output_files.append(Path(self.eyes_timing_filename))
+            self._eyes_timing_writer = None
+
         self._last_gaze_timestamp = None
         self._last_write_monotonic = None
         self._written_frames = 0
@@ -537,6 +610,7 @@ class RecordingManager(RecordingManagerBase):
         self._duplicated_frames = 0
         self._imu_samples_written = 0
         self._event_samples_written = 0
+        self._eyes_frames_written = 0
         self._recording_start_time = None
         self._next_frame_time = None
         self._latest_frame = None
@@ -634,7 +708,15 @@ class RecordingManager(RecordingManagerBase):
         event_type = getattr(event, "type", None) or getattr(event, "event_type", None)
         subtype = getattr(event, "category", None) or getattr(event, "event_subtype", None)
         confidence = getattr(event, "confidence", None)
+
+        # Pupil Labs FixationEventData has start_time_ns/end_time_ns but no 'duration'
+        # attribute - calculate it if not directly available
         duration = getattr(event, "duration", None)
+        if duration is None:
+            start_ns = getattr(event, "start_time_ns", None)
+            end_ns = getattr(event, "end_time_ns", None)
+            if start_ns is not None and end_ns is not None:
+                duration = (end_ns - start_ns) / 1e9  # Convert ns to seconds
 
         payload = self._event_payload_as_json(event)
 
@@ -695,6 +777,47 @@ class RecordingManager(RecordingManagerBase):
             with contextlib.suppress(asyncio.QueueEmpty):
                 self._audio_frame_queue.get_nowait()
             self._audio_frame_queue.put_nowait(audio)
+
+    def write_eyes_frame(
+        self,
+        frame: Optional[np.ndarray],
+        timestamp_unix: Optional[float] = None,
+        timestamp_ns: Optional[int] = None,
+    ):
+        """Queue an eyes frame for recording.
+
+        Args:
+            frame: BGR numpy array (384x192 for Neon)
+            timestamp_unix: Unix timestamp in seconds
+            timestamp_ns: Unix timestamp in nanoseconds
+        """
+        if not self._is_recording:
+            return
+        if self._eyes_frame_queue is None:
+            logger.warning("Eyes frame queue is None while recording")
+            return
+        if frame is None:
+            return
+
+        queued = {
+            "frame": frame,
+            "timestamp_unix": timestamp_unix,
+            "timestamp_ns": timestamp_ns,
+            "enqueued_time": time.time(),
+        }
+
+        try:
+            self._eyes_frame_queue.put_nowait(queued)
+        except asyncio.QueueFull:
+            # Drop oldest frame to make room
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._eyes_frame_queue.get_nowait()
+            self._eyes_frame_queue.put_nowait(queued)
+
+        # Debug: log first queued frame
+        if not hasattr(self, '_eyes_first_queued_logged'):
+            self._eyes_first_queued_logged = True
+            logger.info("First eyes frame queued for recording (shape: %s)", frame.shape if hasattr(frame, 'shape') else 'unknown')
 
     @staticmethod
     def _stringify(value: Any) -> str:
@@ -886,6 +1009,9 @@ class RecordingManager(RecordingManagerBase):
             'audio_filename': self.audio_filename,
             'audio_timing_filename': self.audio_timing_filename,
             'device_status_filename': self.device_status_filename,
+            'eyes_video_filename': self.eyes_video_filename,
+            'eyes_timing_filename': self.eyes_timing_filename,
+            'eyes_frames_written': self._eyes_frames_written,
         }
 
     async def _frame_writer_loop(self) -> None:
@@ -963,6 +1089,76 @@ class RecordingManager(RecordingManagerBase):
         finally:
             if wave_file is not None:
                 await asyncio.to_thread(wave_file.close)
+
+    async def _eyes_writer_loop(self) -> None:
+        """Background task to write eyes frames to video file."""
+        if self._eyes_frame_queue is None or self._eyes_video_encoder is None:
+            logger.warning("Eyes writer loop: queue or encoder is None, exiting")
+            return
+
+        logger.info("Eyes writer loop started")
+
+        # Frame rate limiting: eyes stream is ~200Hz, we downsample to 30fps
+        target_fps = 30.0
+        min_frame_interval = 1.0 / target_fps
+        last_frame_time: Optional[float] = None
+        frames_received = 0
+        frames_skipped_rate_limit = 0
+
+        try:
+            while True:
+                item = await self._eyes_frame_queue.get()
+                if item is self._eyes_queue_sentinel:
+                    logger.info("Eyes writer loop: received sentinel, stopping")
+                    break
+
+                frames_received += 1
+                frame = item.get("frame")
+                timestamp_unix = item.get("timestamp_unix")
+                timestamp_ns = item.get("timestamp_ns")
+
+                if frame is None:
+                    continue
+
+                # Frame rate limiting
+                current_time = time.time()
+                if last_frame_time is not None:
+                    elapsed = current_time - last_frame_time
+                    if elapsed < min_frame_interval:
+                        frames_skipped_rate_limit += 1
+                        continue  # Skip frame to maintain target fps
+
+                last_frame_time = current_time
+                write_time = time.time()
+
+                # Write frame to video
+                if self.use_ffmpeg:
+                    await self._eyes_video_encoder.write_frame(frame)
+                else:
+                    self._eyes_video_encoder.write_frame(frame)
+
+                self._eyes_frames_written += 1
+
+                # Log timing data
+                if self._eyes_timing_writer is not None:
+                    timing_fields = [
+                        self._stringify(self._eyes_frames_written),
+                        self._stringify(timestamp_unix),
+                        self._stringify(timestamp_ns),
+                        self._stringify(write_time),
+                    ]
+                    self._eyes_timing_writer.enqueue(self._compose_csv_line(timing_fields))
+
+                if self._eyes_frames_written == 1:
+                    logger.info("First eyes frame recorded (shape: %s)", frame.shape if hasattr(frame, 'shape') else 'unknown')
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Eyes writer loop failed: %s", exc, exc_info=True)
+        finally:
+            logger.info("Eyes writer loop ended: received=%d, written=%d, skipped_rate_limit=%d",
+                       frames_received, self._eyes_frames_written, frames_skipped_rate_limit)
 
     def _prepare_audio_frame(
         self, audio_frame: "AudioFrame"

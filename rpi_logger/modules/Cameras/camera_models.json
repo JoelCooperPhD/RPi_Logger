@@ -40,20 +40,12 @@
             ],
             "fps": 15.0,
             "pixel_format": "MJPEG"
-          },
-          {
-            "size": [
-              1920,
-              1080
-            ],
-            "fps": 15.0,
-            "pixel_format": "MJPEG"
           }
         ],
         "default_record": {
           "size": [
-            1920,
-            1080
+            1280,
+            720
           ],
           "fps": 15.0,
           "pixel_format": "MJPEG"
@@ -210,7 +202,19 @@
           }
         }
       },
-      "tested": "2025-12-09"
+      "tested": "2025-12-10",
+      "sensor_info": {
+        "shutter_type": "Rolling Shutter",
+        "max_resolution": "1280x720 (720p)",
+        "max_fps": "15 fps",
+        "autofocus": false,
+        "auto_exposure": true,
+        "auto_white_balance": true,
+        "limitations": "Despite advertising 1080p, this camera only works reliably up to 720p. Frame rate is limited to 15fps. Rolling shutter may cause distortion when recording fast-moving objects.",
+        "best_for": "General scene recording, fixed camera positions, interviews, workspace monitoring",
+        "not_recommended_for": "High-speed motion capture, recording fast hand movements or rapid head turns where rolling shutter artifacts would affect data quality",
+        "notes": "Budget USB camera suitable for basic video documentation. For research requiring precise timing or high frame rates, consider a global shutter camera like the IMX296."
+      }
     },
     "hd_pro_webcam_c920": {
       "name": "HD Pro Webcam C920",
@@ -448,7 +452,19 @@
           }
         }
       },
-      "tested": "2025-12-09"
+      "tested": "2025-12-09",
+      "sensor_info": {
+        "shutter_type": "Rolling Shutter",
+        "max_resolution": "1920x1080 (1080p)",
+        "max_fps": "30 fps",
+        "autofocus": true,
+        "auto_exposure": true,
+        "auto_white_balance": true,
+        "limitations": "Rolling shutter may cause distortion when recording fast-moving objects. Autofocus can hunt/adjust during recording which may be distracting in videos.",
+        "best_for": "Interviews, participant observation, workspace recording, any scenario where subjects are relatively stationary",
+        "not_recommended_for": "High-speed motion analysis, recording rapid hand movements or quick head turns where rolling shutter artifacts would affect data quality",
+        "notes": "High quality consumer webcam with glass lens and good low-light performance. Autofocus is helpful for varying distances but can be disabled if needed. Good all-around choice for general video documentation."
+      }
     },
     "imx296": {
       "name": "IMX296 Global Shutter",
@@ -485,7 +501,18 @@
         }
       },
       "tested": "2025-01-15",
-      "notes": "Sony IMX296 global shutter sensor, excellent for high-speed capture"
+      "sensor_info": {
+        "shutter_type": "Global Shutter",
+        "max_resolution": "1456x1088 (1.6MP)",
+        "max_fps": "60 fps",
+        "autofocus": false,
+        "auto_exposure": true,
+        "auto_white_balance": true,
+        "limitations": "Fixed focus lens (may need manual adjustment for different distances). Lower resolution than typical webcams. Requires manual focus adjustment if subject distance changes.",
+        "best_for": "Eye tracking, recording fast hand movements, high-speed behavioral coding, any research requiring precise frame timing or analysis of rapid motion without distortion",
+        "not_recommended_for": "Scenarios requiring autofocus or very high resolution images",
+        "notes": "Research-grade camera ideal for human factors work. Global shutter captures the entire frame at once, eliminating motion distortion. High frame rate (60fps) enables detailed analysis of rapid movements. Hardware timestamps provide precise timing for synchronization with other data streams."
+      }
     },
     "uvc_046d_0819": {
       "name": "Logitech C270",
@@ -531,7 +558,18 @@
         }
       },
       "tested": "2025-01-15",
-      "notes": "Budget Logitech webcam, limited to 640x480"
+      "sensor_info": {
+        "shutter_type": "Rolling Shutter",
+        "max_resolution": "640x480 (VGA)",
+        "max_fps": "30 fps",
+        "autofocus": false,
+        "auto_exposure": true,
+        "auto_white_balance": true,
+        "limitations": "Low resolution (VGA only). Fixed focus optimized for typical webcam distances. Narrow field of view. Rolling shutter may cause distortion with fast movement.",
+        "best_for": "Basic video documentation where high resolution is not critical, backup camera, secondary angle coverage",
+        "not_recommended_for": "Primary data collection for detailed behavioral analysis, any scenario requiring HD video or fine detail",
+        "notes": "Budget webcam suitable only for basic documentation. Low resolution limits usefulness for detailed video coding. Consider higher resolution cameras for primary research data collection."
+      }
     }
   }
 }

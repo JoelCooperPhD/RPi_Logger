@@ -69,6 +69,9 @@ class AudioState:
             if device_id in self.selected_devices:
                 self.selected_devices[device_id] = info
 
+        # Try to restore previously-selected devices by name
+        self.try_restore_device_selection()
+
         self._update_status()
         self._notify()
 
@@ -77,6 +80,10 @@ class AudioState:
         self.devices[device_id] = device
         if device_id in self.selected_devices:
             self.selected_devices[device_id] = device
+
+        # Try to restore previously-selected devices by name
+        self.try_restore_device_selection()
+
         self._update_status()
         self._notify()
 

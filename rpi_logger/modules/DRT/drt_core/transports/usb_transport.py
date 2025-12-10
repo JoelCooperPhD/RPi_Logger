@@ -11,7 +11,7 @@ import logging
 
 import serial
 
-from .base_transport import BaseTransport
+from rpi_logger.core.devices.transports import BaseTransport
 from ..protocols import DEFAULT_READ_TIMEOUT, DEFAULT_WRITE_TIMEOUT
 
 logger = logging.getLogger(__name__)

@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 
 from .base_handler import BaseGPSHandler
-from ..transports.base_transport import BaseGPSTransport
+from ..transports import BaseGPSTransport
 
 logger = logging.getLogger(__name__)
 

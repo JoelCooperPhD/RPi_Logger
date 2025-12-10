@@ -77,6 +77,9 @@ class ModuleManager:
         self._health_check_task: Optional[asyncio.Task] = None
         self._shutdown = False
 
+        # Track pending state update tasks to prevent garbage collection
+        self._pending_state_tasks: Set[asyncio.Task] = set()
+
         # Discover modules and register with state manager
         self._discover_modules()
 
@@ -701,9 +704,12 @@ class ModuleManager:
         self.module_processes.pop(module_name, None)
 
         # Update state manager (don't await in sync context)
-        asyncio.create_task(
+        # Track task to prevent garbage collection before completion
+        task = asyncio.create_task(
             self.state_manager.set_actual_state(module_name, ActualState.STOPPED)
         )
+        self._pending_state_tasks.add(task)
+        task.add_done_callback(self._pending_state_tasks.discard)
 
     async def _process_status_callback(
         self,
@@ -804,6 +810,11 @@ class ModuleManager:
 
         self.module_processes.clear()
 
+        # Wait for any pending state update tasks to complete
+        if self._pending_state_tasks:
+            await asyncio.gather(*self._pending_state_tasks, return_exceptions=True)
+            self._pending_state_tasks.clear()
+
         # Re-enable reconciliation
         self.state_manager.enable_reconciliation()
 
@@ -823,6 +834,14 @@ class ModuleManager:
             self._health_check_loop(interval)
         )
         self.logger.info("Health check started (interval: %.1fs)", interval)
+
+    async def cleanup(self) -> None:
+        """Clean up resources including observer registration."""
+        await self.stop_all()
+        await self.stop_health_check()
+        # Remove observer to prevent memory leaks
+        self.state_manager.remove_observer(self._handle_state_event)
+        self.logger.info("ModuleManager cleanup complete")
 
     async def stop_health_check(self) -> None:
         """Stop the health check loop."""

@@ -57,7 +57,8 @@ class ModuleProcess:
         self.stderr_task: Optional[asyncio.Task] = None
         self.monitor_task: Optional[asyncio.Task] = None
 
-        self.command_queue: asyncio.Queue = asyncio.Queue()
+        # Bounded queue to prevent memory exhaustion (100 commands should be plenty)
+        self.command_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
 
         self.shutdown_event = asyncio.Event()
         self._was_forcefully_stopped = False
@@ -345,7 +346,14 @@ class ModuleProcess:
             self.logger.warning("Cannot send command - process not running")
             return
 
-        await self.command_queue.put(command)
+        try:
+            # Use wait_for to avoid blocking indefinitely if queue is full
+            await asyncio.wait_for(self.command_queue.put(command), timeout=5.0)
+        except asyncio.TimeoutError:
+            self.logger.error(
+                "Command queue full after 5s timeout, dropping command: %s",
+                command[:100]
+            )
 
     async def start_session(self) -> None:
         await self.send_command(CommandMessage.start_session(session_dir=str(self.output_dir)))

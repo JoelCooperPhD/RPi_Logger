@@ -211,19 +211,9 @@ class GPSTkinterGUI:
         try:
             toplevel = self.root.winfo_toplevel()
 
-            # DEBUG: Log what we have available
-            has_attr = hasattr(self.args, 'instance_id')
-            instance_id_value = getattr(self.args, 'instance_id', None) if has_attr else None
-            self.logger.info("GPS _update_window_title DEBUG: has_instance_id_attr=%s, instance_id=%r, connected=%r, port=%r",
-                           has_attr, instance_id_value, self._connected, self._port)
-
-            # Also log all args attributes for debugging
-            self.logger.info("GPS args attributes: %s", dir(self.args))
-
             # Primary: Use instance_id if available (for multi-instance modules)
             if hasattr(self.args, 'instance_id') and self.args.instance_id:
                 title = self.args.instance_id
-                self.logger.info("GPS using instance_id for title: %s", title)
             # Fallback: Build from device info (original logic)
             elif self._connected and self._port:
                 # Format: "GPS(UART):serial0" (matching VOG/DRT pattern)
@@ -235,13 +225,11 @@ class GPSTkinterGUI:
                     port_short = port_short[3:]
 
                 title = f"GPS({self._connection_type}):{port_short}"
-                self.logger.info("GPS using device info for title: %s", title)
             else:
                 title = "GPS"
-                self.logger.info("GPS using default title: %s", title)
 
             toplevel.title(title)
-            self.logger.info("GPS window title set to: %s", title)
+            self.logger.debug("GPS window title set to: %s", title)
         except Exception as e:
             self.logger.warning("Failed to update window title: %s", e)
 

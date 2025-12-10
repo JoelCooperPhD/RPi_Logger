@@ -248,19 +248,9 @@ class DRTTkinterGUI:
         try:
             toplevel = self.root.winfo_toplevel()
 
-            # DEBUG: Log what we have available
-            has_attr = hasattr(self.args, 'instance_id')
-            instance_id_value = getattr(self.args, 'instance_id', None) if has_attr else None
-            self.logger.info("DRT _update_window_title DEBUG: has_instance_id_attr=%s, instance_id=%r, port=%r, device_type=%r",
-                           has_attr, instance_id_value, self._port, self._device_type)
-
-            # Also log all args attributes for debugging
-            self.logger.info("DRT args attributes: %s", dir(self.args))
-
             # Primary: Use instance_id if available (for multi-instance modules)
             if hasattr(self.args, 'instance_id') and self.args.instance_id:
                 title = self.args.instance_id
-                self.logger.info("DRT using instance_id for title: %s", title)
             # Fallback: Build from device info (original logic)
             elif self._port and self._device_type:
                 # Extract short port name (e.g., "ACM0" from "/dev/ttyACM0")
@@ -269,13 +259,11 @@ class DRTTkinterGUI:
                 # Determine connection type from device_type
                 conn_type = "XBee" if 'wireless' in self._device_type.value.lower() else "USB"
                 title = f"DRT({conn_type}):{port_short}"
-                self.logger.info("DRT using device info for title: %s", title)
             else:
                 title = "DRT"
-                self.logger.info("DRT using default title: %s", title)
 
             toplevel.title(title)
-            self.logger.info("DRT window title set to: %s", title)
+            self.logger.debug("DRT window title set to: %s", title)
         except Exception as e:
             self.logger.warning("Failed to update window title: %s", e)
 

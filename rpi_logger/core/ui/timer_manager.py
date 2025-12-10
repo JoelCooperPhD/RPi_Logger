@@ -108,7 +108,7 @@ class TimerManager:
                     self.current_time_label.config(text=time_str)
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
-            pass
+            self.logger.debug("Clock timer task cancelled")
 
     async def _update_session_timer(self) -> None:
         try:
@@ -123,7 +123,7 @@ class TimerManager:
 
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
-            pass
+            self.logger.debug("Session timer task cancelled")
 
     async def _update_trial_timer(self) -> None:
         try:
@@ -138,7 +138,7 @@ class TimerManager:
 
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
-            pass
+            self.logger.debug("Trial timer task cancelled")
 
     async def _update_system_monitor(self) -> None:
         try:
@@ -161,4 +161,4 @@ class TimerManager:
 
                 await asyncio.sleep(2.0)
         except asyncio.CancelledError:
-            pass
+            self.logger.debug("System monitor task cancelled")

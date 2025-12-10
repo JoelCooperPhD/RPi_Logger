@@ -242,6 +242,21 @@ class GazeTracker:
                         break
                     self.recording_manager.write_audio_sample(next_audio)
 
+                # Drain eyes frames for recording
+                eyes_drained = 0
+                while True:
+                    next_eyes = await self.stream_handler.next_eyes(timeout=0)
+                    if next_eyes is None:
+                        break
+                    eyes_drained += 1
+                    self.recording_manager.write_eyes_frame(
+                        next_eyes.image,
+                        timestamp_unix=next_eyes.timestamp_unix_seconds,
+                        timestamp_ns=next_eyes.timestamp_unix_ns,
+                    )
+                if eyes_drained > 0 and self.frame_count == 1:
+                    logger.info("Drained %d eyes frames on first iteration", eyes_drained)
+
                 # Phase 1.2 & 1.3: Separate display and recording overlays with early scaling
                 display_frame = None
                 recording_frame = None

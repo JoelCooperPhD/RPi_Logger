@@ -417,6 +417,10 @@ class ModuleStateManager:
         if observer in self._observers:
             self._observers.remove(observer)
             self._event_filters.pop(observer, None)
+            self.logger.debug(
+                "Removed observer %s",
+                observer.__name__ if hasattr(observer, '__name__') else str(observer)
+            )
 
     async def _notify_observers(self, change: StateChange) -> None:
         """Notify all observers of a state change."""

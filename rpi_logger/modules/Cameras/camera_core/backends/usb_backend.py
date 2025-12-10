@@ -17,6 +17,7 @@ import numpy as np
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode, CameraCapabilities, ControlInfo, ControlType
 from rpi_logger.modules.Cameras.camera_core.capabilities import build_capabilities
+from rpi_logger.modules.Cameras.camera_core.utils import to_snake_case
 
 
 # OpenCV control properties to probe
@@ -209,7 +210,7 @@ class USBHandle:
     def _set_control_v4l2(self, name: str, value: Any) -> bool:
         """Set control via v4l2-ctl (Linux only)."""
         # Convert PascalCase back to snake_case for v4l2
-        v4l2_name = self._to_snake_case(name)
+        v4l2_name = to_snake_case(name)
 
         try:
             # v4l2-ctl -d /dev/video0 --set-ctrl=brightness=128
@@ -234,16 +235,6 @@ class USBHandle:
         except Exception as e:
             self._logger.debug("v4l2-ctl error setting %s: %s", name, e)
             return False
-
-    @staticmethod
-    def _to_snake_case(name: str) -> str:
-        """Convert PascalCase to snake_case for v4l2."""
-        result = []
-        for i, char in enumerate(name):
-            if i > 0 and char.isupper():
-                result.append("_")
-            result.append(char.lower())
-        return "".join(result)
 
     # ------------------------------------------------------------------ producer
 

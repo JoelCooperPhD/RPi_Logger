@@ -98,6 +98,7 @@ class HeartbeatMonitor:
         timeout: float = 10.0,
         warning_threshold: int = 2,
         unhealthy_threshold: int = 3,
+        callback_timeout: float = 30.0,
     ):
         """
         Initialize heartbeat monitor.
@@ -107,11 +108,13 @@ class HeartbeatMonitor:
             timeout: Time without heartbeat before marking unhealthy (seconds)
             warning_threshold: Missed heartbeats before WARNING status
             unhealthy_threshold: Missed heartbeats before UNHEALTHY status
+            callback_timeout: Timeout for callback execution (seconds)
         """
         self.interval = interval
         self.timeout = timeout
         self.warning_threshold = warning_threshold
         self.unhealthy_threshold = unhealthy_threshold
+        self.callback_timeout = callback_timeout
 
         self._instances: Dict[str, HeartbeatInfo] = {}
         self._unhealthy_callback: Optional[UnhealthyCallback] = None
@@ -119,6 +122,9 @@ class HeartbeatMonitor:
         self._monitor_task: Optional[asyncio.Task] = None
         self._running = False
         self._lock = asyncio.Lock()
+
+        # Track callback tasks to prevent garbage collection
+        self._callback_tasks: Set[asyncio.Task] = set()
 
     def set_unhealthy_callback(self, callback: UnhealthyCallback) -> None:
         """Set callback for when an instance becomes unhealthy."""
@@ -144,6 +150,12 @@ class HeartbeatMonitor:
                 await self._monitor_task
             except asyncio.CancelledError:
                 pass
+
+        # Wait for any pending callback tasks
+        if self._callback_tasks:
+            await asyncio.gather(*self._callback_tasks, return_exceptions=True)
+            self._callback_tasks.clear()
+
         logger.info("Heartbeat monitor stopped")
 
     def register(self, instance_id: str) -> None:
@@ -188,7 +200,28 @@ class HeartbeatMonitor:
         if was_unhealthy:
             logger.info("Instance %s recovered (received heartbeat)", instance_id)
             if self._recovered_callback:
-                asyncio.create_task(self._recovered_callback(instance_id, info))
+                task = asyncio.create_task(
+                    self._run_recovered_callback(instance_id, info)
+                )
+                self._callback_tasks.add(task)
+                task.add_done_callback(self._callback_tasks.discard)
+
+    async def _run_recovered_callback(
+        self, instance_id: str, info: HeartbeatInfo
+    ) -> None:
+        """Run recovered callback with timeout and error handling."""
+        try:
+            await asyncio.wait_for(
+                self._recovered_callback(instance_id, info),  # type: ignore[misc]
+                timeout=self.callback_timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                "Recovered callback for %s timed out after %.1fs",
+                instance_id, self.callback_timeout
+            )
+        except Exception as e:
+            logger.error("Recovered callback error for %s: %s", instance_id, e)
 
     def get_status(self, instance_id: str) -> HealthStatus:
         """Get current health status of an instance."""

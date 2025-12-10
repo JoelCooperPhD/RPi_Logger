@@ -36,23 +36,18 @@ class TrackerConfig:
     overlay_line_start_y: int = 30
 
     # Gaze indicator settings
-    gaze_circle_radius: int = 30
-    gaze_circle_thickness: int = 3
-    gaze_center_radius: int = 2
+    gaze_circle_radius: int = 60
+    gaze_circle_thickness: int = 6
+    gaze_center_radius: int = 4
     gaze_shape: str = "circle"
-    gaze_color_worn_b: int = 255
-    gaze_color_worn_g: int = 255
-    gaze_color_worn_r: int = 0
-    gaze_color_not_worn_b: int = 0
-    gaze_color_not_worn_g: int = 0
-    gaze_color_not_worn_r: int = 255
+    gaze_color_worn_b: int = 0
+    gaze_color_worn_g: int = 0
+    gaze_color_worn_r: int = 255
 
     # Data export controls
     enable_advanced_gaze_logging: bool = False
     expand_eye_event_details: bool = True
-    enable_audio_recording: bool = False
     audio_stream_param: str = "audio=scene"
-    enable_device_status_logging: bool = False
     device_status_poll_interval: float = 5.0
 
     # Phase 3.1: Frame selection mode

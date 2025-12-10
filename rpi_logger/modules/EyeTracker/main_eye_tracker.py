@@ -32,8 +32,7 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 if __package__ in {None, ""}:
     __package__ = "rpi_logger.modules.EyeTracker"
 
-from .app.main_eye_tracker import *  # noqa: F401,F403
-from .app.main_eye_tracker import main as _app_main
+from .app.main_eye_tracker import parse_args, build_runtime, main as _app_main
 from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)

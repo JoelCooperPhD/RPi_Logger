@@ -25,6 +25,14 @@ except ImportError:
     Colors = None  # type: ignore
     RoundedButton = None  # type: ignore
 
+try:
+    from rpi_logger.modules.Cameras.app.widgets.sensor_info_dialog import show_sensor_info
+
+    HAS_SENSOR_DIALOG = True
+except ImportError:
+    HAS_SENSOR_DIALOG = False
+    show_sensor_info = None  # type: ignore
+
 if TYPE_CHECKING:
     from rpi_logger.modules.Cameras.camera_core.state import CameraCapabilities, ControlInfo, ControlType
 
@@ -37,29 +45,39 @@ DEFAULT_SETTINGS = {
     "overlay": "true",
 }
 
-# Essential controls to display (in order)
-ESSENTIAL_CONTROLS = [
+# Image adjustment controls (Card 2)
+IMAGE_CONTROLS = [
     "Brightness",
     "Contrast",
     "Saturation",
     "Hue",
-    "Exposure",
+]
+
+# Exposure/Focus controls (Card 3)
+EXPOSURE_FOCUS_CONTROLS = [
+    # Auto toggles first
     "AutoExposure",
+    "AeExposureMode",  # Picam equivalent
+    # Exposure controls
+    "Exposure",
+    "ExposureTime",  # Picam
     "Gain",
+    "AnalogueGain",  # Picam
+    # Focus toggles
+    "AutoFocus",
+    "FocusAutomaticContinuous",  # USB (e.g., Logitech C920)
+    "AfMode",  # Picam
+    # Focus controls
+    "Focus",
+    "FocusAbsolute",  # USB
+    # White balance
+    "AwbMode",
     "WhiteBalanceBlueU",
     "WhiteBalanceRedV",
-    "Focus",
-    "AutoFocus",
-    # Picam equivalents
-    "AwbMode",
-    "AeExposureMode",
-    "ExposureTime",
-    "AnalogueGain",
-    "Brightness",
-    "Contrast",
-    "Saturation",
-    "AfMode",
 ]
+
+# Combined list for backwards compatibility
+ESSENTIAL_CONTROLS = IMAGE_CONTROLS + EXPOSURE_FOCUS_CONTROLS
 
 # Control dependencies: child -> (parent, values_that_enable_child)
 # When parent's value is NOT in the enable set, the child control is disabled
@@ -67,6 +85,8 @@ CONTROL_DEPENDENCIES = {
     # USB cameras: Gain/Exposure only work in Manual Mode (value starts with "1:")
     "Gain": ("AutoExposure", lambda v: str(v).startswith("1:") or v is True),
     "Exposure": ("AutoExposure", lambda v: str(v).startswith("1:") or v is True),
+    # USB cameras: Manual focus only works when autofocus is disabled
+    "FocusAbsolute": ("FocusAutomaticContinuous", lambda v: not v),
     # Picam: AnalogueGain/ExposureTime work when AeExposureMode is "Custom" or "Off"
     "AnalogueGain": ("AeExposureMode", lambda v: v in ("Custom", "Off")),
     "ExposureTime": ("AeExposureMode", lambda v: v in ("Custom", "Off")),
@@ -100,7 +120,7 @@ class CameraSettingsWindow:
 
         # Capabilities per camera
         self._capabilities: Dict[str, "CameraCapabilities"] = {}
-        self._camera_info: Dict[str, Dict[str, str]] = {}  # model, backend, mode_count
+        self._camera_info: Dict[str, Dict[str, Any]] = {}  # model, backend, mode_count, sensor_info
 
         # UI widgets (created lazily)
         self._preview_res_var: Optional[tk.StringVar] = None
@@ -114,8 +134,11 @@ class CameraSettingsWindow:
 
         # Control widgets - keyed by control name
         self._control_widgets: Dict[str, Dict[str, Any]] = {}  # {name: {var, widget, reset_btn, ...}}
-        self._controls_frame: Optional[tk.Widget] = None
-        self._info_labels: Dict[str, tk.Label] = {}
+        self._image_controls_card: Optional[tk.Widget] = None
+        self._exposure_controls_card: Optional[tk.Widget] = None
+        self._info_label: Optional[tk.Label] = None
+        self._info_btn: Optional[tk.Widget] = None
+        self._info_btn_enabled: bool = False
 
         self._suppress_change = False
         self._debounce_id: Optional[str] = None
@@ -144,6 +167,8 @@ class CameraSettingsWindow:
         merged = dict(DEFAULT_SETTINGS)
         merged.update(settings or {})
         self._latest[camera_id] = merged
+        # Clamp to available options (ensures empty values get set to first available)
+        self._clamp_settings_to_options(camera_id)
         if self._active_camera == camera_id:
             self._refresh_resolution_ui()
 
@@ -182,6 +207,8 @@ class CameraSettingsWindow:
         *,
         hw_model: Optional[str] = None,
         backend: Optional[str] = None,
+        sensor_info: Optional[Dict[str, Any]] = None,
+        display_name: Optional[str] = None,
     ) -> None:
         """Update capabilities for a camera, enabling control widgets."""
         # Check if controls actually changed before storing
@@ -208,10 +235,14 @@ class CameraSettingsWindow:
                     unique_sizes.add(m.size)
             mode_count = len(unique_sizes)
 
+        # Use display_name for model field (consistent across UI), fall back to hw_model
+        model_display = display_name or hw_model or "Unknown"
+
         self._camera_info[camera_id] = {
-            "model": hw_model or "Unknown",
+            "model": model_display,
             "backend": backend_display,
             "mode_count": str(mode_count) if mode_count else "0",
+            "sensor_info": sensor_info,
         }
         if camera_id == self._active_camera:
             # Only rebuild controls if they actually changed
@@ -310,99 +341,154 @@ class CameraSettingsWindow:
     def _build_ui(self) -> None:
         assert tk is not None and ttk is not None
 
-        main_frame = ttk.Frame(self._window, padding=10)
+        # Window background - darker for contrast with cards
+        bg = Colors.BG_DARK if HAS_THEME and Colors else "#2b2b2b"
+
+        main_frame = tk.Frame(self._window, bg=bg, padx=10, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
 
-        self._build_resolution_section(main_frame, row=0)
-        self._build_controls_section(main_frame, row=1)
-        self._build_info_section(main_frame, row=2)
-        self._build_buttons_section(main_frame, row=3)
+        self._build_capture_card(main_frame, row=0)
+        self._build_image_controls_card(main_frame, row=1)
+        self._build_exposure_controls_card(main_frame, row=2)
+        self._build_footer(main_frame, row=3)
 
-    def _build_resolution_section(self, parent, row: int) -> None:
-        """Build the resolution and FPS settings section."""
-        lf = ttk.LabelFrame(parent, text="Resolution & FPS")
-        lf.grid(row=row, column=0, sticky="new", pady=(0, 8), padx=2)
-        lf.columnconfigure(1, weight=1)
+    def _create_card(self, parent, row: int) -> tk.Frame:
+        """Create a borderless card frame with subtle background differentiation."""
+        bg = Colors.BG_FRAME if HAS_THEME and Colors else "#363636"
+        card = tk.Frame(parent, bg=bg, padx=10, pady=8)
+        card.grid(row=row, column=0, sticky="new", pady=(0, 8))
+        card.columnconfigure(0, weight=1)
+        return card
 
-        # Use Inframe styles for widgets inside LabelFrames
-        label_style = "Inframe.TLabel" if HAS_THEME else ""
-        combo_style = "Inframe.TCombobox" if HAS_THEME else ""
+    def _build_capture_card(self, parent, row: int) -> None:
+        """Build the capture settings card with resolution/FPS in horizontal layout."""
+        card = self._create_card(parent, row)
+        bg = Colors.BG_FRAME if HAS_THEME and Colors else "#363636"
+        fg = Colors.FG_PRIMARY if HAS_THEME and Colors else "#ecf0f1"
+        fg_secondary = Colors.FG_SECONDARY if HAS_THEME and Colors else "#95a5a6"
 
-        # Preview Resolution
-        r = 0
-        ttk.Label(lf, text="Preview Resolution:", style=label_style).grid(row=r, column=0, sticky="w", padx=5, pady=2)
+        # Configure grid columns: label | res combo | fps combo | "fps" label
+        card.columnconfigure(1, weight=1)
+        card.columnconfigure(2, weight=0)
+
+        # Preview row
+        tk.Label(card, text="Preview", bg=bg, fg=fg, anchor="w").grid(
+            row=0, column=0, sticky="w", padx=(0, 10), pady=2
+        )
         self._preview_res_var = tk.StringVar(value=DEFAULT_SETTINGS["preview_resolution"])
-        self._preview_res_combo = ttk.Combobox(lf, textvariable=self._preview_res_var, values=(), state="readonly", width=14, style=combo_style)
-        self._preview_res_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
+        self._preview_res_combo = ttk.Combobox(
+            card, textvariable=self._preview_res_var, values=(), state="readonly", width=12
+        )
+        self._preview_res_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=2)
 
-        # Preview FPS
-        r += 1
-        ttk.Label(lf, text="Preview FPS:", style=label_style).grid(row=r, column=0, sticky="w", padx=5, pady=2)
         self._preview_fps_var = tk.StringVar(value=DEFAULT_SETTINGS["preview_fps"])
-        self._preview_fps_combo = ttk.Combobox(lf, textvariable=self._preview_fps_var, values=("1", "2", "5", "10", "15"), state="readonly", width=14, style=combo_style)
-        self._preview_fps_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
+        self._preview_fps_combo = ttk.Combobox(
+            card, textvariable=self._preview_fps_var, values=("1", "2", "5", "10", "15"),
+            state="readonly", width=5
+        )
+        self._preview_fps_combo.grid(row=0, column=2, sticky="e", pady=2)
+        tk.Label(card, text="fps", bg=bg, fg=fg_secondary, anchor="w").grid(
+            row=0, column=3, sticky="w", padx=(4, 0), pady=2
+        )
 
-        # Record Resolution
-        r += 1
-        ttk.Label(lf, text="Record Resolution:", style=label_style).grid(row=r, column=0, sticky="w", padx=5, pady=2)
+        # Record row
+        tk.Label(card, text="Record", bg=bg, fg=fg, anchor="w").grid(
+            row=1, column=0, sticky="w", padx=(0, 10), pady=2
+        )
         self._record_res_var = tk.StringVar(value=DEFAULT_SETTINGS["record_resolution"])
-        self._record_res_combo = ttk.Combobox(lf, textvariable=self._record_res_var, values=(), state="readonly", width=14, style=combo_style)
-        self._record_res_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
+        self._record_res_combo = ttk.Combobox(
+            card, textvariable=self._record_res_var, values=(), state="readonly", width=12
+        )
+        self._record_res_combo.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=2)
 
-        # Record FPS
-        r += 1
-        ttk.Label(lf, text="Record FPS:", style=label_style).grid(row=r, column=0, sticky="w", padx=5, pady=2)
         self._record_fps_var = tk.StringVar(value=DEFAULT_SETTINGS["record_fps"])
-        self._record_fps_combo = ttk.Combobox(lf, textvariable=self._record_fps_var, values=("15", "24", "30", "60"), state="readonly", width=14, style=combo_style)
-        self._record_fps_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
+        self._record_fps_combo = ttk.Combobox(
+            card, textvariable=self._record_fps_var, values=("15", "24", "30", "60"),
+            state="readonly", width=5
+        )
+        self._record_fps_combo.grid(row=1, column=2, sticky="e", pady=2)
+        tk.Label(card, text="fps", bg=bg, fg=fg_secondary, anchor="w").grid(
+            row=1, column=3, sticky="w", padx=(4, 0), pady=2
+        )
 
-    def _build_controls_section(self, parent, row: int) -> None:
-        """Build the camera controls section (populated dynamically)."""
-        lf = ttk.LabelFrame(parent, text="Camera Controls")
-        lf.grid(row=row, column=0, sticky="new", pady=(0, 8), padx=2)
-        lf.columnconfigure(1, weight=1)
-        self._controls_frame = lf
-
-        # Use Inframe style for placeholder
-        label_style = "Inframe.Secondary.TLabel" if HAS_THEME else ""
-
-        # Placeholder - will be rebuilt when capabilities arrive
-        self._controls_placeholder = ttk.Label(lf, text="No camera selected", style=label_style)
-        self._controls_placeholder.grid(row=0, column=0, columnspan=3, padx=10, pady=10)
-
-    def _build_info_section(self, parent, row: int) -> None:
-        """Build the camera info section (read-only)."""
-        lf = ttk.LabelFrame(parent, text="Camera Info")
-        lf.grid(row=row, column=0, sticky="new", pady=(0, 4), padx=2)
-        lf.columnconfigure(1, weight=1)
-
-        # Use Inframe styles for widgets inside LabelFrames
-        label_style = "Inframe.TLabel" if HAS_THEME else ""
-
-        info_items = [("Model:", "model"), ("Backend:", "backend")]
-        for i, (label, key) in enumerate(info_items):
-            ttk.Label(lf, text=label, style=label_style).grid(row=i, column=0, sticky="w", padx=5, pady=1)
-            val_label = ttk.Label(lf, text="-", style=label_style)
-            val_label.grid(row=i, column=1, sticky="e", padx=5, pady=1)
-            self._info_labels[key] = val_label
-
-    def _build_buttons_section(self, parent, row: int) -> None:
-        """Build the bottom buttons section with Apply and Reprobe."""
-        btn_frame = ttk.Frame(parent)
-        btn_frame.grid(row=row, column=0, sticky="e", pady=(8, 0), padx=2)
+        # Apply button row
+        btn_frame = tk.Frame(card, bg=bg)
+        btn_frame.grid(row=2, column=0, columnspan=4, sticky="e", pady=(6, 0))
 
         if HAS_THEME and RoundedButton is not None and Colors is not None:
-            bg = Colors.BG_DARKER if Colors else "#2b2b2b"
-            apply_btn = RoundedButton(btn_frame, text="Apply", command=self._apply_resolution, width=100, height=30, style="default", bg=bg)
-            apply_btn.pack(side=tk.RIGHT, padx=(4, 0))
-            reprobe_btn = RoundedButton(btn_frame, text="Reprobe", command=self._reprobe_camera, width=100, height=30, style="default", bg=bg)
-            reprobe_btn.pack(side=tk.RIGHT)
+            apply_btn = RoundedButton(
+                btn_frame, text="Apply", command=self._apply_resolution,
+                width=80, height=26, style="default", bg=bg
+            )
+            apply_btn.pack(side=tk.RIGHT)
         else:
             apply_btn = ttk.Button(btn_frame, text="Apply", command=self._apply_resolution)
-            apply_btn.pack(side=tk.RIGHT, padx=(4, 0))
-            reprobe_btn = ttk.Button(btn_frame, text="Reprobe", command=self._reprobe_camera)
-            reprobe_btn.pack(side=tk.RIGHT)
+            apply_btn.pack(side=tk.RIGHT)
+
+    def _build_image_controls_card(self, parent, row: int) -> None:
+        """Build the image adjustment controls card (Brightness, Contrast, etc.)."""
+        card = self._create_card(parent, row)
+        card.columnconfigure(1, weight=1)
+        self._image_controls_card = card
+
+        # Placeholder - will be populated when capabilities arrive
+        bg = Colors.BG_FRAME if HAS_THEME and Colors else "#363636"
+        fg = Colors.FG_SECONDARY if HAS_THEME and Colors else "#95a5a6"
+        self._image_placeholder = tk.Label(card, text="No camera selected", bg=bg, fg=fg)
+        self._image_placeholder.grid(row=0, column=0, columnspan=3, pady=6)
+
+    def _build_exposure_controls_card(self, parent, row: int) -> None:
+        """Build the exposure/focus controls card."""
+        card = self._create_card(parent, row)
+        card.columnconfigure(1, weight=1)
+        self._exposure_controls_card = card
+
+        # Placeholder - will be populated when capabilities arrive
+        bg = Colors.BG_FRAME if HAS_THEME and Colors else "#363636"
+        fg = Colors.FG_SECONDARY if HAS_THEME and Colors else "#95a5a6"
+        self._exposure_placeholder = tk.Label(card, text="", bg=bg, fg=fg)
+        self._exposure_placeholder.grid(row=0, column=0, columnspan=3, pady=6)
+
+    def _build_footer(self, parent, row: int) -> None:
+        """Build the footer with camera info and action buttons (no card background)."""
+        bg = Colors.BG_DARK if HAS_THEME and Colors else "#2b2b2b"
+        fg = Colors.FG_SECONDARY if HAS_THEME and Colors else "#95a5a6"
+
+        footer = tk.Frame(parent, bg=bg)
+        footer.grid(row=row, column=0, sticky="ew", pady=(4, 0))
+        footer.columnconfigure(0, weight=1)
+
+        # Camera info label (left side)
+        self._info_label = tk.Label(footer, text="-", bg=bg, fg=fg, anchor="w")
+        self._info_label.grid(row=0, column=0, sticky="w")
+
+        # Buttons frame (right side)
+        btn_frame = tk.Frame(footer, bg=bg)
+        btn_frame.grid(row=0, column=1, sticky="e")
+
+        if HAS_THEME and RoundedButton is not None and Colors is not None:
+            self._info_btn = RoundedButton(
+                btn_frame, text="Info", command=self._show_sensor_info,
+                width=50, height=24, style="default", bg=bg
+            )
+            self._info_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+            reprobe_btn = RoundedButton(
+                btn_frame, text="Reprobe", command=self._reprobe_camera,
+                width=70, height=24, style="default", bg=bg
+            )
+            reprobe_btn.pack(side=tk.LEFT)
+        else:
+            self._info_btn = ttk.Button(btn_frame, text="Info", command=self._show_sensor_info, width=5)
+            self._info_btn.pack(side=tk.LEFT, padx=(0, 6))
+
+            reprobe_btn = ttk.Button(btn_frame, text="Reprobe", command=self._reprobe_camera, width=8)
+            reprobe_btn.pack(side=tk.LEFT)
+
+        # Initially disabled until we have sensor info
+        self._info_btn_enabled = False
+        self._set_info_btn_enabled(False)
 
     # ------------------------------------------------------------------
     # Controls section - dynamic rebuild
@@ -410,41 +496,70 @@ class CameraSettingsWindow:
 
     def _rebuild_controls_section(self) -> None:
         """Rebuild control widgets based on current camera's capabilities."""
-        if not self._controls_frame or not self._window:
+        if not self._window:
             return
 
-        # Clear existing control widgets
-        for child in self._controls_frame.winfo_children():
-            child.destroy()
         self._control_widgets.clear()
+        bg = Colors.BG_FRAME if HAS_THEME and Colors else "#363636"
+        fg_muted = Colors.FG_SECONDARY if HAS_THEME and Colors else "#95a5a6"
 
-        # Use Inframe style for placeholder labels
-        placeholder_style = "Inframe.Secondary.TLabel" if HAS_THEME else ""
+        # Clear and rebuild image controls card
+        if self._image_controls_card:
+            for child in self._image_controls_card.winfo_children():
+                child.destroy()
 
+        # Clear and rebuild exposure controls card
+        if self._exposure_controls_card:
+            for child in self._exposure_controls_card.winfo_children():
+                child.destroy()
+
+        # Check if we have valid camera and controls
         if not self._active_camera:
-            ttk.Label(self._controls_frame, text="No camera selected", style=placeholder_style).grid(row=0, column=0, columnspan=3, padx=10, pady=10)
+            if self._image_controls_card:
+                tk.Label(self._image_controls_card, text="No camera selected", bg=bg, fg=fg_muted).grid(
+                    row=0, column=0, columnspan=3, pady=6
+                )
             return
 
         caps = self._capabilities.get(self._active_camera)
         if not caps or not caps.controls:
-            ttk.Label(self._controls_frame, text="No controls available", style=placeholder_style).grid(row=0, column=0, columnspan=3, padx=10, pady=10)
+            if self._image_controls_card:
+                tk.Label(self._image_controls_card, text="No controls available", bg=bg, fg=fg_muted).grid(
+                    row=0, column=0, columnspan=3, pady=6
+                )
             return
 
-        # Filter to essential controls that exist
-        available_controls = []
-        seen_names = set()
-        for name in ESSENTIAL_CONTROLS:
-            if name in caps.controls and name not in seen_names:
-                available_controls.append((name, caps.controls[name]))
-                seen_names.add(name)
+        # Build image controls (Brightness, Contrast, Saturation, Hue)
+        image_controls = []
+        seen = set()
+        for name in IMAGE_CONTROLS:
+            if name in caps.controls and name not in seen:
+                image_controls.append((name, caps.controls[name]))
+                seen.add(name)
 
-        if not available_controls:
-            ttk.Label(self._controls_frame, text="No controls available", style=placeholder_style).grid(row=0, column=0, columnspan=3, padx=10, pady=10)
-            return
+        if image_controls and self._image_controls_card:
+            for row_idx, (name, ctrl) in enumerate(image_controls):
+                self._build_control_widget(self._image_controls_card, row_idx, name, ctrl)
+        elif self._image_controls_card:
+            tk.Label(self._image_controls_card, text="No image controls", bg=bg, fg=fg_muted).grid(
+                row=0, column=0, columnspan=3, pady=6
+            )
 
-        # Build widgets for each control
-        for row_idx, (name, ctrl) in enumerate(available_controls):
-            self._build_control_widget(self._controls_frame, row_idx, name, ctrl)
+        # Build exposure/focus controls
+        exposure_controls = []
+        for name in EXPOSURE_FOCUS_CONTROLS:
+            if name in caps.controls and name not in seen:
+                exposure_controls.append((name, caps.controls[name]))
+                seen.add(name)
+
+        if exposure_controls and self._exposure_controls_card:
+            for row_idx, (name, ctrl) in enumerate(exposure_controls):
+                self._build_control_widget(self._exposure_controls_card, row_idx, name, ctrl)
+        elif self._exposure_controls_card:
+            # Hide the card if no exposure/focus controls
+            tk.Label(self._exposure_controls_card, text="", bg=bg, fg=fg_muted).grid(
+                row=0, column=0, pady=0
+            )
 
         # Apply initial dependent control states
         self._update_dependent_control_states()
@@ -453,40 +568,38 @@ class CameraSettingsWindow:
         """Build a single control widget based on control type."""
         from rpi_logger.modules.Cameras.camera_core.state import ControlType
 
-        # Inframe styles for widgets inside LabelFrames
-        label_style = "Inframe.TLabel" if HAS_THEME else ""
-        check_style = "Inframe.TCheckbutton" if HAS_THEME else ""
-        combo_style = "Inframe.TCombobox" if HAS_THEME else ""
-        frame_style = "Inframe.TFrame" if HAS_THEME else ""
-        scale_style = "Inframe.Horizontal.TScale" if HAS_THEME else ""
+        bg = Colors.BG_FRAME if HAS_THEME and Colors else "#363636"
+        fg = Colors.FG_PRIMARY if HAS_THEME and Colors else "#ecf0f1"
 
         # Label
         display_name = self._format_control_name(name)
-        ttk.Label(parent, text=f"{display_name}:", style=label_style).grid(row=row, column=0, sticky="w", padx=5, pady=2)
+        tk.Label(parent, text=f"{display_name}:", bg=bg, fg=fg, anchor="w").grid(
+            row=row, column=0, sticky="w", padx=(0, 8), pady=2
+        )
 
         widget_info: Dict[str, Any] = {"control": ctrl, "name": name}
 
         if ctrl.control_type == ControlType.BOOLEAN:
             # Checkbutton
             var = tk.BooleanVar(value=bool(ctrl.current_value))
-            cb = ttk.Checkbutton(parent, variable=var, command=lambda n=name: self._on_control_changed(n), style=check_style)
-            cb.grid(row=row, column=1, sticky="w", padx=5, pady=2)
+            cb = ttk.Checkbutton(parent, variable=var, command=lambda n=name: self._on_control_changed(n))
+            cb.grid(row=row, column=1, sticky="w", pady=2)
             widget_info["var"] = var
             widget_info["widget"] = cb
 
         elif ctrl.control_type == ControlType.ENUM and ctrl.options:
             # Combobox for enum
             var = tk.StringVar(value=str(ctrl.current_value) if ctrl.current_value is not None else "")
-            combo = ttk.Combobox(parent, textvariable=var, values=[str(o) for o in ctrl.options], state="readonly", width=12, style=combo_style)
-            combo.grid(row=row, column=1, sticky="ew", padx=5, pady=2)
+            combo = ttk.Combobox(parent, textvariable=var, values=[str(o) for o in ctrl.options], state="readonly", width=14)
+            combo.grid(row=row, column=1, sticky="ew", pady=2)
             combo.bind("<<ComboboxSelected>>", lambda e, n=name: self._on_control_changed(n))
             widget_info["var"] = var
             widget_info["widget"] = combo
 
         elif ctrl.min_value is not None and ctrl.max_value is not None:
             # Scale (slider) for numeric with range
-            frame = ttk.Frame(parent, style=frame_style)
-            frame.grid(row=row, column=1, sticky="ew", padx=5, pady=2)
+            frame = tk.Frame(parent, bg=bg)
+            frame.grid(row=row, column=1, sticky="ew", pady=2)
             frame.columnconfigure(0, weight=1)
 
             min_val = float(ctrl.min_value)
@@ -500,11 +613,12 @@ class CameraSettingsWindow:
             if ctrl.control_type == ControlType.INTEGER:
                 resolution = max(1, int(resolution))
 
-            scale = ttk.Scale(frame, from_=min_val, to=max_val, variable=var, orient=tk.HORIZONTAL, command=lambda v, n=name: self._on_scale_changed(n, v), style=scale_style)
+            scale = ttk.Scale(frame, from_=min_val, to=max_val, variable=var, orient=tk.HORIZONTAL,
+                              command=lambda v, n=name: self._on_scale_changed(n, v))
             scale.grid(row=0, column=0, sticky="ew")
 
             # Value label
-            val_label = ttk.Label(frame, text=self._format_value(current, ctrl), width=6, anchor="e", style=label_style)
+            val_label = tk.Label(frame, text=self._format_value(current, ctrl), width=6, anchor="e", bg=bg, fg=fg)
             val_label.grid(row=0, column=1, padx=(4, 0))
 
             widget_info["var"] = var
@@ -516,7 +630,7 @@ class CameraSettingsWindow:
             # Entry for unknown or unbounded
             var = tk.StringVar(value=str(ctrl.current_value) if ctrl.current_value is not None else "")
             entry = ttk.Entry(parent, textvariable=var, width=10)
-            entry.grid(row=row, column=1, sticky="e", padx=5, pady=2)
+            entry.grid(row=row, column=1, sticky="e", pady=2)
             entry.bind("<Return>", lambda e, n=name: self._on_control_changed(n))
             entry.bind("<FocusOut>", lambda e, n=name: self._on_control_changed(n))
             widget_info["var"] = var
@@ -525,7 +639,7 @@ class CameraSettingsWindow:
         # Reset button (if default available)
         if ctrl.default_value is not None:
             reset_btn = ttk.Button(parent, text="R", width=2, command=lambda n=name: self._reset_control(n))
-            reset_btn.grid(row=row, column=2, padx=(2, 5), pady=2)
+            reset_btn.grid(row=row, column=2, padx=(4, 0), pady=2)
             widget_info["reset_btn"] = reset_btn
 
         self._control_widgets[name] = widget_info
@@ -783,15 +897,62 @@ class CameraSettingsWindow:
             self._suppress_change = False
 
     def _refresh_info_section(self) -> None:
-        """Refresh camera info labels."""
+        """Refresh camera info in footer and info button state."""
+        if not self._info_label:
+            return
+
         if not self._active_camera:
-            for label in self._info_labels.values():
-                label.config(text="-")
+            self._info_label.config(text="-")
+            self._set_info_btn_enabled(False)
             return
 
         info = self._camera_info.get(self._active_camera, {})
-        for key, label in self._info_labels.items():
-            label.config(text=info.get(key, "-"))
+        model = info.get("model", "Unknown")
+        backend = info.get("backend", "")
+
+        # Format as "Model (Backend)" or just "Model"
+        if backend and backend != "Unknown":
+            display_text = f"{model} ({backend})"
+        else:
+            display_text = model
+
+        self._info_label.config(text=display_text)
+
+        # Enable/disable info button based on whether we have sensor info
+        has_sensor_info = bool(info.get("sensor_info"))
+        self._set_info_btn_enabled(has_sensor_info)
+
+    def _set_info_btn_enabled(self, enabled: bool) -> None:
+        """Set the info button enabled/disabled state."""
+        self._info_btn_enabled = enabled
+        if not self._info_btn:
+            return
+        try:
+            # RoundedButton has set_enabled method
+            if hasattr(self._info_btn, 'set_enabled'):
+                self._info_btn.set_enabled(enabled)
+            else:
+                # ttk.Button fallback
+                self._info_btn.config(state="normal" if enabled else "disabled")
+        except Exception:
+            pass
+
+    def _show_sensor_info(self) -> None:
+        """Show detailed sensor/hardware information dialog."""
+        if not self._active_camera or not self._window:
+            return
+
+        info = self._camera_info.get(self._active_camera, {})
+        sensor_info = info.get("sensor_info")
+        if not sensor_info:
+            return
+
+        camera_name = info.get("model", "Unknown Camera")
+
+        if HAS_SENSOR_DIALOG and show_sensor_info:
+            show_sensor_info(self._window, sensor_info, camera_name)
+        else:
+            self._logger.debug("Sensor info dialog not available")
 
     def _apply_settings_to_ui(self, settings: Dict[str, str]) -> None:
         """Apply settings dict to resolution UI."""

@@ -1,6 +1,221 @@
 {
   "schema": 1,
   "models": {
+    "arducam_usb_camera": {
+      "name": "Arducam USB Camera",
+      "backend": "usb",
+      "match_patterns": [
+        "Arducam USB Camera: Arducam USB*"
+      ],
+      "capabilities": {
+        "modes": [
+          {
+            "size": [
+              320,
+              240
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              640,
+              480
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              800,
+              600
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1280,
+              720
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          }
+        ],
+        "default_record": {
+          "size": [
+            1280,
+            720
+          ],
+          "fps": 15.0,
+          "pixel_format": "MJPEG"
+        },
+        "default_preview": {
+          "size": [
+            640,
+            480
+          ],
+          "fps": 15.0,
+          "pixel_format": "MJPEG"
+        },
+        "controls": {
+          "Brightness": {
+            "name": "Brightness",
+            "type": "int",
+            "current": 0,
+            "min": -64,
+            "max": 64,
+            "default": 0,
+            "step": 1.0,
+            "backend_id": "brightness"
+          },
+          "Contrast": {
+            "name": "Contrast",
+            "type": "int",
+            "current": 32,
+            "min": 0,
+            "max": 64,
+            "default": 32,
+            "step": 1.0,
+            "backend_id": "contrast"
+          },
+          "Saturation": {
+            "name": "Saturation",
+            "type": "int",
+            "current": 64,
+            "min": 0,
+            "max": 128,
+            "default": 64,
+            "step": 1.0,
+            "backend_id": "saturation"
+          },
+          "Hue": {
+            "name": "Hue",
+            "type": "int",
+            "current": 0,
+            "min": -40,
+            "max": 40,
+            "default": 0,
+            "step": 1.0,
+            "backend_id": "hue"
+          },
+          "WhiteBalanceAutomatic": {
+            "name": "WhiteBalanceAutomatic",
+            "type": "bool",
+            "current": 1,
+            "default": 1,
+            "backend_id": "white_balance_automatic"
+          },
+          "Gamma": {
+            "name": "Gamma",
+            "type": "int",
+            "current": 100,
+            "min": 72,
+            "max": 500,
+            "default": 100,
+            "step": 1.0,
+            "backend_id": "gamma"
+          },
+          "Gain": {
+            "name": "Gain",
+            "type": "int",
+            "current": 0,
+            "min": 0,
+            "max": 100,
+            "default": 0,
+            "step": 1.0,
+            "backend_id": "gain"
+          },
+          "PowerLineFrequency": {
+            "name": "PowerLineFrequency",
+            "type": "enum",
+            "current": "1:50 Hz",
+            "min": 0,
+            "max": 2,
+            "default": 1,
+            "options": [
+              "0:Disabled",
+              "1:50 Hz",
+              "2:60 Hz"
+            ],
+            "backend_id": "power_line_frequency"
+          },
+          "WhiteBalanceTemperature": {
+            "name": "WhiteBalanceTemperature",
+            "type": "int",
+            "current": 4600,
+            "min": 2800,
+            "max": 6500,
+            "default": 4600,
+            "step": 1.0,
+            "backend_id": "white_balance_temperature"
+          },
+          "Sharpness": {
+            "name": "Sharpness",
+            "type": "int",
+            "current": 2,
+            "min": 0,
+            "max": 6,
+            "default": 2,
+            "step": 1.0,
+            "backend_id": "sharpness"
+          },
+          "BacklightCompensation": {
+            "name": "BacklightCompensation",
+            "type": "int",
+            "current": 1,
+            "min": 0,
+            "max": 2,
+            "default": 1,
+            "step": 1.0,
+            "backend_id": "backlight_compensation"
+          },
+          "AutoExposure": {
+            "name": "AutoExposure",
+            "type": "enum",
+            "current": "3:Aperture Priority Mode",
+            "min": 0,
+            "max": 3,
+            "default": 3,
+            "options": [
+              "1:Manual Mode",
+              "3:Aperture Priority Mode"
+            ],
+            "backend_id": "auto_exposure"
+          },
+          "ExposureTimeAbsolute": {
+            "name": "ExposureTimeAbsolute",
+            "type": "int",
+            "current": 156,
+            "min": 1,
+            "max": 5000,
+            "default": 156,
+            "step": 1.0,
+            "backend_id": "exposure_time_absolute"
+          },
+          "ExposureDynamicFramerate": {
+            "name": "ExposureDynamicFramerate",
+            "type": "bool",
+            "current": 0,
+            "default": 0,
+            "backend_id": "exposure_dynamic_framerate"
+          }
+        }
+      },
+      "tested": "2025-12-10",
+      "sensor_info": {
+        "shutter_type": "Rolling Shutter",
+        "max_resolution": "1280x720 (720p)",
+        "max_fps": "15 fps",
+        "autofocus": false,
+        "auto_exposure": true,
+        "auto_white_balance": true,
+        "limitations": "Despite advertising 1080p, this camera only works reliably up to 720p. Frame rate is limited to 15fps. Rolling shutter may cause distortion when recording fast-moving objects.",
+        "best_for": "General scene recording, fixed camera positions, interviews, workspace monitoring",
+        "not_recommended_for": "High-speed motion capture, recording fast hand movements or rapid head turns where rolling shutter artifacts would affect data quality",
+        "notes": "Budget USB camera suitable for basic video documentation. For research requiring precise timing or high frame rates, consider a global shutter camera like the IMX296."
+      }
+    },
     "hd_pro_webcam_c920": {
       "name": "HD Pro Webcam C920",
       "backend": "usb",
@@ -237,7 +452,19 @@
           }
         }
       },
-      "tested": "2025-12-09"
+      "tested": "2025-12-09",
+      "sensor_info": {
+        "shutter_type": "Rolling Shutter",
+        "max_resolution": "1920x1080 (1080p)",
+        "max_fps": "30 fps",
+        "autofocus": true,
+        "auto_exposure": true,
+        "auto_white_balance": true,
+        "limitations": "Rolling shutter may cause distortion when recording fast-moving objects. Autofocus can hunt/adjust during recording which may be distracting in videos.",
+        "best_for": "Interviews, participant observation, workspace recording, any scenario where subjects are relatively stationary",
+        "not_recommended_for": "High-speed motion analysis, recording rapid hand movements or quick head turns where rolling shutter artifacts would affect data quality",
+        "notes": "High quality consumer webcam with glass lens and good low-light performance. Autofocus is helpful for varying distances but can be disabled if needed. Good all-around choice for general video documentation."
+      }
     }
   }
 }

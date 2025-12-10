@@ -304,6 +304,7 @@ class CamerasRuntime(ModuleRuntime):
                     hw_model=self._descriptor.hw_model if self._descriptor else None,
                     backend=camera_type,
                     sensor_info=self._known_model.sensor_info if self._known_model else None,
+                    display_name=self._known_model.name if self._known_model else self._camera_name,
                 )
             self.view.set_status(f"Camera ready: {self._camera_name}")
 
@@ -653,6 +654,7 @@ class CamerasRuntime(ModuleRuntime):
                     hw_model=self._descriptor.hw_model if self._descriptor else None,
                     backend=camera_type,
                     sensor_info=self._known_model.sensor_info if self._known_model else None,
+                    display_name=self._known_model.name if self._known_model else self._camera_name,
                 )
                 self.view.set_status("Camera reprobed successfully")
             else:

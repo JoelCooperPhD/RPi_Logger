@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
 try:
     import tkinter as tk
@@ -30,14 +30,10 @@ from vmc import LegacyTkViewBridge, StubCodexView
 
 try:
     from rpi_logger.core.ui.theme.styles import Theme
-    from rpi_logger.core.ui.theme.colors import Colors
-    from rpi_logger.core.ui.theme.widgets import RoundedButton
     HAS_THEME = True
 except ImportError:
     HAS_THEME = False
     Theme = None  # type: ignore
-    Colors = None  # type: ignore
-    RoundedButton = None  # type: ignore
 
 # Import stream viewers
 from .stream_viewers import (
@@ -193,8 +189,9 @@ class NeonEyeTrackerTkinterGUI:
             )
             video_frame = self._video_viewer.build_ui()
             video_frame.grid(row=0, column=0, sticky="nsew")
-            self._video_viewer._visible = True  # Video is always visible when enabled
-            self._video_viewer._enabled = True  # Start enabled
+            # Video viewer is always enabled - set state to match gridded frame
+            self._video_viewer._visible = True
+            self._video_viewer._enabled = True
 
             # Create eyes viewer (right side of video, stacked vertically)
             # Eyes are hidden by default, shown when checkbox is checked
@@ -321,10 +318,9 @@ class NeonEyeTrackerTkinterGUI:
         self._stream_controls = controls
 
         # Register viewers with controls
-        # Note: eyes viewer is NOT registered here - we handle its visibility
-        # through _update_video_eyes_layout in _on_stream_change instead
-        if self._video_viewer:
-            controls.register_viewer("video", self._video_viewer)
+        # Note: video viewer is NOT registered - it's always enabled as the core
+        # purpose of the module. Eyes viewer is also not registered here - we
+        # handle its visibility through _update_video_eyes_layout in _on_stream_change
         if self._imu_viewer:
             controls.register_viewer("imu", self._imu_viewer)
         if self._events_viewer:
@@ -383,10 +379,11 @@ class NeonEyeTrackerTkinterGUI:
             imu = self._imu_provider() if self._imu_provider else None
             self._imu_viewer.update(imu)
 
-        # Update events viewer
+        # Update events viewer (with gaze data for PERCLOS)
         if self._events_viewer and self._events_viewer.enabled:
             event = self._event_provider() if self._event_provider else None
-            self._events_viewer.update(event)
+            gaze = self._gaze_provider() if self._gaze_provider else None
+            self._events_viewer.update(event, gaze)
 
         # Update audio viewer
         if self._audio_viewer and self._audio_viewer.enabled:
@@ -731,6 +728,10 @@ class NeonEyeTrackerView:
                     self.gui._eyes_viewer._enabled = eyes_enabled
                     self.gui._update_video_eyes_layout(eyes_visible=eyes_enabled)
 
+            # Ensure video viewer is always enabled (no toggle for video)
+            if self.gui._video_viewer:
+                self.gui._video_viewer._enabled = True
+
             # Set preview interval from config
             preview_hz = max(1, int(getattr(self.args, "gui_preview_update_hz", 10)))
             self.gui.set_preview_interval(int(1000 / preview_hz))
@@ -810,11 +811,10 @@ class NeonEyeTrackerView:
         if self._stream_controls and self._runtime and hasattr(self._runtime, 'config'):
             self._stream_controls.save_to_config(self._runtime.config)
 
-            # Persist stream states to config file
+            # Persist stream states to config file (video always enabled, not persisted)
             if self._preferences:
                 config = self._runtime.config
                 stream_updates = {
-                    "stream_video_enabled": config.stream_video_enabled,
                     "stream_gaze_enabled": config.stream_gaze_enabled,
                     "stream_eyes_enabled": config.stream_eyes_enabled,
                     "stream_imu_enabled": config.stream_imu_enabled,

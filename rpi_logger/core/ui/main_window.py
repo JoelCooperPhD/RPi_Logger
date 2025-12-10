@@ -45,7 +45,7 @@ class TextHandler(logging.Handler):
             after_id = self.text_widget.after(0, self._append_log, msg)
             self._pending_after_ids.append(after_id)
         except Exception:
-            pass
+            pass  # Silent: logging should never crash the app
 
     def _append_log(self, msg: str) -> None:
         if self._closed:
@@ -68,7 +68,7 @@ class TextHandler(logging.Handler):
             # Widget was destroyed
             self._closed = True
         except Exception:
-            pass
+            pass  # Silent: logging should never crash the app
 
     def close(self) -> None:
         self._closed = True
@@ -77,7 +77,7 @@ class TextHandler(logging.Handler):
             try:
                 self.text_widget.after_cancel(after_id)
             except Exception:
-                pass
+                pass  # Widget may already be destroyed
         self._pending_after_ids.clear()
         super().close()
 

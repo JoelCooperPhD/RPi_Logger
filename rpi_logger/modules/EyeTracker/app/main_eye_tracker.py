@@ -161,34 +161,10 @@ def parse_args(argv: Optional[list[str]] = None):
         help="Write compact legacy event CSV",
     )
     parser.add_argument(
-        "--enable-audio-recording",
-        dest="enable_audio_recording",
-        action="store_true",
-        help="Capture headset audio stream",
-    )
-    parser.add_argument(
-        "--disable-audio-recording",
-        dest="enable_audio_recording",
-        action="store_false",
-        help="Disable headset audio stream",
-    )
-    parser.add_argument(
         "--audio-stream-param",
         dest="audio_stream_param",
         default=get_config_str(config, "audio_stream_param", "audio=scene"),
         help="RTSP query parameter used to locate audio stream",
-    )
-    parser.add_argument(
-        "--log-device-status",
-        dest="enable_device_status_logging",
-        action="store_true",
-        help="Record periodic device telemetry",
-    )
-    parser.add_argument(
-        "--no-log-device-status",
-        dest="enable_device_status_logging",
-        action="store_false",
-        help="Disable device telemetry logging",
     )
     parser.add_argument(
         "--device-status-interval",
@@ -201,8 +177,6 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.set_defaults(
         enable_advanced_gaze_logging=get_config_bool(config, "enable_advanced_gaze_logging", False),
         expand_eye_event_details=get_config_bool(config, "expand_eye_event_details", True),
-        enable_audio_recording=get_config_bool(config, "enable_audio_recording", False),
-        enable_device_status_logging=get_config_bool(config, "enable_device_status_logging", False),
     )
 
     args = parser.parse_args(argv)
@@ -220,16 +194,13 @@ def parse_args(argv: Optional[list[str]] = None):
     args.overlay_color_b = get_config_int(config, "overlay_color_b", 0)
     args.overlay_margin_left = get_config_int(config, "overlay_margin_left", 10)
     args.overlay_line_start_y = get_config_int(config, "overlay_line_start_y", 30)
-    args.gaze_circle_radius = get_config_int(config, "gaze_circle_radius", 10)
-    args.gaze_circle_thickness = get_config_int(config, "gaze_circle_thickness", 1)
-    args.gaze_center_radius = get_config_int(config, "gaze_center_radius", 1)
+    args.gaze_circle_radius = get_config_int(config, "gaze_circle_radius", 60)
+    args.gaze_circle_thickness = get_config_int(config, "gaze_circle_thickness", 6)
+    args.gaze_center_radius = get_config_int(config, "gaze_center_radius", 4)
     args.gaze_shape = get_config_str(config, "gaze_shape", "circle")
-    args.gaze_color_worn_b = get_config_int(config, "gaze_color_worn_b", 255)
-    args.gaze_color_worn_g = get_config_int(config, "gaze_color_worn_g", 255)
-    args.gaze_color_worn_r = get_config_int(config, "gaze_color_worn_r", 0)
-    args.gaze_color_not_worn_b = get_config_int(config, "gaze_color_not_worn_b", 0)
-    args.gaze_color_not_worn_g = get_config_int(config, "gaze_color_not_worn_g", 0)
-    args.gaze_color_not_worn_r = get_config_int(config, "gaze_color_not_worn_r", 255)
+    args.gaze_color_worn_b = get_config_int(config, "gaze_color_worn_b", 0)
+    args.gaze_color_worn_g = get_config_int(config, "gaze_color_worn_g", 0)
+    args.gaze_color_worn_r = get_config_int(config, "gaze_color_worn_r", 255)
 
     # Stream viewer enable states (Controls menu persistence)
     args.stream_video_enabled = get_config_bool(config, "stream_video_enabled", True)

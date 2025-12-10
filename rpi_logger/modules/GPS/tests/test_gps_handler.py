@@ -7,7 +7,7 @@ import pytest
 
 from rpi_logger.modules.GPS.gps_core.handlers.gps_handler import GPSHandler
 from rpi_logger.modules.GPS.gps_core.handlers.base_handler import BaseGPSHandler
-from rpi_logger.modules.GPS.gps_core.transports.base_transport import BaseGPSTransport
+from rpi_logger.modules.GPS.gps_core.transports import BaseGPSTransport
 from rpi_logger.modules.GPS.gps_core.parsers.nmea_types import GPSFixSnapshot
 
 

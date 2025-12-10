@@ -1,7 +1,7 @@
-enabled = true
+enabled = false
 view.show_io_panel = true
-view.show_logger = false
+view.show_logger = true
 display_name = Cameras
 preview_resolution = auto
 device_connected = false
-window_geometry = 746x536+1011+470
+window_geometry = 320x200

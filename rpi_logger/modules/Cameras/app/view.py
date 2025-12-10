@@ -374,6 +374,8 @@ class CameraView:
         *,
         hw_model: Optional[str] = None,
         backend: Optional[str] = None,
+        sensor_info: Optional[Dict[str, Any]] = None,
+        display_name: Optional[str] = None,
     ) -> None:
         """Update camera capabilities and refresh settings options."""
         if not self._camera_id or not capabilities:
@@ -417,6 +419,8 @@ class CameraView:
                 capabilities,
                 hw_model=hw_model,
                 backend=backend,
+                sensor_info=sensor_info,
+                display_name=display_name,
             )
 
     def set_status(self, message: str) -> None:
