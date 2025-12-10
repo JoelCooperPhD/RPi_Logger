@@ -1,38 +1,9 @@
-"""Shared utility functions for the Cameras module.
-
-Keep this module lightweight - it's imported by worker subprocesses.
-"""
+"""Shared utility functions for the Cameras module."""
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Tuple
 
 Resolution = Tuple[int, int]
-
-
-@dataclass(slots=True)
-class CameraMetrics:
-    """Metrics snapshot for a camera.
-
-    Uses consistent field naming across the module.
-    """
-    state: str
-    is_recording: bool
-    fps_capture: float
-    fps_encode: float
-    fps_preview: float
-    frames_captured: int
-    frames_recorded: int
-    target_fps: float  # Camera's actual/configured FPS (always available)
-    target_record_fps: float
-    target_preview_fps: float
-    capture_wait_ms: float
-    preview_queue: int = 0
-    record_queue: int = 0
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dict for UI consumption."""
-        return asdict(self)
 
 
 def parse_resolution(raw: Any, default: Resolution) -> Resolution:
@@ -58,40 +29,33 @@ def parse_resolution(raw: Any, default: Resolution) -> Resolution:
             if "," in s:
                 w, h = s.split(",", 1)
                 return int(w.strip()), int(h.strip())
-    except (ValueError, TypeError, AttributeError):
+    except Exception:
         pass
     return default
 
 
 def parse_fps(raw: Any, default: float) -> float:
-    """Parse FPS from string or number.
-
-    Returns the default if parsing fails.
-    """
+    """Parse FPS from various formats."""
     if raw is None or raw == "":
         return default
     try:
         return float(raw)
-    except (ValueError, TypeError):
+    except Exception:
         return default
 
 
 def parse_bool(raw: Any, default: bool) -> bool:
-    """Parse boolean from various formats.
-
-    Truthy strings: "true", "1", "yes", "on"
-    """
-    if raw is None or raw == "":
+    """Parse boolean from various formats."""
+    if raw is None:
         return default
     if isinstance(raw, bool):
         return raw
-    return str(raw).strip().lower() in ("true", "1", "yes", "on")
+    if isinstance(raw, str):
+        return raw.lower() in ("true", "1", "yes", "on")
+    try:
+        return bool(raw)
+    except Exception:
+        return default
 
 
-__all__ = [
-    "CameraMetrics",
-    "Resolution",
-    "parse_bool",
-    "parse_fps",
-    "parse_resolution",
-]
+__all__ = ["Resolution", "parse_resolution", "parse_fps", "parse_bool"]

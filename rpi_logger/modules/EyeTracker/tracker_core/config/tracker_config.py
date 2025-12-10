@@ -5,14 +5,24 @@ from typing import Optional
 
 @dataclass
 class TrackerConfig:
-    fps: float = 5.0
-    resolution: tuple = (1280, 720)
+    # Recording settings (downsampled from Neon raw 1600x1200 @ 30Hz)
+    fps: float = 10.0
+    resolution: tuple = (800, 600)
     output_dir: str = "recordings"
+
+    # Preview settings
+    preview_width: int = 400
+    preview_height: Optional[int] = None
+    preview_fps: float = 10.0
     display_width: int = 640
 
-    # Phase 1.3: Preview resolution for early scaling
-    preview_width: int = 640
-    preview_height: Optional[int] = None
+    # Stream viewer enable states (persisted)
+    stream_video_enabled: bool = True
+    stream_gaze_enabled: bool = True
+    stream_eyes_enabled: bool = False
+    stream_imu_enabled: bool = False
+    stream_events_enabled: bool = False
+    stream_audio_enabled: bool = False
 
     # Recording overlay settings (matching camera module)
     enable_recording_overlay: bool = True
@@ -49,6 +59,11 @@ class TrackerConfig:
     # "timer" - maintains consistent output FPS, duplicates frames when camera slower (default)
     # "camera" - only writes unique camera frames, variable timing (for frame-accurate analysis)
     frame_selection_mode: str = "timer"
+
+    # IMU visualization settings
+    imu_sparkline_duration_sec: float = 10.0  # Seconds of motion history to display
+    imu_motion_still_threshold: float = 0.02  # g deviation for STILL state (subtle head movements)
+    imu_motion_rapid_threshold: float = 0.08  # g deviation for RAPID state
 
     def __post_init__(self):
         """Calculate preview height to maintain aspect ratio"""

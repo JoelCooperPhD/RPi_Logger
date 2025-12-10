@@ -77,19 +77,22 @@ class DRTPlotter:
         canvas_widget.configure(bg=Colors.BG_DARK, highlightbackground=Colors.BORDER, highlightcolor=Colors.BORDER)
         canvas_widget.grid(row=0, column=0, rowspan=20, sticky='nsew', padx=2, pady=2)
 
-        # Per-device reaction time data
-        self._rt_now = {}
-        self._rt_array = {}
-        self._rt_xy = {}
-        self._rt_index = {}
+        # Single device tracking (multi-instance pattern - one device per plotter)
+        self._device_id: Optional[str] = None
+        self._device_added: bool = False
 
-        # Per-device stimulus state data
-        self._state_now = {}
-        self._state_array = {}
-        self._state_xy = {}
-        self._state_index = {}
+        # Reaction time data (single device)
+        self._rt_now: Optional[float] = None
+        self._rt_array: dict = {'hit': None, 'miss': None}
+        self._rt_xy: dict = {'hit': None, 'miss': None}
+        self._rt_index: int = 0
 
-        self._unit_ids = set()
+        # Stimulus state data (single device)
+        self._state_now: float = 0
+        self._state_array: Optional[np.ndarray] = None
+        self._state_xy = None
+        self._state_index: int = 0
+
         self._plot_lines = []
 
         self._rt_y_min = 0
@@ -178,54 +181,56 @@ class DRTPlotter:
         return self._plot_lines
 
     def add_device(self, port: str):
-        """Add a device to track in the plotter."""
-        if port in self._unit_ids:
+        """Add a device to track in the plotter (single device only)."""
+        if self._device_added:
             return
 
-        # Initialize reaction time tracking for device
-        self._rt_now[port] = None
-        self._rt_index[port] = 0
+        self._device_id = port
+        self._device_added = True
 
-        self._rt_array[port] = {
+        # Initialize reaction time tracking
+        self._rt_now = None
+        self._rt_index = 0
+
+        self._rt_array = {
             'hit': np.full(self.BUFFER_SIZE, np.nan),
             'miss': np.full(self.BUFFER_SIZE, np.nan)
         }
 
-        self._rt_xy[port] = {}
-        self._rt_xy[port]['hit'] = self._ax_rt.plot(
-            self._time_array, self._rt_array[port]['hit'],
+        self._rt_xy['hit'] = self._ax_rt.plot(
+            self._time_array, self._rt_array['hit'],
             marker='o', linestyle='', markersize=3
         )
 
-        c = self._rt_xy[port]['hit'][0].get_color()
-        self._rt_xy[port]['miss'] = self._ax_rt.plot(
-            self._time_array, self._rt_array[port]['miss'],
+        c = self._rt_xy['hit'][0].get_color()
+        self._rt_xy['miss'] = self._ax_rt.plot(
+            self._time_array, self._rt_array['miss'],
             marker='x', linestyle='', markersize=3, color=c
         )
 
-        # Initialize stimulus state tracking for device
-        self._state_now[port] = 0
-        self._state_index[port] = 0
-        self._state_array[port] = np.full(self.BUFFER_SIZE, np.nan)
-        self._state_xy[port] = self._ax_state.plot(
-            self._time_array, self._state_array[port],
+        # Initialize stimulus state tracking
+        self._state_now = 0
+        self._state_index = 0
+        self._state_array = np.full(self.BUFFER_SIZE, np.nan)
+        self._state_xy = self._ax_state.plot(
+            self._time_array, self._state_array,
             linewidth=1.5
         )
 
-        self._unit_ids.add(port)
         self._rebuild_plot_lines()
 
     def _rebuild_plot_lines(self):
         """Rebuild the list of plot lines for animation."""
         # Always include default lines
         self._plot_lines = [self._default_state_line, self._default_rt_hit, self._default_rt_miss]
-        # Add device-specific lines
-        for port in self._unit_ids:
-            if port in self._state_xy:
-                self._plot_lines.extend(self._state_xy[port])
-            if port in self._rt_xy:
-                self._plot_lines.extend(self._rt_xy[port]['hit'])
-                self._plot_lines.extend(self._rt_xy[port]['miss'])
+        # Add device-specific lines if device is added
+        if self._device_added:
+            if self._state_xy is not None:
+                self._plot_lines.extend(self._state_xy)
+            if self._rt_xy['hit'] is not None:
+                self._plot_lines.extend(self._rt_xy['hit'])
+            if self._rt_xy['miss'] is not None:
+                self._plot_lines.extend(self._rt_xy['miss'])
 
     def _should_update(self) -> bool:
         """Check if animation should process this frame.
@@ -240,40 +245,42 @@ class DRTPlotter:
         if not self._should_update():
             return self._plot_lines
 
-        for unit_id in list(self._unit_ids):
-            try:
-                self._rescale_rt_y(self._rt_now.get(unit_id))
+        if not self._device_added:
+            return self._plot_lines
 
-                idx = self._rt_index[unit_id]
-                rt_val = self._rt_now.get(unit_id)
-                if rt_val is not None:
-                    if rt_val > 0:
-                        self._rt_array[unit_id]['hit'][idx] = rt_val
-                        self._rt_array[unit_id]['miss'][idx] = np.nan
-                    else:
-                        self._rt_array[unit_id]['hit'][idx] = np.nan
-                        self._rt_array[unit_id]['miss'][idx] = abs(rt_val)
+        try:
+            self._rescale_rt_y(self._rt_now)
+
+            idx = self._rt_index
+            rt_val = self._rt_now
+            if rt_val is not None:
+                if rt_val > 0:
+                    self._rt_array['hit'][idx] = rt_val
+                    self._rt_array['miss'][idx] = np.nan
                 else:
-                    self._rt_array[unit_id]['hit'][idx] = np.nan
-                    self._rt_array[unit_id]['miss'][idx] = np.nan
+                    self._rt_array['hit'][idx] = np.nan
+                    self._rt_array['miss'][idx] = abs(rt_val)
+            else:
+                self._rt_array['hit'][idx] = np.nan
+                self._rt_array['miss'][idx] = np.nan
 
-                self._rt_index[unit_id] = (idx + 1) % self.BUFFER_SIZE
-                self._rt_now[unit_id] = None
+            self._rt_index = (idx + 1) % self.BUFFER_SIZE
+            self._rt_now = None
 
-                rt_view_hit = self._get_circular_view(self._rt_array[unit_id]['hit'], self._rt_index[unit_id])
-                rt_view_miss = self._get_circular_view(self._rt_array[unit_id]['miss'], self._rt_index[unit_id])
-                self._rt_xy[unit_id]['hit'][0].set_ydata(rt_view_hit)
-                self._rt_xy[unit_id]['miss'][0].set_ydata(rt_view_miss)
+            rt_view_hit = self._get_circular_view(self._rt_array['hit'], self._rt_index)
+            rt_view_miss = self._get_circular_view(self._rt_array['miss'], self._rt_index)
+            self._rt_xy['hit'][0].set_ydata(rt_view_hit)
+            self._rt_xy['miss'][0].set_ydata(rt_view_miss)
 
-                state_idx = self._state_index[unit_id]
-                self._state_array[unit_id][state_idx] = self._state_now.get(unit_id, 0)
-                self._state_index[unit_id] = (state_idx + 1) % self.BUFFER_SIZE
+            state_idx = self._state_index
+            self._state_array[state_idx] = self._state_now
+            self._state_index = (state_idx + 1) % self.BUFFER_SIZE
 
-                state_view = self._get_circular_view(self._state_array[unit_id], self._state_index[unit_id])
-                self._state_xy[unit_id][0].set_ydata(state_view)
+            state_view = self._get_circular_view(self._state_array, self._state_index)
+            self._state_xy[0].set_ydata(state_view)
 
-            except (KeyError, IndexError) as e:
-                self.logger.debug("Animation error for %s: %s", unit_id, e)
+        except (KeyError, IndexError) as e:
+            self.logger.debug("Animation error: %s", e)
 
         return self._plot_lines
 
@@ -313,15 +320,15 @@ class DRTPlotter:
         if not self._recording:
             return
 
-        if port not in self._rt_now:
+        if not self._device_added:
             self.add_device(port)
 
         rt_seconds = reaction_time / 1000.0
 
         if is_hit:
-            self._rt_now[port] = rt_seconds
+            self._rt_now = rt_seconds
         else:
-            self._rt_now[port] = -rt_seconds
+            self._rt_now = -rt_seconds
 
     def update_stimulus_state(self, port: str, state: int):
         """Update stimulus state for a device.
@@ -333,10 +340,10 @@ class DRTPlotter:
         if not self._recording:
             return
 
-        if port not in self._state_now:
+        if not self._device_added:
             self.add_device(port)
 
-        self._state_now[port] = int(state)
+        self._state_now = int(state)
 
     # ------------------------------------------------------------------
     # Session and recording control
@@ -359,75 +366,77 @@ class DRTPlotter:
             self.logger.info("  Resuming animation from frozen state")
             self.run = True
 
-        for port in list(self._state_now.keys()):
-            self._state_now[port] = 0
+        if self._device_added:
+            self._state_now = 0
 
         self._recording = True
 
     def stop_recording(self):
         """Pause recording - creates gap in data, animation keeps marching."""
         self.logger.info("STOP RECORDING: Creating gap, animation keeps marching")
-        for port in list(self._state_now.keys()):
-            self._state_now[port] = np.nan
+        if self._device_added:
+            self._state_now = np.nan
         self._recording = False
 
     def stop(self):
         """Stop session completely - freeze animation."""
         self.logger.info("STOP: Freezing animation completely")
-        for port in list(self._state_now.keys()):
-            idx = self._state_index.get(port, 0)
-            self._state_array[port][idx] = np.nan
-            self._state_index[port] = (idx + 1) % self.BUFFER_SIZE
-            state_view = self._get_circular_view(self._state_array[port], self._state_index[port])
-            self._state_xy[port][0].set_ydata(state_view)
+        if self._device_added and self._state_array is not None:
+            idx = self._state_index
+            self._state_array[idx] = np.nan
+            self._state_index = (idx + 1) % self.BUFFER_SIZE
+            state_view = self._get_circular_view(self._state_array, self._state_index)
+            self._state_xy[0].set_ydata(state_view)
         self.run = False
         self._session_active = False
         self._recording = False
 
-    def remove_device(self, port: str):
-        """Remove a device from the plotter."""
-        if port not in self._unit_ids:
+    def remove_device(self, port: str = None):
+        """Remove the device from the plotter."""
+        if not self._device_added:
             return
 
-        if port in self._rt_xy:
-            self._rt_xy[port]['hit'][0].remove()
-            self._rt_xy[port]['miss'][0].remove()
-            del self._rt_xy[port]
+        if self._rt_xy['hit'] is not None:
+            self._rt_xy['hit'][0].remove()
+            self._rt_xy['hit'] = None
+        if self._rt_xy['miss'] is not None:
+            self._rt_xy['miss'][0].remove()
+            self._rt_xy['miss'] = None
 
-        if port in self._state_xy:
-            self._state_xy[port][0].remove()
-            del self._state_xy[port]
+        if self._state_xy is not None:
+            self._state_xy[0].remove()
+            self._state_xy = None
 
-        if port in self._rt_array:
-            del self._rt_array[port]
-            del self._rt_now[port]
-            del self._rt_index[port]
+        self._rt_array = {'hit': None, 'miss': None}
+        self._rt_now = None
+        self._rt_index = 0
 
-        if port in self._state_array:
-            del self._state_array[port]
-            del self._state_now[port]
-            del self._state_index[port]
+        self._state_array = None
+        self._state_now = 0
+        self._state_index = 0
 
-        self._unit_ids.discard(port)
+        device_id = self._device_id
+        self._device_id = None
+        self._device_added = False
         self._rebuild_plot_lines()
 
-        self.logger.info("Removed device %s from plotter", port)
+        self.logger.info("Removed device %s from plotter", device_id)
 
     def clear_all(self):
         """Clear all data from the plot."""
-        for unit_id in self._state_array.keys():
-            self._state_now[unit_id] = np.nan
-            self._state_array[unit_id][:] = np.nan
-            self._state_index[unit_id] = 0
-            self._state_xy[unit_id][0].set_ydata(self._state_array[unit_id])
+        if self._device_added and self._state_array is not None:
+            self._state_now = np.nan
+            self._state_array[:] = np.nan
+            self._state_index = 0
+            self._state_xy[0].set_ydata(self._state_array)
 
-        for unit_id in self._rt_array.keys():
-            self._rt_now[unit_id] = None  # Clear pending RT values
-            self._rt_array[unit_id]['hit'][:] = np.nan
-            self._rt_array[unit_id]['miss'][:] = np.nan
-            self._rt_index[unit_id] = 0
-            self._rt_xy[unit_id]['hit'][0].set_ydata(self._rt_array[unit_id]['hit'])
-            self._rt_xy[unit_id]['miss'][0].set_ydata(self._rt_array[unit_id]['miss'])
+        if self._device_added and self._rt_array['hit'] is not None:
+            self._rt_now = None  # Clear pending RT values
+            self._rt_array['hit'][:] = np.nan
+            self._rt_array['miss'][:] = np.nan
+            self._rt_index = 0
+            self._rt_xy['hit'][0].set_ydata(self._rt_array['hit'])
+            self._rt_xy['miss'][0].set_ydata(self._rt_array['miss'])
 
         # Reset Y scale
         self._rt_y_max = 1

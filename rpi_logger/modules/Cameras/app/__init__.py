@@ -1,5 +1,5 @@
 """Cameras app-layer package."""
 
-from .view import CamerasView
+from .view import CameraView
 
-__all__ = ["CamerasView"]
+__all__ = ["CameraView"]

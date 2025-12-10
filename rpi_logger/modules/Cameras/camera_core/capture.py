@@ -1,7 +1,8 @@
 """
-Camera capture abstraction for the worker process.
+Camera capture abstraction.
 
 Provides a unified interface for Picamera2 and USB cameras.
+Runs directly in-process (no subprocess).
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from typing import Any, AsyncIterator, Optional, Tuple
 import numpy as np
 
 from rpi_logger.modules.Cameras.config import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
-from rpi_logger.modules.Cameras.runtime.backends.picam_color import get_picam_color_format
+from rpi_logger.modules.Cameras.camera_core.backends.picam_color import get_picam_color_format
 
 # Try to import Picamera2 - may not be available on non-Pi platforms
 try:
@@ -216,7 +217,7 @@ class PicamCapture(CaptureHandle):
 
         try:
             # Handle enum controls - convert string to index if needed
-            from rpi_logger.modules.Cameras.runtime.backends.picam_backend import PICAM_ENUMS
+            from rpi_logger.modules.Cameras.camera_core.backends.picam_backend import PICAM_ENUMS
             if name in PICAM_ENUMS and isinstance(value, str):
                 options = PICAM_ENUMS[name]
                 if value in options:

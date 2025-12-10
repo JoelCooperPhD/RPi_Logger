@@ -72,6 +72,7 @@ class DeviceManager:
         urls: dict[str, Optional[str]] = {
             "video": f"{base}/?camera=world",
             "gaze": f"{base}/?camera=gaze",
+            "eyes": f"{base}/?camera=eyes",
             "imu": f"{base}/live/imu",
             "events": f"{base}/live/events",
         }

@@ -6,7 +6,7 @@ Provides configuration for Pupil Labs Neon eye tracker settings.
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from pathlib import Path
 
 from rpi_logger.core.logging_utils import get_module_logger
@@ -19,13 +19,29 @@ if TYPE_CHECKING:
     from rpi_logger.modules.EyeTracker.app.eye_tracker_runtime import EyeTrackerRuntime
 
 
+# Neon scene camera raw specifications (fixed by hardware)
+RAW_WIDTH = 1600
+RAW_HEIGHT = 1200
+RAW_FPS = 30
+
+# Recording resolution options (downsampled from raw)
+RECORDING_RESOLUTIONS = [
+    (1600, 1200, "1600x1200 (Full)"),
+    (1200, 900, "1200x900 (3/4)"),
+    (800, 600, "800x600 (1/2)"),
+    (400, 300, "400x300 (1/4)"),
+]
+
+# Recording FPS options (downsampled from 30 Hz)
+RECORDING_FPS_OPTIONS = [30, 15, 10, 5]
+
+
 class EyeTrackerConfigWindow:
     """Modal dialog for configuring Eye Tracker settings.
 
     Configuration options:
+    - Recording settings (resolution, frame rate)
     - Preview settings (resolution, frame rate)
-    - Gaze overlay settings (shape, colors, size)
-    - Recording settings (overlay, audio)
 
     Uses event-driven updates matching VOG/DRT pattern.
     """
@@ -39,7 +55,7 @@ class EyeTrackerConfigWindow:
         self._config_path = Path(__file__).parent.parent.parent.parent / "config.txt"
 
         # Window dimensions
-        width, height = 380, 480
+        width, height = 340, 240
 
         # Calculate position before creating dialog
         saved_pos = self._load_saved_position_static()
@@ -74,127 +90,9 @@ class EyeTrackerConfigWindow:
         main_frame.pack(fill=tk.BOTH, expand=True)
         main_frame.columnconfigure(0, weight=1)
 
-        self._build_preview_settings(main_frame, row=0)
-        self._build_gaze_settings(main_frame, row=1)
-        self._build_recording_settings(main_frame, row=2)
-        self._build_buttons(main_frame, row=3)
-
-    def _build_preview_settings(self, parent: ttk.Frame, row: int):
-        """Build preview settings section."""
-        lf = ttk.LabelFrame(parent, text="Preview Settings")
-        lf.grid(row=row, column=0, sticky="new", pady=2, padx=2)
-        lf.columnconfigure(1, weight=1)
-
-        # Preview Width
-        r = 0
-        ttk.Label(lf, text="Preview Width:", style='Inframe.TLabel').grid(
-            row=r, column=0, sticky="w", padx=5, pady=2
-        )
-        self.config_vars['preview_width'] = tk.StringVar()
-        ttk.Entry(lf, textvariable=self.config_vars['preview_width'], width=10).grid(
-            row=r, column=1, sticky="e", padx=5, pady=2
-        )
-
-        # Preview Height
-        r += 1
-        ttk.Label(lf, text="Preview Height:", style='Inframe.TLabel').grid(
-            row=r, column=0, sticky="w", padx=5, pady=2
-        )
-        self.config_vars['preview_height'] = tk.StringVar()
-        ttk.Entry(lf, textvariable=self.config_vars['preview_height'], width=10).grid(
-            row=r, column=1, sticky="e", padx=5, pady=2
-        )
-
-        # Target FPS
-        r += 1
-        ttk.Label(lf, text="Target FPS:", style='Inframe.TLabel').grid(
-            row=r, column=0, sticky="w", padx=5, pady=2
-        )
-        self.config_vars['target_fps'] = tk.StringVar()
-        ttk.Entry(lf, textvariable=self.config_vars['target_fps'], width=10).grid(
-            row=r, column=1, sticky="e", padx=5, pady=2
-        )
-
-    def _build_gaze_settings(self, parent: ttk.Frame, row: int):
-        """Build gaze overlay settings section."""
-        lf = ttk.LabelFrame(parent, text="Gaze Overlay")
-        lf.grid(row=row, column=0, sticky="new", pady=2, padx=2)
-        lf.columnconfigure(1, weight=1)
-
-        # Gaze Shape
-        r = 0
-        ttk.Label(lf, text="Gaze Shape:", style='Inframe.TLabel').grid(
-            row=r, column=0, sticky="w", padx=5, pady=2
-        )
-        self.config_vars['gaze_shape'] = tk.StringVar()
-        shape_combo = ttk.Combobox(
-            lf,
-            textvariable=self.config_vars['gaze_shape'],
-            values=["circle", "crosshair", "dot"],
-            width=12,
-            state="readonly"
-        )
-        shape_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
-
-        # Gaze Circle Radius
-        r += 1
-        ttk.Label(lf, text="Circle Radius:", style='Inframe.TLabel').grid(
-            row=r, column=0, sticky="w", padx=5, pady=2
-        )
-        self.config_vars['gaze_circle_radius'] = tk.StringVar()
-        ttk.Entry(lf, textvariable=self.config_vars['gaze_circle_radius'], width=10).grid(
-            row=r, column=1, sticky="e", padx=5, pady=2
-        )
-
-        # Gaze Circle Thickness
-        r += 1
-        ttk.Label(lf, text="Circle Thickness:", style='Inframe.TLabel').grid(
-            row=r, column=0, sticky="w", padx=5, pady=2
-        )
-        self.config_vars['gaze_circle_thickness'] = tk.StringVar()
-        ttk.Entry(lf, textvariable=self.config_vars['gaze_circle_thickness'], width=10).grid(
-            row=r, column=1, sticky="e", padx=5, pady=2
-        )
-
-        # Separator
-        r += 1
-        ttk.Separator(lf, orient=tk.HORIZONTAL).grid(
-            row=r, column=0, columnspan=2, sticky="ew", pady=5
-        )
-
-        # Color labels
-        r += 1
-        ttk.Label(lf, text="Worn Color (RGB):", style='Inframe.TLabel').grid(
-            row=r, column=0, sticky="w", padx=5, pady=2
-        )
-
-        color_frame = ttk.Frame(lf)
-        color_frame.grid(row=r, column=1, sticky="e", padx=5, pady=2)
-
-        self.config_vars['gaze_color_worn_r'] = tk.StringVar()
-        self.config_vars['gaze_color_worn_g'] = tk.StringVar()
-        self.config_vars['gaze_color_worn_b'] = tk.StringVar()
-
-        ttk.Entry(color_frame, textvariable=self.config_vars['gaze_color_worn_r'], width=4).pack(side=tk.LEFT, padx=1)
-        ttk.Entry(color_frame, textvariable=self.config_vars['gaze_color_worn_g'], width=4).pack(side=tk.LEFT, padx=1)
-        ttk.Entry(color_frame, textvariable=self.config_vars['gaze_color_worn_b'], width=4).pack(side=tk.LEFT, padx=1)
-
-        # Not worn color
-        r += 1
-        ttk.Label(lf, text="Not Worn Color (RGB):", style='Inframe.TLabel').grid(
-            row=r, column=0, sticky="w", padx=5, pady=2
-        )
-
-        color_frame2 = ttk.Frame(lf)
-        color_frame2.grid(row=r, column=1, sticky="e", padx=5, pady=2)
-
-        self.config_vars['gaze_color_not_worn_r'] = tk.StringVar()
-        self.config_vars['gaze_color_not_worn_g'] = tk.StringVar()
-        self.config_vars['gaze_color_not_worn_b'] = tk.StringVar()
-
-        ttk.Entry(color_frame2, textvariable=self.config_vars['gaze_color_not_worn_r'], width=4).pack(side=tk.LEFT, padx=1)
-        ttk.Entry(color_frame2, textvariable=self.config_vars['gaze_color_not_worn_g'], width=4).pack(side=tk.LEFT, padx=1)
-        ttk.Entry(color_frame2, textvariable=self.config_vars['gaze_color_not_worn_b'], width=4).pack(side=tk.LEFT, padx=1)
+        self._build_recording_settings(main_frame, row=0)
+        self._build_preview_settings(main_frame, row=1)
+        self._build_buttons(main_frame, row=2)
 
     def _build_recording_settings(self, parent: ttk.Frame, row: int):
         """Build recording settings section."""
@@ -202,49 +100,71 @@ class EyeTrackerConfigWindow:
         lf.grid(row=row, column=0, sticky="new", pady=2, padx=2)
         lf.columnconfigure(1, weight=1)
 
-        # Enable Recording Overlay
+        # Recording Resolution dropdown
         r = 0
-        self.config_vars['enable_recording_overlay'] = tk.StringVar(value="1")
-        overlay_cb = ttk.Checkbutton(
-            lf, text="Enable Recording Overlay",
-            variable=self.config_vars['enable_recording_overlay'],
-            onvalue="1", offvalue="0",
-            style='Switch.TCheckbutton'
+        ttk.Label(lf, text="Resolution:", style='Inframe.TLabel').grid(
+            row=r, column=0, sticky="w", padx=5, pady=2
         )
-        overlay_cb.grid(row=r, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+        self.config_vars['recording_resolution'] = tk.StringVar()
+        self._recording_res_combo = ttk.Combobox(
+            lf,
+            textvariable=self.config_vars['recording_resolution'],
+            values=[res[2] for res in RECORDING_RESOLUTIONS],
+            width=18,
+            state="readonly"
+        )
+        self._recording_res_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
+        self._recording_res_combo.bind("<<ComboboxSelected>>", self._on_recording_resolution_changed)
 
-        # Include Gaze in Recording
+        # Recording FPS dropdown
         r += 1
-        self.config_vars['include_gaze_in_recording'] = tk.StringVar(value="1")
-        gaze_cb = ttk.Checkbutton(
-            lf, text="Include Gaze in Recording",
-            variable=self.config_vars['include_gaze_in_recording'],
-            onvalue="1", offvalue="0",
-            style='Switch.TCheckbutton'
+        ttk.Label(lf, text="FPS:", style='Inframe.TLabel').grid(
+            row=r, column=0, sticky="w", padx=5, pady=2
         )
-        gaze_cb.grid(row=r, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+        self.config_vars['recording_fps'] = tk.StringVar()
+        self._recording_fps_combo = ttk.Combobox(
+            lf,
+            textvariable=self.config_vars['recording_fps'],
+            values=[str(fps) for fps in RECORDING_FPS_OPTIONS],
+            width=18,
+            state="readonly"
+        )
+        self._recording_fps_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
 
-        # Enable Audio Recording
-        r += 1
-        self.config_vars['enable_audio_recording'] = tk.StringVar(value="0")
-        audio_cb = ttk.Checkbutton(
-            lf, text="Enable Audio Recording",
-            variable=self.config_vars['enable_audio_recording'],
-            onvalue="1", offvalue="0",
-            style='Switch.TCheckbutton'
-        )
-        audio_cb.grid(row=r, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+    def _build_preview_settings(self, parent: ttk.Frame, row: int):
+        """Build preview settings section."""
+        lf = ttk.LabelFrame(parent, text="Preview")
+        lf.grid(row=row, column=0, sticky="new", pady=2, padx=2)
+        lf.columnconfigure(1, weight=1)
 
-        # Advanced Gaze Logging
-        r += 1
-        self.config_vars['enable_advanced_gaze_logging'] = tk.StringVar(value="0")
-        adv_cb = ttk.Checkbutton(
-            lf, text="Advanced Gaze Logging",
-            variable=self.config_vars['enable_advanced_gaze_logging'],
-            onvalue="1", offvalue="0",
-            style='Switch.TCheckbutton'
+        # Preview Resolution dropdown (relative to recording - 4 downsampling options)
+        r = 0
+        ttk.Label(lf, text="Resolution:", style='Inframe.TLabel').grid(
+            row=r, column=0, sticky="w", padx=5, pady=2
         )
-        adv_cb.grid(row=r, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+        self.config_vars['preview_resolution'] = tk.StringVar()
+        self._preview_res_combo = ttk.Combobox(
+            lf,
+            textvariable=self.config_vars['preview_resolution'],
+            width=18,
+            state="readonly"
+        )
+        self._preview_res_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
+
+        # Preview FPS dropdown
+        r += 1
+        ttk.Label(lf, text="FPS:", style='Inframe.TLabel').grid(
+            row=r, column=0, sticky="w", padx=5, pady=2
+        )
+        self.config_vars['preview_fps'] = tk.StringVar()
+        self._preview_fps_combo = ttk.Combobox(
+            lf,
+            textvariable=self.config_vars['preview_fps'],
+            values=[str(fps) for fps in RECORDING_FPS_OPTIONS],
+            width=18,
+            state="readonly"
+        )
+        self._preview_fps_combo.grid(row=r, column=1, sticky="e", padx=5, pady=2)
 
     def _build_buttons(self, parent: ttk.Frame, row: int):
         """Build common buttons at bottom of dialog."""
@@ -254,17 +174,49 @@ class EyeTrackerConfigWindow:
 
         btn_bg = Colors.BG_DARKER
         RoundedButton(
-            btn_frame, text="Refresh", command=self._load_config,
-            width=80, height=32, style='default', bg=btn_bg
-        ).pack(side=tk.LEFT, padx=4)
-        RoundedButton(
             btn_frame, text="Apply", command=self._apply_config,
-            width=80, height=32, style='default', bg=btn_bg
+            width=100, height=32, style='default', bg=btn_bg
         ).pack(side=tk.LEFT, padx=4)
         RoundedButton(
             btn_frame, text="Close", command=self._on_close,
-            width=80, height=32, style='default', bg=btn_bg
+            width=100, height=32, style='default', bg=btn_bg
         ).pack(side=tk.LEFT, padx=4)
+
+    def _on_recording_resolution_changed(self, event=None):
+        """Update preview resolution options when recording resolution changes."""
+        self._update_preview_resolution_options()
+
+    def _update_preview_resolution_options(self):
+        """Update preview resolution dropdown based on current recording resolution.
+
+        Preview options are relative to recording resolution with 4 downsampling levels:
+        Full, 3/4, 1/2, 1/4 of the recording resolution.
+        """
+        rec_label = self.config_vars['recording_resolution'].get()
+
+        # Find the recording resolution
+        rec_w, rec_h = RECORDING_RESOLUTIONS[0][:2]  # Default to full
+        for w, h, label in RECORDING_RESOLUTIONS:
+            if label == rec_label:
+                rec_w, rec_h = w, h
+                break
+
+        # Build preview options: 4 downsampling levels from recording resolution
+        preview_options = [
+            (rec_w, rec_h, f"{rec_w}x{rec_h} (Full)"),
+            (rec_w * 3 // 4, rec_h * 3 // 4, f"{rec_w * 3 // 4}x{rec_h * 3 // 4} (3/4)"),
+            (rec_w // 2, rec_h // 2, f"{rec_w // 2}x{rec_h // 2} (1/2)"),
+            (rec_w // 4, rec_h // 4, f"{rec_w // 4}x{rec_h // 4} (1/4)"),
+        ]
+
+        self._preview_options = preview_options  # Store for apply
+        self._preview_res_combo['values'] = [opt[2] for opt in preview_options]
+
+        # Keep current selection if valid, otherwise default to 1/2
+        current = self.config_vars['preview_resolution'].get()
+        valid_labels = [opt[2] for opt in preview_options]
+        if current not in valid_labels:
+            self.config_vars['preview_resolution'].set(preview_options[2][2])  # Default to 1/2
 
     def _load_config(self):
         """Load current configuration from runtime."""
@@ -274,93 +226,42 @@ class EyeTrackerConfigWindow:
 
         config = self.runtime._tracker_config
 
-        # Preview settings
-        self.config_vars['preview_width'].set(str(config.preview_width))
-        self.config_vars['preview_height'].set(str(config.preview_height or ''))
-        self.config_vars['target_fps'].set(str(config.fps))
+        # Recording resolution - find closest match
+        rec_w, rec_h = config.resolution
+        matched_label = RECORDING_RESOLUTIONS[0][2]  # Default to full
+        for w, h, label in RECORDING_RESOLUTIONS:
+            if w == rec_w and h == rec_h:
+                matched_label = label
+                break
+        self.config_vars['recording_resolution'].set(matched_label)
 
-        # Gaze settings
-        self.config_vars['gaze_shape'].set(config.gaze_shape)
-        self.config_vars['gaze_circle_radius'].set(str(config.gaze_circle_radius))
-        self.config_vars['gaze_circle_thickness'].set(str(config.gaze_circle_thickness))
+        # Recording FPS - find closest match
+        fps = config.fps
+        closest_fps = min(RECORDING_FPS_OPTIONS, key=lambda x: abs(x - fps))
+        self.config_vars['recording_fps'].set(str(closest_fps))
 
-        # Gaze colors
-        self.config_vars['gaze_color_worn_r'].set(str(config.gaze_color_worn_r))
-        self.config_vars['gaze_color_worn_g'].set(str(config.gaze_color_worn_g))
-        self.config_vars['gaze_color_worn_b'].set(str(config.gaze_color_worn_b))
-        self.config_vars['gaze_color_not_worn_r'].set(str(config.gaze_color_not_worn_r))
-        self.config_vars['gaze_color_not_worn_g'].set(str(config.gaze_color_not_worn_g))
-        self.config_vars['gaze_color_not_worn_b'].set(str(config.gaze_color_not_worn_b))
+        # Update preview resolution options based on recording resolution
+        self._update_preview_resolution_options()
 
-        # Recording settings
-        self.config_vars['enable_recording_overlay'].set('1' if config.enable_recording_overlay else '0')
-        self.config_vars['include_gaze_in_recording'].set('1' if config.include_gaze_in_recording else '0')
-        self.config_vars['enable_audio_recording'].set('1' if config.enable_audio_recording else '0')
-        self.config_vars['enable_advanced_gaze_logging'].set('1' if config.enable_advanced_gaze_logging else '0')
+        # Preview resolution - find closest match from current options
+        preview_w = config.preview_width
+        preview_h = config.preview_height or preview_w * 3 // 4  # Default 4:3 aspect
+        # Find best match in preview options
+        if hasattr(self, '_preview_options'):
+            matched_label = self._preview_options[2][2]  # Default to 1/2
+            for w, h, label in self._preview_options:
+                if w == preview_w and h == preview_h:
+                    matched_label = label
+                    break
+            self.config_vars['preview_resolution'].set(matched_label)
 
-    def _validate_numeric_field(self, field_name: str, display_name: str, allow_zero: bool = True) -> Optional[str]:
-        """Validate a numeric field value."""
-        value = self.config_vars.get(field_name, tk.StringVar()).get().strip()
-        if not value:
-            return None  # Empty is OK
-
-        try:
-            num = int(value)
-            if num < 0:
-                return f"{display_name} must be a positive number"
-            if not allow_zero and num == 0:
-                return f"{display_name} must be greater than zero"
-        except ValueError:
-            return f"{display_name} must be a valid integer"
-
-        return None
-
-    def _validate_config(self) -> Optional[str]:
-        """Validate all configuration fields before applying."""
-        fields = [
-            ('preview_width', 'Preview Width', False),
-            ('preview_height', 'Preview Height', False),
-            ('target_fps', 'Target FPS', False),
-            ('gaze_circle_radius', 'Circle Radius', False),
-            ('gaze_circle_thickness', 'Circle Thickness', False),
-            ('gaze_color_worn_r', 'Worn Color R', True),
-            ('gaze_color_worn_g', 'Worn Color G', True),
-            ('gaze_color_worn_b', 'Worn Color B', True),
-            ('gaze_color_not_worn_r', 'Not Worn Color R', True),
-            ('gaze_color_not_worn_g', 'Not Worn Color G', True),
-            ('gaze_color_not_worn_b', 'Not Worn Color B', True),
-        ]
-
-        for field_name, display_name, allow_zero in fields:
-            error = self._validate_numeric_field(field_name, display_name, allow_zero)
-            if error:
-                return error
-
-        # Validate color ranges (0-255)
-        color_fields = [
-            'gaze_color_worn_r', 'gaze_color_worn_g', 'gaze_color_worn_b',
-            'gaze_color_not_worn_r', 'gaze_color_not_worn_g', 'gaze_color_not_worn_b'
-        ]
-        for field in color_fields:
-            value = self.config_vars.get(field, tk.StringVar()).get().strip()
-            if value:
-                try:
-                    num = int(value)
-                    if num < 0 or num > 255:
-                        return f"{field.replace('_', ' ').title()} must be 0-255"
-                except ValueError:
-                    pass  # Already caught above
-
-        return None
+        # Preview FPS
+        preview_fps = getattr(config, 'preview_fps', config.fps)
+        closest_preview_fps = min(RECORDING_FPS_OPTIONS, key=lambda x: abs(x - preview_fps))
+        self.config_vars['preview_fps'].set(str(closest_preview_fps))
 
     def _apply_config(self):
         """Apply configuration changes."""
-        # Validate before applying
-        error = self._validate_config()
-        if error:
-            messagebox.showerror("Validation Error", error, parent=self.dialog)
-            return
-
         if not self.runtime or not self.runtime._tracker_config:
             messagebox.showerror("Error", "No tracker configuration available", parent=self.dialog)
             return
@@ -368,49 +269,40 @@ class EyeTrackerConfigWindow:
         config = self.runtime._tracker_config
 
         try:
-            # Update preview settings
-            pw = self.config_vars['preview_width'].get().strip()
-            if pw:
-                config.preview_width = int(pw)
+            # Update recording resolution
+            rec_label = self.config_vars['recording_resolution'].get()
+            for w, h, label in RECORDING_RESOLUTIONS:
+                if label == rec_label:
+                    config.resolution = (w, h)
+                    break
 
-            ph = self.config_vars['preview_height'].get().strip()
-            if ph:
-                config.preview_height = int(ph)
+            # Update recording FPS
+            rec_fps = self.config_vars['recording_fps'].get()
+            config.fps = float(rec_fps)
 
-            fps = self.config_vars['target_fps'].get().strip()
-            if fps:
-                config.fps = float(fps)
+            # Update preview resolution (from relative options)
+            preview_label = self.config_vars['preview_resolution'].get()
+            if hasattr(self, '_preview_options'):
+                for w, h, label in self._preview_options:
+                    if label == preview_label:
+                        config.preview_width = w
+                        config.preview_height = h
+                        break
 
-            # Update gaze settings
-            config.gaze_shape = self.config_vars['gaze_shape'].get()
-
-            gcr = self.config_vars['gaze_circle_radius'].get().strip()
-            if gcr:
-                config.gaze_circle_radius = int(gcr)
-
-            gct = self.config_vars['gaze_circle_thickness'].get().strip()
-            if gct:
-                config.gaze_circle_thickness = int(gct)
-
-            # Update gaze colors
-            for suffix in ['r', 'g', 'b']:
-                worn_val = self.config_vars[f'gaze_color_worn_{suffix}'].get().strip()
-                if worn_val:
-                    setattr(config, f'gaze_color_worn_{suffix}', int(worn_val))
-
-                not_worn_val = self.config_vars[f'gaze_color_not_worn_{suffix}'].get().strip()
-                if not_worn_val:
-                    setattr(config, f'gaze_color_not_worn_{suffix}', int(not_worn_val))
-
-            # Update recording settings
-            config.enable_recording_overlay = self.config_vars['enable_recording_overlay'].get() == '1'
-            config.include_gaze_in_recording = self.config_vars['include_gaze_in_recording'].get() == '1'
-            config.enable_audio_recording = self.config_vars['enable_audio_recording'].get() == '1'
-            config.enable_advanced_gaze_logging = self.config_vars['enable_advanced_gaze_logging'].get() == '1'
+            # Update preview FPS
+            preview_fps = self.config_vars['preview_fps'].get()
+            config.preview_fps = float(preview_fps)
 
             # Update frame processor if it exists
             if self.runtime._frame_processor:
                 self.runtime._frame_processor.config = config
+
+            # Update recording manager if it exists
+            if self.runtime._recording_manager:
+                self.runtime._recording_manager.config = config
+                # Update video encoder resolution
+                self.runtime._recording_manager._video_encoder.resolution = config.resolution
+                self.runtime._recording_manager._video_encoder.fps = config.fps
 
             messagebox.showinfo("Success", "Configuration applied", parent=self.dialog)
 

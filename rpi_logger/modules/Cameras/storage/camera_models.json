@@ -1,0 +1,243 @@
+{
+  "schema": 1,
+  "models": {
+    "hd_pro_webcam_c920": {
+      "name": "HD Pro Webcam C920",
+      "backend": "usb",
+      "match_patterns": [
+        "HD Pro Webcam C920*"
+      ],
+      "capabilities": {
+        "modes": [
+          {
+            "size": [
+              320,
+              240
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              640,
+              480
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              800,
+              600
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1280,
+              720
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1920,
+              1080
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
+          }
+        ],
+        "default_record": {
+          "size": [
+            1920,
+            1080
+          ],
+          "fps": 15.0,
+          "pixel_format": "MJPEG"
+        },
+        "default_preview": {
+          "size": [
+            640,
+            480
+          ],
+          "fps": 15.0,
+          "pixel_format": "MJPEG"
+        },
+        "controls": {
+          "Brightness": {
+            "name": "Brightness",
+            "type": "int",
+            "current": 128,
+            "min": 0,
+            "max": 255,
+            "default": 128,
+            "step": 1.0,
+            "backend_id": "brightness"
+          },
+          "Contrast": {
+            "name": "Contrast",
+            "type": "int",
+            "current": 163,
+            "min": 0,
+            "max": 255,
+            "default": 128,
+            "step": 1.0,
+            "backend_id": "contrast"
+          },
+          "Saturation": {
+            "name": "Saturation",
+            "type": "int",
+            "current": 110,
+            "min": 0,
+            "max": 255,
+            "default": 128,
+            "step": 1.0,
+            "backend_id": "saturation"
+          },
+          "WhiteBalanceAutomatic": {
+            "name": "WhiteBalanceAutomatic",
+            "type": "bool",
+            "current": 1,
+            "default": 1,
+            "backend_id": "white_balance_automatic"
+          },
+          "Gain": {
+            "name": "Gain",
+            "type": "int",
+            "current": 114,
+            "min": 0,
+            "max": 255,
+            "default": 0,
+            "step": 1.0,
+            "backend_id": "gain"
+          },
+          "PowerLineFrequency": {
+            "name": "PowerLineFrequency",
+            "type": "enum",
+            "current": "2:60 Hz",
+            "min": 0,
+            "max": 2,
+            "default": 2,
+            "options": [
+              "0:Disabled",
+              "1:50 Hz",
+              "2:60 Hz"
+            ],
+            "backend_id": "power_line_frequency"
+          },
+          "WhiteBalanceTemperature": {
+            "name": "WhiteBalanceTemperature",
+            "type": "int",
+            "current": 2851,
+            "min": 2000,
+            "max": 6500,
+            "default": 4000,
+            "step": 1.0,
+            "backend_id": "white_balance_temperature"
+          },
+          "Sharpness": {
+            "name": "Sharpness",
+            "type": "int",
+            "current": 128,
+            "min": 0,
+            "max": 255,
+            "default": 128,
+            "step": 1.0,
+            "backend_id": "sharpness"
+          },
+          "BacklightCompensation": {
+            "name": "BacklightCompensation",
+            "type": "int",
+            "current": 0,
+            "min": 0,
+            "max": 1,
+            "default": 0,
+            "step": 1.0,
+            "backend_id": "backlight_compensation"
+          },
+          "AutoExposure": {
+            "name": "AutoExposure",
+            "type": "enum",
+            "current": "1:Manual Mode",
+            "min": 0,
+            "max": 3,
+            "default": 3,
+            "options": [
+              "1:Manual Mode",
+              "3:Aperture Priority Mode"
+            ],
+            "backend_id": "auto_exposure"
+          },
+          "ExposureTimeAbsolute": {
+            "name": "ExposureTimeAbsolute",
+            "type": "int",
+            "current": 156,
+            "min": 3,
+            "max": 2047,
+            "default": 250,
+            "step": 1.0,
+            "backend_id": "exposure_time_absolute"
+          },
+          "ExposureDynamicFramerate": {
+            "name": "ExposureDynamicFramerate",
+            "type": "bool",
+            "current": 0,
+            "default": 0,
+            "backend_id": "exposure_dynamic_framerate"
+          },
+          "PanAbsolute": {
+            "name": "PanAbsolute",
+            "type": "int",
+            "current": 0,
+            "min": -36000,
+            "max": 36000,
+            "default": 0,
+            "step": 3600.0,
+            "backend_id": "pan_absolute"
+          },
+          "TiltAbsolute": {
+            "name": "TiltAbsolute",
+            "type": "int",
+            "current": 0,
+            "min": -36000,
+            "max": 36000,
+            "default": 0,
+            "step": 3600.0,
+            "backend_id": "tilt_absolute"
+          },
+          "FocusAbsolute": {
+            "name": "FocusAbsolute",
+            "type": "int",
+            "current": 35,
+            "min": 0,
+            "max": 250,
+            "default": 0,
+            "step": 5.0,
+            "backend_id": "focus_absolute"
+          },
+          "FocusAutomaticContinuous": {
+            "name": "FocusAutomaticContinuous",
+            "type": "bool",
+            "current": 1,
+            "default": 1,
+            "backend_id": "focus_automatic_continuous"
+          },
+          "ZoomAbsolute": {
+            "name": "ZoomAbsolute",
+            "type": "int",
+            "current": 100,
+            "min": 100,
+            "max": 500,
+            "default": 100,
+            "step": 1.0,
+            "backend_id": "zoom_absolute"
+          }
+        }
+      },
+      "tested": "2025-12-09"
+    }
+  }
+}

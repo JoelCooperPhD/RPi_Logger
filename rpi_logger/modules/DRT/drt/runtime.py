@@ -61,11 +61,12 @@ class DRTModuleRuntime(ModuleRuntime):
         self.module_subdir: str = "DRT"
         self.module_data_dir: Path = self.session_dir
 
-        # Device management - devices are assigned by main logger
-        self.handlers: Dict[str, BaseDRTHandler] = {}
-        self.device_types: Dict[str, DRTDeviceType] = {}
-        self._transports: Dict[str, USBTransport] = {}
-        self._proxy_transports: Dict[str, XBeeProxyTransport] = {}
+        # Device management - single device per instance (multi-instance pattern)
+        self.device_id: Optional[str] = None
+        self.handler: Optional[BaseDRTHandler] = None
+        self.device_type: Optional[DRTDeviceType] = None
+        self._transport: Optional[USBTransport] = None
+        self._proxy_transport: Optional[XBeeProxyTransport] = None
 
         # Background tasks
         self.task_manager = BackgroundTaskManager(name="DRTRuntimeTasks", logger=self.logger)
@@ -97,13 +98,13 @@ class DRTModuleRuntime(ModuleRuntime):
         StatusMessage.send("ready")
 
     async def shutdown(self) -> None:
-        """Shutdown the runtime - stop recording and disconnect all devices."""
+        """Shutdown the runtime - stop recording and disconnect device."""
         self.logger.info("Shutting down DRT runtime")
         await self._stop_recording()
 
-        # Disconnect all devices
-        for device_id in list(self.handlers.keys()):
-            await self.unassign_device(device_id)
+        # Disconnect device if connected
+        if self.handler:
+            await self.unassign_device(self.device_id)
 
     async def cleanup(self) -> None:
         await self.task_manager.shutdown()
@@ -132,10 +133,10 @@ class DRTModuleRuntime(ModuleRuntime):
             return True
 
         if action == "unassign_all_devices":
-            # Disconnect all devices before shutdown to release serial ports
-            self.logger.info("Unassigning all devices before shutdown")
-            for device_id in list(self.handlers.keys()):
-                await self.unassign_device(device_id)
+            # Disconnect device before shutdown to release serial port
+            self.logger.info("Unassigning device before shutdown")
+            if self.handler:
+                await self.unassign_device(self.device_id)
             return True
 
         if action == "start_recording":
@@ -235,8 +236,8 @@ class DRTModuleRuntime(ModuleRuntime):
         Returns:
             True if device was successfully assigned
         """
-        if device_id in self.handlers:
-            self.logger.warning("Device %s already assigned", device_id)
+        if self.handler is not None:
+            self.logger.warning("Device already assigned (current: %s, new: %s)", self.device_id, device_id)
             return True
 
         self.logger.info(
@@ -259,7 +260,7 @@ class DRTModuleRuntime(ModuleRuntime):
                     StatusMessage.send("device_error", {"device_id": device_id, "error": "Failed to initialize proxy transport"}, command_id=command_id)
                     return False
 
-                self._proxy_transports[device_id] = transport
+                self._proxy_transport = transport
 
                 # Create wireless handler
                 handler = self._create_handler(drt_device_type, device_id, transport)
@@ -276,7 +277,7 @@ class DRTModuleRuntime(ModuleRuntime):
                     StatusMessage.send("device_error", {"device_id": device_id, "error": f"Failed to connect on {port}"}, command_id=command_id)
                     return False
 
-                self._transports[device_id] = transport
+                self._transport = transport
 
                 # Create appropriate handler based on device type
                 handler = self._create_handler(drt_device_type, device_id, transport)
@@ -293,8 +294,9 @@ class DRTModuleRuntime(ModuleRuntime):
             await handler.start()
 
             # Store handler and type
-            self.handlers[device_id] = handler
-            self.device_types[device_id] = drt_device_type
+            self.device_id = device_id
+            self.handler = handler
+            self.device_type = drt_device_type
 
             self.logger.info("Device %s assigned and started (%s)", device_id, drt_device_type.value)
 
@@ -330,54 +332,60 @@ class DRTModuleRuntime(ModuleRuntime):
         except Exception as e:
             self.logger.error("Failed to assign device %s: %s", device_id, e, exc_info=True)
             # Clean up on failure
-            if device_id in self._transports:
-                transport = self._transports.pop(device_id)
-                await transport.disconnect()
-            if device_id in self._proxy_transports:
-                transport = self._proxy_transports.pop(device_id)
-                await transport.disconnect()
+            if self._transport:
+                await self._transport.disconnect()
+                self._transport = None
+            if self._proxy_transport:
+                await self._proxy_transport.disconnect()
+                self._proxy_transport = None
             # Notify logger that device assignment failed
             StatusMessage.send("device_error", {"device_id": device_id, "error": str(e)}, command_id=command_id)
             return False
 
-    async def unassign_device(self, device_id: str) -> None:
+    async def unassign_device(self, device_id: str = None) -> None:
         """
-        Unassign a device from this module.
+        Unassign the current device from this module.
 
         Args:
-            device_id: The device to unassign
+            device_id: The device to unassign (for compatibility, ignored - uses self.device_id)
         """
-        if device_id not in self.handlers:
-            self.logger.warning("Device %s not assigned", device_id)
+        if self.handler is None:
+            self.logger.warning("No device assigned")
             return
 
-        self.logger.info("Unassigning device: %s", device_id)
-        device_type = self.device_types.get(device_id)
+        self.logger.info("Unassigning device: %s", self.device_id)
 
         try:
-            handler = self.handlers.pop(device_id)
-            self.device_types.pop(device_id, None)
+            handler = self.handler
+            device_type = self.device_type
+            current_device_id = self.device_id
+
+            # Clear state first
+            self.handler = None
+            self.device_type = None
+            self.device_id = None
+
             await handler.stop()
 
             # Clean up transport (USB or proxy)
-            if device_id in self._transports:
-                transport = self._transports.pop(device_id)
-                await transport.disconnect()
-            elif device_id in self._proxy_transports:
-                transport = self._proxy_transports.pop(device_id)
-                await transport.disconnect()
+            if self._transport:
+                await self._transport.disconnect()
+                self._transport = None
+            elif self._proxy_transport:
+                await self._proxy_transport.disconnect()
+                self._proxy_transport = None
             elif handler.transport:
                 # Fallback: disconnect via handler's transport reference
                 await handler.transport.disconnect()
 
             # Notify view
             if self.view and device_type:
-                self.view.on_device_disconnected(device_id, device_type)
+                self.view.on_device_disconnected(current_device_id, device_type)
 
-            self.logger.info("Device %s unassigned", device_id)
+            self.logger.info("Device %s unassigned", current_device_id)
 
         except Exception as e:
-            self.logger.error("Error unassigning device %s: %s", device_id, e, exc_info=True)
+            self.logger.error("Error unassigning device %s: %s", self.device_id, e, exc_info=True)
 
     def _parse_device_type(self, device_type: str, is_wireless: bool = False) -> DRTDeviceType:
         """Parse device type string to DRTDeviceType enum."""
@@ -439,9 +447,8 @@ class DRTModuleRuntime(ModuleRuntime):
 
     async def _on_xbee_data(self, node_id: str, data: str) -> None:
         """Handle incoming XBee data from main logger."""
-        transport = self._proxy_transports.get(node_id)
-        if transport:
-            transport.push_data(data)
+        if self._proxy_transport and node_id == self.device_id:
+            self._proxy_transport.push_data(data)
         else:
             self.logger.debug("Received XBee data for unknown device: %s", node_id)
 
@@ -461,34 +468,21 @@ class DRTModuleRuntime(ModuleRuntime):
     # Recording control
 
     async def _start_recording(self) -> bool:
-        self.logger.debug("_start_recording called, handlers: %s", list(self.handlers.keys()))
-        if not self.handlers:
-            self.logger.error("Cannot start recording - no devices connected")
+        self.logger.debug("_start_recording called, device_id: %s", self.device_id)
+        if not self.handler:
+            self.logger.error("Cannot start recording - no device connected")
             return False
 
-        successes = []
-        failures = []
-        for port, handler in self.handlers.items():
-            self.logger.debug("Calling start_experiment on handler for %s", port)
-            handler._trial_label = self.trial_label
-            try:
-                started = await handler.start_experiment()
-                self.logger.debug("start_experiment returned %s for %s", started, port)
-            except Exception as exc:  # pragma: no cover - defensive
-                self.logger.error("start_experiment failed on %s: %s", port, exc)
-                started = False
-            if started:
-                successes.append((port, handler))
-            else:
-                failures.append(port)
+        self.handler._trial_label = self.trial_label
+        try:
+            started = await self.handler.start_experiment()
+            self.logger.debug("start_experiment returned %s for %s", started, self.device_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.error("start_experiment failed on %s: %s", self.device_id, exc)
+            started = False
 
-        if failures:
-            self.logger.error("Failed to start recording on: %s", ", ".join(failures))
-            for port, handler in successes:
-                try:
-                    await handler.stop_experiment()
-                except Exception as exc:  # pragma: no cover - defensive
-                    self.logger.warning("Rollback stop_experiment failed on %s: %s", port, exc)
+        if not started:
+            self.logger.error("Failed to start recording on: %s", self.device_id)
             return False
 
         self._recording_active = True
@@ -500,20 +494,16 @@ class DRTModuleRuntime(ModuleRuntime):
         if not self._recording_active:
             return
 
-        failures = []
-        for port, handler in self.handlers.items():
+        if self.handler:
             # Clear trial label when stopping
-            handler._trial_label = ""
+            self.handler._trial_label = ""
             try:
-                stopped = await handler.stop_experiment()
+                stopped = await self.handler.stop_experiment()
+                if not stopped:
+                    self.logger.error("Failed to stop recording on: %s", self.device_id)
             except Exception as exc:  # pragma: no cover - defensive
-                self.logger.error("stop_experiment failed on %s: %s", port, exc)
-                stopped = False
-            if not stopped:
-                failures.append(port)
+                self.logger.error("stop_experiment failed on %s: %s", self.device_id, exc)
 
-        if failures:
-            self.logger.error("Failed to stop recording on: %s", ", ".join(failures))
         self._recording_active = False
         self.trial_label = ""
         if self.view:
@@ -533,9 +523,9 @@ class DRTModuleRuntime(ModuleRuntime):
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.module_data_dir = ensure_module_data_dir(self.session_dir, self.module_subdir)
 
-        # Update all handler output directories
-        for handler in self.handlers.values():
-            handler.update_output_dir(self.module_data_dir)
+        # Update handler output directory
+        if self.handler:
+            self.handler.update_output_dir(self.module_data_dir)
 
         # Sync to model if requested
         if update_model:
@@ -546,13 +536,13 @@ class DRTModuleRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
     # GUI-facing helpers
 
-    def get_device_handler(self, device_id: str) -> Optional[BaseDRTHandler]:
-        """Get handler for a specific device."""
-        return self.handlers.get(device_id)
+    def get_device_handler(self, device_id: str = None) -> Optional[BaseDRTHandler]:
+        """Get the current device handler."""
+        return self.handler
 
-    def get_device_type(self, device_id: str) -> Optional[DRTDeviceType]:
-        """Get device type for a specific device."""
-        return self.device_types.get(device_id)
+    def get_device_type(self, device_id: str = None) -> Optional[DRTDeviceType]:
+        """Get the current device type."""
+        return self.device_type
 
     @property
     def recording(self) -> bool:

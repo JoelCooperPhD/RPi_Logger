@@ -706,6 +706,40 @@ class EyeTrackerRuntime(ModuleRuntime):
             return None
         return self._tracker_handler.get_display_frame()
 
+    def _get_latest_eyes_frame(self) -> Optional[np.ndarray]:
+        if not self._stream_handler:
+            return None
+        return self._stream_handler.get_latest_eyes_frame()
+
+    def _get_latest_gaze(self) -> Optional[Any]:
+        """Get latest gaze data for stream viewer."""
+        if not self._stream_handler:
+            return None
+        return self._stream_handler.get_latest_gaze()
+
+    def _get_latest_imu(self) -> Optional[Any]:
+        """Get latest IMU data for stream viewer."""
+        if not self._stream_handler:
+            return None
+        return self._stream_handler.get_latest_imu()
+
+    def _get_latest_event(self) -> Optional[Any]:
+        """Get latest eye event for stream viewer."""
+        if not self._stream_handler:
+            return None
+        return self._stream_handler.get_latest_event()
+
+    def _get_latest_audio(self) -> Optional[Any]:
+        """Get latest audio data for stream viewer."""
+        if not self._stream_handler:
+            return None
+        return self._stream_handler.get_latest_audio()
+
+    @property
+    def config(self) -> Optional["TrackerConfig"]:
+        """Return tracker config for stream controls persistence."""
+        return self._tracker_config
+
     # ------------------------------------------------------------------
     # Recording automation
 

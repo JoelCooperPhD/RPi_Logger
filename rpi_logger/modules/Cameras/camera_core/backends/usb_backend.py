@@ -15,9 +15,8 @@ import cv2
 import numpy as np
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.runtime import CapabilityMode, CameraCapabilities
-from rpi_logger.modules.Cameras.runtime.capabilities import build_capabilities
-from rpi_logger.modules.Cameras.runtime.state import ControlInfo, ControlType
+from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode, CameraCapabilities, ControlInfo, ControlType
+from rpi_logger.modules.Cameras.camera_core.capabilities import build_capabilities
 
 
 # OpenCV control properties to probe

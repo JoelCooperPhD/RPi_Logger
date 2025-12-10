@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from rpi_logger.modules.Cameras.runtime import CameraId
+from rpi_logger.modules.Cameras.camera_core import CameraId
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module_filename_prefix
 
 
@@ -34,7 +34,7 @@ def resolve_session_paths(
     camera_dir = module_dir / camera_id.key.replace(":", "_") if per_camera_subdir else module_dir
     camera_dir.mkdir(parents=True, exist_ok=True)
 
-    prefix = module_filename_prefix(session_root, module_name, trial_number)
+    prefix = module_filename_prefix(session_root, module_name, trial_number, code="CAM")
     camera_suffix = camera_id.stable_id
 
     video_path = camera_dir / f"{prefix}_{camera_suffix}.avi"

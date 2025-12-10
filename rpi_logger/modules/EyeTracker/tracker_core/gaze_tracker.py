@@ -129,6 +129,7 @@ class GazeTracker:
                 imu_url=stream_urls.get("imu"),
                 events_url=stream_urls.get("events"),
                 audio_url=stream_urls.get("audio"),
+                eyes_url=stream_urls.get("eyes"),
             ) or []
 
             frame_task = asyncio.create_task(self._process_frames(), name="frame-processor")

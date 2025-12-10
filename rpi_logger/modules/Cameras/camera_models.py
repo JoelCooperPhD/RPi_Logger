@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.runtime.state import (
+from rpi_logger.modules.Cameras.camera_core.state import (
     CameraCapabilities,
     CapabilityMode,
     CapabilitySource,
@@ -28,7 +28,7 @@ from rpi_logger.modules.Cameras.runtime.state import (
 )
 
 if TYPE_CHECKING:
-    from rpi_logger.modules.Cameras.runtime.state import CameraDescriptor
+    from rpi_logger.modules.Cameras.camera_core.state import CameraDescriptor
 
 # Schema version for camera_models.json
 SCHEMA_VERSION = 1

@@ -7,4 +7,4 @@ view.show_logger = false
 device_connected = false
 preview_resolution = auto
 audio.selected_device_names = HD Pro Webcam C920: USB Audio (hw:3,0)(USB):audio_9
-window_geometry = 598x60+1106+471
+window_geometry = 320x200

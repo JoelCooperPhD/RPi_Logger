@@ -59,13 +59,12 @@ class VOGModuleRuntime(ModuleRuntime):
         self.module_subdir: str = "VOG"
         self.module_data_dir: Path = self.session_dir
 
-        # Device management - devices are assigned by main logger
-        self.handlers: Dict[str, VOGHandler] = {}
-        self.device_types: Dict[str, VOGDeviceType] = {}
-        self._transports: Dict[str, BaseTransport] = {}
-
-        # XBee proxy transports for wireless devices (separate from USB transports)
-        self._proxy_transports: Dict[str, XBeeProxyTransport] = {}
+        # Device management - single device per instance (multi-instance pattern)
+        self.device_id: Optional[str] = None
+        self.handler: Optional[VOGHandler] = None
+        self.device_type: Optional[VOGDeviceType] = None
+        self._transport: Optional[BaseTransport] = None
+        self._proxy_transport: Optional[XBeeProxyTransport] = None
 
         # Background tasks
         self.task_manager = BackgroundTaskManager(name="VOGRuntimeTasks", logger=self.logger)
@@ -106,13 +105,13 @@ class VOGModuleRuntime(ModuleRuntime):
         StatusMessage.send("ready")
 
     async def shutdown(self) -> None:
-        """Shutdown the runtime - stop session and disconnect all devices."""
+        """Shutdown the runtime - stop session and disconnect device."""
         self.logger.info("Shutting down VOG runtime")
         await self._stop_session()
 
-        # Disconnect all devices
-        for device_id in list(self.handlers.keys()):
-            await self.unassign_device(device_id)
+        # Disconnect device if connected
+        if self.handler:
+            await self.unassign_device(self.device_id)
 
     async def cleanup(self) -> None:
         """Final cleanup - shutdown background tasks."""
@@ -148,8 +147,8 @@ class VOGModuleRuntime(ModuleRuntime):
         Returns:
             True if device was successfully assigned
         """
-        if device_id in self.handlers:
-            self.logger.warning("Device %s already assigned", device_id)
+        if self.handler is not None:
+            self.logger.warning("Device already assigned (current: %s, new: %s)", self.device_id, device_id)
             return True
 
         self.logger.info(
@@ -177,8 +176,8 @@ class VOGModuleRuntime(ModuleRuntime):
                     self.logger.error("Failed to initialize proxy transport for %s", device_id)
                     StatusMessage.send("device_error", {"device_id": device_id, "error": "Failed to initialize proxy transport"}, command_id=command_id)
                     return False
-                self._proxy_transports[device_id] = transport
-                self._transports[device_id] = transport  # Also store in main dict for handler access
+                self._proxy_transport = transport
+                self._transport = transport  # Also store in main var for handler access
                 self.logger.info("Created XBee proxy transport for %s", device_id)
             else:
                 # USB device - create transport
@@ -190,7 +189,7 @@ class VOGModuleRuntime(ModuleRuntime):
                     StatusMessage.send("device_error", {"device_id": device_id, "error": f"Failed to connect on {port}"}, command_id=command_id)
                     return False
 
-                self._transports[device_id] = transport
+                self._transport = transport
 
             # Create handler (same for both USB and wireless)
             handler = VOGHandler(
@@ -205,8 +204,9 @@ class VOGModuleRuntime(ModuleRuntime):
             await handler.initialize_device()
             await handler.start()
 
-            self.handlers[device_id] = handler
-            self.device_types[device_id] = vog_device_type
+            self.device_id = device_id
+            self.handler = handler
+            self.device_type = vog_device_type
             self.logger.info("Device %s assigned and started (%s)", device_id, vog_device_type.value)
 
             # Update window title to show device display name
@@ -246,50 +246,55 @@ class VOGModuleRuntime(ModuleRuntime):
         except Exception as e:
             self.logger.error("Failed to assign device %s: %s", device_id, e, exc_info=True)
             # Clean up on failure
-            if device_id in self._transports:
-                transport = self._transports.pop(device_id)
-                await transport.disconnect()
-            if device_id in self._proxy_transports:
-                transport = self._proxy_transports.pop(device_id)
-                await transport.disconnect()
+            if self._transport:
+                await self._transport.disconnect()
+                self._transport = None
+            if self._proxy_transport:
+                await self._proxy_transport.disconnect()
+                self._proxy_transport = None
             StatusMessage.send("device_error", {"device_id": device_id, "error": str(e)}, command_id=command_id)
             return False
 
-    async def unassign_device(self, device_id: str) -> None:
+    async def unassign_device(self, device_id: str = None) -> None:
         """
-        Unassign a device from this module.
+        Unassign the current device from this module.
 
         Args:
-            device_id: The device to unassign
+            device_id: The device to unassign (for compatibility, ignored - uses self.device_id)
         """
-        if device_id not in self.handlers:
-            self.logger.warning("Device %s not assigned", device_id)
+        if self.handler is None:
+            self.logger.warning("No device assigned")
             return
 
-        self.logger.info("Unassigning device: %s", device_id)
-        device_type = self.device_types.get(device_id)
+        self.logger.info("Unassigning device: %s", self.device_id)
 
         try:
-            handler = self.handlers.pop(device_id)
-            self.device_types.pop(device_id, None)
+            handler = self.handler
+            device_type = self.device_type
+            current_device_id = self.device_id
+
+            # Clear state first
+            self.handler = None
+            self.device_type = None
+            self.device_id = None
+
             await handler.stop()
 
             # Clean up transport
-            if device_id in self._transports:
-                transport = self._transports.pop(device_id)
-                await transport.disconnect()
-            if device_id in self._proxy_transports:
-                self._proxy_transports.pop(device_id)
-                # Note: transport already disconnected via _transports
+            if self._transport:
+                await self._transport.disconnect()
+                self._transport = None
+            # Proxy transport shares reference with _transport, just clear it
+            self._proxy_transport = None
 
             # Notify view
             if self.view and device_type:
-                self.view.on_device_disconnected(device_id, device_type)
+                self.view.on_device_disconnected(current_device_id, device_type)
 
-            self.logger.info("Device %s unassigned", device_id)
+            self.logger.info("Device %s unassigned", current_device_id)
 
         except Exception as e:
-            self.logger.error("Error unassigning device %s: %s", device_id, e, exc_info=True)
+            self.logger.error("Error unassigning device %s: %s", self.device_id, e, exc_info=True)
 
     # ------------------------------------------------------------------
     # Command and action handling (VMC ModuleRuntime interface)
@@ -315,10 +320,10 @@ class VOGModuleRuntime(ModuleRuntime):
             return True
 
         if action == "unassign_all_devices":
-            # Disconnect all devices before shutdown to release serial ports
-            self.logger.info("Unassigning all devices before shutdown")
-            for device_id in list(self.handlers.keys()):
-                await self.unassign_device(device_id)
+            # Disconnect device before shutdown to release serial port
+            self.logger.info("Unassigning device before shutdown")
+            if self.handler:
+                await self.unassign_device(self.device_id)
             return True
 
         if action == "start_recording":
@@ -421,44 +426,30 @@ class VOGModuleRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
 
     async def _start_session(self) -> bool:
-        """Start experiment session on all devices (sends exp>1)."""
+        """Start experiment session (sends exp>1)."""
         if self._session_active:
             self.logger.debug("Session already active")
             return True
 
-        if not self.handlers:
-            self.logger.warning("Cannot start session - no devices connected")
+        if not self.handler:
+            self.logger.warning("Cannot start session - no device connected")
             return False
 
-        # Start all devices in parallel
-        async def start_one(port: str, handler) -> tuple[str, bool]:
-            try:
-                return port, await handler.start_experiment()
-            except Exception as exc:
-                self.logger.error("start_experiment failed on %s: %s", port, exc)
-                return port, False
-
-        results = await asyncio.gather(*[
-            start_one(port, handler) for port, handler in self.handlers.items()
-        ])
-
-        successes = [(port, self.handlers[port]) for port, ok in results if ok]
-        failures = [port for port, ok in results if not ok]
-
-        if failures:
-            self.logger.error("Failed to start session on: %s", ", ".join(failures))
-            # Rollback in parallel
-            await asyncio.gather(*[
-                handler.stop_experiment() for _, handler in successes
-            ], return_exceptions=True)
+        try:
+            started = await self.handler.start_experiment()
+            if not started:
+                self.logger.error("Failed to start session on: %s", self.device_id)
+                return False
+        except Exception as exc:
+            self.logger.error("start_experiment failed on %s: %s", self.device_id, exc)
             return False
 
         self._session_active = True
-        self.logger.info("Session started on all devices (exp>1)")
+        self.logger.info("Session started (exp>1)")
         return True
 
     async def _stop_session(self) -> None:
-        """Stop experiment session on all devices (sends exp>0)."""
+        """Stop experiment session (sends exp>0)."""
         if not self._session_active:
             return
 
@@ -466,33 +457,25 @@ class VOGModuleRuntime(ModuleRuntime):
         if self._recording_active:
             await self._stop_recording()
 
-        # Stop all devices in parallel
-        async def stop_one(port: str, handler) -> tuple[str, bool]:
+        if self.handler:
             try:
-                return port, await handler.stop_experiment()
+                stopped = await self.handler.stop_experiment()
+                if not stopped:
+                    self.logger.error("Failed to stop session on: %s", self.device_id)
             except Exception as exc:
-                self.logger.error("stop_experiment failed on %s: %s", port, exc)
-                return port, False
-
-        results = await asyncio.gather(*[
-            stop_one(port, handler) for port, handler in self.handlers.items()
-        ])
-
-        failures = [port for port, ok in results if not ok]
-        if failures:
-            self.logger.error("Failed to stop session on: %s", ", ".join(failures))
+                self.logger.error("stop_experiment failed on %s: %s", self.device_id, exc)
 
         self._session_active = False
-        self.logger.info("Session stopped on all devices (exp>0)")
+        self.logger.info("Session stopped (exp>0)")
 
     # ------------------------------------------------------------------
     # Recording control (trial start/stop)
     # ------------------------------------------------------------------
 
     async def _start_recording(self) -> bool:
-        """Start trial/recording on all devices (sends trl>1)."""
-        if not self.handlers:
-            self.logger.error("Cannot start recording - no devices connected")
+        """Start trial/recording (sends trl>1)."""
+        if not self.handler:
+            self.logger.error("Cannot start recording - no device connected")
             return False
 
         # Ensure session is started first
@@ -501,31 +484,17 @@ class VOGModuleRuntime(ModuleRuntime):
             if not session_ok:
                 return False
 
-        # Start trial on all devices in parallel
-        async def start_one(port: str, handler) -> tuple[str, bool]:
-            try:
-                return port, await handler.start_trial()
-            except Exception as exc:
-                self.logger.error("start_trial failed on %s: %s", port, exc)
-                return port, False
-
-        results = await asyncio.gather(*[
-            start_one(port, handler) for port, handler in self.handlers.items()
-        ])
-
-        successes = [(port, self.handlers[port]) for port, ok in results if ok]
-        failures = [port for port, ok in results if not ok]
-
-        if failures:
-            self.logger.error("Failed to start recording on: %s", ", ".join(failures))
-            # Rollback in parallel
-            await asyncio.gather(*[
-                handler.stop_trial() for _, handler in successes
-            ], return_exceptions=True)
+        try:
+            started = await self.handler.start_trial()
+            if not started:
+                self.logger.error("Failed to start recording on: %s", self.device_id)
+                return False
+        except Exception as exc:
+            self.logger.error("start_trial failed on %s: %s", self.device_id, exc)
             return False
 
         self._recording_active = True
-        self.logger.info("Recording started on all devices (trl>1)")
+        self.logger.info("Recording started (trl>1)")
 
         # Notify view
         if self.view:
@@ -534,29 +503,21 @@ class VOGModuleRuntime(ModuleRuntime):
         return True
 
     async def _stop_recording(self) -> None:
-        """Stop trial/recording on all devices (sends trl>0)."""
+        """Stop trial/recording (sends trl>0)."""
         if not self._recording_active:
             return
 
-        # Stop trial on all devices in parallel
-        async def stop_one(port: str, handler) -> tuple[str, bool]:
+        if self.handler:
             try:
-                return port, await handler.stop_trial()
+                stopped = await self.handler.stop_trial()
+                if not stopped:
+                    self.logger.error("Failed to stop recording on: %s", self.device_id)
             except Exception as exc:
-                self.logger.error("stop_trial failed on %s: %s", port, exc)
-                return port, False
-
-        results = await asyncio.gather(*[
-            stop_one(port, handler) for port, handler in self.handlers.items()
-        ])
-
-        failures = [port for port, ok in results if not ok]
-        if failures:
-            self.logger.error("Failed to stop recording on: %s", ", ".join(failures))
+                self.logger.error("stop_trial failed on %s: %s", self.device_id, exc)
 
         self._recording_active = False
         self.trial_label = ""
-        self.logger.info("Recording stopped on all devices (trl>0)")
+        self.logger.info("Recording stopped (trl>0)")
 
         # Notify view
         if self.view:
@@ -567,14 +528,14 @@ class VOGModuleRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
 
     async def _peek_open_all(self) -> None:
-        """Send peek/open command to all devices (in parallel)."""
-        if self.handlers:
-            await asyncio.gather(*[h.peek_open() for h in self.handlers.values()])
+        """Send peek/open command to device."""
+        if self.handler:
+            await self.handler.peek_open()
 
     async def _peek_close_all(self) -> None:
-        """Send peek/close command to all devices (in parallel)."""
-        if self.handlers:
-            await asyncio.gather(*[h.peek_close() for h in self.handlers.values()])
+        """Send peek/close command to device."""
+        if self.handler:
+            await self.handler.peek_close()
 
     # ------------------------------------------------------------------
     # Window visibility control
@@ -601,17 +562,9 @@ class VOGModuleRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
 
     async def _get_config(self, port: Optional[str] = None) -> None:
-        """Request config from device(s).
-
-        If port is specified, request config from that device only.
-        Otherwise, request from the first connected device.
-        """
-        if port and port in self.handlers:
-            await self.handlers[port].get_device_config()
-        elif self.handlers:
-            # Default to first connected device
-            handler = next(iter(self.handlers.values()))
-            await handler.get_device_config()
+        """Request config from device."""
+        if self.handler:
+            await self.handler.get_device_config()
 
     # ------------------------------------------------------------------
     # Session directory management
@@ -629,9 +582,9 @@ class VOGModuleRuntime(ModuleRuntime):
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.module_data_dir = ensure_module_data_dir(self.session_dir, self.module_subdir)
 
-        # Update all handler output directories
-        for handler in self.handlers.values():
-            handler.output_dir = self.module_data_dir
+        # Update handler output directory
+        if self.handler:
+            self.handler.output_dir = self.module_data_dir
 
         # Sync to model if requested
         if update_model:
@@ -643,9 +596,9 @@ class VOGModuleRuntime(ModuleRuntime):
     # Public API for GUI/View
     # ------------------------------------------------------------------
 
-    def get_device_handler(self, device_id: str) -> Optional[VOGHandler]:
-        """Get handler for a specific device."""
-        return self.handlers.get(device_id)
+    def get_device_handler(self, device_id: str = None) -> Optional[VOGHandler]:
+        """Get the current device handler."""
+        return self.handler
 
     @property
     def recording(self) -> bool:
@@ -678,9 +631,8 @@ class VOGModuleRuntime(ModuleRuntime):
 
     async def _on_xbee_data(self, node_id: str, data: str) -> None:
         """Handle incoming XBee data from main logger."""
-        transport = self._proxy_transports.get(node_id)
-        if transport:
-            transport.push_data(data)
+        if self._proxy_transport and node_id == self.device_id:
+            self._proxy_transport.push_data(data)
         else:
             self.logger.debug("Received XBee data for unknown device: %s", node_id)
 

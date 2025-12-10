@@ -38,16 +38,19 @@ class StreamHandler:
         self.last_imu: Optional[Any] = None
         self.last_event: Optional[Any] = None
         self.last_audio: Optional[Any] = None
+        self.last_eyes_frame: Optional[np.ndarray] = None
 
         self.imu_listener: Optional[Callable[[Any], None]] = None
         self.event_listener: Optional[Callable[[Any], None]] = None
         self.camera_frames = 0
+        self._eyes_frames = 0
         self.tasks: List[asyncio.Task] = []
         self._video_task_active = False
         self._gaze_task_active = False
         self._imu_task_active = False
         self._event_task_active = False
         self._audio_task_active = False
+        self._eyes_task_active = False
         self.camera_fps_tracker = RollingFPS(window_seconds=5.0)
         self._dropped_frames = 0
         self._total_wait_ms = 0.0
@@ -72,6 +75,7 @@ class StreamHandler:
                 self._imu_task_active,
                 self._event_task_active,
                 self._audio_task_active,
+                self._eyes_task_active,
             )
         )
 
@@ -83,6 +87,7 @@ class StreamHandler:
         imu_url: Optional[str] = None,
         events_url: Optional[str] = None,
         audio_url: Optional[str] = None,
+        eyes_url: Optional[str] = None,
     ):
         if self.running:
             return
@@ -92,6 +97,7 @@ class StreamHandler:
         self._imu_task_active = bool(imu_url)
         self._event_task_active = bool(events_url)
         self._audio_task_active = bool(audio_url)
+        self._eyes_task_active = bool(eyes_url)
         self._update_running_flag()
         logger.info(f"Video URL: {video_url}")
         logger.info(f"Gaze URL: {gaze_url}")
@@ -101,6 +107,8 @@ class StreamHandler:
             logger.info(f"Events URL: {events_url}")
         if audio_url:
             logger.info(f"Audio URL: {audio_url}")
+        if eyes_url:
+            logger.info(f"Eyes URL: {eyes_url}")
 
         self.tasks = [
             asyncio.create_task(self._stream_video_frames(video_url), name="video-stream"),
@@ -119,6 +127,10 @@ class StreamHandler:
             self.tasks.append(
                 asyncio.create_task(self._stream_audio_data(audio_url), name="audio-stream")
             )
+        if eyes_url:
+            self.tasks.append(
+                asyncio.create_task(self._stream_eyes_frames(eyes_url), name="eyes-stream")
+            )
 
         return self.tasks
 
@@ -128,6 +140,7 @@ class StreamHandler:
         self._imu_task_active = False
         self._event_task_active = False
         self._audio_task_active = False
+        self._eyes_task_active = False
         self._update_running_flag()
 
         for task in self.tasks:
@@ -349,6 +362,51 @@ class StreamHandler:
             self._audio_task_active = False
             self._update_running_flag()
 
+    async def _stream_eyes_frames(self, eyes_url: str):
+        """Stream eye camera frames (384x192 combined left+right at 200Hz)."""
+        logger.info("Starting eyes stream...")
+
+        frame_count = 0
+        try:
+            async for frame in receive_video_frames(eyes_url):
+                if not self.running:
+                    break
+
+                frame_count += 1
+                if frame_count == 1:
+                    logger.info("First eyes frame received!")
+                    logger.info(f"Eyes frame type: {type(frame)}")
+
+                if frame:
+                    try:
+                        pixel_data = frame.bgr_buffer()
+
+                        if pixel_data is not None:
+                            if pixel_data.flags['C_CONTIGUOUS']:
+                                frame_array = pixel_data
+                            else:
+                                frame_array = np.ascontiguousarray(pixel_data)
+                            self._eyes_frames += 1
+                            self.last_eyes_frame = frame_array
+
+                            if self._eyes_frames == 1:
+                                logger.info(f"Eyes frame shape: {pixel_data.shape}")
+                                logger.info(f"Eyes frame dtype: {pixel_data.dtype}")
+
+                    except Exception as e:
+                        if frame_count <= 5:
+                            logger.error(f"Eyes frame {frame_count}: Error getting pixel data: {e}")
+
+        except asyncio.CancelledError:
+            logger.debug("Eyes stream task cancelled")
+            raise
+        except Exception as e:
+            if self.running:
+                logger.error(f"Eyes stream error: {e}")
+        finally:
+            self._eyes_task_active = False
+            self._update_running_flag()
+
     def get_latest_frame(self) -> Optional[np.ndarray]:
         return self.last_frame
 
@@ -372,6 +430,9 @@ class StreamHandler:
 
     def get_latest_audio(self) -> Optional[Any]:
         return self.last_audio
+
+    def get_latest_eyes_frame(self) -> Optional[np.ndarray]:
+        return self.last_eyes_frame
 
     def get_camera_fps(self) -> float:
         return self.camera_fps_tracker.get_fps()

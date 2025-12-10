@@ -1,10 +1,19 @@
 import asyncio
+import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Optional, Tuple
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
+
+
+def _ffmpeg_available() -> bool:
+    """Check if ffmpeg is available in PATH."""
+    return shutil.which("ffmpeg") is not None
 
 
 class VideoEncoder:
@@ -25,6 +34,14 @@ class VideoEncoder:
         width, height = self.resolution
         self._output_path = output_path
         self._frames_since_flush = 0
+
+        # Check ffmpeg availability and fall back to OpenCV if needed
+        if self.use_ffmpeg and not _ffmpeg_available():
+            logger.warning(
+                "ffmpeg not found in PATH, falling back to OpenCV VideoWriter. "
+                "Install ffmpeg for better compression and performance."
+            )
+            self.use_ffmpeg = False
 
         if self.use_ffmpeg:
             cmd = [

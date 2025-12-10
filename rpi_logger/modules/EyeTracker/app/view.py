@@ -4,13 +4,14 @@ Implements the EyeTracker GUI following DRT/VOG patterns with:
 - StubCodexView for VMC compatibility
 - LegacyTkViewBridge for Tkinter integration
 - Real-time video preview with gaze overlay
+- Stream viewers for eyes, IMU, events, and audio
 - Device status and recording state display
 """
 
 from __future__ import annotations
 
 import asyncio
-import io
+import logging
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
 
@@ -20,11 +21,6 @@ try:
 except Exception:
     tk = None  # type: ignore
     ttk = None  # type: ignore
-
-try:
-    from PIL import Image
-except Exception:
-    Image = None  # type: ignore
 
 import numpy as np
 
@@ -42,11 +38,22 @@ except ImportError:
     Colors = None  # type: ignore
     RoundedButton = None  # type: ignore
 
+# Import stream viewers
+from .stream_viewers import (
+    VideoViewer,
+    EyesViewer,
+    IMUViewer,
+    EventsViewer,
+    AudioViewer,
+    StreamControls,
+)
+
 if TYPE_CHECKING:
     from rpi_logger.modules.EyeTracker.app.eye_tracker_runtime import EyeTrackerRuntime
 
 ActionCallback = Optional[Callable[..., Awaitable[None]]]
 FrameProvider = Callable[[], Optional[np.ndarray]]
+DataProvider = Callable[[], Optional[Any]]
 
 
 class _SystemPlaceholder:
@@ -91,9 +98,9 @@ class NeonEyeTrackerTkinterGUI:
 
     Key features:
     - Real-time video preview with gaze overlay
+    - Stream viewers for eyes, IMU, events, and audio
     - Device status display (connected/disconnected)
     - Recording state indicator
-    - Reconnect and configure controls
     """
 
     def __init__(
@@ -122,24 +129,35 @@ class NeonEyeTrackerTkinterGUI:
         # Preview state
         self._preview_interval_ms = 100  # Default 10 Hz, overridden by view
         self._preview_after_handle: Optional[str] = None
-        self._frame_provider: Optional[FrameProvider] = None
-        self._canvas: Optional[tk.Canvas] = None
-        self._photo_ref = None
 
-        # Button references
-        self._reconnect_btn = None
-        self._configure_btn = None
+        # Data providers
+        self._frame_provider: Optional[FrameProvider] = None
+        self._eyes_frame_provider: Optional[FrameProvider] = None
+        self._gaze_provider: Optional[DataProvider] = None
+        self._imu_provider: Optional[DataProvider] = None
+        self._event_provider: Optional[DataProvider] = None
+        self._audio_provider: Optional[DataProvider] = None
+
+        # Stream viewers
+        self._video_viewer: Optional[VideoViewer] = None
+        self._eyes_viewer: Optional[EyesViewer] = None
+        self._imu_viewer: Optional[IMUViewer] = None
+        self._events_viewer: Optional[EventsViewer] = None
+        self._audio_viewer: Optional[AudioViewer] = None
+        self._stream_controls: Optional[StreamControls] = None
 
         # UI references
         self.root = embedded_parent
         self._frame: Optional[tk.Frame] = None
         self._content_frame: Optional[tk.Frame] = None
+        self._video_eyes_frame: Optional[tk.Frame] = None
+        self._viewers_container: Optional[tk.Frame] = None
 
         if embedded_parent:
             self._build_ui(embedded_parent)
 
     def _build_ui(self, parent: tk.Widget):
-        """Build the embedded UI with preview canvas."""
+        """Build the embedded UI with preview canvas and stream viewers."""
         self.logger.info("Building NeonEyeTracker GUI")
 
         try:
@@ -149,24 +167,74 @@ class NeonEyeTrackerTkinterGUI:
             self._frame.columnconfigure(0, weight=1)
             self._frame.rowconfigure(0, weight=1)
 
-            # Content frame for preview
+            # Content frame for preview and viewers
             self._content_frame = ttk.Frame(self._frame)
             self._content_frame.grid(row=0, column=0, sticky="NSEW")
             self._content_frame.columnconfigure(0, weight=1)
-            self._content_frame.rowconfigure(0, weight=1)
+            self._content_frame.rowconfigure(0, weight=1)  # Main row (video + eyes) expands
+            self._content_frame.rowconfigure(1, weight=0)  # Other viewers container
 
-            # Create preview canvas
+            # Video/eyes container with weighted columns
+            self._video_eyes_frame = ttk.Frame(self._content_frame)
+            self._video_eyes_frame.grid(row=0, column=0, sticky="nsew")
+            self._video_eyes_frame.rowconfigure(0, weight=1)
+
+            # Create video viewer (left side, 3/4 weight when eyes visible)
             canvas_width = getattr(self.args, 'preview_width', 640) or 640
             canvas_height = getattr(self.args, 'preview_height', 480) or 480
-            canvas_bg = Colors.BG_CANVAS if HAS_THEME and Colors else "#1e1e1e"
 
-            self._canvas = tk.Canvas(
-                self._content_frame,
+            self._video_viewer = VideoViewer(
+                self._video_eyes_frame,
+                self.logger.getChild("VideoViewer"),
                 width=canvas_width,
                 height=canvas_height,
-                bg=canvas_bg
+                row=0,
             )
-            self._canvas.grid(row=0, column=0, sticky="nsew")
+            video_frame = self._video_viewer.build_ui()
+            video_frame.grid(row=0, column=0, sticky="nsew")
+            self._video_viewer._visible = True  # Video is always visible when enabled
+            self._video_viewer._enabled = True  # Start enabled
+
+            # Create eyes viewer (right side of video, stacked vertically)
+            # Eyes are hidden by default, shown when checkbox is checked
+            self._eyes_viewer = EyesViewer(
+                self._video_eyes_frame,
+                self.logger.getChild("EyesViewer"),
+                row=0,
+                stacked=True,  # Stack left/right eyes vertically
+            )
+            self._eyes_viewer.build_ui()
+            # Don't grid the eyes viewer here - it starts hidden
+
+            # Set initial column weights (video gets all space when eyes hidden)
+            self._update_video_eyes_layout(eyes_visible=False)
+
+            # Container for other stream viewers (below video)
+            self._viewers_container = ttk.Frame(self._content_frame)
+            self._viewers_container.grid(row=1, column=0, sticky="ew")
+            self._viewers_container.columnconfigure(0, weight=1)
+
+            # Audio viewer first (right under videos)
+            self._audio_viewer = AudioViewer(
+                self._viewers_container,
+                self.logger.getChild("AudioViewer"),
+                row=0,
+            )
+            self._audio_viewer.build_ui()
+
+            self._imu_viewer = IMUViewer(
+                self._viewers_container,
+                self.logger.getChild("IMUViewer"),
+                row=1,
+            )
+            self._imu_viewer.build_ui()
+
+            self._events_viewer = EventsViewer(
+                self._viewers_container,
+                self.logger.getChild("EventsViewer"),
+                row=2,
+            )
+            self._events_viewer.build_ui()
 
             # Initialize status variables
             self._status_var = tk.StringVar(value="Waiting for device...")
@@ -177,22 +245,119 @@ class NeonEyeTrackerTkinterGUI:
         except Exception as e:
             self.logger.error("Failed to build GUI: %s", e, exc_info=True)
 
+    def _update_video_eyes_layout(self, eyes_visible: bool) -> None:
+        """Update the video/eyes layout based on eyes visibility.
+
+        When eyes are visible: video gets 4/5 weight, eyes get 1/5 weight
+        When eyes are hidden: video gets all the space
+
+        Uses uniform column groups to ensure consistent ratios regardless of
+        window size (grid weights only distribute extra space, not total space).
+
+        Args:
+            eyes_visible: Whether the eyes viewer should be visible
+        """
+        if not self._video_eyes_frame:
+            return
+
+        if eyes_visible:
+            # Video 4/5, eyes 1/5 using uniform groups for true proportional sizing
+            self._video_eyes_frame.columnconfigure(0, weight=4, uniform="video_eyes")
+            self._video_eyes_frame.columnconfigure(1, weight=1, uniform="video_eyes")
+            # Show eyes viewer
+            if self._eyes_viewer and self._eyes_viewer._frame:
+                self._eyes_viewer._frame.grid(row=0, column=1, sticky="nsew")
+                self._eyes_viewer._visible = True
+        else:
+            # Video gets all space - remove uniform group
+            self._video_eyes_frame.columnconfigure(0, weight=1, uniform="")
+            self._video_eyes_frame.columnconfigure(1, weight=0, uniform="")
+            # Hide eyes viewer
+            if self._eyes_viewer and self._eyes_viewer._frame:
+                self._eyes_viewer._frame.grid_forget()
+                self._eyes_viewer._visible = False
+
+    # ------------------------------------------------------------------
+    # Provider setters
+
     def set_frame_provider(self, provider: FrameProvider) -> None:
         """Set the frame provider callback for preview updates."""
         self._frame_provider = provider
+
+    def set_eyes_frame_provider(self, provider: FrameProvider) -> None:
+        """Set the eyes frame provider callback for eye preview updates."""
+        self._eyes_frame_provider = provider
+
+    def set_gaze_provider(self, provider: DataProvider) -> None:
+        """Set the gaze data provider callback."""
+        self._gaze_provider = provider
+
+    def set_imu_provider(self, provider: DataProvider) -> None:
+        """Set the IMU data provider callback."""
+        self._imu_provider = provider
+
+    def set_event_provider(self, provider: DataProvider) -> None:
+        """Set the eye event data provider callback."""
+        self._event_provider = provider
+
+    def set_audio_provider(self, provider: DataProvider) -> None:
+        """Set the audio data provider callback."""
+        self._audio_provider = provider
 
     def set_preview_interval(self, interval_ms: int) -> None:
         """Set preview update interval in milliseconds."""
         self._preview_interval_ms = max(50, interval_ms)
 
+    # ------------------------------------------------------------------
+    # Stream controls
+
+    def set_stream_controls(self, controls: StreamControls) -> None:
+        """Set the stream controls instance and register viewers.
+
+        Args:
+            controls: StreamControls instance managing checkbox state
+        """
+        self._stream_controls = controls
+
+        # Register viewers with controls
+        # Note: eyes viewer is NOT registered here - we handle its visibility
+        # through _update_video_eyes_layout in _on_stream_change instead
+        if self._video_viewer:
+            controls.register_viewer("video", self._video_viewer)
+        if self._imu_viewer:
+            controls.register_viewer("imu", self._imu_viewer)
+        if self._events_viewer:
+            controls.register_viewer("events", self._events_viewer)
+        if self._audio_viewer:
+            controls.register_viewer("audio", self._audio_viewer)
+
+        # Set up callback for stream changes (e.g., eyes visibility)
+        controls.set_on_change_callback(self._on_stream_change)
+
+    def _on_stream_change(self, stream: str, enabled: bool) -> None:
+        """Handle stream state changes from controls.
+
+        Args:
+            stream: Name of the stream that changed
+            enabled: New enabled state
+        """
+        # Handle eyes viewer layout change
+        # We manage eyes visibility through layout, not set_enabled
+        if stream == "eyes" and self._eyes_viewer:
+            self._eyes_viewer._enabled = enabled  # For preview loop updates
+            self._update_video_eyes_layout(eyes_visible=enabled)
+
+    # ------------------------------------------------------------------
+    # Preview loop
+
     def start_preview(self) -> None:
         """Start the preview update loop."""
-        if self._canvas and self.root:
+        if self._video_viewer and self.root:
             self._schedule_preview()
 
     def _schedule_preview(self) -> None:
         """Schedule the next preview update."""
-        if not self.root or not self._canvas:
+        if not self.root:
             return
         self._preview_after_handle = self.root.after(
             self._preview_interval_ms,
@@ -200,37 +365,32 @@ class NeonEyeTrackerTkinterGUI:
         )
 
     def _preview_tick(self) -> None:
-        """Update preview canvas with latest frame."""
-        if self._canvas is None:
-            return
+        """Update all enabled stream viewers with latest data."""
+        # Update video viewer
+        if self._video_viewer and self._video_viewer.enabled:
+            frame = self._frame_provider() if self._frame_provider else None
+            gaze = self._gaze_provider() if self._gaze_provider else None
+            self._video_viewer.update(frame, gaze)
 
-        frame = self._frame_provider() if self._frame_provider else None
+        # Update eyes viewer
+        if self._eyes_viewer and self._eyes_viewer.enabled:
+            eyes = self._eyes_frame_provider() if self._eyes_frame_provider else None
+            self._eyes_viewer.update(eyes)
 
-        if frame is None or Image is None:
-            self._canvas.delete("all")
-            text_color = Colors.FG_PRIMARY if HAS_THEME and Colors else "#ecf0f1"
-            self._canvas.create_text(
-                self._canvas.winfo_width() // 2,
-                self._canvas.winfo_height() // 2,
-                text="Waiting for frames...",
-                fill=text_color,
-            )
-        else:
-            try:
-                rgb = frame[:, :, ::-1]
-                image = Image.fromarray(rgb)
-                ppm_data = io.BytesIO()
-                image.save(ppm_data, format="PPM")
-                photo = tk.PhotoImage(data=ppm_data.getvalue())
-                self._canvas.delete("all")
-                self._canvas.create_image(
-                    self._canvas.winfo_width() // 2,
-                    self._canvas.winfo_height() // 2,
-                    image=photo,
-                )
-                self._photo_ref = photo
-            except Exception as exc:
-                self.logger.debug("Preview update failed: %s", exc)
+        # Update IMU viewer
+        if self._imu_viewer and self._imu_viewer.enabled:
+            imu = self._imu_provider() if self._imu_provider else None
+            self._imu_viewer.update(imu)
+
+        # Update events viewer
+        if self._events_viewer and self._events_viewer.enabled:
+            event = self._event_provider() if self._event_provider else None
+            self._events_viewer.update(event)
+
+        # Update audio viewer
+        if self._audio_viewer and self._audio_viewer.enabled:
+            audio = self._audio_provider() if self._audio_provider else None
+            self._audio_viewer.update(audio)
 
         self._schedule_preview()
 
@@ -255,7 +415,6 @@ class NeonEyeTrackerTkinterGUI:
             self._device_var.set(device_name or "Connected")
         if self._status_var:
             self._status_var.set("Streaming")
-        self._update_button_states()
 
     def on_device_disconnected(self) -> None:
         """Handle device disconnection."""
@@ -266,14 +425,12 @@ class NeonEyeTrackerTkinterGUI:
             self._device_var.set("None")
         if self._status_var:
             self._status_var.set("Disconnected")
-        self._update_button_states()
 
     def set_device_status(self, text: str, *, connected: bool) -> None:
         """Update device status display."""
         self._device_connected = connected
         if self._status_var:
             self._status_var.set(text)
-        self._update_button_states()
 
     def set_device_info(self, device_name: str) -> None:
         """Update device name display."""
@@ -287,17 +444,8 @@ class NeonEyeTrackerTkinterGUI:
         if self._recording_var:
             self._recording_var.set("Recording" if active else "Idle")
 
-    def _update_button_states(self) -> None:
-        """Enable/disable buttons based on device state."""
-        state = 'normal' if self._device_connected else 'disabled'
-        if self._configure_btn:
-            try:
-                self._configure_btn.configure(state=state)
-            except tk.TclError:
-                pass
-
     # ------------------------------------------------------------------
-    # Button callbacks
+    # Menu callbacks
 
     def _on_reconnect_clicked(self) -> None:
         """Handle reconnect button click."""
@@ -325,6 +473,11 @@ class NeonEyeTrackerTkinterGUI:
     def handle_window_close(self) -> None:
         """Handle window close event."""
         self.stop_preview()
+        # Cleanup viewers
+        for viewer in [self._video_viewer, self._eyes_viewer, self._imu_viewer,
+                       self._events_viewer, self._audio_viewer]:
+            if viewer:
+                viewer.cleanup()
 
 
 class NeonEyeTrackerView:
@@ -345,6 +498,7 @@ class NeonEyeTrackerView:
         *,
         display_name: str,
         logger: Optional[logging.Logger] = None,
+        help_callback: Optional[Callable] = None,
     ) -> None:
         self.args = args
         self.model = model
@@ -359,10 +513,13 @@ class NeonEyeTrackerView:
             action_callback=action_callback,
             display_name=self.display_name,
             logger=stub_logger,
+            help_callback=help_callback,
         )
         self._bridge = LegacyTkViewBridge(self._stub_view, logger=self.logger.getChild("Bridge"))
         self.gui: Optional[NeonEyeTrackerTkinterGUI] = None
         self._runtime: Optional["EyeTrackerRuntime"] = None
+        self._controls_menu: Optional[Any] = None
+        self._stream_controls: Optional[StreamControls] = None
 
         self._bridge.mount(self._build_embedded_gui)
         self._stub_view.set_preview_title("Preview")
@@ -405,16 +562,80 @@ class NeonEyeTrackerView:
             gui.async_bridge.bind_loop(loop)
         self.gui = gui
 
+        # Create stream controls
+        root = getattr(self._stub_view, "root", None)
+        if root:
+            self._stream_controls = StreamControls(root, self.logger)
+            gui.set_stream_controls(self._stream_controls)
+
         # Apply pending runtime binding if bind_runtime was called before GUI created
         if self._runtime:
-            gui.system = self._runtime
+            self.bind_runtime(self._runtime)
             self.logger.info("Applied pending runtime binding to GUI")
 
         # Build IO stub content (status panel)
         self._build_io_stub_content()
 
+        # Install Controls menu
+        self._install_controls_menu()
+
         self.logger.info("NeonEyeTracker embedded GUI built successfully")
         return container
+
+    def _install_controls_menu(self) -> None:
+        """Install the Controls menu with Configure, stream checkboxes, and Reconnect."""
+        if self._controls_menu is not None:
+            return
+
+        menu = None
+        add_menu = getattr(self._stub_view, "add_menu", None)
+        menubar = getattr(self._stub_view, "menubar", None)
+
+        if callable(add_menu):
+            try:
+                menu = add_menu("Controls")
+            except Exception:
+                menu = None
+        if menu is None and menubar is not None:
+            try:
+                menu = tk.Menu(menubar, tearoff=0)
+                menubar.add_cascade(label="Controls", menu=menu)
+            except Exception:
+                menu = None
+
+        if menu is None:
+            self.logger.debug("Controls menu unavailable; skipping menu wiring")
+            return
+
+        self._controls_menu = menu
+
+        # Configure option
+        menu.add_command(
+            label="Configure...",
+            command=self._on_configure_menu,
+        )
+
+        # Add stream controls checkboxes
+        if self._stream_controls:
+            self._stream_controls.build_menu(menu)
+
+        menu.add_separator()
+
+        # Reconnect option
+        menu.add_command(
+            label="Reconnect",
+            command=self._on_reconnect_menu,
+        )
+
+    def _on_configure_menu(self) -> None:
+        """Handle Configure menu item click."""
+        if self.gui:
+            self.gui._on_configure_clicked()
+
+    def _on_reconnect_menu(self) -> None:
+        """Handle Reconnect menu item click."""
+        if self.gui:
+            self.gui._on_reconnect_clicked()
 
     def _build_io_stub_content(self) -> None:
         """Build the status panel in the IO stub area."""
@@ -453,43 +674,6 @@ class NeonEyeTrackerView:
                 row=2, column=1, sticky="e", padx=5, pady=2
             )
 
-            # Controls LabelFrame
-            controls_lf = ttk.LabelFrame(parent, text="Controls")
-            controls_lf.grid(row=1, column=0, sticky="new", padx=4, pady=2)
-            controls_lf.columnconfigure(0, weight=1)
-            controls_lf.columnconfigure(1, weight=1)
-
-            # Use RoundedButton if available
-            if RoundedButton is not None and HAS_THEME and Colors is not None:
-                btn_bg = Colors.BG_FRAME
-                self.gui._reconnect_btn = RoundedButton(
-                    controls_lf, text="Reconnect",
-                    command=self.gui._on_reconnect_clicked,
-                    width=80, height=32, style='default', bg=btn_bg
-                )
-                self.gui._reconnect_btn.grid(row=0, column=0, padx=2, pady=4)
-
-                self.gui._configure_btn = RoundedButton(
-                    controls_lf, text="Configure",
-                    command=self.gui._on_configure_clicked,
-                    width=80, height=32, style='default', bg=btn_bg
-                )
-                self.gui._configure_btn.grid(row=0, column=1, padx=2, pady=4)
-                self.gui._configure_btn.configure(state='disabled')
-            else:
-                self.gui._reconnect_btn = ttk.Button(
-                    controls_lf, text="Reconnect",
-                    command=self.gui._on_reconnect_clicked
-                )
-                self.gui._reconnect_btn.grid(row=0, column=0, sticky="ew", padx=2, pady=4)
-
-                self.gui._configure_btn = ttk.Button(
-                    controls_lf, text="Configure",
-                    command=self.gui._on_configure_clicked,
-                    state='disabled'
-                )
-                self.gui._configure_btn.grid(row=0, column=1, sticky="ew", padx=2, pady=4)
-
         self._stub_view.set_io_stub_title("EyeTracker-Neon")
         self._stub_view.build_io_stub_content(builder)
 
@@ -506,9 +690,38 @@ class NeonEyeTrackerView:
                 if loop:
                     self.gui.async_bridge.bind_loop(loop)
 
-            # Set up frame provider
+            # Set up frame provider (video with gaze overlay)
             if hasattr(runtime, '_get_latest_frame'):
                 self.gui.set_frame_provider(runtime._get_latest_frame)
+
+            # Set up eyes frame provider
+            if hasattr(runtime, '_get_latest_eyes_frame'):
+                self.gui.set_eyes_frame_provider(runtime._get_latest_eyes_frame)
+
+            # Set up gaze provider
+            if hasattr(runtime, '_get_latest_gaze'):
+                self.gui.set_gaze_provider(runtime._get_latest_gaze)
+
+            # Set up IMU provider
+            if hasattr(runtime, '_get_latest_imu'):
+                self.gui.set_imu_provider(runtime._get_latest_imu)
+
+            # Set up event provider
+            if hasattr(runtime, '_get_latest_event'):
+                self.gui.set_event_provider(runtime._get_latest_event)
+
+            # Set up audio provider
+            if hasattr(runtime, '_get_latest_audio'):
+                self.gui.set_audio_provider(runtime._get_latest_audio)
+
+            # Load stream states from config if available
+            if self._stream_controls and hasattr(runtime, 'config'):
+                self._stream_controls.load_from_config(runtime.config)
+                # Handle eyes viewer state separately (not registered with controls)
+                eyes_enabled = self._stream_controls.is_enabled("eyes")
+                if self.gui and self.gui._eyes_viewer:
+                    self.gui._eyes_viewer._enabled = eyes_enabled
+                    self.gui._update_video_eyes_layout(eyes_visible=eyes_enabled)
 
             # Set preview interval from config
             preview_hz = max(1, int(getattr(self.args, "gui_preview_update_hz", 10)))
@@ -585,6 +798,10 @@ class NeonEyeTrackerView:
 
     async def cleanup(self) -> None:
         """Clean up view resources."""
+        # Save stream states to config if available
+        if self._stream_controls and self._runtime and hasattr(self._runtime, 'config'):
+            self._stream_controls.save_to_config(self._runtime.config)
+
         if self.gui:
             try:
                 self.gui.handle_window_close()

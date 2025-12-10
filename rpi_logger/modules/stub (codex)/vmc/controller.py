@@ -141,8 +141,10 @@ class StubCodexController:
 
                 command = CommandMessage.parse(line)
                 if not command:
+                    self.logger.debug("Failed to parse command: %s", line[:100])
                     continue
 
+                self.logger.info("Received command: %s", command.get("command", "unknown"))
                 await self._process_command(command)
         finally:
             shutdown_flag.set()
@@ -194,11 +196,15 @@ class StubCodexController:
             handled = True
 
         if not handled and self._runtime:
+            self.logger.info("Forwarding command to runtime: %s", action)
             try:
                 handled = await self._runtime.handle_command(command)
+                self.logger.info("Runtime handled command %s: %s", action, handled)
             except Exception:
                 self.logger.exception("Runtime command handler failed [%s]", action)
                 handled = True
+        elif not handled:
+            self.logger.warning("No runtime attached to handle command: %s", action)
 
         if not handled:
             self.logger.warning("Unknown command: %s", action)

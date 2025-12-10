@@ -26,7 +26,7 @@ except ImportError:
     RoundedButton = None  # type: ignore
 
 if TYPE_CHECKING:
-    from rpi_logger.modules.Cameras.runtime.state import CameraCapabilities, ControlInfo, ControlType
+    from rpi_logger.modules.Cameras.camera_core.state import CameraCapabilities, ControlInfo, ControlType
 
 # Re-export DEFAULT_SETTINGS for backwards compatibility
 DEFAULT_SETTINGS = {
@@ -157,6 +157,8 @@ class CameraSettingsWindow:
         record_fps_values: Optional[List[str]] = None,
     ) -> None:
         """Update available resolution/FPS options for a camera."""
+        self._logger.info("update_camera_options: camera_id=%s, active=%s, resolutions=%s",
+                        camera_id, self._active_camera, preview_resolutions)
         self._options.setdefault(camera_id, {})
         if preview_resolutions is not None:
             self._options[camera_id]["preview_resolutions"] = preview_resolutions
@@ -167,8 +169,10 @@ class CameraSettingsWindow:
         if record_fps_values is not None:
             self._options[camera_id]["record_fps_values"] = record_fps_values
 
+        # Always clamp settings when options are updated (not just when active)
+        self._clamp_settings_to_options(camera_id)
+
         if camera_id == self._active_camera:
-            self._clamp_settings_to_options(camera_id)
             self._refresh_resolution_ui()
 
     def update_camera_capabilities(
@@ -447,7 +451,7 @@ class CameraSettingsWindow:
 
     def _build_control_widget(self, parent, row: int, name: str, ctrl: "ControlInfo") -> None:
         """Build a single control widget based on control type."""
-        from rpi_logger.modules.Cameras.runtime.state import ControlType
+        from rpi_logger.modules.Cameras.camera_core.state import ControlType
 
         # Inframe styles for widgets inside LabelFrames
         label_style = "Inframe.TLabel" if HAS_THEME else ""
@@ -592,7 +596,7 @@ class CameraSettingsWindow:
 
     def _format_value(self, value: float, ctrl: "ControlInfo") -> str:
         """Format a value for display."""
-        from rpi_logger.modules.Cameras.runtime.state import ControlType
+        from rpi_logger.modules.Cameras.camera_core.state import ControlType
 
         if ctrl.control_type == ControlType.INTEGER:
             return str(int(value))
@@ -637,7 +641,7 @@ class CameraSettingsWindow:
             return
 
         # Get value based on type
-        from rpi_logger.modules.Cameras.runtime.state import ControlType
+        from rpi_logger.modules.Cameras.camera_core.state import ControlType
 
         try:
             if ctrl.control_type == ControlType.BOOLEAN:
@@ -697,17 +701,23 @@ class CameraSettingsWindow:
 
     def _apply_resolution(self) -> None:
         """Apply resolution/FPS settings."""
+        self._logger.info("_apply_resolution called, active_camera=%s", self._active_camera)
         if not self._active_camera:
+            self._logger.warning("No active camera set - cannot apply")
             return
 
         settings = self._get_resolution_settings()
+        self._logger.info("Settings to apply: %s", settings)
         self._latest[self._active_camera] = settings
 
         if self._on_apply_resolution:
+            self._logger.info("Calling _on_apply_resolution callback")
             try:
                 self._on_apply_resolution(self._active_camera, settings)
             except Exception:
                 self._logger.debug("Resolution apply callback failed", exc_info=True)
+        else:
+            self._logger.warning("No _on_apply_resolution callback registered")
 
     def _reprobe_camera(self) -> None:
         """Request reprobing of the active camera's capabilities."""
@@ -737,6 +747,8 @@ class CameraSettingsWindow:
     def _refresh_resolution_ui(self) -> None:
         """Refresh resolution/FPS comboboxes."""
         if not self._window or not self._preview_res_var:
+            self._logger.debug("_refresh_resolution_ui: window=%s, var=%s - skipping",
+                             self._window is not None, self._preview_res_var is not None)
             return
 
         self._suppress_change = True
@@ -744,6 +756,7 @@ class CameraSettingsWindow:
             if self._active_camera:
                 settings = self._latest.get(self._active_camera, dict(DEFAULT_SETTINGS))
                 opts = self._options.get(self._active_camera, {})
+                self._logger.info("_refresh_resolution_ui: settings=%s, opts=%s", settings, opts)
 
                 # Update combobox values
                 if self._preview_res_combo:

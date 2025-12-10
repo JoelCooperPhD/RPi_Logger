@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.runtime import (
+from rpi_logger.modules.Cameras.camera_core import (
     CameraId,
     CameraRuntimeState,
     deserialize_camera_state,

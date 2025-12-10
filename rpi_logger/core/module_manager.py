@@ -876,14 +876,19 @@ class ModuleManager:
 
     async def send_command(self, module_name: str, command: str) -> bool:
         """Send a raw command string to a running module process."""
+        self.logger.info(
+            "send_command to %s (known processes: %s)",
+            module_name, list(self.module_processes.keys())
+        )
         process = self.module_processes.get(module_name)
         if not process or not process.is_running():
             self.logger.warning(
-                "Cannot send command to %s - process not running",
-                module_name
+                "Cannot send command to %s - process not running (found: %s, running: %s)",
+                module_name, process is not None, process.is_running() if process else False
             )
             return False
         try:
+            self.logger.info("Sending command to %s: %s", module_name, command[:100])
             await process.send_command(command)
             return True
         except Exception as exc:

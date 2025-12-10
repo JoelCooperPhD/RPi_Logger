@@ -325,6 +325,10 @@ class LoggerSystem:
                 return
             elif status.get_status_type() == "ready":
                 # Module is ready for commands
+                self.logger.info(
+                    "Module/instance %s sent 'ready' status, forwarding to instance_manager",
+                    effective_id
+                )
                 self.instance_manager.on_status_message(
                     effective_id, "ready", status.get_payload()
                 )
@@ -1124,9 +1128,12 @@ class LoggerSystem:
             self.logger.error("Instance %s failed to become ready", instance_id)
             return False
 
+        self.logger.info("Instance %s is ready, proceeding with device connection", instance_id)
+
         # Send assign_device command via InstanceStateManager (non-blocking)
         # This transitions to CONNECTING state. Connection result comes via status messages.
         if not device.is_internal:
+            self.logger.info("Sending assign_device to non-internal device %s", device_id)
             command_builder = self._build_assign_device_command_builder(device)
             await self.instance_manager.connect_device(instance_id, command_builder)
             # Connection result will arrive via on_status_message -> device_ready/device_error
