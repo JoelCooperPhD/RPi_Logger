@@ -231,6 +231,14 @@ def parse_args(argv: Optional[list[str]] = None):
     args.gaze_color_not_worn_g = get_config_int(config, "gaze_color_not_worn_g", 0)
     args.gaze_color_not_worn_r = get_config_int(config, "gaze_color_not_worn_r", 255)
 
+    # Stream viewer enable states (Controls menu persistence)
+    args.stream_video_enabled = get_config_bool(config, "stream_video_enabled", True)
+    args.stream_gaze_enabled = get_config_bool(config, "stream_gaze_enabled", True)
+    args.stream_eyes_enabled = get_config_bool(config, "stream_eyes_enabled", False)
+    args.stream_imu_enabled = get_config_bool(config, "stream_imu_enabled", False)
+    args.stream_events_enabled = get_config_bool(config, "stream_events_enabled", False)
+    args.stream_audio_enabled = get_config_bool(config, "stream_audio_enabled", False)
+
     args.config = config
     args.config_file_path = config_path
 

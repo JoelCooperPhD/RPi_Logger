@@ -25,6 +25,7 @@ except Exception:
 import numpy as np
 
 from rpi_logger.core.logging_utils import ensure_structured_logger, get_module_logger
+from rpi_logger.modules.base.preferences import ModulePreferences
 from vmc import LegacyTkViewBridge, StubCodexView
 
 try:
@@ -521,6 +522,13 @@ class NeonEyeTrackerView:
         self._controls_menu: Optional[Any] = None
         self._stream_controls: Optional[StreamControls] = None
 
+        # Initialize preferences for config persistence
+        config_path = getattr(args, "config_file_path", None)
+        if config_path:
+            self._preferences = ModulePreferences(Path(config_path))
+        else:
+            self._preferences = None
+
         self._bridge.mount(self._build_embedded_gui)
         self._stub_view.set_preview_title("Preview")
         self.model.subscribe(self._on_model_change)
@@ -798,9 +806,26 @@ class NeonEyeTrackerView:
 
     async def cleanup(self) -> None:
         """Clean up view resources."""
-        # Save stream states to config if available
+        # Save stream states to config object and persist to disk
         if self._stream_controls and self._runtime and hasattr(self._runtime, 'config'):
             self._stream_controls.save_to_config(self._runtime.config)
+
+            # Persist stream states to config file
+            if self._preferences:
+                config = self._runtime.config
+                stream_updates = {
+                    "stream_video_enabled": config.stream_video_enabled,
+                    "stream_gaze_enabled": config.stream_gaze_enabled,
+                    "stream_eyes_enabled": config.stream_eyes_enabled,
+                    "stream_imu_enabled": config.stream_imu_enabled,
+                    "stream_events_enabled": config.stream_events_enabled,
+                    "stream_audio_enabled": config.stream_audio_enabled,
+                }
+                try:
+                    await self._preferences.write_async(stream_updates)
+                    self.logger.debug("Persisted stream control states to config")
+                except Exception as e:
+                    self.logger.warning("Failed to persist stream states: %s", e)
 
         if self.gui:
             try:

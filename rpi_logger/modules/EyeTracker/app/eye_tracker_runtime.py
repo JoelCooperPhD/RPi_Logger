@@ -231,6 +231,15 @@ class EyeTrackerRuntime(ModuleRuntime):
     # ------------------------------------------------------------------
     # Tracker lifecycle helpers
 
+    @staticmethod
+    def _parse_bool(value: Any) -> bool:
+        """Parse a value to boolean, handling string representations."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "1", "yes", "on"}
+        return bool(value)
+
     def _build_tracker_components(self) -> None:
         config = TrackerConfig(
             fps=float(getattr(self.args, "target_fps", 5.0)),
@@ -264,6 +273,13 @@ class EyeTrackerRuntime(ModuleRuntime):
             audio_stream_param=str(getattr(self.args, "audio_stream_param", "audio=scene")),
             enable_device_status_logging=bool(getattr(self.args, "enable_device_status_logging", False)),
             device_status_poll_interval=float(getattr(self.args, "device_status_poll_interval", 5.0)),
+            # Stream viewer enable states (persisted via Controls menu)
+            stream_video_enabled=self._parse_bool(getattr(self.args, "stream_video_enabled", True)),
+            stream_gaze_enabled=self._parse_bool(getattr(self.args, "stream_gaze_enabled", True)),
+            stream_eyes_enabled=self._parse_bool(getattr(self.args, "stream_eyes_enabled", False)),
+            stream_imu_enabled=self._parse_bool(getattr(self.args, "stream_imu_enabled", False)),
+            stream_events_enabled=self._parse_bool(getattr(self.args, "stream_events_enabled", False)),
+            stream_audio_enabled=self._parse_bool(getattr(self.args, "stream_audio_enabled", False)),
         )
 
         self._tracker_config = config

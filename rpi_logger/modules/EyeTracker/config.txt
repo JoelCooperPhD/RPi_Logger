@@ -31,6 +31,18 @@ preview_preset = 4
 gui_preview_update_hz = 5
 
 ################################################################################
+# STREAM VIEWER PERSISTENCE (Controls menu state)
+################################################################################
+# Which stream viewers are enabled by default (true | false)
+# These are automatically saved when you toggle checkboxes in Controls menu
+stream_video_enabled = true
+stream_gaze_enabled = true
+stream_eyes_enabled = true
+stream_imu_enabled = false
+stream_events_enabled = false
+stream_audio_enabled = false
+
+################################################################################
 # RECORDING OVERLAY (APPLIED TO SAVED VIDEO)
 ################################################################################
 enable_recording_overlay = true     # Toggle overlay entirely
@@ -87,6 +99,6 @@ preview_resolution = auto
 gui_io_stub_visible = false
 view.show_io_panel = false
 view.show_logger = false
-window_geometry = 1233x901+1065+257
-device_connected = true
+window_geometry = 320x200
+device_connected = false
 eyetracker_config_dialog_geometry = +392+790
