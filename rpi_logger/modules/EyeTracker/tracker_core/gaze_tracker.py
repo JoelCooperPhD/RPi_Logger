@@ -7,7 +7,7 @@ from .config.tracker_config import TrackerConfig as Config
 from .device_manager import DeviceManager
 from .stream_handler import StreamHandler, FramePacket
 from .frame_processor import FrameProcessor
-from .recording import RecordingManager, FrameTimingMetadata
+from .recording import RecordingManager
 
 logger = get_module_logger(__name__)
 
@@ -314,18 +314,7 @@ class GazeTracker:
                     self._latest_display_frame = display_frame
 
                 if self.recording_manager.is_recording and recording_frame is not None:
-                    frame_metadata = FrameTimingMetadata(
-                        capture_monotonic=frame_packet.received_monotonic,
-                        capture_unix=frame_packet.timestamp_unix_seconds,
-                        camera_frame_index=frame_packet.camera_frame_index,
-                        display_frame_index=self.frame_count,
-                        dropped_frames_total=self.dropped_frames,
-                        duplicates_total=self.recording_manager.duplicated_frames,
-                        available_camera_fps=self.stream_handler.get_camera_fps(),
-                        requested_fps=self.config.fps,
-                        gaze_timestamp=getattr(latest_gaze, "timestamp_unix_seconds", None),
-                    )
-                    self.recording_manager.write_frame(recording_frame, metadata=frame_metadata)
+                    self.recording_manager.write_frame(recording_frame)
                     self.recording_manager.write_gaze_sample(latest_gaze)
 
                 if self.display_enabled and display_frame is not None:

@@ -69,10 +69,7 @@ gaze_color_worn_r = 255
 ################################################################################
 # DATA EXPORT OPTIONS
 ################################################################################
-enable_advanced_gaze_logging = false      # Extra per-eye metrics CSV
-expand_eye_event_details = true           # Detailed fixation/blink fields
 audio_stream_param = audio=scene          # RTSP query for audio stream
-device_status_poll_interval = 5.0
 
 ################################################################################
 # LOGGING
@@ -89,11 +86,11 @@ discovery_retry = 3.0     # Seconds between retries
 ################################################################################
 # MASTER LOGGER INTEGRATION
 ################################################################################
-enabled = false
+enabled = true
 preview_resolution = auto
 gui_io_stub_visible = false
 view.show_io_panel = false
 view.show_logger = true
 window_geometry = 320x200
-device_connected = false
+device_connected = true
 eyetracker_config_dialog_geometry = +392+790

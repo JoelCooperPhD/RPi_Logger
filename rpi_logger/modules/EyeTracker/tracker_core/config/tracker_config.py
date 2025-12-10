@@ -45,15 +45,7 @@ class TrackerConfig:
     gaze_color_worn_r: int = 255
 
     # Data export controls
-    enable_advanced_gaze_logging: bool = False
-    expand_eye_event_details: bool = True
     audio_stream_param: str = "audio=scene"
-    device_status_poll_interval: float = 5.0
-
-    # Phase 3.1: Frame selection mode
-    # "timer" - maintains consistent output FPS, duplicates frames when camera slower (default)
-    # "camera" - only writes unique camera frames, variable timing (for frame-accurate analysis)
-    frame_selection_mode: str = "timer"
 
     # IMU visualization settings
     imu_sparkline_duration_sec: float = 10.0  # Seconds of motion history to display

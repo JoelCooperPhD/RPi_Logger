@@ -167,9 +167,9 @@ class EyeTrackerRuntime(ModuleRuntime):
         action = (command.get("command") or "").lower()
 
         # Recording commands
-        if action == "start_recording":
+        if action in ("start_recording", "record"):
             return await self._start_recording_flow(command)
-        if action == "stop_recording":
+        if action in ("stop_recording", "pause"):
             return await self._stop_recording_flow()
 
         # Device commands
@@ -279,10 +279,7 @@ class EyeTrackerRuntime(ModuleRuntime):
             gaze_color_worn_b=int(getattr(self.args, "gaze_color_worn_b", 0)),
             gaze_color_worn_g=int(getattr(self.args, "gaze_color_worn_g", 0)),
             gaze_color_worn_r=int(getattr(self.args, "gaze_color_worn_r", 255)),
-            enable_advanced_gaze_logging=bool(getattr(self.args, "enable_advanced_gaze_logging", False)),
-            expand_eye_event_details=bool(getattr(self.args, "expand_eye_event_details", True)),
             audio_stream_param=str(getattr(self.args, "audio_stream_param", "audio=scene")),
-            device_status_poll_interval=float(getattr(self.args, "device_status_poll_interval", 5.0)),
             # Stream viewer enable states (persisted via Controls menu)
             stream_video_enabled=self._parse_bool(getattr(self.args, "stream_video_enabled", True)),
             stream_gaze_enabled=self._parse_bool(getattr(self.args, "stream_gaze_enabled", True)),

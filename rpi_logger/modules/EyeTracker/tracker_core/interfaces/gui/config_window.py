@@ -301,8 +301,8 @@ class EyeTrackerConfigWindow:
             if self.runtime._recording_manager:
                 self.runtime._recording_manager.config = config
                 # Update video encoder resolution
-                self.runtime._recording_manager._video_encoder.resolution = config.resolution
-                self.runtime._recording_manager._video_encoder.fps = config.fps
+                self.runtime._recording_manager._world_video_encoder.resolution = config.resolution
+                self.runtime._recording_manager._world_video_encoder.fps = config.fps
 
             messagebox.showinfo("Success", "Configuration applied", parent=self.dialog)
 

@@ -137,46 +137,10 @@ def parse_args(argv: Optional[list[str]] = None):
     )
 
     parser.add_argument(
-        "--advanced-gaze-logging",
-        dest="enable_advanced_gaze_logging",
-        action="store_true",
-        help="Enable extended gaze CSV logging",
-    )
-    parser.add_argument(
-        "--no-advanced-gaze-logging",
-        dest="enable_advanced_gaze_logging",
-        action="store_false",
-        help="Disable extended gaze CSV logging",
-    )
-    parser.add_argument(
-        "--enable-eye-event-details",
-        dest="expand_eye_event_details",
-        action="store_true",
-        help="Include fixation/blink details in events CSV",
-    )
-    parser.add_argument(
-        "--disable-eye-event-details",
-        dest="expand_eye_event_details",
-        action="store_false",
-        help="Write compact legacy event CSV",
-    )
-    parser.add_argument(
         "--audio-stream-param",
         dest="audio_stream_param",
         default=get_config_str(config, "audio_stream_param", "audio=scene"),
         help="RTSP query parameter used to locate audio stream",
-    )
-    parser.add_argument(
-        "--device-status-interval",
-        dest="device_status_poll_interval",
-        type=positive_float,
-        default=get_config_float(config, "device_status_poll_interval", 5.0),
-        help="Seconds between telemetry samples",
-    )
-
-    parser.set_defaults(
-        enable_advanced_gaze_logging=get_config_bool(config, "enable_advanced_gaze_logging", False),
-        expand_eye_event_details=get_config_bool(config, "expand_eye_event_details", True),
     )
 
     args = parser.parse_args(argv)

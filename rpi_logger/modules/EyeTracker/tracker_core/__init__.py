@@ -1,5 +1,5 @@
 from .rolling_fps import RollingFPS
-from .recording import RecordingManager, FrameTimingMetadata
+from .recording import RecordingManager
 from .config.tracker_config import TrackerConfig
 
 from .device_manager import DeviceManager
@@ -21,7 +21,6 @@ __all__ = [
     'RollingFPS',
 
     'RecordingManager',
-    'FrameTimingMetadata',
     'TrackerConfig',
 
     'DeviceManager',
