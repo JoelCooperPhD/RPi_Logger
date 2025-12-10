@@ -1,14 +1,11 @@
 """Eye events stream viewer with mini-visualizations and counter display.
 
 Provides real-time visualization of eye tracking events for human factors research:
-- Blink rate sparkline (fatigue/drowsiness indicator)
-- Event timeline (temporal patterns)
-- Fixation duration distribution (processing depth)
-- Attention heat indicator (cognitive state)
-- Saccade velocity gauge (fatigue detection)
-- Scan pattern rose (attention distribution)
-- Fixation/saccade ratio (task type indicator)
-- PERCLOS indicator (drowsiness metric)
+- Event timeline (temporal patterns) - 30s window
+- Saccade velocity gauge (fatigue detection) - 30s window
+- Saccade duration histogram (timing distribution) - 30s window
+- Fixation/saccade ratio (task type indicator) - 30s window
+- PERCLOS indicator (true P80 drowsiness metric) - 30s window
 """
 
 from __future__ import annotations
@@ -18,7 +15,7 @@ import math
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 try:
     import tkinter as tk
@@ -37,10 +34,6 @@ except ImportError:
 
 from .base_viewer import BaseStreamViewer
 
-if TYPE_CHECKING:
-    pass
-
-
 # =============================================================================
 # Constants
 # =============================================================================
@@ -52,32 +45,34 @@ EVENT_TYPE_SACCADE_ONSET = 2
 EVENT_TYPE_FIXATION_ONSET = 3
 EVENT_TYPE_BLINK = 4
 
-# Visualization colors
+# Visualization colors (instrument-grade, muted professional palette)
 class VizColors:
     """Colors for mini-visualizations."""
     # Canvas backgrounds
-    BG = "#1e1e1e"
+    BG = "#1a1a1a"
     BG_DARK = "#141414"
-    BORDER = "#404055"
+    BORDER = "#333333"
 
-    # Event colors
-    BLINK = "#3498db"      # Blue
-    FIXATION = "#2ecc71"   # Green
-    SACCADE = "#e67e22"    # Orange
-    ONSET = "#9b59b6"      # Purple (for onset events)
+    # Event colors (muted, professional)
+    BLINK = "#5a7a8a"      # Muted steel blue
+    FIXATION = "#5a7a5a"   # Muted sage green
+    SACCADE = "#7a6a5a"    # Muted tan/brown
+    ONSET = "#6a5a7a"      # Muted purple
 
-    # State colors
-    GOOD = "#2ecc71"       # Green
-    CAUTION = "#f39c12"    # Yellow/Orange
-    WARNING = "#e74c3c"    # Red
+    # State colors (subdued)
+    GOOD = "#4a6a4a"       # Dark muted green
+    CAUTION = "#6a5a3a"    # Dark muted amber
+    WARNING = "#6a4a4a"    # Dark muted red
 
     # Text
-    TEXT = "#ecf0f1"
-    TEXT_DIM = "#7f8c8d"
+    TEXT = "#a0a0a0"
+    TEXT_DIM = "#505050"
 
     # Gauge
-    GAUGE_BG = "#2a2a2a"
-    GAUGE_ZONE = "#3a5a3a"
+    GAUGE_BG = "#252525"
+    GAUGE_ZONE = "#2a3a2a"
+    GAUGE_RANGE = "#3a4a5a"    # Muted blue-gray for min/max spread
+    GAUGE_INDICATOR = "#8a9aaa"  # Neutral light blue-gray for current value
 
 
 def _init_viz_colors() -> None:
@@ -93,6 +88,117 @@ def _init_viz_colors() -> None:
 
 
 _init_viz_colors()
+
+
+# =============================================================================
+# PERCLOS Buffer Infrastructure
+# =============================================================================
+
+@dataclass
+class ApertureRecord:
+    """A single eyelid aperture sample for PERCLOS calculation."""
+    timestamp: float           # Unix timestamp (seconds)
+    aperture_left: float       # Left eyelid aperture (0-1, 1=fully open)
+    aperture_right: float      # Right eyelid aperture (0-1, 1=fully open)
+
+
+class PerclosBuffer:
+    """Ring buffer for eyelid aperture samples to compute true PERCLOS.
+
+    PERCLOS (Percentage of Eye Closure) is defined as the percentage of time
+    that the eyes are more than 80% closed over a measurement period.
+
+    Reference: NHTSA-approved thresholds:
+    - < 7.5% = Alert
+    - 7.5-15% = Questionable/Drowsy
+    - > 15% = Dangerous
+
+    Uses P80 definition: eye is "closed" when eyelid aperture < 20% (80%+ closed).
+    """
+
+    # Eye is considered "closed" when aperture is below this threshold
+    # P80 definition: <20% open means >80% closed
+    CLOSURE_THRESHOLD = 0.20
+
+    def __init__(self, window_sec: float = 30.0, max_samples: int = 3000):
+        """Initialize PERCLOS buffer.
+
+        Args:
+            window_sec: Time window for PERCLOS calculation (default 30s)
+            max_samples: Maximum samples to retain (default 3000 = 100Hz * 30s)
+        """
+        self._window_sec = window_sec
+        self._samples: deque[ApertureRecord] = deque(maxlen=max_samples)
+        self._last_prune = time.time()
+
+    def add_gaze_sample(self, gaze_data: Any) -> None:
+        """Add a gaze sample containing eyelid aperture data.
+
+        Args:
+            gaze_data: Gaze sample from Pupil Labs API with eyelid_aperture_left/right
+        """
+        try:
+            aperture_left = getattr(gaze_data, "eyelid_aperture_left", None)
+            aperture_right = getattr(gaze_data, "eyelid_aperture_right", None)
+
+            # Skip if no aperture data available
+            if aperture_left is None and aperture_right is None:
+                return
+
+            # Use available aperture (prefer average of both eyes)
+            left = float(aperture_left) if aperture_left is not None else None
+            right = float(aperture_right) if aperture_right is not None else None
+
+            record = ApertureRecord(
+                timestamp=getattr(gaze_data, "timestamp_unix_seconds", time.time()),
+                aperture_left=left if left is not None else (right or 1.0),
+                aperture_right=right if right is not None else (left or 1.0),
+            )
+            self._samples.append(record)
+
+            # Periodic pruning
+            now = time.time()
+            if now - self._last_prune > 5.0:
+                self._prune_old_samples(now)
+                self._last_prune = now
+        except Exception:
+            pass
+
+    def _prune_old_samples(self, now: float) -> None:
+        """Remove samples older than window_sec."""
+        cutoff = now - self._window_sec
+        while self._samples and self._samples[0].timestamp < cutoff:
+            self._samples.popleft()
+
+    def get_perclos(self) -> float:
+        """Calculate PERCLOS (percentage of time eyes >80% closed).
+
+        Returns:
+            PERCLOS value between 0.0 and 1.0, or -1.0 if insufficient data
+        """
+        if len(self._samples) < 10:  # Need minimum samples
+            return -1.0
+
+        now = time.time()
+        cutoff = now - self._window_sec
+        recent = [s for s in self._samples if s.timestamp >= cutoff]
+
+        if len(recent) < 10:
+            return -1.0
+
+        # Count samples where eye is >80% closed (aperture < 20%)
+        # Use binocular average - if either eye is closed, consider closed
+        closed_count = 0
+        for sample in recent:
+            avg_aperture = (sample.aperture_left + sample.aperture_right) / 2.0
+            if avg_aperture < self.CLOSURE_THRESHOLD:
+                closed_count += 1
+
+        return closed_count / len(recent)
+
+    def has_data(self) -> bool:
+        """Check if buffer has sufficient data for PERCLOS calculation."""
+        return len(self._samples) >= 10
 
 
 # =============================================================================
@@ -125,12 +231,31 @@ class EventBuffer:
     _last_prune: float = field(default_factory=time.time)
 
     def add(self, event_data: Any) -> None:
-        """Add an event from the Pupil Labs API to the buffer."""
+        """Add an event from the Pupil Labs API to the buffer.
+
+        Note: We use time.time() at receipt rather than the event's timestamp
+        to ensure time windowing works correctly (same pattern as IMU viewer).
+
+        Pupil Labs FixationEventData has start_time_ns and end_time_ns but no
+        duration attribute - we must calculate it ourselves.
+        """
         try:
+            now = time.time()
+            event_type = int(getattr(event_data, "event_type", -1))
+
+            # Calculate duration from start_time_ns and end_time_ns (Pupil Labs API)
+            # The API does NOT provide a 'duration' attribute directly
+            start_ns = getattr(event_data, "start_time_ns", None)
+            end_ns = getattr(event_data, "end_time_ns", None)
+            if start_ns is not None and end_ns is not None:
+                duration_sec = (end_ns - start_ns) / 1e9
+            else:
+                duration_sec = 0.0
+
             record = EventRecord(
-                timestamp=getattr(event_data, "timestamp", time.time()),
-                event_type=int(getattr(event_data, "event_type", -1)),
-                duration=float(getattr(event_data, "duration", 0.0) or 0.0),
+                timestamp=now,
+                event_type=event_type,
+                duration=duration_sec,
                 amplitude_deg=float(getattr(event_data, "amplitude_angle_deg", 0.0) or 0.0),
                 mean_velocity=float(getattr(event_data, "mean_velocity", 0.0) or 0.0),
                 start_x=float(getattr(event_data, "start_gaze_x", 0.0) or 0.0),
@@ -141,7 +266,6 @@ class EventBuffer:
             self._events.append(record)
 
             # Prune old events periodically (every 5 seconds)
-            now = time.time()
             if now - self._last_prune > 5.0:
                 self._prune_old_events(now)
                 self._last_prune = now
@@ -212,7 +336,12 @@ class EventBuffer:
         return sum(b.duration for b in blinks)
 
     def get_fixation_saccade_ratio(self, seconds: float = 60.0) -> tuple[float, float]:
-        """Get fixation vs saccade time ratio as (fix_fraction, sacc_fraction)."""
+        """Get fixation vs saccade time ratio as (fix_fraction, sacc_fraction).
+
+        Uses completed fixation/saccade events if available (they have duration).
+        Falls back to onset event counts if no completed events are available.
+        """
+        # Try completed events first (they have duration data)
         fixations = self.get_events_by_type(EVENT_TYPE_FIXATION, seconds)
         saccades = self.get_events_by_type(EVENT_TYPE_SACCADE, seconds)
 
@@ -220,9 +349,19 @@ class EventBuffer:
         sacc_time = sum(s.duration for s in saccades)
         total = fix_time + sacc_time
 
-        if total <= 0:
-            return 0.5, 0.5
-        return fix_time / total, sacc_time / total
+        if total > 0:
+            return fix_time / total, sacc_time / total
+
+        # Fallback: use onset event counts as a proxy
+        # This gives a rough ratio even without completed events
+        fix_onsets = self.get_events_by_type(EVENT_TYPE_FIXATION_ONSET, seconds)
+        sacc_onsets = self.get_events_by_type(EVENT_TYPE_SACCADE_ONSET, seconds)
+        onset_total = len(fix_onsets) + len(sacc_onsets)
+
+        if onset_total > 0:
+            return len(fix_onsets) / onset_total, len(sacc_onsets) / onset_total
+
+        return 0.5, 0.5
 
 
 # =============================================================================
@@ -273,7 +412,7 @@ class MiniViz:
         self._label_widget = ttk.Label(
             self._frame,
             text=self._label,
-            font=("Consolas", 9),
+            font=("Consolas", 8),
             anchor="center",
         )
         if label_style:
@@ -301,67 +440,12 @@ class MiniViz:
 # Visualization Implementations
 # =============================================================================
 
-class BlinkRateSparkline(MiniViz):
-    """Tiny sparkline showing blinks per minute over 60 seconds."""
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=100, height=30, title="Blink Rate", label="--/min")
-        self._points: list[int] = []
-
-    def update(self, buffer: EventBuffer) -> None:
-        if not self._canvas:
-            return
-
-        # Get blink history (counts per second for last 60 seconds)
-        history = buffer.get_blink_rate_history(60)
-        bpm = buffer.get_blinks_per_minute(60.0)
-
-        # Update label
-        self.set_label(f"{bpm:.0f}/min")
-
-        # Draw sparkline
-        self._canvas.delete("all")
-
-        w = self._width - 4
-        h = self._height - 4
-
-        # Calculate rolling bpm (5-second windows) for smoother line
-        window = 5
-        smoothed = []
-        for i in range(len(history) - window + 1):
-            chunk = history[i:i + window]
-            smoothed.append(sum(chunk) * (60.0 / window))
-
-        if not smoothed:
-            return
-
-        max_val = max(max(smoothed), 20)  # Minimum scale of 20 bpm
-
-        # Build polyline points
-        points = []
-        for i, val in enumerate(smoothed):
-            x = 2 + (i / max(1, len(smoothed) - 1)) * w
-            y = 2 + h - (val / max_val) * h
-            points.extend([x, y])
-
-        if len(points) >= 4:
-            # Color based on current bpm
-            if bpm < 10:
-                color = VizColors.CAUTION  # Low blink rate = high cognitive load
-            elif bpm > 25:
-                color = VizColors.WARNING  # High blink rate = fatigue
-            else:
-                color = VizColors.GOOD
-
-            self._canvas.create_line(points, fill=color, width=1.5, smooth=True)
-
-
 class EventTimeline(MiniViz):
     """Scrolling timeline showing recent events as colored ticks."""
 
     def __init__(self, parent: "tk.Frame") -> None:
         super().__init__(parent, width=120, height=30, title="Timeline", label="Last 30s")
-        self._time_window = 30.0  # seconds
+        self._time_window = 30.0  # 30 second rolling window
 
     def update(self, buffer: EventBuffer) -> None:
         if not self._canvas:
@@ -369,8 +453,16 @@ class EventTimeline(MiniViz):
 
         self._canvas.delete("all")
 
-        w = self._width - 4
-        h = self._height - 4
+        # Get actual canvas dimensions
+        canvas_w = self._canvas.winfo_width()
+        canvas_h = self._canvas.winfo_height()
+        if canvas_w <= 1:
+            canvas_w = self._width
+        if canvas_h <= 1:
+            canvas_h = self._height
+
+        w = canvas_w - 4
+        h = canvas_h - 4
         now = time.time()
 
         events = buffer.get_recent(self._time_window)
@@ -405,373 +497,277 @@ class EventTimeline(MiniViz):
             self._canvas.create_line(
                 x, y_center - tick_h // 2,
                 x, y_center + tick_h // 2,
-                fill=color, width=2
+                fill=color, width=1
             )
 
 
-class FixationDistBar(MiniViz):
-    """3-segment bar showing short/medium/long fixation distribution."""
+class BlinkRateGauge(MiniViz):
+    """Gauge showing blinks per minute with variability spread.
+
+    Shows current blink rate and the range of recent measurements.
+    No judgment on what's "normal" - just shows the data and spread.
+    """
 
     def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=80, height=30, title="Fixation Dur", label="--")
-        # Thresholds in seconds
-        self._short_thresh = 0.2    # < 200ms
-        self._long_thresh = 0.5     # > 500ms
+        super().__init__(parent, width=80, height=30, title="Blink Rate", label="--")
+        self._max_rate = 40.0
+        # Store recent per-minute rates for spread calculation
+        self._recent_rates: deque[float] = deque(maxlen=6)  # ~6 samples over 60s
+        self._last_sample_time = 0.0
 
     def update(self, buffer: EventBuffer) -> None:
         if not self._canvas:
             return
 
-        durations = buffer.get_fixation_durations(60.0)
-
-        if not durations:
-            self._canvas.delete("all")
-            self._draw_empty_bar()
-            self.set_label("--")
-            return
-
-        # Categorize fixations
-        short = sum(1 for d in durations if d < self._short_thresh)
-        medium = sum(1 for d in durations if self._short_thresh <= d < self._long_thresh)
-        long = sum(1 for d in durations if d >= self._long_thresh)
-        total = len(durations)
-
-        # Calculate proportions
-        short_pct = short / total if total > 0 else 0.33
-        medium_pct = medium / total if total > 0 else 0.34
-        long_pct = long / total if total > 0 else 0.33
-
-        # Draw bar
-        self._canvas.delete("all")
-        w = self._width - 4
-        h = self._height - 8
-        y = 4
-
-        x = 2
-        # Short (blue - visual search)
-        short_w = short_pct * w
-        if short_w > 0:
-            self._canvas.create_rectangle(x, y, x + short_w, y + h,
-                                          fill="#3498db", outline="")
-            x += short_w
-
-        # Medium (green - normal)
-        medium_w = medium_pct * w
-        if medium_w > 0:
-            self._canvas.create_rectangle(x, y, x + medium_w, y + h,
-                                          fill=VizColors.GOOD, outline="")
-            x += medium_w
-
-        # Long (orange - deep processing/fatigue)
-        long_w = long_pct * w
-        if long_w > 0:
-            self._canvas.create_rectangle(x, y, x + long_w, y + h,
-                                          fill=VizColors.CAUTION, outline="")
-
-        # Update label with mean duration
-        mean_dur = sum(durations) / len(durations) * 1000  # ms
-        self.set_label(f"{mean_dur:.0f}ms avg")
-
-    def _draw_empty_bar(self) -> None:
-        w = self._width - 4
-        h = self._height - 8
-        self._canvas.create_rectangle(2, 4, w + 2, h + 4,
-                                       fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
-
-
-class AttentionHeatBar(MiniViz):
-    """Gradient bar showing combined attention/cognitive state indicator."""
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=60, height=30, title="Cog Load", label="Normal")
-        self._baseline_bpm = 15.0  # Typical blink rate
-
-    def update(self, buffer: EventBuffer) -> None:
-        if not self._canvas:
-            return
-
-        # Calculate attention score (0 = good, 1 = overload/fatigue)
-        score = self._calculate_attention_score(buffer)
-
-        self._canvas.delete("all")
-        w = self._width - 4
-        h = self._height - 8
-
-        # Draw gradient background
-        self._draw_gradient(2, 4, w, h)
-
-        # Draw indicator marker
-        marker_x = 2 + score * w
-        self._canvas.create_polygon(
-            marker_x - 4, 2,
-            marker_x + 4, 2,
-            marker_x, 8,
-            fill=VizColors.TEXT, outline=""
-        )
-        self._canvas.create_line(marker_x, 8, marker_x, h + 4,
-                                  fill=VizColors.TEXT, width=2)
-
-        # Update label
-        if score < 0.33:
-            self.set_label("Normal")
-        elif score < 0.66:
-            self.set_label("Elevated")
-        else:
-            self.set_label("High")
-
-    def _calculate_attention_score(self, buffer: EventBuffer) -> float:
-        """Calculate combined attention/load score (0-1)."""
-        scores = []
-
-        # Blink rate deviation
-        bpm = buffer.get_blinks_per_minute(60.0)
-        if bpm > 0:
-            deviation = abs(bpm - self._baseline_bpm) / self._baseline_bpm
-            scores.append(min(1.0, deviation))
-
-        # Fixation duration (longer = higher load or fatigue)
-        durations = buffer.get_fixation_durations(30.0)
-        if durations:
-            mean_dur = sum(durations) / len(durations)
-            # Score increases for very short (<150ms) or very long (>600ms)
-            if mean_dur < 0.15:
-                scores.append(0.6)  # Very short = visual search stress
-            elif mean_dur > 0.6:
-                scores.append(0.8)  # Very long = fatigue
-            else:
-                scores.append(0.2)  # Normal range
-
-        # Saccade velocity (lower = fatigue)
-        velocities = buffer.get_saccade_velocities(30.0)
-        if velocities:
-            mean_vel = sum(velocities) / len(velocities)
-            if mean_vel < 200:
-                scores.append(0.8)  # Slow saccades = fatigue
-            elif mean_vel < 350:
-                scores.append(0.4)
-            else:
-                scores.append(0.1)  # Normal/high velocity
-
-        if not scores:
-            return 0.5
-
-        return min(1.0, sum(scores) / len(scores))
-
-    def _draw_gradient(self, x: int, y: int, w: int, h: int) -> None:
-        """Draw green-yellow-red gradient."""
-        # Simple 3-zone gradient
-        third = w // 3
-        self._canvas.create_rectangle(x, y, x + third, y + h,
-                                       fill=VizColors.GOOD, outline="")
-        self._canvas.create_rectangle(x + third, y, x + 2 * third, y + h,
-                                       fill=VizColors.CAUTION, outline="")
-        self._canvas.create_rectangle(x + 2 * third, y, x + w, y + h,
-                                       fill=VizColors.WARNING, outline="")
-
-
-class SaccadeVelocityGauge(MiniViz):
-    """Gauge showing mean saccade velocity vs normal range."""
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=80, height=30, title="Saccade Vel", label="--")
-        # Normal saccade velocity range (deg/s)
-        self._normal_min = 300.0
-        self._normal_max = 500.0
-        self._max_vel = 800.0
-
-    def update(self, buffer: EventBuffer) -> None:
-        if not self._canvas:
-            return
-
-        velocities = buffer.get_saccade_velocities(30.0)
-
-        self._canvas.delete("all")
-        w = self._width - 4
-        h = self._height - 8
-
-        # Draw background with normal zone
-        self._canvas.create_rectangle(2, 4, w + 2, h + 4,
-                                       fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
-
-        # Draw normal zone
-        zone_start = 2 + (self._normal_min / self._max_vel) * w
-        zone_end = 2 + (self._normal_max / self._max_vel) * w
-        self._canvas.create_rectangle(zone_start, 4, zone_end, h + 4,
-                                       fill=VizColors.GAUGE_ZONE, outline="")
-
-        if not velocities:
-            self.set_label("--")
-            return
-
-        mean_vel = sum(velocities) / len(velocities)
-
-        # Draw velocity indicator
-        vel_x = 2 + min(1.0, mean_vel / self._max_vel) * w
-
-        # Color based on velocity
-        if mean_vel < self._normal_min:
-            color = VizColors.WARNING  # Slow = fatigue
-        elif mean_vel > self._normal_max:
-            color = VizColors.CAUTION  # Fast = alertness/stress
-        else:
-            color = VizColors.GOOD
-
-        self._canvas.create_rectangle(vel_x - 2, 4, vel_x + 2, h + 4,
-                                       fill=color, outline="")
-
-        self.set_label(f"{mean_vel:.0f}°/s")
-
-
-class ScanPatternRose(MiniViz):
-    """8-directional rose showing saccade direction distribution."""
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=40, height=40, title="Scan", label="--")
-        self._num_sectors = 8
-
-    def update(self, buffer: EventBuffer) -> None:
-        if not self._canvas:
-            return
-
-        directions = buffer.get_saccade_directions(60.0)
-
         self._canvas.delete("all")
 
-        cx = self._width // 2
-        cy = self._height // 2
-        max_r = min(cx, cy) - 4
+        # Get actual canvas dimensions
+        canvas_w = self._canvas.winfo_width()
+        canvas_h = self._canvas.winfo_height()
+        if canvas_w <= 1:
+            canvas_w = self._width
+        if canvas_h <= 1:
+            canvas_h = self._height
 
-        # Draw background circle
-        self._canvas.create_oval(cx - max_r, cy - max_r, cx + max_r, cy + max_r,
-                                  fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
-
-        if not directions:
-            self.set_label("--")
-            return
-
-        # Count directions in each sector
-        sector_counts = [0] * self._num_sectors
-        sector_angle = 2 * math.pi / self._num_sectors
-
-        for angle in directions:
-            # Normalize angle to [0, 2*pi)
-            angle = angle % (2 * math.pi)
-            sector = int(angle / sector_angle) % self._num_sectors
-            sector_counts[sector] += 1
-
-        max_count = max(sector_counts) if sector_counts else 1
-
-        # Draw sectors
-        for i, count in enumerate(sector_counts):
-            if count == 0:
-                continue
-
-            angle_start = i * sector_angle - math.pi / 2  # Start from top
-            r = (count / max_count) * max_r * 0.9
-
-            # Draw pie slice
-            x1 = cx + r * math.cos(angle_start)
-            y1 = cy + r * math.sin(angle_start)
-            x2 = cx + r * math.cos(angle_start + sector_angle)
-            y2 = cy + r * math.sin(angle_start + sector_angle)
-
-            intensity = int(100 + (count / max_count) * 155)
-            color = f"#{intensity:02x}{intensity:02x}ff"  # Blue-ish
-
-            self._canvas.create_polygon(
-                cx, cy, x1, y1, x2, y2,
-                fill=color, outline=""
-            )
-
-        # Draw center dot
-        self._canvas.create_oval(cx - 2, cy - 2, cx + 2, cy + 2,
-                                  fill=VizColors.TEXT, outline="")
-
-        # Calculate entropy (distribution measure)
-        total = sum(sector_counts)
-        if total > 0:
-            probs = [c / total for c in sector_counts if c > 0]
-            entropy = -sum(p * math.log2(p) for p in probs) if probs else 0
-            max_entropy = math.log2(self._num_sectors)
-            uniformity = entropy / max_entropy if max_entropy > 0 else 0
-            self.set_label(f"{uniformity:.0%} unif")
-        else:
-            self.set_label("--")
-
-
-class FixSaccRatioBar(MiniViz):
-    """Split bar showing fixation vs saccade time ratio."""
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=60, height=30, title="Fix/Sacc", label="--")
-
-    def update(self, buffer: EventBuffer) -> None:
-        if not self._canvas:
-            return
-
-        fix_ratio, sacc_ratio = buffer.get_fixation_saccade_ratio(60.0)
-
-        self._canvas.delete("all")
-        w = self._width - 4
-        h = self._height - 8
-
-        # Draw fixation portion (green)
-        fix_w = fix_ratio * w
-        if fix_w > 0:
-            self._canvas.create_rectangle(2, 4, 2 + fix_w, h + 4,
-                                          fill=VizColors.FIXATION, outline="")
-
-        # Draw saccade portion (orange)
-        if sacc_ratio > 0:
-            self._canvas.create_rectangle(2 + fix_w, 4, w + 2, h + 4,
-                                          fill=VizColors.SACCADE, outline="")
-
-        # Update label
-        self.set_label(f"{fix_ratio:.0%} fix")
-
-
-class PerclosIndicator(MiniViz):
-    """PERCLOS-style indicator showing percentage of eyes closed."""
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=50, height=30, title="PERCLOS", label="--")
-        # PERCLOS thresholds
-        self._normal_thresh = 0.08   # < 8% = alert
-        self._caution_thresh = 0.15  # 8-15% = drowsy
-        # > 15% = dangerous
-
-    def update(self, buffer: EventBuffer) -> None:
-        if not self._canvas:
-            return
-
-        # Calculate PERCLOS (blink duration / total time)
-        window = 60.0
-        blink_duration = buffer.get_total_blink_duration(window)
-        perclos = blink_duration / window
-
-        self._canvas.delete("all")
-        w = self._width - 4
-        h = self._height - 8
-
-        # Determine color
-        if perclos < self._normal_thresh:
-            color = VizColors.GOOD
-        elif perclos < self._caution_thresh:
-            color = VizColors.CAUTION
-        else:
-            color = VizColors.WARNING
+        w = canvas_w - 4
+        h = canvas_h - 8
 
         # Draw background
         self._canvas.create_rectangle(2, 4, w + 2, h + 4,
                                        fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
 
-        # Draw fill based on percentage (cap at 30% for display)
+        # Get current blink rate
+        blink_rate = buffer.get_blinks_per_minute(60.0)
+
+        if blink_rate == 0:
+            self.set_label("--")
+            return
+
+        # Sample rate periodically for spread calculation
+        now = time.time()
+        if now - self._last_sample_time >= 10.0:  # Sample every 10s
+            self._recent_rates.append(blink_rate)
+            self._last_sample_time = now
+
+        # Calculate spread if we have enough samples
+        if len(self._recent_rates) >= 2:
+            min_rate = min(self._recent_rates)
+            max_rate = max(self._recent_rates)
+
+            # Draw spread bar (min to max range)
+            min_x = 2 + min(1.0, min_rate / self._max_rate) * w
+            max_x = 2 + min(1.0, max_rate / self._max_rate) * w
+            if max_x > min_x:
+                self._canvas.create_rectangle(min_x, 6, max_x, h + 2,
+                                               fill=VizColors.GAUGE_RANGE, outline="")
+
+        # Draw current value indicator (always same neutral color)
+        rate_x = 2 + min(1.0, blink_rate / self._max_rate) * w
+        self._canvas.create_rectangle(rate_x - 2, 4, rate_x + 2, h + 4,
+                                       fill=VizColors.GAUGE_INDICATOR, outline="")
+
+        self.set_label(f"{blink_rate:.0f}/min")
+
+
+class BlinkDurationGauge(MiniViz):
+    """Gauge showing average blink duration with min/max spread.
+
+    Shows current average blink duration and the range of individual blinks.
+    No judgment on what's "normal" - just shows the data and spread.
+    """
+
+    def __init__(self, parent: "tk.Frame") -> None:
+        super().__init__(parent, width=80, height=30, title="Blink Dur", label="--")
+        self._max_dur = 600.0  # ms - scale max
+
+    def update(self, buffer: EventBuffer) -> None:
+        if not self._canvas:
+            return
+
+        self._canvas.delete("all")
+
+        # Get actual canvas dimensions
+        canvas_w = self._canvas.winfo_width()
+        canvas_h = self._canvas.winfo_height()
+        if canvas_w <= 1:
+            canvas_w = self._width
+        if canvas_h <= 1:
+            canvas_h = self._height
+
+        w = canvas_w - 4
+        h = canvas_h - 8
+
+        # Draw background
+        self._canvas.create_rectangle(2, 4, w + 2, h + 4,
+                                       fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
+
+        # Get blink durations from last 60 seconds
+        blinks = buffer.get_events_by_type(EVENT_TYPE_BLINK, 60.0)
+        durations_ms = [b.duration * 1000 for b in blinks if b.duration > 0]
+
+        if not durations_ms:
+            self.set_label("--")
+            return
+
+        mean_dur = sum(durations_ms) / len(durations_ms)
+        min_dur = min(durations_ms)
+        max_dur = max(durations_ms)
+
+        # Draw spread bar (min to max range) if there's variation
+        if len(durations_ms) >= 2 and max_dur > min_dur:
+            min_x = 2 + min(1.0, min_dur / self._max_dur) * w
+            max_x = 2 + min(1.0, max_dur / self._max_dur) * w
+            self._canvas.create_rectangle(min_x, 6, max_x, h + 2,
+                                           fill=VizColors.GAUGE_RANGE, outline="")
+
+        # Draw mean indicator (always same neutral color)
+        dur_x = 2 + min(1.0, mean_dur / self._max_dur) * w
+        self._canvas.create_rectangle(dur_x - 2, 4, dur_x + 2, h + 4,
+                                       fill=VizColors.GAUGE_INDICATOR, outline="")
+
+        self.set_label(f"{mean_dur:.0f}ms")
+
+
+class SaccadeRateGauge(MiniViz):
+    """Gauge showing saccades per minute with variability spread.
+
+    Shows current saccade rate and the range of recent measurements.
+    No judgment on what's "normal" - just shows the data and spread.
+    """
+
+    def __init__(self, parent: "tk.Frame") -> None:
+        super().__init__(parent, width=80, height=30, title="Saccades", label="--")
+        self._max_rate = 300.0  # per minute - scale max
+        # Store recent per-minute rates for spread calculation
+        self._recent_rates: deque[float] = deque(maxlen=6)  # ~6 samples over 60s
+        self._last_sample_time = 0.0
+
+    def update(self, buffer: EventBuffer) -> None:
+        if not self._canvas:
+            return
+
+        self._canvas.delete("all")
+
+        # Get actual canvas dimensions
+        canvas_w = self._canvas.winfo_width()
+        canvas_h = self._canvas.winfo_height()
+        if canvas_w <= 1:
+            canvas_w = self._width
+        if canvas_h <= 1:
+            canvas_h = self._height
+
+        w = canvas_w - 4
+        h = canvas_h - 8
+
+        # Draw background
+        self._canvas.create_rectangle(2, 4, w + 2, h + 4,
+                                       fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
+
+        # Count saccade onsets in last 30 seconds, scale to per-minute
+        sacc_onsets = buffer.get_events_by_type(EVENT_TYPE_SACCADE_ONSET, 30.0)
+        saccade_rate = len(sacc_onsets) * 2.0  # Scale 30s to per-minute
+
+        if saccade_rate == 0:
+            self.set_label("--")
+            return
+
+        # Sample rate periodically for spread calculation
+        now = time.time()
+        if now - self._last_sample_time >= 10.0:  # Sample every 10s
+            self._recent_rates.append(saccade_rate)
+            self._last_sample_time = now
+
+        # Calculate spread if we have enough samples
+        if len(self._recent_rates) >= 2:
+            min_rate = min(self._recent_rates)
+            max_rate = max(self._recent_rates)
+
+            # Draw spread bar (min to max range)
+            min_x = 2 + min(1.0, min_rate / self._max_rate) * w
+            max_x = 2 + min(1.0, max_rate / self._max_rate) * w
+            if max_x > min_x:
+                self._canvas.create_rectangle(min_x, 6, max_x, h + 2,
+                                               fill=VizColors.GAUGE_RANGE, outline="")
+
+        # Draw current value indicator (always same neutral color)
+        rate_x = 2 + min(1.0, saccade_rate / self._max_rate) * w
+        self._canvas.create_rectangle(rate_x - 2, 4, rate_x + 2, h + 4,
+                                       fill=VizColors.GAUGE_INDICATOR, outline="")
+
+        self.set_label(f"{saccade_rate:.0f}/min")
+
+
+class PerclosIndicator(MiniViz):
+    """True PERCLOS indicator using continuous eyelid aperture data.
+
+    PERCLOS (Percentage of Eye Closure) is defined as the percentage of time
+    that the eyes are more than 80% closed (P80 definition).
+
+    NHTSA-approved thresholds:
+    - < 7.5% = Alert
+    - 7.5-15% = Questionable/Drowsy
+    - > 15% = Dangerous
+    """
+
+    def __init__(self, parent: "tk.Frame") -> None:
+        super().__init__(parent, width=50, height=30, title="PERCLOS", label="--")
+        # NHTSA-approved PERCLOS thresholds
+        self._alert_thresh = 0.075   # < 7.5% = alert
+        self._drowsy_thresh = 0.15   # 7.5-15% = drowsy, > 15% = dangerous
+
+    def update_perclos(self, perclos_buffer: PerclosBuffer) -> None:
+        """Update PERCLOS display using eyelid aperture data.
+
+        Args:
+            perclos_buffer: Buffer containing eyelid aperture samples
+        """
+        if not self._canvas:
+            return
+
+        self._canvas.delete("all")
+
+        # Get actual canvas dimensions
+        canvas_w = self._canvas.winfo_width()
+        canvas_h = self._canvas.winfo_height()
+        if canvas_w <= 1:
+            canvas_w = self._width
+        if canvas_h <= 1:
+            canvas_h = self._height
+
+        w = canvas_w - 4
+        h = canvas_h - 8
+
+        # Get true PERCLOS from aperture data
+        perclos = perclos_buffer.get_perclos()
+
+        # Draw background
+        self._canvas.create_rectangle(2, 4, w + 2, h + 4,
+                                       fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
+
+        if perclos < 0:
+            # Insufficient data
+            self.set_label("--")
+            return
+
+        # Determine color based on NHTSA thresholds
+        if perclos < self._alert_thresh:
+            color = VizColors.GOOD       # Alert
+        elif perclos < self._drowsy_thresh:
+            color = VizColors.CAUTION    # Drowsy
+        else:
+            color = VizColors.WARNING    # Dangerous
+
+        # Draw fill based on percentage (cap at 30% for display scaling)
         fill_w = min(perclos / 0.30, 1.0) * w
         if fill_w > 0:
             self._canvas.create_rectangle(2, 4, 2 + fill_w, h + 4,
                                           fill=color, outline="")
 
         self.set_label(f"{perclos:.1%}")
+
+    def update(self, buffer: EventBuffer) -> None:
+        """Legacy update method - does nothing, use update_perclos instead."""
+        pass
 
 
 # =============================================================================
@@ -782,14 +778,11 @@ class EventsViewer(BaseStreamViewer):
     """Eye events viewer with mini-visualizations and counter display.
 
     Shows real-time visualizations for human factors research:
-    - Blink rate sparkline (fatigue/drowsiness)
     - Event timeline (temporal patterns)
-    - Fixation duration distribution (processing depth)
-    - Attention heat indicator (cognitive state)
     - Saccade velocity gauge (fatigue detection)
     - Scan pattern rose (attention distribution)
     - Fixation/saccade ratio (task type)
-    - PERCLOS indicator (drowsiness)
+    - PERCLOS indicator (true P80 drowsiness metric from eyelid aperture)
 
     Plus compact counters showing running totals.
     """
@@ -822,12 +815,23 @@ class EventsViewer(BaseStreamViewer):
         # Event buffer for visualizations
         self._buffer = EventBuffer(max_age_sec=60.0)
 
+        # PERCLOS buffer for true P80 calculation from eyelid aperture
+        self._perclos_buffer = PerclosBuffer(window_sec=30.0)
+
         # Counters for each event type
         self._counts: dict[str, int] = {et[1]: 0 for et in self.EVENT_TYPES}
-        self._vars: dict[str, Optional["tk.StringVar"]] = {}
+
+        # StringVar for text display (IMU style)
+        self._info_var: Optional["tk.StringVar"] = None
 
         # Mini-visualizations
         self._visualizations: list[MiniViz] = []
+
+        # Reference to PERCLOS indicator for special update handling
+        self._perclos_indicator: Optional[PerclosIndicator] = None
+
+        # Track last processed event to avoid duplicate additions
+        self._last_event_id: Optional[int] = None
 
     def build_ui(self) -> "ttk.Frame":
         """Build the eye events display with visualizations and counters."""
@@ -842,15 +846,14 @@ class EventsViewer(BaseStreamViewer):
         viz_frame.grid(row=0, column=0, sticky="ew", pady=(0, 4))
 
         # Create all mini-visualizations
+        # Using blink and onset metrics which have reliable data from Pupil Labs
+        self._perclos_indicator = PerclosIndicator(viz_frame)
         self._visualizations = [
-            BlinkRateSparkline(viz_frame),
             EventTimeline(viz_frame),
-            FixationDistBar(viz_frame),
-            AttentionHeatBar(viz_frame),
-            SaccadeVelocityGauge(viz_frame),
-            ScanPatternRose(viz_frame),
-            FixSaccRatioBar(viz_frame),
-            PerclosIndicator(viz_frame),
+            BlinkRateGauge(viz_frame),
+            BlinkDurationGauge(viz_frame),
+            SaccadeRateGauge(viz_frame),
+            self._perclos_indicator,
         ]
 
         # Configure columns for even spacing
@@ -863,75 +866,77 @@ class EventsViewer(BaseStreamViewer):
             frame = viz.build()
             frame.grid(row=0, column=col, sticky="nsew", padx=2, pady=2)
 
-        # Row 1: Original counter display (full labels with values)
-        counter_frame = ttk.Frame(self._frame)
-        counter_frame.grid(row=1, column=0, sticky="ew", pady=(4, 0))
-
+        # Row 1: Single line of text data (IMU style)
         label_style = "Inframe.TLabel" if HAS_THEME else None
-        value_font = ("Consolas", 10, "bold")
+        small_font = ("Consolas", 8)
 
-        # Create counters with full labels (matching original layout)
-        self._vars: dict[str, Optional["tk.StringVar"]] = {}
-        for col, (label_text, event_key) in enumerate(self.EVENT_TYPES):
-            # Counter frame
-            item_frame = ttk.Frame(counter_frame)
-            is_last = col == len(self.EVENT_TYPES) - 1
-            item_frame.grid(row=0, column=col, padx=(0, 12) if not is_last else 0)
-
-            # Label
-            label = ttk.Label(item_frame, text=label_text)
-            if label_style:
-                label.configure(style=label_style)
-            label.grid(row=0, column=0)
-
-            # Value
-            var = tk.StringVar(value="0")
-            self._vars[event_key] = var
-            value_label = ttk.Label(
-                item_frame,
-                textvariable=var,
-                font=value_font,
-            )
-            if label_style:
-                value_label.configure(style=label_style)
-            value_label.grid(row=1, column=0)
+        self._info_var = tk.StringVar(value="Blink:-- │ Fix:-- │ FixOn:-- │ Sacc:-- │ SaccOn:--")
+        info_label = ttk.Label(self._frame, textvariable=self._info_var, font=small_font)
+        if label_style:
+            info_label.configure(style=label_style)
+        info_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
 
         return self._frame
 
-    def update(self, event_data: Any) -> None:
-        """Update the visualizations and counters with new event data.
+    def update(self, event_data: Any, gaze_data: Any = None) -> None:
+        """Update the visualizations and counters with new event and gaze data.
 
         Args:
             event_data: Eye event from Pupil Labs API, or None if no event available
+            gaze_data: Gaze sample with eyelid aperture for PERCLOS, or None
         """
         if not self._enabled:
             return
 
-        # Always update visualizations (they use buffered data)
+        # Add gaze data to PERCLOS buffer if available
+        if gaze_data is not None:
+            try:
+                self._perclos_buffer.add_gaze_sample(gaze_data)
+            except Exception as exc:
+                self._logger.debug("PERCLOS gaze update failed: %s", exc)
+
+        # Add event to buffer FIRST (before updating visualizations)
+        # Only add if it's a NEW event (not the same one we already processed)
+        if event_data is not None:
+            event_id = id(event_data)
+            if event_id != self._last_event_id:
+                self._last_event_id = event_id
+                try:
+                    self._buffer.add(event_data)
+
+                    # Determine event type and update counter
+                    event_key = self._get_event_type(event_data)
+
+                    if event_key in self._counts:
+                        self._counts[event_key] += 1
+
+                    # Update info line (IMU style)
+                    self._update_info_line()
+
+                except Exception as exc:
+                    self._logger.debug("Event update failed: %s", exc)
+
+        # Update visualizations (they use buffered data)
         for viz in self._visualizations:
             try:
-                viz.update(self._buffer)
+                # PERCLOS indicator uses its own buffer
+                if viz is self._perclos_indicator:
+                    self._perclos_indicator.update_perclos(self._perclos_buffer)
+                else:
+                    viz.update(self._buffer)
             except Exception as exc:
                 self._logger.debug("Visualization update failed: %s", exc)
 
-        if event_data is None:
-            return
-
-        try:
-            # Add event to buffer
-            self._buffer.add(event_data)
-
-            # Determine event type and update counter
-            event_key = self._get_event_type(event_data)
-
-            if event_key in self._counts:
-                self._counts[event_key] += 1
-                var = self._vars.get(event_key)
-                if var:
-                    var.set(str(self._counts[event_key]))
-
-        except Exception as exc:
-            self._logger.debug("Event update failed: %s", exc)
+    def _update_info_line(self) -> None:
+        """Update the single-line info display."""
+        if self._info_var:
+            self._info_var.set(
+                f"Blink:{self._counts.get('blink', 0)} │ "
+                f"Fix:{self._counts.get('fixation', 0)} │ "
+                f"FixOn:{self._counts.get('fixation_onset', 0)} │ "
+                f"Sacc:{self._counts.get('saccade', 0)} │ "
+                f"SaccOn:{self._counts.get('saccade_onset', 0)}"
+            )
 
     def _get_event_type(self, event_data: Any) -> str:
         """Determine the type of eye event.
@@ -983,12 +988,15 @@ class EventsViewer(BaseStreamViewer):
         """Reset all counters and visualizations."""
         for event_key in self._counts:
             self._counts[event_key] = 0
-            var = self._vars.get(event_key)
-            if var:
-                var.set("0")
 
-        # Reset buffer
+        # Reset info line
+        if self._info_var:
+            self._info_var.set("Blink:-- │ Fix:-- │ FixOn:-- │ Sacc:-- │ SaccOn:--")
+
+        # Reset buffers and tracking
         self._buffer = EventBuffer(max_age_sec=60.0)
+        self._perclos_buffer = PerclosBuffer(window_sec=30.0)
+        self._last_event_id = None
 
         # Reset visualizations
         for viz in self._visualizations:

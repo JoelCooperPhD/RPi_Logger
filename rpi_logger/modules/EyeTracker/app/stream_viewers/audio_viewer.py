@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 try:
     import tkinter as tk
@@ -30,10 +30,6 @@ except ImportError:
     Colors = None  # type: ignore
 
 from .base_viewer import BaseStreamViewer
-
-if TYPE_CHECKING:
-    pass
-
 
 # Audio level constants
 DB_MIN = -60.0
@@ -95,7 +91,6 @@ class AudioViewer(BaseStreamViewer):
         """
         super().__init__(parent, "audio", logger, row=row)
         self._canvas: Optional["tk.Canvas"] = None
-        self._db_var: Optional["tk.StringVar"] = None
         self._canvas_items: dict[str, int] = {}
         self._peak_db = DB_MIN
         self._peak_hold_frames = 0
@@ -123,18 +118,6 @@ class AudioViewer(BaseStreamViewer):
             highlightbackground=canvas_border,
         )
         self._canvas.grid(row=0, column=0, sticky="ew")
-
-        # dB label
-        label_style = "Inframe.TLabel" if HAS_THEME else None
-        self._db_var = tk.StringVar(value="-- dB")
-        db_label = ttk.Label(
-            self._frame,
-            textvariable=self._db_var,
-            font=("Consolas", 9),
-        )
-        if label_style:
-            db_label.configure(style=label_style)
-        db_label.grid(row=0, column=1, padx=(8, 0))
 
         return self._frame
 
@@ -167,13 +150,6 @@ class AudioViewer(BaseStreamViewer):
 
             # Update display
             self._draw_meter(rms_db, self._peak_db)
-
-            # Update dB label
-            if self._db_var:
-                if rms_db > DB_MIN:
-                    self._db_var.set(f"{rms_db:.1f} dB")
-                else:
-                    self._db_var.set("-- dB")
 
         except Exception as exc:
             self._logger.debug("Audio update failed: %s", exc)
@@ -376,8 +352,6 @@ class AudioViewer(BaseStreamViewer):
         self._peak_hold_frames = 0
         if self._canvas:
             self._draw_meter(DB_MIN, DB_MIN)
-        if self._db_var:
-            self._db_var.set("-- dB")
 
 
 __all__ = ["AudioViewer"]

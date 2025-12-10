@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Set
 
 try:
@@ -33,8 +33,8 @@ class StreamConfig:
 
 
 # Stream configuration defining order, labels, and defaults
+# Note: Video is not included as it's the core purpose of the module and always enabled
 STREAM_CONFIGS = [
-    StreamConfig("video", "Video", default_enabled=True),
     StreamConfig("eyes", "Eyes"),
     StreamConfig("audio", "Audio"),
     StreamConfig("imu", "IMU"),
@@ -206,8 +206,8 @@ class StreamControls:
         Args:
             config: TrackerConfig object with stream_*_enabled attributes
         """
+        # Note: video is always enabled, so not included in config persistence
         stream_config_map = {
-            "video": "stream_video_enabled",
             "gaze": "stream_gaze_enabled",
             "eyes": "stream_eyes_enabled",
             "imu": "stream_imu_enabled",
@@ -233,8 +233,8 @@ class StreamControls:
         Args:
             config: TrackerConfig object with stream_*_enabled attributes
         """
+        # Note: video is always enabled, so not included in config persistence
         stream_config_map = {
-            "video": "stream_video_enabled",
             "gaze": "stream_gaze_enabled",
             "eyes": "stream_eyes_enabled",
             "imu": "stream_imu_enabled",

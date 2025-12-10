@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 try:
     import tkinter as tk
@@ -12,9 +12,6 @@ try:
 except Exception:
     tk = None  # type: ignore
     ttk = None  # type: ignore
-
-if TYPE_CHECKING:
-    pass
 
 
 class BaseStreamViewer(ABC):
