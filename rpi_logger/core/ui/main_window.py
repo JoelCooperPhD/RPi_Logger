@@ -262,6 +262,9 @@ class MainWindow:
             var = tk.BooleanVar(value=is_enabled)
             self.module_vars[module_info.name] = var
 
+            # Register checkbox with UIStateObserver for state synchronization
+            self.logger_system.register_ui_checkbox(module_info.name, var)
+
             modules_menu.add_checkbutton(
                 label=module_info.display_name,
                 variable=var,

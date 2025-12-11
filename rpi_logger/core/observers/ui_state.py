@@ -49,6 +49,9 @@ class UIStateObserver:
             Callable[[str, ActualState, Optional[Any]], Any]
         ] = None
 
+        # Flag to disable updates during shutdown
+        self._shutdown = False
+
     def set_root(self, root: tk.Tk) -> None:
         """Set the Tk root window."""
         self._root = root
@@ -61,6 +64,11 @@ class UIStateObserver:
     def unregister_checkbox(self, module_name: str) -> None:
         """Unregister a checkbox variable."""
         self._checkbox_vars.pop(module_name, None)
+
+    def shutdown(self) -> None:
+        """Disable updates during shutdown to prevent Tcl errors."""
+        self._shutdown = True
+        self._checkbox_vars.clear()
 
     def set_status_callback(
         self,
@@ -90,6 +98,9 @@ class UIStateObserver:
         desired_state: DesiredState
     ) -> None:
         """Update a checkbox to reflect desired state."""
+        if self._shutdown:
+            return
+
         var = self._checkbox_vars.get(module_name)
         if not var:
             return
@@ -110,12 +121,20 @@ class UIStateObserver:
                 pass
 
         if self._root:
-            self._root.after(0, do_update)
+            try:
+                if self._root.winfo_exists():
+                    self._root.after(0, do_update)
+            except tk.TclError:
+                # Root window already destroyed
+                pass
         else:
             do_update()
 
     def _handle_actual_state_change(self, change: StateChange) -> None:
         """Handle actual state changes - sync checkbox with running state."""
+        if self._shutdown:
+            return
+
         module_name = change.module_name
         new_state: ActualState = change.new_value
 
@@ -124,7 +143,6 @@ class UIStateObserver:
             # Sync checkbox with actual state
             # If module crashed/stopped unexpectedly, uncheck it
             # If module started successfully, ensure it's checked
-            should_be_checked = new_state in RUNNING_STATES
 
             def do_update():
                 try:
@@ -147,7 +165,12 @@ class UIStateObserver:
                     pass
 
             if self._root:
-                self._root.after(0, do_update)
+                try:
+                    if self._root.winfo_exists():
+                        self._root.after(0, do_update)
+                except tk.TclError:
+                    # Root window already destroyed
+                    pass
             else:
                 do_update()
 
@@ -190,6 +213,9 @@ class UIStateObserver:
 
     def sync_all_checkboxes(self, desired_states: Dict[str, bool]) -> None:
         """Synchronize all checkboxes with desired states."""
+        if self._shutdown:
+            return
+
         for module_name, enabled in desired_states.items():
             var = self._checkbox_vars.get(module_name)
             if var:
@@ -200,6 +226,10 @@ class UIStateObserver:
                         pass
 
                 if self._root:
-                    self._root.after(0, do_update)
+                    try:
+                        if self._root.winfo_exists():
+                            self._root.after(0, do_update)
+                    except tk.TclError:
+                        pass
                 else:
                     do_update()

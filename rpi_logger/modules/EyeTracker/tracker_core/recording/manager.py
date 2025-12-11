@@ -16,7 +16,6 @@ import contextlib
 import csv
 import datetime
 import io
-import time
 import wave
 from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
@@ -70,7 +69,7 @@ class RecordingManager(RecordingManagerBase):
 
     MODULE_SUBDIR_NAME = "EyeTracker-Neon"
 
-    def __init__(self, config: Config, *, use_ffmpeg: bool = True, **kwargs):
+    def __init__(self, config: Config, *, use_ffmpeg: bool = True):
         super().__init__(device_id="eye_tracker")
         self.config = config
         self.use_ffmpeg = use_ffmpeg

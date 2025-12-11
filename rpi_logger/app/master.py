@@ -2,7 +2,6 @@ import argparse
 import asyncio
 import signal
 import sys
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -90,18 +89,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
 async def _cleanup_logger_system(logger_system: LoggerSystem) -> None:
     """Shared cleanup logic for logger system shutdown."""
-    logger.info("Starting logger system cleanup...")
-    state_start = time.time()
+    # Shutdown UI observer first to prevent Tcl errors during state changes
+    logger_system.shutdown_ui_observer()
+
     await logger_system.save_running_modules_state()
-    logger.info("⏱️  Saved state in %.3fs", time.time() - state_start)
-
-    cleanup_start = time.time()
     await logger_system.cleanup()
-    logger.info("⏱️  Logger cleanup in %.3fs", time.time() - cleanup_start)
-
-    update_start = time.time()
     await logger_system.update_running_modules_state_after_cleanup()
-    logger.info("⏱️  Finalized restart state in %.3fs", time.time() - update_start)
 
 
 async def run_gui(args, logger_system: LoggerSystem) -> None:
@@ -113,24 +106,11 @@ async def run_gui(args, logger_system: LoggerSystem) -> None:
     shutdown_task: Optional[asyncio.Task] = None
 
     async def cleanup_ui():
-        logger.info("Starting UI cleanup...")
-
-        geom_start = time.time()
         ui.save_window_geometry()
-        logger.info("⏱️  Saved window geometry in %.3fs", time.time() - geom_start)
-
-        log_start = time.time()
         ui.cleanup_log_handler()
-        logger.info("⏱️  Cleaned up log handler in %.3fs", time.time() - log_start)
-
-        timer_start = time.time()
         await ui.timer_manager.stop_all()
-        logger.info("⏱️  Stopped timers in %.3fs", time.time() - timer_start)
-
         if ui.root:
-            destroy_start = time.time()
             ui.root.destroy()
-            logger.info("⏱️  Destroyed window in %.3fs", time.time() - destroy_start)
 
     shutdown_coordinator.register_cleanup(
         lambda: _cleanup_logger_system(logger_system)

@@ -1,7 +1,7 @@
 view.show_logger = false
 _geometry = 320x200
 preview_resolution = auto
-device_connected = false
+device_connected = true
 view.show_io_panel = true
 display_name = DRT
 window_geometry = 320x200

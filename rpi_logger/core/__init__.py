@@ -12,6 +12,7 @@ from .module_state_manager import (
     STOPPED_STATES,
 )
 from .shutdown_coordinator import get_shutdown_coordinator, ShutdownCoordinator
+from .state_facade import StateFacade
 
 __version__ = "2.0.0"
 
@@ -29,5 +30,6 @@ __all__ = [
     'STOPPED_STATES',
     'get_shutdown_coordinator',
     'ShutdownCoordinator',
+    'StateFacade',
     '__version__',
 ]

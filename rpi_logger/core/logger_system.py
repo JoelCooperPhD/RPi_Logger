@@ -24,21 +24,16 @@ from .module_state_manager import (
     DesiredState,
     RUNNING_STATES,
 )
-from .observers import (
-    ConfigPersistenceObserver,
-    SessionRecoveryObserver,
-    UIStateObserver,
-)
+from .observers import UIStateObserver
+from .state_facade import StateFacade
 from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
 from rpi_logger.modules.base import gui_utils
 from .config_manager import get_config_manager
-from .paths import STATE_FILE
 from .module_manager import ModuleManager
 from .session_manager import SessionManager
 from .instance_manager import InstanceStateManager
 from .instance_state import InstanceState
-from .instance_geometry_store import get_instance_geometry_store
 from .devices import (
     DeviceSystem, InterfaceType, DeviceFamily,
     DeviceInfo,
@@ -57,11 +52,11 @@ class LoggerSystem:
     - SessionManager: Session and recording control
     - WindowManager: Window layout and geometry
     - ModuleStateManager: Centralized state tracking
+    - ModuleStatePersistence: Centralized state persistence
 
-    State synchronization is handled through observers:
-    - ConfigPersistenceObserver: Persists enabled state to config files
-    - SessionRecoveryObserver: Manages running_modules.json
-    - UIStateObserver: Updates UI elements
+    State synchronization is handled through:
+    - StateFacade: Unified state persistence (lifecycle, geometry, preferences)
+    - UIStateObserver: Updates UI elements based on state changes
     """
 
     def __init__(
@@ -93,25 +88,17 @@ class LoggerSystem:
         self.window_manager = WindowManager()
         self.config_manager = get_config_manager()
 
-        # Create observers
-        self._config_observer = ConfigPersistenceObserver.from_module_infos(
-            self.module_manager.get_available_modules()
-        )
-        self._session_recovery_observer = SessionRecoveryObserver(STATE_FILE)
+        # Create unified state facade (lifecycle, geometry, preferences)
+        module_configs = {
+            m.name: m.config_path
+            for m in self.module_manager.get_available_modules()
+        }
+        self._state = StateFacade(module_configs)
+
+        # Create UI observer (only observer we still need)
         self._ui_observer = UIStateObserver()
 
-        # Register observers with state manager
-        self.state_manager.add_observer(
-            self._config_observer,
-            events={StateEvent.DESIRED_STATE_CHANGED}
-        )
-        self.state_manager.add_observer(
-            self._session_recovery_observer,
-            events={
-                StateEvent.ACTUAL_STATE_CHANGED,
-                StateEvent.STARTUP_COMPLETE,
-            }
-        )
+        # Register UI observer with state manager
         self.state_manager.add_observer(
             self._ui_observer,
             events={
@@ -125,7 +112,6 @@ class LoggerSystem:
         self.device_system.set_xbee_data_callback(self._route_xbee_to_module)
 
         # State
-        self.shutdown_event = asyncio.Event()
         self.event_logger: Optional['EventLogger'] = None
         self._gracefully_quitting_modules: set[str] = set()
         self._startup_modules: Set[str] = set()
@@ -177,8 +163,6 @@ class LoggerSystem:
     async def async_init(self) -> None:
         """Complete async initialization. Must be called after construction."""
         await self._load_enabled_modules()
-
-        # Start health check
         await self.module_manager.start_health_check()
 
     async def _load_enabled_modules(self) -> None:
@@ -190,14 +174,11 @@ class LoggerSystem:
         2. Otherwise, load from individual module config.txt files
         """
         # Try to load from session recovery file first
-        running_modules = await self._session_recovery_observer.load_state_file()
+        running_modules = await self._state.load_recovery_state()
 
         if running_modules:
             # Session recovery - restore previously running modules
-            self.logger.info(
-                "Restoring modules from last session: %s",
-                running_modules
-            )
+            self.logger.info("Restoring modules from last session: %s", running_modules)
             self._startup_modules = running_modules.copy()
 
             # Set desired state for recovered modules
@@ -206,13 +187,6 @@ class LoggerSystem:
                     module_name, True, reconcile=False
                 )
                 self.state_manager.mark_startup_module(module_name)
-                self.logger.info(
-                    "Module %s will be restored from last session",
-                    module_name
-                )
-
-            # Note: We don't delete the state file here - it's deleted
-            # after startup completes successfully
         else:
             # Fresh start - load from config files
             await self.module_manager.load_enabled_modules()
@@ -228,7 +202,10 @@ class LoggerSystem:
 
         # Update state file with actually running modules
         running = set(self.module_manager.get_running_modules())
-        await self._session_recovery_observer.write_state_file(running)
+        await self._state.save_startup_snapshot(running)
+
+        # Transition to running phase
+        self._state.enter_running_phase()
 
     # =========================================================================
     # Module Status Callback
@@ -248,11 +225,10 @@ class LoggerSystem:
             instance_id: For multi-instance modules, the instance ID (e.g., "DRT:ACM0")
         """
         module_name = process.module_info.name
-        # Use instance_id if provided, otherwise fall back to module_name
         effective_id = instance_id or module_name
 
         if status:
-            self.logger.info(
+            self.logger.debug(
                 "Module %s status: %s (instance: %s)",
                 module_name, status.get_status_type(), effective_id
             )
@@ -268,7 +244,7 @@ class LoggerSystem:
                     module_name, ActualState.IDLE
                 )
             elif status.get_status_type() == "quitting":
-                self.logger.info("=== MODULE/INSTANCE QUITTING: %s ===", effective_id)
+                self.logger.info("Module/instance quitting: %s", effective_id)
                 self._gracefully_quitting_modules.add(effective_id)
 
                 # Route to instance manager for state tracking
@@ -276,46 +252,15 @@ class LoggerSystem:
                     effective_id, "quitting", status.get_payload()
                 )
 
-                # Handle instance vs module cleanup differently
+                # Handle cleanup based on instance type
                 if instance_id and self._is_multi_instance_module(module_name):
-                    # Multi-instance module: notify only the device for this instance
-                    self.logger.info(
-                        "QUITTING: Multi-instance cleanup for %s (module: %s)",
-                        instance_id, module_name
-                    )
                     self._notify_instance_disconnected(instance_id)
-
-                    # Save disconnected state - only if no other instances remain
-                    # (the instance was already removed from map by _notify_instance_disconnected)
-                    # Instance IDs use uppercase module names (e.g., "CAMERAS:device")
-                    module_prefix = f"{module_name.upper()}:"
-                    other_instances_running = any(
-                        inst_id.startswith(module_prefix)
-                        for inst_id in self._device_instance_map.values()
-                    )
-                    self.logger.info(
-                        "QUITTING: other_instances_running=%s (prefix=%r, map_values=%s)",
-                        other_instances_running, module_prefix, list(self._device_instance_map.values())
-                    )
-                    if not other_instances_running:
-                        self.logger.info("QUITTING: Saving disconnected state for %s", module_name)
-                        # Save device_connected=false to prevent auto-launch on restart
-                        # Note: We do NOT change 'enabled' state - that reflects user's
-                        # interest in this module type (checkbox in Modules menu)
-                        await self._save_device_connection_state(module_name, False)
-                    else:
-                        self.logger.warning(
-                            "QUITTING: SKIPPED saving state for %s - other instances still running",
-                            module_name
-                        )
+                    has_other_instances = self._has_other_instances(module_name)
+                    await self._state.on_module_quit(module_name, has_other_instances)
                 else:
-                    # Single-instance module: notify all devices
                     self.module_manager.cleanup_stopped_process(module_name)
                     self._notify_device_connected_for_module(module_name, False)
-                    # Save device_connected=false to prevent auto-launch on restart
-                    # Note: We do NOT change 'enabled' state - that reflects user's
-                    # interest in this module type (checkbox in Modules menu)
-                    await self._save_device_connection_state(module_name, False)
+                    await self._state.on_module_quit(module_name, has_other_instances=False)
 
                 if self.ui_callback:
                     try:
@@ -323,31 +268,22 @@ class LoggerSystem:
                     except Exception as e:
                         self.logger.error("UI callback error: %s", e)
                 return
+
             elif status.get_status_type() == "ready":
-                # Module is ready for commands
-                self.logger.info(
-                    "Module/instance %s sent 'ready' status, forwarding to instance_manager",
-                    effective_id
-                )
                 self.instance_manager.on_status_message(
                     effective_id, "ready", status.get_payload()
                 )
             elif status.get_status_type() == "device_ready":
-                # Module has successfully connected to device
-                # Route to instance manager for state transition
                 device_id = status.get_payload().get("device_id")
                 if device_id:
-                    self.logger.info("Device %s ready (module acknowledged)", device_id)
+                    self.logger.info("Device %s ready", device_id)
                     self.instance_manager.on_status_message(
                         effective_id, "device_ready", status.get_payload()
                     )
-                    # Save connection state for auto-connect on next startup
-                    await self._save_device_connection_state(module_name, True)
+                    await self._state.on_device_connected(module_name)
                 else:
                     self.logger.warning("device_ready status missing device_id")
             elif status.get_status_type() == "device_error":
-                # Module failed to connect to device
-                # Route to instance manager for state transition
                 device_id = status.get_payload().get("device_id")
                 error_msg = status.get_payload().get("error", "Unknown error")
                 if device_id:
@@ -358,11 +294,8 @@ class LoggerSystem:
                 else:
                     self.logger.warning("device_error status missing device_id")
             elif status.get_status_type() in ("window_hidden", "window_shown"):
-                # Window visibility is now tied to connection state
-                # No separate tracking needed
-                pass
+                pass  # Window visibility tied to connection state
             elif status.get_status_type() == "geometry_changed":
-                # Persist window geometry to InstanceGeometryStore
                 payload = status.get_payload()
                 geom_instance_id = payload.get("instance_id") or module_name
                 geometry = WindowGeometry(
@@ -371,11 +304,7 @@ class LoggerSystem:
                     width=payload.get("width", 800),
                     height=payload.get("height", 600),
                 )
-                get_instance_geometry_store().set(geom_instance_id, geometry)
-                self.logger.info(
-                    "Saved geometry for %s: %s",
-                    geom_instance_id, geometry.to_geometry_string()
-                )
+                self._state.set_geometry(geom_instance_id, geometry)
             elif status.is_error():
                 self.logger.error("Module %s error: %s",
                                 module_name,
@@ -383,39 +312,21 @@ class LoggerSystem:
 
         # Handle unexpected process termination
         if not process.is_running():
-            # Notify instance manager of process exit
             self.instance_manager.on_process_exit(effective_id)
 
-            if instance_id and self._is_multi_instance_module(module_name):
-                # Multi-instance: check if this instance quit unexpectedly
-                if effective_id not in self._gracefully_quitting_modules:
-                    self.logger.warning("Instance %s stopped unexpectedly", effective_id)
-                    self._notify_instance_disconnected(instance_id)
-                    # Disable module on unexpected termination too
-                    module_prefix = f"{module_name.upper()}:"
-                    other_instances_running = any(
-                        inst_id.startswith(module_prefix)
-                        for inst_id in self._device_instance_map.values()
-                    )
-                    if not other_instances_running:
-                        await self._save_device_connection_state(module_name, False)
-                        await self.toggle_module_enabled(module_name, False)
-                        await self.state_manager.set_desired_state(
-                            module_name, False, reconcile=False
-                        )
-            elif self.state_manager.is_module_enabled(module_name):
-                # Single-instance: original behavior
-                if module_name not in self._gracefully_quitting_modules:
-                    self.logger.warning("Module %s crashed/stopped unexpectedly", module_name)
-                    self.module_manager.cleanup_stopped_process(module_name)
-                    await self.state_manager.set_actual_state(module_name, ActualState.CRASHED)
-                    self._notify_device_connected_for_module(module_name, False)
-                    # Disable module on unexpected termination
-                    await self._save_device_connection_state(module_name, False)
-                    await self.toggle_module_enabled(module_name, False)
-                    await self.state_manager.set_desired_state(
-                        module_name, False, reconcile=False
-                    )
+            # Only handle as crash if not gracefully quitting and not shutting down
+            if effective_id not in self._gracefully_quitting_modules:
+                if not self._state.is_shutting_down():
+                    self.logger.warning("Module %s crashed/stopped unexpectedly", effective_id)
+
+                    if instance_id and self._is_multi_instance_module(module_name):
+                        self._notify_instance_disconnected(instance_id)
+                    else:
+                        self.module_manager.cleanup_stopped_process(module_name)
+                        await self.state_manager.set_actual_state(module_name, ActualState.CRASHED)
+                        self._notify_device_connected_for_module(module_name, False)
+
+                    await self._state.on_module_crash(module_name)
 
         if not process.is_running() and effective_id in self._gracefully_quitting_modules:
             self._gracefully_quitting_modules.discard(effective_id)
@@ -425,6 +336,14 @@ class LoggerSystem:
                 await self.ui_callback(effective_id, process.get_state(), status)
             except Exception as e:
                 self.logger.error("UI callback error: %s", e)
+
+    def _has_other_instances(self, module_name: str) -> bool:
+        """Check if other instances of this module are still running."""
+        module_prefix = f"{module_name.upper()}:"
+        return any(
+            inst_id.startswith(module_prefix)
+            for inst_id in self._device_instance_map.values()
+        )
 
     def _notify_instance_disconnected(self, instance_id: str) -> None:
         """Notify UI that a specific module instance has disconnected.
@@ -535,6 +454,10 @@ class LoggerSystem:
     def set_ui_root(self, root) -> None:
         """Set the Tk root for thread-safe UI updates."""
         self._ui_observer.set_root(root)
+
+    def shutdown_ui_observer(self) -> None:
+        """Shutdown the UI observer to prevent Tcl errors during cleanup."""
+        self._ui_observer.shutdown()
 
     # =========================================================================
     # Module Management (delegate to ModuleManager)
@@ -671,11 +594,9 @@ class LoggerSystem:
             module_name: The module name (e.g., "DRT")
             instance_id: Optional instance ID for multi-instance modules (e.g., "DRT:ACM0")
         """
-        geometry_store = get_instance_geometry_store()
-
         # For multi-instance modules, try instance-specific geometry first
         if instance_id and instance_id != module_name:
-            geometry = geometry_store.get(instance_id)
+            geometry = self._state.get_geometry(instance_id)
             if geometry:
                 normalized = self._normalize_geometry(geometry)
                 self.logger.debug(
@@ -685,7 +606,7 @@ class LoggerSystem:
                 return normalized
 
         # Try module-level geometry in store
-        geometry = geometry_store.get(module_name)
+        geometry = self._state.get_geometry(module_name)
         if geometry:
             normalized = self._normalize_geometry(geometry)
             self.logger.debug(
@@ -804,28 +725,21 @@ class LoggerSystem:
         """Persist snapshot of modules running at shutdown initiation."""
         running_modules = set(self.module_manager.get_running_modules())
 
-        # Filter out forcefully stopped modules
-        filtered = running_modules - self.module_manager.forcefully_stopped_modules
-        skipped = running_modules - filtered
+        # Mark forcefully stopped modules
+        for module_name in self.module_manager.forcefully_stopped_modules:
+            self._state.mark_forcefully_stopped(module_name)
 
-        if skipped:
-            self.logger.info(
-                "Skipping force-stopped modules from restart snapshot: %s",
-                sorted(skipped)
-            )
-
-        return await self._session_recovery_observer.save_shutdown_state(filtered)
+        return await self._state.save_shutdown_snapshot(running_modules)
 
     async def update_running_modules_state_after_cleanup(self) -> bool:
         """Rewrite restart state excluding modules that failed to stop cleanly."""
-        # Get modules that should have been running
         running_modules = set(self.module_manager.get_running_modules())
 
-        # Update forcefully stopped tracking
+        # Mark any newly forcefully stopped modules
         for module_name in self.module_manager.forcefully_stopped_modules:
-            self._session_recovery_observer.mark_forcefully_stopped(module_name)
+            self._state.mark_forcefully_stopped(module_name)
 
-        return await self._session_recovery_observer.finalize_shutdown_state(running_modules)
+        return await self._state.save_shutdown_snapshot(running_modules)
 
     async def cleanup(self, request_geometry: bool = False) -> None:
         """Cleanup all resources.
@@ -834,9 +748,13 @@ class LoggerSystem:
             request_geometry: Unused, geometry is saved by modules during quit.
         """
         self.logger.info("Cleaning up logger system")
+
+        # Enter shutdown phase BEFORE stopping modules so status callbacks
+        # can detect we're in shutdown mode and preserve device_connected state
+        self._state.enter_shutdown_phase()
+
         await self.module_manager.stop_health_check()
         await self.stop_all()
-        self.shutdown_event.set()
 
     def get_session_info(self) -> dict:
         """Get information about the current session."""
@@ -1010,29 +928,6 @@ class LoggerSystem:
         """
         await self.stop_and_disconnect_device(device_id)
 
-    # =========================================================================
-    # Device Connection State Persistence
-    # =========================================================================
-
-    async def _save_device_connection_state(self, module_id: str, connected: bool) -> None:
-        """Save device connection state to module config."""
-        modules = self.module_manager.get_available_modules()
-        module_info = next((m for m in modules if m.name == module_id), None)
-
-        if not module_info or not module_info.config_path:
-            self.logger.warning("Cannot save connection state - no config for %s", module_id)
-            return
-
-        success = await self.config_manager.write_config_async(
-            module_info.config_path,
-            {'device_connected': connected}
-        )
-
-        if success:
-            self.logger.info("Saved device_connected=%s for module %s", connected, module_id)
-        else:
-            self.logger.error("Failed to save device_connected for module %s", module_id)
-
     async def _load_pending_auto_connects(self) -> None:
         """Load device connection states and mark modules for auto-connect.
 
@@ -1043,18 +938,15 @@ class LoggerSystem:
         modules = self.module_manager.get_available_modules()
 
         for module_info in modules:
-            if not module_info.config_path:
-                continue
-
             # Only auto-connect if the module is enabled
             if not self.is_module_enabled(module_info.name):
                 continue
 
-            config = await self.config_manager.read_config_async(module_info.config_path)
-            was_connected = self.config_manager.get_bool(config, 'device_connected', default=False)
+            # Load persisted state
+            state = await self._state.load_module_state(module_info.name)
 
-            if was_connected:
-                self.logger.info("Module %s had device connected - marking for auto-connect", module_info.name)
+            if state.device_connected:
+                self.logger.info("Module %s marked for auto-connect", module_info.name)
                 self.device_system.request_auto_connect(module_info.name)
 
     # =========================================================================
@@ -1140,7 +1032,7 @@ class LoggerSystem:
         else:
             # Internal modules don't send device_ready (no hardware to connect)
             # Save connection state now for auto-connect on next startup
-            await self._save_device_connection_state(module_id, True)
+            await self._state.on_device_connected(module_id)
 
         return True
 
@@ -1190,21 +1082,9 @@ class LoggerSystem:
         # Update device state (UI update)
         self._notify_device_connected(device_id, False)
 
-        # Save disconnected state for restart behavior
-        # For multi-instance modules, only save false if no other instances remain
-        # Instance IDs use uppercase module names (e.g., "CAMERAS:device")
-        module_prefix = f"{module_id.upper()}:"
-        other_instances_running = any(
-            inst_id.startswith(module_prefix)
-            for inst_id in self._device_instance_map.values()
-        )
-        if not other_instances_running:
-            await self._save_device_connection_state(module_id, False)
-            # Disable module so it doesn't auto-start on next launch
-            await self.toggle_module_enabled(module_id, False)
-            await self.state_manager.set_desired_state(
-                module_id, False, reconcile=False
-            )
+        # User explicitly disconnected - save state and disable module
+        if not self._has_other_instances(module_id):
+            await self._state.on_user_disconnect(module_id)
 
         return True
 

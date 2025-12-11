@@ -8,8 +8,11 @@ display_name = EyeTracker-Neon
 ################################################################################
 # CORE CAPTURE
 ################################################################################
-# Frame processing rate (1-120 fps; 5-30 recommended for eye tracking)
+# Scene camera processing rate (1-120 fps; 5-30 recommended for eye tracking)
 target_fps = 10.0
+
+# Eye camera recording rate (Neon delivers 200Hz; downsampled to this)
+eyes_fps = 30.0
 
 # Scene video resolution written to disk (WIDTH x HEIGHT)
 resolution_width = 1280
@@ -90,7 +93,7 @@ enabled = true
 preview_resolution = auto
 gui_io_stub_visible = false
 view.show_io_panel = false
-view.show_logger = true
+view.show_logger = false
 window_geometry = 320x200
-device_connected = true
+device_connected = false
 eyetracker_config_dialog_geometry = +392+790

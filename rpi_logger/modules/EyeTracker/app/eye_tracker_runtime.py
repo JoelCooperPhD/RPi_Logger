@@ -292,7 +292,7 @@ class EyeTrackerRuntime(ModuleRuntime):
         self._device_manager.audio_stream_param = config.audio_stream_param
         self._stream_handler = StreamHandler()
         self._frame_processor = FrameProcessor(config)
-        self._recording_manager = RecordingManager(config, device_manager=self._device_manager)
+        self._recording_manager = RecordingManager(config)
         self._tracker_handler = TrackerHandler(
             config,
             self._device_manager,

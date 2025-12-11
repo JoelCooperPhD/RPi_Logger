@@ -407,24 +407,21 @@ class MainController:
 
         for module_name, enabled in self.logger_system.get_module_enabled_states().items():
             if enabled:
-                # Check if this is a device-based module
                 device_module_info = _lookup_device_module(module_name)
                 if device_module_info:
                     interface, family = device_module_info
                     self.logger.info("Auto-enabling device section: %s", module_name)
-                    # Enable connection type (shows device section in panel)
                     self.logger_system.set_connection_enabled(interface, family, True)
                 else:
                     self.logger.info("Auto-starting module: %s", module_name)
                     success = await self.logger_system.set_module_enabled(module_name, True)
                     if not success:
                         self.logger.error("Failed to auto-start module: %s", module_name)
-                        # Note: checkbox will be auto-updated by UIStateObserver
 
         # Refresh UI after enabling device sections
         self.logger_system.notify_devices_changed()
 
-        # Signal that startup is complete (for state file cleanup)
+        # Signal that startup is complete
         await self.logger_system.on_startup_complete()
 
     def show_about(self) -> None:

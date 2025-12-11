@@ -52,10 +52,7 @@ class GazeTracker:
         self.device_manager.audio_stream_param = config.audio_stream_param
         self.stream_handler = stream_handler or StreamHandler()
         self.frame_processor = frame_processor or FrameProcessor(config)
-        self.recording_manager = recording_manager or RecordingManager(
-            config,
-            device_manager=self.device_manager,
-        )
+        self.recording_manager = recording_manager or RecordingManager(config)
         self.stream_handler.set_imu_listener(self.recording_manager.write_imu_sample)
         self.stream_handler.set_event_listener(self.recording_manager.write_event_sample)
 
@@ -177,10 +174,6 @@ class GazeTracker:
 
                 if frame_packet is None:
                     self.no_frame_timeouts += 1
-
-                    if not self.stream_handler.running and self.stream_handler.camera_frames == self.last_camera_frame_count:
-                        self.running = False
-                        break
 
                     # Track elapsed time without frames for warnings
                     if no_frame_since is None:

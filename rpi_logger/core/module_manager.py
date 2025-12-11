@@ -248,13 +248,8 @@ class ModuleManager:
         """Load module enabled state from configs (sets desired state)."""
         for module_info in self.available_modules:
             if not module_info.config_path:
-                # No config - default to disabled
                 await self.state_manager.set_desired_state(
                     module_info.name, False, reconcile=False
-                )
-                self.logger.debug(
-                    "Module %s has no config, defaulting to disabled",
-                    module_info.name
                 )
                 continue
 
@@ -266,9 +261,7 @@ class ModuleManager:
             )
 
             if enabled:
-                self.logger.info("Module %s enabled in config", module_info.name)
-            else:
-                self.logger.debug("Module %s disabled in config", module_info.name)
+                self.logger.debug("Module %s enabled in config", module_info.name)
 
     # =========================================================================
     # Module Info Queries

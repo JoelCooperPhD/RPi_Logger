@@ -65,6 +65,7 @@ running_modules.json
 
 # Logs directory
 /logs/
+**/logs/
 
 # Empty audio directory placeholder
 /audio/

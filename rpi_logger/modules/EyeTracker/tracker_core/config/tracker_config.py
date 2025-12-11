@@ -16,6 +16,9 @@ class TrackerConfig:
     preview_fps: float = 10.0
     display_width: int = 640
 
+    # Eye camera recording settings (downsampled from Neon 200Hz)
+    eyes_fps: float = 30.0
+
     # Stream viewer enable states (persisted)
     stream_video_enabled: bool = True
     stream_gaze_enabled: bool = True
@@ -52,8 +55,9 @@ class TrackerConfig:
     imu_motion_still_threshold: float = 0.02  # g deviation for STILL state (subtle head movements)
     imu_motion_rapid_threshold: float = 0.08  # g deviation for RAPID state
 
-    # Neon scene camera delivers 30 fps
-    NEON_SCENE_FPS: float = 30.0
+    # Neon hardware stream rates
+    NEON_SCENE_FPS: float = 30.0   # Scene camera delivers 30 fps
+    NEON_EYES_FPS: float = 200.0   # Eye cameras deliver 200 fps
 
     def __post_init__(self):
         """Calculate preview height to maintain aspect ratio"""
@@ -80,3 +84,15 @@ class TrackerConfig:
         Same logic as recording_skip_factor but for preview display.
         """
         return max(1, round(self.NEON_SCENE_FPS / self.preview_fps))
+
+    def eyes_recording_skip_factor(self) -> int:
+        """Compute frame skip factor for eye camera recording.
+
+        Since the Neon eye cameras deliver 200Hz, we skip frames to achieve
+        lower effective FPS. For example:
+        - 200 fps -> skip_factor=1 (write every frame)
+        - 100 fps -> skip_factor=2 (write every 2nd frame)
+        - 30 fps  -> skip_factor=7 (write every 7th frame)
+        - 20 fps  -> skip_factor=10 (write every 10th frame)
+        """
+        return max(1, round(self.NEON_EYES_FPS / self.eyes_fps))
