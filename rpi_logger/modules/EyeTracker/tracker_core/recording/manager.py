@@ -30,6 +30,7 @@ from rpi_logger.modules.base.storage_utils import (
 )
 from rpi_logger.core.logging_utils import get_module_logger
 from ..config.tracker_config import TrackerConfig as Config
+from ..rolling_fps import RollingFPS
 from .async_csv_writer import AsyncCSVWriter
 from .video_encoder import VideoEncoder
 
@@ -115,6 +116,9 @@ class RecordingManager(RecordingManagerBase):
         self._imu_samples_written = 0
         self._event_samples_written = 0
         self._last_gaze_timestamp: Optional[float] = None
+
+        # FPS tracking for recording output
+        self._record_fps_tracker = RollingFPS(window_seconds=5.0)
 
         # Output directory
         self._output_root = Path(config.output_dir)
@@ -251,6 +255,7 @@ class RecordingManager(RecordingManagerBase):
             self._imu_samples_written = 0
             self._event_samples_written = 0
             self._last_gaze_timestamp = None
+            self._record_fps_tracker.reset()
             self._is_recording = True
 
             logger.info("Recording started: %s", self.world_video_filename)
@@ -546,10 +551,21 @@ class RecordingManager(RecordingManagerBase):
         """Return experiment label."""
         return self._current_experiment_label
 
+    def get_record_fps(self) -> float:
+        """Get current recording output FPS."""
+        if not self._is_recording:
+            return 0.0
+        return self._record_fps_tracker.get_fps()
+
     # === Private Methods ===
 
     async def _world_writer_loop(self) -> None:
-        """Background task to write world video frames."""
+        """Background task to write world video frames.
+
+        Frames are pre-filtered by GazeTracker._process_frames() before being
+        queued, so no skip logic is needed here - all frames received should
+        be written.
+        """
         if self._world_frame_queue is None:
             return
 
@@ -560,6 +576,7 @@ class RecordingManager(RecordingManagerBase):
 
             await self._world_video_encoder.write_frame(frame)
             self._world_frames_written += 1
+            self._record_fps_tracker.add_frame()
 
     async def _eyes_writer_loop(self) -> None:
         """Background task to write eyes video frames (downsampled to 30fps)."""
@@ -624,8 +641,9 @@ class RecordingManager(RecordingManagerBase):
     ) -> tuple[Optional[int], Optional[int], list[bytes]]:
         """Extract audio data from frame."""
         try:
-            sample_rate = getattr(audio_frame.av_frame, "sample_rate", None)
-            layout = getattr(audio_frame.av_frame, "layout", None)
+            av_frame = audio_frame.av_frame
+            sample_rate = getattr(av_frame, "sample_rate", None)
+            layout = getattr(av_frame, "layout", None)
             channels = None
             if layout is not None:
                 channels = getattr(layout, "nb_channels", None)
@@ -634,19 +652,31 @@ class RecordingManager(RecordingManagerBase):
                     if channel_list is not None:
                         channels = len(channel_list)
 
-            chunks: list[bytes] = []
-            last_array = None
-            for block in audio_frame.to_resampled_ndarray():
-                array = np.asarray(block, dtype=np.int16)
-                if array.ndim == 1:
-                    array = array.reshape(1, -1)
-                chunks.append(np.ascontiguousarray(array.T).tobytes())
-                last_array = array
+            # Use av_frame.to_ndarray() directly instead of to_resampled_ndarray()
+            # The resampler method returns an empty iterator; direct access works
+            samples = av_frame.to_ndarray()
 
-            if channels is None and last_array is not None:
-                channels = last_array.shape[0]
+            if samples is None or samples.size == 0:
+                return None, None, []
 
-            return sample_rate, channels, chunks
+            # Infer channels from array shape if not detected from layout
+            if channels is None:
+                channels = samples.shape[0] if samples.ndim == 2 else 1
+
+            # Convert to int16 for WAV (handle various input formats)
+            if samples.dtype in (np.float32, np.float64):
+                # Float audio is typically in range [-1.0, 1.0]
+                samples = np.clip(samples, -1.0, 1.0)
+                samples = (samples * 32767).astype(np.int16)
+            elif samples.dtype != np.int16:
+                samples = samples.astype(np.int16)
+
+            # Ensure shape is (channels, samples) then transpose for interleaved WAV
+            if samples.ndim == 1:
+                samples = samples.reshape(1, -1)
+
+            chunk = np.ascontiguousarray(samples.T).tobytes()
+            return sample_rate, channels, [chunk]
         except Exception as exc:
             logger.error("Failed to prepare audio frame: %s", exc)
             return None, None, []

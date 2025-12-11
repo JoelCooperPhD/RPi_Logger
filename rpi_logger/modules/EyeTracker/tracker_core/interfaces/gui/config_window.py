@@ -32,8 +32,14 @@ RECORDING_RESOLUTIONS = [
     (400, 300, "400x300 (1/4)"),
 ]
 
-# Recording FPS options (downsampled from 30 Hz)
-RECORDING_FPS_OPTIONS = [30, 15, 10, 5]
+# Recording FPS options (downsampled from 30 Hz via frame skipping)
+# Format: (fps_value, display_label)
+RECORDING_FPS_OPTIONS = [
+    (30.0, "30 fps (Full)"),
+    (15.0, "15 fps (1/2)"),
+    (10.0, "10 fps (1/3)"),
+    (7.5, "7.5 fps (1/4)"),
+]
 
 
 class EyeTrackerConfigWindow:
@@ -125,7 +131,7 @@ class EyeTrackerConfigWindow:
         self._recording_fps_combo = ttk.Combobox(
             lf,
             textvariable=self.config_vars['recording_fps'],
-            values=[str(fps) for fps in RECORDING_FPS_OPTIONS],
+            values=[label for _, label in RECORDING_FPS_OPTIONS],
             width=18,
             state="readonly"
         )
@@ -160,7 +166,7 @@ class EyeTrackerConfigWindow:
         self._preview_fps_combo = ttk.Combobox(
             lf,
             textvariable=self.config_vars['preview_fps'],
-            values=[str(fps) for fps in RECORDING_FPS_OPTIONS],
+            values=[label for _, label in RECORDING_FPS_OPTIONS],
             width=18,
             state="readonly"
         )
@@ -237,8 +243,8 @@ class EyeTrackerConfigWindow:
 
         # Recording FPS - find closest match
         fps = config.fps
-        closest_fps = min(RECORDING_FPS_OPTIONS, key=lambda x: abs(x - fps))
-        self.config_vars['recording_fps'].set(str(closest_fps))
+        closest_option = min(RECORDING_FPS_OPTIONS, key=lambda x: abs(x[0] - fps))
+        self.config_vars['recording_fps'].set(closest_option[1])
 
         # Update preview resolution options based on recording resolution
         self._update_preview_resolution_options()
@@ -257,8 +263,8 @@ class EyeTrackerConfigWindow:
 
         # Preview FPS
         preview_fps = getattr(config, 'preview_fps', config.fps)
-        closest_preview_fps = min(RECORDING_FPS_OPTIONS, key=lambda x: abs(x - preview_fps))
-        self.config_vars['preview_fps'].set(str(closest_preview_fps))
+        closest_option = min(RECORDING_FPS_OPTIONS, key=lambda x: abs(x[0] - preview_fps))
+        self.config_vars['preview_fps'].set(closest_option[1])
 
     def _apply_config(self):
         """Apply configuration changes."""
@@ -277,8 +283,11 @@ class EyeTrackerConfigWindow:
                     break
 
             # Update recording FPS
-            rec_fps = self.config_vars['recording_fps'].get()
-            config.fps = float(rec_fps)
+            rec_fps_label = self.config_vars['recording_fps'].get()
+            for fps_val, label in RECORDING_FPS_OPTIONS:
+                if label == rec_fps_label:
+                    config.fps = fps_val
+                    break
 
             # Update preview resolution (from relative options)
             preview_label = self.config_vars['preview_resolution'].get()
@@ -290,8 +299,11 @@ class EyeTrackerConfigWindow:
                         break
 
             # Update preview FPS
-            preview_fps = self.config_vars['preview_fps'].get()
-            config.preview_fps = float(preview_fps)
+            preview_fps_label = self.config_vars['preview_fps'].get()
+            for fps_val, label in RECORDING_FPS_OPTIONS:
+                if label == preview_fps_label:
+                    config.preview_fps = fps_val
+                    break
 
             # Update frame processor if it exists
             if self.runtime._frame_processor:

@@ -8,6 +8,7 @@ from .device_manager import DeviceManager
 from .stream_handler import StreamHandler, FramePacket
 from .frame_processor import FrameProcessor
 from .recording import RecordingManager
+from .rolling_fps import RollingFPS
 
 logger = get_module_logger(__name__)
 
@@ -36,10 +37,13 @@ class GazeTracker:
         self.frame_count = 0
         self.start_time = None
         self.no_frame_timeouts = 0  # When no frames available from stream
-        self.dropped_frames = 0
-        self.last_camera_frame_count = 0
 
         self._latest_display_frame = None
+        self._display_fps_tracker = RollingFPS(window_seconds=5.0)
+
+        # Frame skip counters for downsampling (checked before any processing)
+        self._preview_frame_counter = 0
+        self._recording_frame_counter = 0
 
         self.device_manager = device_manager or DeviceManager()
         self.device_manager.audio_stream_param = config.audio_stream_param
@@ -97,6 +101,10 @@ class GazeTracker:
         """Check if in reduced processing mode"""
         return self._reduced_processing
 
+    def get_display_fps(self) -> float:
+        """Get current display output FPS."""
+        return self._display_fps_tracker.get_fps()
+
     async def run(self):
         if not self.device_manager.is_connected:
             logger.error("No device connected")
@@ -149,11 +157,10 @@ class GazeTracker:
             await self.cleanup()
 
     async def _process_frames(self):
-        frame_interval = 1.0 / self.config.fps
-        fps_int = max(int(self.config.fps), 1)
-        # Give a reasonable timeout for the first frame (10 seconds)
-        next_frame_deadline = time.perf_counter() + 10.0
-        no_frame_count = 0
+        # Track time without frames for warnings (elapsed-time based)
+        no_frame_since: Optional[float] = None
+        warned_1s = False
+        warned_5s = False
 
         while self.running:
             try:
@@ -162,59 +169,67 @@ class GazeTracker:
                     # Idle sleep with minimal CPU usage
                     # Streams stay alive in background
                     await asyncio.sleep(0.1)
-
-                    # Update deadline to avoid burst processing on resume
-                    next_frame_deadline = time.perf_counter() + frame_interval
                     continue
 
                 # Phase 1.6: Reduced processing mode when not visible and not recording
+                # Skip processing on 9/10 frames but don't artificially delay
                 if self._reduced_processing and not self.recording_manager.is_recording:
-                    # Only update frame occasionally for UI thumbnail (every 10 frames)
                     if self.frame_count % 10 != 0:
-                        await asyncio.sleep(frame_interval)
-                        next_frame_deadline = time.perf_counter() + frame_interval
+                        # Drain the frame without processing
+                        _ = await self.stream_handler.wait_for_frame(timeout=1.0)
+                        self.frame_count += 1
                         continue
 
-                wait_timeout = max(0.0, next_frame_deadline - time.perf_counter())
-                # Phase 1.1: Use event-driven wait instead of polling
+                # Wait for next frame with a reasonable timeout for stream health detection
                 try:
-                    frame_packet: Optional[FramePacket] = await self.stream_handler.wait_for_frame(timeout=wait_timeout)
+                    frame_packet: Optional[FramePacket] = await self.stream_handler.wait_for_frame(timeout=1.0)
                 except asyncio.TimeoutError:
                     frame_packet = None
 
                 if frame_packet is None:
                     self.no_frame_timeouts += 1
-                    no_frame_count += 1
 
                     if not self.stream_handler.running and self.stream_handler.camera_frames == self.last_camera_frame_count:
                         logger.info("Stream handler stopped; exiting frame loop")
                         self.running = False
                         break
 
-                    if no_frame_count in (fps_int, fps_int * 5):
-                        logger.warning("No frames received for %d second(s)", no_frame_count // fps_int)
-
-                    next_frame_deadline = time.perf_counter() + frame_interval
+                    # Track elapsed time without frames for warnings
+                    if no_frame_since is None:
+                        no_frame_since = time.perf_counter()
+                    elapsed = time.perf_counter() - no_frame_since
+                    if elapsed >= 1.0 and not warned_1s:
+                        logger.warning("No frames received for 1 second")
+                        warned_1s = True
+                    if elapsed >= 5.0 and not warned_5s:
+                        logger.warning("No frames received for 5 seconds")
+                        warned_5s = True
                     continue
 
+                # Reset no-frame tracking on successful frame
                 self.frame_count += 1
-                no_frame_count = 0
+                no_frame_since = None
+                warned_1s = False
+                warned_5s = False
 
                 raw_frame = frame_packet.image
-                current_camera_frames = frame_packet.camera_frame_index
-                new_camera_frames = current_camera_frames - self.last_camera_frame_count
-                if new_camera_frames > 1:
-                    self.dropped_frames += new_camera_frames - 1
-                self.last_camera_frame_count = current_camera_frames
 
-                # OpenCV mode (display_enabled): can use async processing in background thread
-                # GUI mode (!display_enabled): run synchronously to avoid Tkinter threading conflicts
-                if self.display_enabled:
-                    processed_frame = await self.frame_processor.process_frame_async(raw_frame)
-                else:
-                    processed_frame = self.frame_processor.process_frame(raw_frame)
-                    await asyncio.sleep(0)  # Yield to event loop
+                # === EARLY SKIP CHECK ===
+                # Determine if we need this frame BEFORE any expensive processing.
+                # This saves ~66% CPU at 10fps (skip 2/3 of frames).
+                self._preview_frame_counter += 1
+                self._recording_frame_counter += 1
 
+                preview_skip_factor = self.config.preview_skip_factor()
+                recording_skip_factor = self.config.recording_skip_factor()
+
+                skip_display = (self._preview_frame_counter % preview_skip_factor != 0)
+                # Only skip recording frames when actively recording
+                is_recording = self.recording_manager.is_recording
+                skip_recording = is_recording and (self._recording_frame_counter % recording_skip_factor != 0)
+
+                # === STREAM DRAINING (always runs at 30fps) ===
+                # Must drain all streams to prevent queue buildup, regardless of skip state
                 latest_gaze = self.stream_handler.get_latest_gaze()
                 while True:
                     next_gaze = await self.stream_handler.next_gaze(timeout=0)
@@ -257,48 +272,50 @@ class GazeTracker:
                 if eyes_drained > 0 and self.frame_count == 1:
                     logger.info("Drained %d eyes frames on first iteration", eyes_drained)
 
-                # Phase 1.2 & 1.3: Separate display and recording overlays with early scaling
+                # Write gaze sample at full rate when recording (for temporal accuracy)
+                if is_recording:
+                    self.recording_manager.write_gaze_sample(latest_gaze)
+
+                # === SKIP FAST PATH ===
+                # If skipping both display AND recording, skip expensive frame processing
+                if skip_display and (skip_recording or not is_recording):
+                    await asyncio.sleep(0)  # Yield to event loop
+                    continue
+
+                # === FRAME PROCESSING (only for frames we'll use) ===
                 display_frame = None
                 recording_frame = None
 
-                # Always create display frame (for GUI or OpenCV display)
-                # Phase 1.3: Scale early for display (reduces overlay CPU)
-                preview_frame = self.frame_processor.scale_for_preview(processed_frame)
+                # OpenCV mode: can use async processing in background thread
+                # GUI mode: run synchronously to avoid Tkinter threading conflicts
+                if self.display_enabled:
+                    processed_frame = await self.frame_processor.process_frame_async(raw_frame)
+                else:
+                    processed_frame = self.frame_processor.process_frame(raw_frame)
+                    await asyncio.sleep(0)  # Yield to event loop
 
-                # Optimization: Check if preview_frame shares memory with processed_frame
-                # If scale_for_preview returned the original frame (because dimensions match),
-                # they are the same object.
-                is_preview_shared = (preview_frame is processed_frame)
+                # === DISPLAY FRAME PREPARATION ===
+                if not skip_display:
+                    # Scale early for display (reduces overlay CPU)
+                    preview_frame = self.frame_processor.scale_for_preview(processed_frame)
 
-                # If they share memory and we are recording, we must separate them to avoid
-                # burning display overlays into the recording (or vice-versa).
-                # We copy preview_frame to keep processed_frame clean for recording.
-                if is_preview_shared and self.recording_manager.is_recording:
-                    preview_frame = preview_frame.copy()
-                    is_preview_shared = False
+                    # Check if preview_frame shares memory with processed_frame
+                    is_preview_shared = (preview_frame is processed_frame)
 
-                # Use synchronous version to avoid event loop issues
-                display_frame = self.frame_processor.add_display_overlays(
-                    preview_frame,
-                    self.frame_count,
-                    current_camera_frames,
-                    self.start_time,
-                    self.recording_manager.is_recording,
-                    latest_gaze,
-                    self.stream_handler.get_camera_fps(),
-                    self.dropped_frames,
-                    self.recording_manager.duplicated_frames,
-                    self.config.fps,
-                    experiment_label=self.recording_manager.current_experiment_label,
-                )
+                    # If they share memory and we are recording, copy to avoid
+                    # burning display overlays into the recording
+                    if is_preview_shared and is_recording and not skip_recording:
+                        preview_frame = preview_frame.copy()
 
-                if self.recording_manager.is_recording:
-                    # Minimal overlay for recording: frame number + optional gaze circle
+                    display_frame = self.frame_processor.add_display_overlays(
+                        preview_frame,
+                        latest_gaze,
+                    )
+
+                # === RECORDING FRAME PREPARATION ===
+                if is_recording and not skip_recording:
                     if self.config.enable_recording_overlay:
-                        frame_number = self.recording_manager.recorded_frame_count + 1  # +1 because we increment AFTER writing
-                        
-                        # OPTIMIZATION: Use processed_frame IN PLACE.
-                        # We ensured it is separate from display_frame above.
+                        frame_number = self.recording_manager.recorded_frame_count + 1
                         recording_frame = self.frame_processor.add_minimal_recording_overlay(
                             processed_frame,
                             frame_number,
@@ -306,16 +323,16 @@ class GazeTracker:
                             include_gaze=self.config.include_gaze_in_recording
                         )
                     else:
-                        # No overlay, use raw processed frame directly
                         recording_frame = processed_frame
 
                 # Store display frame if generated
                 if display_frame is not None:
                     self._latest_display_frame = display_frame
+                    self._display_fps_tracker.add_frame()
 
-                if self.recording_manager.is_recording and recording_frame is not None:
+                # Write recording frame (already filtered, no skip check needed)
+                if recording_frame is not None:
                     self.recording_manager.write_frame(recording_frame)
-                    self.recording_manager.write_gaze_sample(latest_gaze)
 
                 if self.display_enabled and display_frame is not None:
                     self.frame_processor.display_frame(display_frame)
@@ -336,9 +353,6 @@ class GazeTracker:
                             await self.pause()
 
                 await asyncio.sleep(0)
-
-                now = time.perf_counter()
-                next_frame_deadline = max(next_frame_deadline + frame_interval, now)
 
             except Exception as e:
                 logger.error(f"Frame processing error: {e}")
