@@ -683,11 +683,6 @@ class NeonEyeTrackerView:
         def builder(parent: tk.Widget) -> None:
             parent.columnconfigure(0, weight=1)
 
-            # Capture Stats LabelFrame - 3-column layout matching Cameras module
-            stats_lf = ttk.LabelFrame(parent, text="Capture Stats")
-            stats_lf.grid(row=0, column=0, sticky="new", padx=4, pady=(4, 2))
-            stats_lf.columnconfigure(0, weight=1)
-
             # Define the fields (matching Cameras pattern)
             fields = [
                 ("cap_tgt", "Cap In/Tgt"),
@@ -707,9 +702,9 @@ class NeonEyeTrackerView:
             fg2 = Colors.FG_PRIMARY if HAS_THEME and Colors else None
 
             if HAS_THEME and Colors:
-                container = tk.Frame(stats_lf, bg=bg)
+                container = tk.Frame(parent, bg=bg)
             else:
-                container = ttk.Frame(stats_lf)
+                container = ttk.Frame(parent)
             container.grid(row=0, column=0, sticky="ew", padx=2, pady=2)
 
             # Configure 3 columns with uniform width
@@ -742,7 +737,6 @@ class NeonEyeTrackerView:
                 val.grid(row=1, column=col, sticky="ew", padx=2)
                 self.gui._metrics_labels[key] = val
 
-        self._stub_view.set_io_stub_title("EyeTracker-Neon")
         self._stub_view.build_io_stub_content(builder)
 
     def bind_runtime(self, runtime: "EyeTrackerRuntime") -> None:
