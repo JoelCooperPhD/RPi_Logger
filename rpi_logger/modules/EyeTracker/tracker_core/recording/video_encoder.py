@@ -29,11 +29,13 @@ class VideoEncoder:
         self._output_path: Optional[Path] = None
         self._flush_interval = 600  # frames (2 minutes at 5fps)
         self._frames_since_flush = 0
+        self._logged_process_death = False
 
     async def start(self, output_path: Path) -> None:
         width, height = self.resolution
         self._output_path = output_path
         self._frames_since_flush = 0
+        self._logged_process_death = False
 
         # Check ffmpeg availability and fall back to OpenCV if needed
         if self.use_ffmpeg and not _ffmpeg_available():
@@ -100,6 +102,13 @@ class VideoEncoder:
             frame_bytes = await asyncio.to_thread(self._resize_and_encode, frame, self.resolution)
 
             if not self._process or self._process.returncode is not None:
+                # Log once when FFmpeg process dies unexpectedly
+                if not self._logged_process_death:
+                    logger.error(
+                        "FFmpeg process died unexpectedly (returncode=%s), frames will be lost",
+                        self._process.returncode if self._process else "None",
+                    )
+                    self._logged_process_death = True
                 return
             assert self._process.stdin is not None
             self._process.stdin.write(frame_bytes)

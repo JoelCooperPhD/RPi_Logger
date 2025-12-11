@@ -42,6 +42,8 @@ class GazeTracker:
         self._display_fps_tracker = RollingFPS(window_seconds=5.0)
 
         # Frame skip counters for downsampling (checked before any processing)
+        # Note: Single-writer pattern - only modified in _process_frames() coroutine.
+        # CPython GIL protects simple increments; no lock needed.
         self._preview_frame_counter = 0
         self._recording_frame_counter = 0
         self._eyes_frame_counter = 0

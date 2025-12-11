@@ -31,11 +31,17 @@ class AsyncCSVWriter:
 
         self._path = path
         self._file = await asyncio.to_thread(open, path, mode, encoding="utf-8")
-        if not exists and self._header:
-            await asyncio.to_thread(self._file.write, self._header + "\n")
+        try:
+            if not exists and self._header:
+                await asyncio.to_thread(self._file.write, self._header + "\n")
 
-        self._queue = asyncio.Queue(maxsize=self._queue_size)
-        self._task = asyncio.create_task(self._writer_loop())
+            self._queue = asyncio.Queue(maxsize=self._queue_size)
+            self._task = asyncio.create_task(self._writer_loop())
+        except Exception:
+            # Clean up file handle if subsequent initialization fails
+            await asyncio.to_thread(self._file.close)
+            self._file = None
+            raise
 
     def enqueue(self, line: str) -> None:
         """Queue a CSV line for writing."""

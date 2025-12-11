@@ -356,15 +356,23 @@ class RecordingManager(RecordingManagerBase):
             frame: Video frame to record
             metadata: Ignored (kept for base class compatibility)
         """
-        if not self._is_recording or self._world_frame_queue is None:
+        # Capture queue reference to avoid race condition where recording stops
+        # between the check and the put_nowait() call
+        queue = self._world_frame_queue
+        if not self._is_recording or queue is None:
             return
 
         try:
-            self._world_frame_queue.put_nowait(frame)
+            queue.put_nowait(frame)
         except asyncio.QueueFull:
             with contextlib.suppress(asyncio.QueueEmpty):
-                self._world_frame_queue.get_nowait()
-            self._world_frame_queue.put_nowait(frame)
+                queue.get_nowait()
+            try:
+                queue.put_nowait(frame)
+            except (asyncio.QueueFull, AttributeError):
+                pass  # Queue was closed during operation
+        except AttributeError:
+            pass  # Queue was set to None during operation
 
     def write_eyes_frame(
         self,
@@ -373,27 +381,41 @@ class RecordingManager(RecordingManagerBase):
         timestamp_ns: Optional[int] = None,
     ) -> None:
         """Queue an eyes frame for recording."""
-        if not self._is_recording or self._eyes_frame_queue is None or frame is None:
+        # Capture queue reference to avoid race condition
+        queue = self._eyes_frame_queue
+        if not self._is_recording or queue is None or frame is None:
             return
 
         try:
-            self._eyes_frame_queue.put_nowait(frame)
+            queue.put_nowait(frame)
         except asyncio.QueueFull:
             with contextlib.suppress(asyncio.QueueEmpty):
-                self._eyes_frame_queue.get_nowait()
-            self._eyes_frame_queue.put_nowait(frame)
+                queue.get_nowait()
+            try:
+                queue.put_nowait(frame)
+            except (asyncio.QueueFull, AttributeError):
+                pass  # Queue was closed during operation
+        except AttributeError:
+            pass  # Queue was set to None during operation
 
     def write_audio_sample(self, audio: Optional["AudioFrame"]) -> None:
         """Queue an audio frame for recording."""
-        if not self._is_recording or self._audio_frame_queue is None or audio is None:
+        # Capture queue reference to avoid race condition
+        queue = self._audio_frame_queue
+        if not self._is_recording or queue is None or audio is None:
             return
 
         try:
-            self._audio_frame_queue.put_nowait(audio)
+            queue.put_nowait(audio)
         except asyncio.QueueFull:
             with contextlib.suppress(asyncio.QueueEmpty):
-                self._audio_frame_queue.get_nowait()
-            self._audio_frame_queue.put_nowait(audio)
+                queue.get_nowait()
+            try:
+                queue.put_nowait(audio)
+            except (asyncio.QueueFull, AttributeError):
+                pass  # Queue was closed during operation
+        except AttributeError:
+            pass  # Queue was set to None during operation
 
     def write_gaze_sample(self, gaze: Optional[Any]) -> None:
         """Write a gaze sample to CSV (30 columns)."""
