@@ -33,17 +33,11 @@ if __package__ in {None, ""}:
     __package__ = "rpi_logger.modules.EyeTracker"
 
 from .app.main_eye_tracker import parse_args, build_runtime, main as _app_main
-from rpi_logger.core.logging_utils import get_module_logger
-
-logger = get_module_logger(__name__)
-logger.debug("main_eye_tracker shim imported")
 
 
 async def main(argv: Optional[list[str]] = None) -> None:
     """Entry point invoked by the module manager discovery logic."""
-    logger.debug("Delegating Neon EyeTracker entry point to app layer")
     await _app_main(argv)
 
 if __name__ == "__main__":
-    logger.debug("main_eye_tracker shim executing entrypoint")
     asyncio.run(main())

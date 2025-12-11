@@ -107,7 +107,6 @@ class EyeTrackerRuntime(ModuleRuntime):
     # ModuleRuntime interface
 
     async def start(self) -> None:
-        self.logger.info("Starting %s runtime", self.display_name)
 
         # Store event loop reference for model callbacks
         self._loop = asyncio.get_running_loop()
@@ -218,7 +217,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             stub_view = getattr(self.view, '_stub_view', None)
             if stub_view and hasattr(stub_view, 'show_window'):
                 stub_view.show_window()
-                self.logger.info("Window shown")
 
     def _hide_window(self) -> None:
         """Hide module window (delegated to stub view)."""
@@ -226,7 +224,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             stub_view = getattr(self.view, '_stub_view', None)
             if stub_view and hasattr(stub_view, 'hide_window'):
                 stub_view.hide_window()
-                self.logger.info("Window hidden")
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
         normalized = (action or "").lower()
@@ -258,6 +255,7 @@ class EyeTrackerRuntime(ModuleRuntime):
     def _build_tracker_components(self) -> None:
         config = TrackerConfig(
             fps=float(getattr(self.args, "target_fps", 5.0)),
+            eyes_fps=float(getattr(self.args, "eyes_fps", 30.0)),
             resolution=(int(getattr(self.args, "width", 1280)), int(getattr(self.args, "height", 720))),
             output_dir=str(Path(getattr(self.args, "output_dir", self.module_dir / "recordings"))),
             display_width=int(getattr(self.args, "preview_width", 640) or 640),
@@ -354,9 +352,7 @@ class EyeTrackerRuntime(ModuleRuntime):
 
         success = await self._connect_to_assigned_device()
 
-        if success:
-            self.logger.info("Reconnected to eye tracker")
-        else:
+        if not success:
             self.logger.warning("Failed to reconnect to assigned device")
             if self.view:
                 self.view.set_device_status("Reconnect failed", connected=False)
@@ -370,18 +366,16 @@ class EyeTrackerRuntime(ModuleRuntime):
             if isinstance(task, asyncio.Task):
                 self._tracker_task = self.task_manager.add(task)
                 task.add_done_callback(lambda _: self._on_tracker_stopped())
-            self.logger.info("Gaze tracker loop started")
             if self.view:
                 self.view.set_device_status("Streaming", connected=True)
         except Exception as exc:
-            self.logger.exception("Failed to start gaze tracker: %s", exc)
+            self.logger.error("Failed to start gaze tracker: %s", exc)
             self._device_connected = False
             if self.view:
                 self.view.set_device_status("Tracker error", connected=False)
             raise TrackerInitializationError(str(exc)) from exc
 
     def _on_tracker_stopped(self) -> None:
-        self.logger.info("Gaze tracker loop exited")
         self._device_connected = False
         if self._device_ready_event:
             self._device_ready_event.clear()
@@ -406,7 +400,6 @@ class EyeTrackerRuntime(ModuleRuntime):
         if self._shutdown.is_set():
             return
 
-        self.logger.info("Reconnect requested")
         await self._stop_tracker()
 
         if self._device_manager:
@@ -456,10 +449,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             }, command_id=command_id)
             return False
 
-        self.logger.info(
-            "Assigning device %s at %s:%s",
-            device_id, network_address, network_port
-        )
 
         # Store assigned device info
         self._assigned_device_id = device_id
@@ -506,14 +495,6 @@ class EyeTrackerRuntime(ModuleRuntime):
         """Handle device unassignment from main UI."""
         device_id = command.get("device_id", "")
 
-        if self._assigned_device_id and self._assigned_device_id != device_id:
-            self.logger.warning(
-                "Unassign request for %s but current device is %s",
-                device_id, self._assigned_device_id
-            )
-
-        self.logger.info("Unassigning device %s", device_id or self._assigned_device_id)
-
         # Stop tracker
         await self._stop_tracker()
 
@@ -558,8 +539,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             # Use direct connection with known address instead of discovery
             from pupil_labs.realtime_api.device import Device
 
-            self.logger.info("Connecting directly to %s:%s", address, port)
-
             # Create device directly without discovery
             device = Device(address=address, port=str(port))
 
@@ -576,8 +555,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             self._device_connected = True
             if self._device_ready_event:
                 self._device_ready_event.set()
-
-            self.logger.info("Connected to eye tracker at %s:%s", address, port)
 
             # Update view with device info
             if self.view:
@@ -628,7 +605,6 @@ class EyeTrackerRuntime(ModuleRuntime):
                 wait_timeout = max(1.0, float(getattr(self.args, "discovery_timeout", 5.0)))
                 ready_event = self._device_ready_event
                 if ready_event is not None:
-                    self.logger.info("Waiting up to %.1fs for eye tracker reconnection", wait_timeout)
                     try:
                         await asyncio.wait_for(ready_event.wait(), timeout=wait_timeout)
                     except asyncio.TimeoutError:
@@ -684,7 +660,6 @@ class EyeTrackerRuntime(ModuleRuntime):
         })
         if self.view:
             self.view.set_recording_state(True)
-        self.logger.info("Recording started -> %s", module_session_dir)
         self.model.recording = True
         return True
 
@@ -707,7 +682,6 @@ class EyeTrackerRuntime(ModuleRuntime):
         })
         if self.view:
             self.view.set_recording_state(False)
-        self.logger.info("Recording stopped")
         self.model.recording = False
         return True
 
@@ -802,7 +776,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             return
         if not self._recording_manager or self._recording_manager.is_recording:
             return
-        self.logger.info("Auto-starting recording")
         await self._start_recording_flow({})
 
     # ------------------------------------------------------------------

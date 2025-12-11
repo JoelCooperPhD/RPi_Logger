@@ -148,7 +148,6 @@ class StreamControls:
         state.viewer = viewer
         # Sync viewer state with checkbox
         viewer.set_enabled(state.enabled.get())
-        self._logger.debug("Registered viewer for stream '%s'", stream)
 
     def set_on_change_callback(self, callback: Callable[[str, bool], None]) -> None:
         """Set callback for stream state changes.
@@ -225,8 +224,6 @@ class StreamControls:
                     if state.viewer is not None:
                         state.viewer.set_enabled(enabled)
 
-        self._logger.debug("Loaded stream states from config")
-
     def save_to_config(self, config: Any) -> None:
         """Save stream enabled states to config object.
 
@@ -246,8 +243,6 @@ class StreamControls:
             state = self._states.get(stream)
             if state is not None and hasattr(config, attr):
                 setattr(config, attr, state.enabled.get())
-
-        self._logger.debug("Saved stream states to config")
 
     def get_viewer(self, stream: str) -> Optional["BaseStreamViewer"]:
         """Get the viewer registered for a stream.

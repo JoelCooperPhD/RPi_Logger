@@ -191,7 +191,6 @@ class NeonEyeTrackerTkinterGUI:
 
     def _build_ui(self, parent: tk.Widget):
         """Build the embedded UI with preview canvas and stream viewers."""
-        self.logger.info("Building NeonEyeTracker GUI")
 
         try:
             # Main frame
@@ -274,8 +273,6 @@ class NeonEyeTrackerTkinterGUI:
             self._status_var = tk.StringVar(value="Waiting for device...")
             self._recording_var = tk.StringVar(value="Idle")
             self._device_var = tk.StringVar(value="None")
-
-            self.logger.info("NeonEyeTracker GUI built successfully")
         except Exception as e:
             self.logger.error("Failed to build GUI: %s", e, exc_info=True)
 
@@ -504,7 +501,6 @@ class NeonEyeTrackerTkinterGUI:
 
     def on_device_connected(self, device_name: str) -> None:
         """Handle device connection."""
-        self.logger.info("Device connected: %s", device_name)
         self._device_connected = True
         self._device_name = device_name
         if self._device_var:
@@ -514,7 +510,6 @@ class NeonEyeTrackerTkinterGUI:
 
     def on_device_disconnected(self) -> None:
         """Handle device disconnection."""
-        self.logger.info("Device disconnected")
         self._device_connected = False
         self._device_name = "None"
         if self._device_var:
@@ -550,8 +545,6 @@ class NeonEyeTrackerTkinterGUI:
 
     def _on_configure_clicked(self) -> None:
         """Handle configure button click."""
-        self.logger.info("Configure button clicked")
-
         if not self.root:
             return
 
@@ -631,15 +624,14 @@ class NeonEyeTrackerView:
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
         """Build the embedded GUI within the VMC container."""
-        self.logger.info("Building NeonEyeTracker embedded GUI")
 
         # Apply theme to root window
         try:
             root = parent.winfo_toplevel()
             if HAS_THEME and Theme is not None:
                 Theme.apply(root)
-        except Exception as e:
-            self.logger.debug("Could not apply theme: %s", e)
+        except Exception:
+            pass
 
         if hasattr(parent, "columnconfigure"):
             try:
@@ -674,7 +666,6 @@ class NeonEyeTrackerView:
         # Apply pending runtime binding if bind_runtime was called before GUI created
         if self._runtime:
             self.bind_runtime(self._runtime)
-            self.logger.info("Applied pending runtime binding to GUI")
 
         # Build IO stub content (status panel)
         self._build_io_stub_content()
@@ -682,7 +673,6 @@ class NeonEyeTrackerView:
         # Install Controls menu
         self._install_controls_menu()
 
-        self.logger.info("NeonEyeTracker embedded GUI built successfully")
         return container
 
     def _install_controls_menu(self) -> None:
@@ -707,7 +697,6 @@ class NeonEyeTrackerView:
                 menu = None
 
         if menu is None:
-            self.logger.debug("Controls menu unavailable; skipping menu wiring")
             return
 
         self._controls_menu = menu
@@ -844,7 +833,6 @@ class NeonEyeTrackerView:
         self._runtime = runtime
         if self.gui:
             self.gui.system = runtime
-            self.logger.info("Runtime bound to GUI (system=%s)", type(runtime).__name__)
 
             # Bind async bridge loop
             if isinstance(self.gui.async_bridge, _LoopAsyncBridge):
@@ -984,9 +972,8 @@ class NeonEyeTrackerView:
                 }
                 try:
                     await self._preferences.write_async(stream_updates)
-                    self.logger.debug("Persisted stream control states to config")
-                except Exception as e:
-                    self.logger.warning("Failed to persist stream states: %s", e)
+                except Exception:
+                    pass
 
         if self.gui:
             try:
@@ -1018,8 +1005,8 @@ class NeonEyeTrackerView:
         try:
             help_menu.delete(0)
             help_menu.add_command(label="Quick Start Guide", command=self._show_help)
-        except Exception as e:
-            self.logger.debug("Could not override help menu: %s", e)
+        except Exception:
+            pass
 
     def _show_help(self) -> None:
         """Show EyeTracker-specific help dialog."""

@@ -166,7 +166,6 @@ class RecordingManager(RecordingManagerBase):
         self._current_experiment_label = folder_name
         self._recordings_this_experiment = 0
 
-        logger.info("Started new experiment: %s", experiment_dir)
         return experiment_dir
 
     @property
@@ -206,7 +205,9 @@ class RecordingManager(RecordingManagerBase):
         self.world_video_filename = str(
             target_dir / f"{prefix}_WORLD_{w}x{h}_{self.config.fps}fps.mp4"
         )
-        self.eyes_video_filename = str(target_dir / f"{prefix}_EYES_384x192.mp4")
+        self.eyes_video_filename = str(
+            target_dir / f"{prefix}_EYES_384x192_{self.config.eyes_fps}fps.mp4"
+        )
         self.audio_filename = str(target_dir / f"{prefix}_AUDIO.wav")
         self.gaze_filename = str(target_dir / f"{prefix}_GAZE.csv")
         self.imu_filename = str(target_dir / f"{prefix}_IMU.csv")
@@ -220,7 +221,7 @@ class RecordingManager(RecordingManagerBase):
 
             # Start eyes video encoder
             self._eyes_video_encoder = VideoEncoder(
-                (384, 192), fps=30.0, use_ffmpeg=self.use_ffmpeg
+                (384, 192), fps=self.config.eyes_fps, use_ffmpeg=self.use_ffmpeg
             )
             await self._eyes_video_encoder.start(Path(self.eyes_video_filename))
             self._eyes_frame_queue = asyncio.Queue(maxsize=120)
@@ -258,7 +259,6 @@ class RecordingManager(RecordingManagerBase):
             self._record_fps_tracker.reset()
             self._is_recording = True
 
-            logger.info("Recording started: %s", self.world_video_filename)
             return Path(self.world_video_filename)
 
         except Exception as exc:
@@ -291,8 +291,6 @@ class RecordingManager(RecordingManagerBase):
 
         await self._world_video_encoder.stop()
         if self.world_video_filename:
-            logger.info("World video saved (%d frames): %s",
-                       self._world_frames_written, self.world_video_filename)
             output_files.append(Path(self.world_video_filename))
 
         # Stop eyes video
@@ -308,8 +306,6 @@ class RecordingManager(RecordingManagerBase):
         if self._eyes_video_encoder is not None:
             await self._eyes_video_encoder.stop()
             if self.eyes_video_filename and Path(self.eyes_video_filename).exists():
-                logger.info("Eyes video saved (%d frames): %s",
-                           self._eyes_frames_written, self.eyes_video_filename)
                 output_files.append(Path(self.eyes_video_filename))
             self._eyes_video_encoder = None
 
@@ -323,30 +319,23 @@ class RecordingManager(RecordingManagerBase):
         self._audio_writer_task = None
         self._audio_frame_queue = None
         if self.audio_filename and Path(self.audio_filename).exists():
-            logger.info("Audio saved: %s", self.audio_filename)
             output_files.append(Path(self.audio_filename))
 
         # Stop CSV writers
         if self._gaze_writer:
             await self._gaze_writer.stop()
-            logger.info("Gaze data saved (%d samples): %s",
-                       self._gaze_samples_written, self.gaze_filename)
             if self.gaze_filename:
                 output_files.append(Path(self.gaze_filename))
             self._gaze_writer = None
 
         if self._imu_writer:
             await self._imu_writer.stop()
-            logger.info("IMU data saved (%d samples): %s",
-                       self._imu_samples_written, self.imu_filename)
             if self.imu_filename:
                 output_files.append(Path(self.imu_filename))
             self._imu_writer = None
 
         if self._event_writer:
             await self._event_writer.stop()
-            logger.info("Events saved (%d samples): %s",
-                       self._event_samples_written, self.events_filename)
             if self.events_filename:
                 output_files.append(Path(self.events_filename))
             self._event_writer = None
@@ -579,25 +568,19 @@ class RecordingManager(RecordingManagerBase):
             self._record_fps_tracker.add_frame()
 
     async def _eyes_writer_loop(self) -> None:
-        """Background task to write eyes video frames (downsampled to 30fps)."""
+        """Background task to write eyes video frames.
+
+        Frames are pre-filtered by GazeTracker._process_frames() before being
+        queued, so no skip logic is needed here - all frames received should
+        be written. This matches the world_writer_loop pattern.
+        """
         if self._eyes_frame_queue is None or self._eyes_video_encoder is None:
             return
-
-        target_fps = 30.0
-        min_interval = 1.0 / target_fps
-        last_frame_time: Optional[float] = None
 
         while True:
             frame = await self._eyes_frame_queue.get()
             if frame is self._eyes_queue_sentinel:
                 break
-
-            # Frame rate limiting
-            now = time.time()
-            if last_frame_time is not None and (now - last_frame_time) < min_interval:
-                continue
-
-            last_frame_time = now
 
             await self._eyes_video_encoder.write_frame(frame)
             self._eyes_frames_written += 1

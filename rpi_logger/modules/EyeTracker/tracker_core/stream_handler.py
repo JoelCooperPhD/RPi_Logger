@@ -112,16 +112,6 @@ class StreamHandler:
         self._audio_task_active = bool(audio_url)
         self._eyes_task_active = bool(eyes_url)
         self._update_running_flag()
-        logger.info(f"Video URL: {video_url}")
-        logger.info(f"Gaze URL: {gaze_url}")
-        if imu_url:
-            logger.info(f"IMU URL: {imu_url}")
-        if events_url:
-            logger.info(f"Events URL: {events_url}")
-        if audio_url:
-            logger.info(f"Audio URL: {audio_url}")
-        if eyes_url:
-            logger.info(f"Eyes URL: {eyes_url}")
 
         self.tasks = [
             asyncio.create_task(self._stream_video_frames(video_url), name="video-stream"),
@@ -166,8 +156,6 @@ class StreamHandler:
         self._drain_queues()
 
     async def _stream_video_frames(self, video_url: str):
-        logger.info("Starting video stream...")
-
         frame_count = 0
         try:
             async for frame in receive_video_frames(video_url):
@@ -175,10 +163,6 @@ class StreamHandler:
                     break
 
                 frame_count += 1
-                if frame_count == 1:
-                    logger.info("First video frame received!")
-                    logger.info(f"Video frame type: {type(frame)}")
-                    logger.info(f"Video frame attributes: {[attr for attr in dir(frame) if not attr.startswith('_')]}")
 
                 if frame:
                     try:
@@ -203,80 +187,43 @@ class StreamHandler:
                             self._enqueue_latest(self._frame_queue, packet, track_drops=True)
                             self._frame_ready_event.set()  # Signal frame available
 
-                            if self.camera_frames == 1:
-                                logger.info(f"Frame shape: {pixel_data.shape}")
-                                logger.info(f"Frame dtype: {pixel_data.dtype}")
-
-                                if len(pixel_data.shape) == 3:
-                                    logger.info(f"Color channels: {pixel_data.shape[2]}")
-                                    if pixel_data.shape[0] > 100 and pixel_data.shape[1] > 100:
-                                        sample = pixel_data[100, 100]
-                                        logger.info(f"Sample pixel: {sample}")
-                                else:
-                                    logger.info("Grayscale frame detected")
-                        else:
-                            if frame_count <= 5:
-                                logger.warning(f"Frame {frame_count}: to_ndarray() returned None")
-
                     except Exception as e:
-                        if frame_count <= 5:
-                            logger.error(f"Frame {frame_count}: Error getting pixel data: {e}")
+                        if frame_count == 1:
+                            logger.error("Video stream frame error: %s", e)
 
         except asyncio.CancelledError:
-            logger.debug("Video stream task cancelled")
             raise
         except Exception as e:
             if self.running:
-                logger.error(f"Video stream error: {e}")
+                logger.error("Video stream error: %s", e)
         finally:
             self._video_task_active = False
             self._update_running_flag()
 
     async def _stream_gaze_data(self, gaze_url: str):
-        logger.info("Starting gaze stream...")
-
-        gaze_count = 0
         try:
             async for gaze in receive_gaze_data(gaze_url):
                 if not self.running:
                     break
-
-                gaze_count += 1
-                if gaze_count == 1:
-                    logger.info("First gaze data received!")
-                    logger.info(f"Gaze data type: {type(gaze)}")
-                    logger.info(f"Gaze data attributes: {[attr for attr in dir(gaze) if not attr.startswith('_')]}")
 
                 self.last_gaze = gaze
                 self._enqueue_latest(self._gaze_queue, gaze)
                 self._gaze_ready_event.set()  # Signal gaze available
 
         except asyncio.CancelledError:
-            logger.debug("Gaze stream task cancelled")
             raise
         except Exception as e:
             if self.running:
-                logger.error(f"Gaze stream error: {e}")
+                logger.error("Gaze stream error: %s", e)
         finally:
             self._gaze_task_active = False
             self._update_running_flag()
 
     async def _stream_imu_data(self, imu_url: str):
-        logger.info("Starting IMU stream...")
-
-        imu_count = 0
         try:
             async for imu in receive_imu_data(imu_url):
                 if not self.running:
                     break
-
-                imu_count += 1
-                if imu_count == 1:
-                    logger.info("First IMU sample received!")
-                    logger.info(
-                        "IMU sample attributes: %s",
-                        [attr for attr in dir(imu) if not attr.startswith("_")],
-                    )
 
                 self.last_imu = imu
                 self._enqueue_latest(self._imu_queue, imu)
@@ -287,11 +234,9 @@ class StreamHandler:
                     try:
                         listener(imu)
                     except Exception as exc:
-                        logger.error("IMU listener error: %s", exc, exc_info=True)
-
+                        logger.error("IMU listener error: %s", exc)
 
         except asyncio.CancelledError:
-            logger.debug("IMU stream task cancelled")
             raise
         except Exception as exc:
             if self.running:
@@ -301,21 +246,10 @@ class StreamHandler:
             self._update_running_flag()
 
     async def _stream_eye_events(self, events_url: str):
-        logger.info("Starting eye events stream...")
-
-        event_count = 0
         try:
             async for event in receive_eye_events_data(events_url):
                 if not self.running:
                     break
-
-                event_count += 1
-                if event_count == 1:
-                    logger.info("First eye event received!")
-                    logger.info(
-                        "Eye event attributes: %s",
-                        [attr for attr in dir(event) if not attr.startswith("_")],
-                    )
 
                 self.last_event = event
                 self._enqueue_latest(self._event_queue, event)
@@ -326,13 +260,9 @@ class StreamHandler:
                     try:
                         listener(event)
                     except Exception as exc:
-                        logger.error("Eye event listener error: %s", exc, exc_info=True)
-
-                if event_count % 50 == 1:
-                    logger.info("Eye events received: %d", event_count)
+                        logger.error("Eye event listener error: %s", exc)
 
         except asyncio.CancelledError:
-            logger.debug("Eye events stream task cancelled")
             raise
         except Exception as exc:
             if self.running:
@@ -342,29 +272,16 @@ class StreamHandler:
             self._update_running_flag()
 
     async def _stream_audio_data(self, audio_url: str):
-        logger.info("Starting audio stream...")
-
-        audio_count = 0
         try:
             async for audio in receive_audio_frames(audio_url):
                 if not self.running:
                     break
-
-                audio_count += 1
-                if audio_count == 1:
-                    logger.info("First audio frame received!")
-                    logger.info(
-                        "Audio frame info: rate=%sHz channels=%s",
-                        getattr(audio.av_frame, "sample_rate", "?"),
-                        getattr(getattr(audio.av_frame, "layout", None), "nb_channels", "?"),
-                    )
 
                 self.last_audio = audio
                 self._enqueue_latest(self._audio_queue, audio)
                 self._audio_ready_event.set()
 
         except asyncio.CancelledError:
-            logger.debug("Audio stream task cancelled")
             raise
         except Exception as exc:
             if self.running:
@@ -375,8 +292,6 @@ class StreamHandler:
 
     async def _stream_eyes_frames(self, eyes_url: str):
         """Stream eye camera frames (384x192 combined left+right at 200Hz)."""
-        logger.info("Starting eyes stream...")
-
         frame_count = 0
         try:
             async for frame in receive_video_frames(eyes_url):
@@ -384,9 +299,6 @@ class StreamHandler:
                     break
 
                 frame_count += 1
-                if frame_count == 1:
-                    logger.info("First eyes frame received!")
-                    logger.info(f"Eyes frame type: {type(frame)}")
 
                 if frame:
                     try:
@@ -411,21 +323,15 @@ class StreamHandler:
                             self._enqueue_latest(self._eyes_queue, packet)
                             self._eyes_ready_event.set()
 
-                            if self._eyes_frames == 1:
-                                logger.info("First eyes frame queued (queue size: %d)", self._eyes_queue.qsize())
-                                logger.info(f"Eyes frame shape: {pixel_data.shape}")
-                                logger.info(f"Eyes frame dtype: {pixel_data.dtype}")
-
                     except Exception as e:
-                        if frame_count <= 5:
-                            logger.error(f"Eyes frame {frame_count}: Error getting pixel data: {e}")
+                        if frame_count == 1:
+                            logger.error("Eyes stream frame error: %s", e)
 
         except asyncio.CancelledError:
-            logger.debug("Eyes stream task cancelled")
             raise
         except Exception as e:
             if self.running:
-                logger.error(f"Eyes stream error: {e}")
+                logger.error("Eyes stream error: %s", e)
         finally:
             self._eyes_task_active = False
             self._update_running_flag()

@@ -88,14 +88,12 @@ class BaseStreamViewer(ABC):
         if self._frame and not self._visible:
             self._frame.grid(row=self._row, column=0, sticky="ew", pady=(4, 0))
             self._visible = True
-            self._logger.debug("Stream viewer '%s' shown", self._stream_name)
 
     def hide(self) -> None:
         """Hide the viewer by removing it from grid."""
         if self._frame and self._visible:
             self._frame.grid_forget()
             self._visible = False
-            self._logger.debug("Stream viewer '%s' hidden", self._stream_name)
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable the viewer.

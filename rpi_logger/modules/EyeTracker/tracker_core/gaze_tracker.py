@@ -44,6 +44,7 @@ class GazeTracker:
         # Frame skip counters for downsampling (checked before any processing)
         self._preview_frame_counter = 0
         self._recording_frame_counter = 0
+        self._eyes_frame_counter = 0
 
         self.device_manager = device_manager or DeviceManager()
         self.device_manager.audio_stream_param = config.audio_stream_param
@@ -66,22 +67,18 @@ class GazeTracker:
         resume is fast.
         """
         if self._paused:
-            logger.debug("Already paused")
             return
 
         self._paused = True
-        logger.info("Eye tracker paused (CPU saving mode - streams remain connected)")
 
     async def resume(self):
         """
         Resume normal frame processing after pause.
         """
         if not self._paused:
-            logger.debug("Already running")
             return
 
         self._paused = False
-        logger.info("Eye tracker resumed")
 
     @property
     def is_paused(self) -> bool:
@@ -91,10 +88,6 @@ class GazeTracker:
     def set_reduced_processing(self, enabled: bool) -> None:
         """Enable reduced processing when window not visible."""
         self._reduced_processing = enabled
-        if enabled:
-            logger.info("Eye tracker entering reduced processing mode")
-        else:
-            logger.info("Eye tracker resuming full processing")
 
     @property
     def is_reduced_processing(self) -> bool:
@@ -115,9 +108,6 @@ class GazeTracker:
 
         if self.display_enabled:
             self.frame_processor.create_window()
-            logger.info("Starting gaze tracker - Press Q to quit, R to toggle recording")
-        else:
-            logger.info("Starting gaze tracker (GUI display mode)")
 
         try:
             experiment_dir = None
@@ -126,8 +116,6 @@ class GazeTracker:
                     experiment_dir = self.recording_manager.start_experiment()
                 except Exception as exc:
                     logger.error("Failed to initialize experiment directory: %s", exc)
-                else:
-                    logger.info("Experiment directory ready: %s", experiment_dir)
 
             stream_urls = self.device_manager.get_stream_urls()
 
@@ -150,16 +138,15 @@ class GazeTracker:
                     await asyncio.gather(*stream_tasks, return_exceptions=True)
 
         except KeyboardInterrupt:
-            logger.info("Interrupted by user")
+            pass
         except Exception as e:
-            logger.error(f"Runtime error: {e}")
+            logger.error("Runtime error: %s", e)
         finally:
             await self.cleanup()
 
     async def _process_frames(self):
         # Track time without frames for warnings (elapsed-time based)
         no_frame_since: Optional[float] = None
-        warned_1s = False
         warned_5s = False
 
         while self.running:
@@ -190,7 +177,6 @@ class GazeTracker:
                     self.no_frame_timeouts += 1
 
                     if not self.stream_handler.running and self.stream_handler.camera_frames == self.last_camera_frame_count:
-                        logger.info("Stream handler stopped; exiting frame loop")
                         self.running = False
                         break
 
@@ -198,9 +184,6 @@ class GazeTracker:
                     if no_frame_since is None:
                         no_frame_since = time.perf_counter()
                     elapsed = time.perf_counter() - no_frame_since
-                    if elapsed >= 1.0 and not warned_1s:
-                        logger.warning("No frames received for 1 second")
-                        warned_1s = True
                     if elapsed >= 5.0 and not warned_5s:
                         logger.warning("No frames received for 5 seconds")
                         warned_5s = True
@@ -209,7 +192,6 @@ class GazeTracker:
                 # Reset no-frame tracking on successful frame
                 self.frame_count += 1
                 no_frame_since = None
-                warned_1s = False
                 warned_5s = False
 
                 raw_frame = frame_packet.image
@@ -257,20 +239,25 @@ class GazeTracker:
                         break
                     self.recording_manager.write_audio_sample(next_audio)
 
-                # Drain eyes frames for recording
+                # Drain eyes frames with early skip downsampling
+                # At 200Hz source, skip most frames before queuing for recording
                 eyes_drained = 0
+                eyes_written = 0
+                eyes_skip_factor = self.config.eyes_recording_skip_factor()
                 while True:
                     next_eyes = await self.stream_handler.next_eyes(timeout=0)
                     if next_eyes is None:
                         break
                     eyes_drained += 1
-                    self.recording_manager.write_eyes_frame(
-                        next_eyes.image,
-                        timestamp_unix=next_eyes.timestamp_unix_seconds,
-                        timestamp_ns=next_eyes.timestamp_unix_ns,
-                    )
-                if eyes_drained > 0 and self.frame_count == 1:
-                    logger.info("Drained %d eyes frames on first iteration", eyes_drained)
+                    self._eyes_frame_counter += 1
+                    # Only queue for recording when counter aligns with skip factor
+                    if is_recording and (self._eyes_frame_counter % eyes_skip_factor == 0):
+                        eyes_written += 1
+                        self.recording_manager.write_eyes_frame(
+                            next_eyes.image,
+                            timestamp_unix=next_eyes.timestamp_unix_seconds,
+                            timestamp_ns=next_eyes.timestamp_unix_ns,
+                        )
 
                 # Write gaze sample at full rate when recording (for temporal accuracy)
                 if is_recording:
@@ -339,7 +326,6 @@ class GazeTracker:
 
                     command = self.frame_processor.check_keyboard()
                     if command == 'quit':
-                        logger.info("Quit requested")
                         self.running = False
                         if self.stream_handler.running:
                             await self.stream_handler.stop_streaming()
@@ -355,12 +341,11 @@ class GazeTracker:
                 await asyncio.sleep(0)
 
             except Exception as e:
-                logger.error(f"Frame processing error: {e}")
+                logger.error("Frame processing error: %s", e)
                 if not self.running:
                     break
 
     async def cleanup(self):
-        logger.info("Cleaning up...")
 
         self.running = False
 
@@ -372,5 +357,3 @@ class GazeTracker:
 
         # Close OpenCV windows
         self.frame_processor.destroy_windows()
-
-        logger.info("Cleanup complete")

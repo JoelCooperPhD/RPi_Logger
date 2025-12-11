@@ -18,10 +18,6 @@ class FrameProcessor:
 
     def __init__(self, config: Config):
         self.config = config
-        self._logged_frame_info = False
-        self._logged_extraction = False
-        self._logged_color_info = False
-        self._logged_gaze_debug = False
         self._logged_gaze_error = False
         # Phase 2.2: Sprite cache for gaze indicators
         self._gaze_sprite_cache: Dict[tuple, np.ndarray] = {}
@@ -148,32 +144,17 @@ class FrameProcessor:
                     return self._last_processed, self._last_was_grayscale
 
             h, w = raw_frame.shape[:2]
-
-            if not self._logged_frame_info:
-                logger.info(f"Raw frame shape: {raw_frame.shape}")
-                if len(raw_frame.shape) == 3:
-                    logger.info(f"Channels: {raw_frame.shape[2]}")
-                self._logged_frame_info = True
-
             scene_frame = raw_frame
 
             if h > w * 1.1:  # Height is larger than width - likely tiled
                 scene_height = h * 2 // 3
                 scene_frame = raw_frame[:scene_height, :]
 
-                if not self._logged_extraction:
-                    logger.info(f"Extracting scene camera from tiled frame")
-                    logger.info(f"Original: {h}x{w}, Scene: {scene_frame.shape}")
-                    self._logged_extraction = True
-
             processed: np.ndarray
             is_grayscale: bool
 
             if len(scene_frame.shape) == 2:  # Grayscale
                 # Phase 2.1: Return grayscale directly, let caller convert if needed
-                if not self._logged_color_info:
-                    logger.info("Scene camera is grayscale - deferring BGR conversion")
-                    self._logged_color_info = True
                 processed, is_grayscale = scene_frame, True
 
             elif len(scene_frame.shape) == 3:
@@ -184,10 +165,8 @@ class FrameProcessor:
                 elif scene_frame.shape[2] == 4:  # RGBA
                     processed, is_grayscale = cv2.cvtColor(scene_frame, cv2.COLOR_RGBA2BGR), False
                 else:
-                    logger.warning(f"Unexpected channel count: {scene_frame.shape[2]}")
                     processed, is_grayscale = scene_frame, False
             else:
-                logger.warning(f"Unexpected scene frame shape: {scene_frame.shape}")
                 processed, is_grayscale = scene_frame, len(scene_frame.shape) == 2
 
             # Cache for next comparison
@@ -199,7 +178,7 @@ class FrameProcessor:
             return processed, is_grayscale
 
         except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+            logger.error("Error processing frame: %s", e)
             return raw_frame, len(raw_frame.shape) == 2
 
     @property
