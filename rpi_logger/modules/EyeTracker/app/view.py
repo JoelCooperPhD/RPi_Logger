@@ -30,10 +30,12 @@ from vmc import LegacyTkViewBridge, StubCodexView
 
 try:
     from rpi_logger.core.ui.theme.styles import Theme
+    from rpi_logger.core.ui.theme.colors import Colors
     HAS_THEME = True
 except ImportError:
     HAS_THEME = False
     Theme = None  # type: ignore
+    Colors = None  # type: ignore
 
 # Import stream viewers
 from .stream_viewers import (
@@ -51,6 +53,35 @@ if TYPE_CHECKING:
 ActionCallback = Optional[Callable[..., Awaitable[None]]]
 FrameProvider = Callable[[], Optional[np.ndarray]]
 DataProvider = Callable[[], Optional[Any]]
+MetricsProvider = Callable[[], dict]
+
+
+def _format_fps(value: Any) -> str:
+    """Format a FPS value for display."""
+    if value is None:
+        return "  --"
+    try:
+        return f"{float(value):5.1f}"
+    except (ValueError, TypeError):
+        return "  --"
+
+
+def _fps_color(actual: Any, target: Any) -> Optional[str]:
+    """Get color based on how close actual FPS is to target."""
+    if not HAS_THEME or Colors is None:
+        return None
+    try:
+        if actual is not None and target is not None and float(target) > 0:
+            pct = (float(actual) / float(target)) * 100
+            if pct >= 95:
+                return Colors.SUCCESS   # Green - good
+            elif pct >= 80:
+                return Colors.WARNING   # Orange - warning
+            else:
+                return Colors.ERROR     # Red - bad
+    except (ValueError, TypeError):
+        pass
+    return Colors.FG_PRIMARY
 
 
 class _SystemPlaceholder:
@@ -134,6 +165,11 @@ class NeonEyeTrackerTkinterGUI:
         self._imu_provider: Optional[DataProvider] = None
         self._event_provider: Optional[DataProvider] = None
         self._audio_provider: Optional[DataProvider] = None
+        self._metrics_provider: Optional[MetricsProvider] = None
+
+        # Metrics display elements
+        self._metrics_fields: dict = {}  # StringVars
+        self._metrics_labels: dict = {}  # Labels for color
 
         # Stream viewers
         self._video_viewer: Optional[VideoViewer] = None
@@ -302,6 +338,10 @@ class NeonEyeTrackerTkinterGUI:
         """Set the audio data provider callback."""
         self._audio_provider = provider
 
+    def set_metrics_provider(self, provider: MetricsProvider) -> None:
+        """Set the metrics provider callback for FPS display."""
+        self._metrics_provider = provider
+
     def set_preview_interval(self, interval_ms: int) -> None:
         """Set preview update interval in milliseconds."""
         self._preview_interval_ms = max(50, interval_ms)
@@ -390,6 +430,12 @@ class NeonEyeTrackerTkinterGUI:
             audio = self._audio_provider() if self._audio_provider else None
             self._audio_viewer.update(audio)
 
+        # Update metrics display
+        if self._metrics_provider:
+            metrics = self._metrics_provider()
+            if metrics:
+                self.update_metrics(metrics)
+
         self._schedule_preview()
 
     def stop_preview(self) -> None:
@@ -400,6 +446,58 @@ class NeonEyeTrackerTkinterGUI:
             except tk.TclError:
                 pass
             self._preview_after_handle = None
+
+    def update_metrics(self, metrics: dict) -> None:
+        """Update metrics display with FPS values."""
+        if not self._metrics_fields:
+            return
+
+        # Capture metrics: fps_capture vs target_fps
+        cap_actual = metrics.get("fps_capture")
+        cap_target = metrics.get("target_fps")
+        cap_str = f"{_format_fps(cap_actual)} / {_format_fps(cap_target)}"
+        cap_color = _fps_color(cap_actual, cap_target)
+
+        # Record metrics: fps_record vs target_record_fps
+        rec_actual = metrics.get("fps_record")
+        rec_target = metrics.get("target_record_fps")
+        rec_str = f"{_format_fps(rec_actual)} / {_format_fps(rec_target)}"
+        rec_color = _fps_color(rec_actual, rec_target)
+
+        # Display metrics: fps_display vs target_display_fps
+        disp_actual = metrics.get("fps_display")
+        disp_target = metrics.get("target_display_fps")
+        disp_str = f"{_format_fps(disp_actual)} / {_format_fps(disp_target)}"
+        disp_color = _fps_color(disp_actual, disp_target)
+
+        def update():
+            try:
+                # Update values
+                if "cap_tgt" in self._metrics_fields:
+                    self._metrics_fields["cap_tgt"].set(cap_str)
+                if "rec_tgt" in self._metrics_fields:
+                    self._metrics_fields["rec_tgt"].set(rec_str)
+                if "disp_tgt" in self._metrics_fields:
+                    self._metrics_fields["disp_tgt"].set(disp_str)
+
+                # Update colors
+                if "cap_tgt" in self._metrics_labels and cap_color:
+                    self._metrics_labels["cap_tgt"].configure(fg=cap_color)
+                if "rec_tgt" in self._metrics_labels and rec_color:
+                    self._metrics_labels["rec_tgt"].configure(fg=rec_color)
+                if "disp_tgt" in self._metrics_labels and disp_color:
+                    self._metrics_labels["disp_tgt"].configure(fg=disp_color)
+            except Exception:
+                pass
+
+        # Schedule on UI thread if needed
+        if self.root:
+            try:
+                self.root.after(0, update)
+            except Exception:
+                pass
+        else:
+            update()
 
     # ------------------------------------------------------------------
     # Device state updates
@@ -679,6 +777,65 @@ class NeonEyeTrackerView:
                 row=2, column=1, sticky="e", padx=5, pady=2
             )
 
+            # Capture Stats LabelFrame - 3-column layout matching Cameras module
+            stats_lf = ttk.LabelFrame(parent, text="Capture Stats")
+            stats_lf.grid(row=1, column=0, sticky="new", padx=4, pady=(4, 2))
+            stats_lf.columnconfigure(0, weight=1)
+
+            # Define the fields (matching Cameras pattern)
+            fields = [
+                ("cap_tgt", "Cap In/Tgt"),
+                ("rec_tgt", "Rec Out/Tgt"),
+                ("disp_tgt", "Disp/Tgt"),
+            ]
+
+            # Initialize StringVars for all fields
+            for key, _ in fields:
+                self.gui._metrics_fields[key] = tk.StringVar(
+                    master=parent, value="  -- /   --"
+                )
+
+            # Build stats display
+            bg = Colors.BG_FRAME if HAS_THEME and Colors else None
+            fg1 = Colors.FG_SECONDARY if HAS_THEME and Colors else None
+            fg2 = Colors.FG_PRIMARY if HAS_THEME and Colors else None
+
+            if HAS_THEME and Colors:
+                container = tk.Frame(stats_lf, bg=bg)
+            else:
+                container = ttk.Frame(stats_lf)
+            container.grid(row=0, column=0, sticky="ew", padx=2, pady=2)
+
+            # Configure 3 columns with uniform width
+            for idx in range(len(fields)):
+                container.columnconfigure(idx, weight=1, uniform="stats")
+
+            # Create label and value widgets for each column
+            for col, (key, label_text) in enumerate(fields):
+                if HAS_THEME and Colors:
+                    name = tk.Label(
+                        container, text=label_text, anchor="center",
+                        bg=bg, fg=fg1
+                    )
+                    val = tk.Label(
+                        container, textvariable=self.gui._metrics_fields[key],
+                        anchor="center", bg=bg, fg=fg2, font=("TkFixedFont", 9)
+                    )
+                else:
+                    name = ttk.Label(container, text=label_text, anchor="center")
+                    val = ttk.Label(
+                        container, textvariable=self.gui._metrics_fields[key],
+                        anchor="center"
+                    )
+                    try:
+                        val.configure(font=("TkFixedFont", 9))
+                    except Exception:
+                        pass
+
+                name.grid(row=0, column=col, sticky="ew", padx=2)
+                val.grid(row=1, column=col, sticky="ew", padx=2)
+                self.gui._metrics_labels[key] = val
+
         self._stub_view.set_io_stub_title("EyeTracker-Neon")
         self._stub_view.build_io_stub_content(builder)
 
@@ -718,6 +875,10 @@ class NeonEyeTrackerView:
             # Set up audio provider
             if hasattr(runtime, '_get_latest_audio'):
                 self.gui.set_audio_provider(runtime._get_latest_audio)
+
+            # Set up metrics provider for FPS display
+            if hasattr(runtime, '_get_metrics'):
+                self.gui.set_metrics_provider(runtime._get_metrics)
 
             # Load stream states from config if available
             if self._stream_controls and hasattr(runtime, 'config'):

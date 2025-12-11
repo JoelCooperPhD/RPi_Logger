@@ -35,10 +35,11 @@ RECORDING_RESOLUTIONS = [
 # Recording FPS options (downsampled from 30 Hz via frame skipping)
 # Format: (fps_value, display_label)
 RECORDING_FPS_OPTIONS = [
-    (30.0, "30 fps (Full)"),
-    (15.0, "15 fps (1/2)"),
-    (10.0, "10 fps (1/3)"),
-    (7.5, "7.5 fps (1/4)"),
+    (15.0, "15 fps"),
+    (10.0, "10 fps"),
+    (5.0, "5 fps"),
+    (2.0, "2 fps"),
+    (1.0, "1 fps"),
 ]
 
 

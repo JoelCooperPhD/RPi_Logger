@@ -357,7 +357,7 @@ class RecordingManager(RecordingManagerBase):
             "gaze_samples": self._gaze_samples_written,
             "imu_samples": self._imu_samples_written,
             "event_samples": self._event_samples_written,
-            "output_files": output_files,
+            "output_files": [str(f) for f in output_files],
         }
 
     def write_frame(self, frame: np.ndarray, metadata: Any = None) -> None:

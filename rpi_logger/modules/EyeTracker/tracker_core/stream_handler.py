@@ -289,8 +289,6 @@ class StreamHandler:
                     except Exception as exc:
                         logger.error("IMU listener error: %s", exc, exc_info=True)
 
-                if imu_count % 100 == 1:
-                    logger.info("IMU samples received: %d", imu_count)
 
         except asyncio.CancelledError:
             logger.debug("IMU stream task cancelled")
@@ -543,12 +541,16 @@ class StreamHandler:
 
     @staticmethod
     async def _dequeue_with_timeout(queue: asyncio.Queue, timeout: Optional[float]) -> Optional[Any]:
-        if queue.empty() and timeout == 0:
-            return None
         try:
-            if timeout is None:
+            if timeout == 0:
+                # Use get_nowait for immediate non-blocking dequeue
+                return queue.get_nowait()
+            elif timeout is None:
                 return await queue.get()
-            return await asyncio.wait_for(queue.get(), timeout=timeout)
+            else:
+                return await asyncio.wait_for(queue.get(), timeout=timeout)
+        except asyncio.QueueEmpty:
+            return None
         except asyncio.TimeoutError:
             return None
 

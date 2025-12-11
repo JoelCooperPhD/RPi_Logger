@@ -215,16 +215,7 @@ class FrameProcessor:
     def add_display_overlays(
         self,
         frame: np.ndarray,
-        frame_count: int,
-        camera_frames: int,
-        start_time: Optional[float],
-        recording: bool,
         last_gaze: Optional[Any],
-        rolling_camera_fps: Optional[float] = None,
-        dropped_frames: int = 0,
-        duplicates: int = 0,
-        requested_fps: float = 30.0,
-        experiment_label: Optional[str] = None,
     ) -> np.ndarray:
         """Overlay for preview window (gaze indicator only)."""
 

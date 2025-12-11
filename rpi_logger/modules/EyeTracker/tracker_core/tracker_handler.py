@@ -63,6 +63,12 @@ class TrackerHandler:
             return None
         return getattr(self.gaze_tracker, "_latest_display_frame", None)
 
+    def get_display_fps(self) -> float:
+        """Get current display output FPS."""
+        if self.gaze_tracker is None:
+            return 0.0
+        return self.gaze_tracker.get_display_fps()
+
     async def stop(self) -> None:
         if self._run_task and not self._run_task.done():
             self._run_task.cancel()

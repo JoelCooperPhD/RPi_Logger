@@ -758,6 +758,36 @@ class EyeTrackerRuntime(ModuleRuntime):
             return None
         return self._stream_handler.get_latest_audio()
 
+    def _get_metrics(self) -> Dict[str, Any]:
+        """Get current FPS metrics for display."""
+        if not self._stream_handler or not self._tracker_config:
+            return {}
+
+        # Get recording FPS (only when recording)
+        is_recording = self._recording_manager and self._recording_manager.is_recording
+        fps_record = None
+        if is_recording and self._recording_manager:
+            fps_record = self._recording_manager.get_record_fps()
+
+        # Get display FPS from tracker handler
+        fps_display = 0.0
+        if self._tracker_handler:
+            fps_display = self._tracker_handler.get_display_fps()
+
+        return {
+            # Capture: from Neon device (raw 30Hz stream)
+            "fps_capture": self._stream_handler.get_camera_fps(),
+            "target_fps": 30.0,  # Neon raw capture rate
+
+            # Record: frames written to video file
+            "fps_record": fps_record,
+            "target_record_fps": self._tracker_config.fps if is_recording else None,
+
+            # Display: frames shown in GUI preview
+            "fps_display": fps_display,
+            "target_display_fps": self._tracker_config.preview_fps,
+        }
+
     @property
     def config(self) -> Optional["TrackerConfig"]:
         """Return tracker config for stream controls persistence."""
