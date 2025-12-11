@@ -144,16 +144,6 @@ class NeonEyeTrackerTkinterGUI:
         self.logger = ensure_structured_logger(logger, fallback_name="NeonEyeTrackerGUI") if logger else get_module_logger("NeonEyeTrackerGUI")
         self.async_bridge: Optional[_LoopAsyncBridge] = None
 
-        # Device state
-        self._device_connected = False
-        self._device_name: str = "None"
-        self._recording = False
-
-        # UI state variables
-        self._status_var: Optional[tk.StringVar] = None
-        self._recording_var: Optional[tk.StringVar] = None
-        self._device_var: Optional[tk.StringVar] = None
-
         # Preview state
         self._preview_interval_ms = 100  # Default 10 Hz, overridden by view
         self._preview_after_handle: Optional[str] = None
@@ -268,11 +258,6 @@ class NeonEyeTrackerTkinterGUI:
                 row=2,
             )
             self._events_viewer.build_ui()
-
-            # Initialize status variables
-            self._status_var = tk.StringVar(value="Waiting for device...")
-            self._recording_var = tk.StringVar(value="Idle")
-            self._device_var = tk.StringVar(value="None")
         except Exception as e:
             self.logger.error("Failed to build GUI: %s", e, exc_info=True)
 
@@ -497,45 +482,6 @@ class NeonEyeTrackerTkinterGUI:
             update()
 
     # ------------------------------------------------------------------
-    # Device state updates
-
-    def on_device_connected(self, device_name: str) -> None:
-        """Handle device connection."""
-        self._device_connected = True
-        self._device_name = device_name
-        if self._device_var:
-            self._device_var.set(device_name or "Connected")
-        if self._status_var:
-            self._status_var.set("Streaming")
-
-    def on_device_disconnected(self) -> None:
-        """Handle device disconnection."""
-        self._device_connected = False
-        self._device_name = "None"
-        if self._device_var:
-            self._device_var.set("None")
-        if self._status_var:
-            self._status_var.set("Disconnected")
-
-    def set_device_status(self, text: str, *, connected: bool) -> None:
-        """Update device status display."""
-        self._device_connected = connected
-        if self._status_var:
-            self._status_var.set(text)
-
-    def set_device_info(self, device_name: str) -> None:
-        """Update device name display."""
-        self._device_name = device_name or "None"
-        if self._device_var:
-            self._device_var.set(self._device_name)
-
-    def set_recording_state(self, active: bool) -> None:
-        """Update recording state display."""
-        self._recording = active
-        if self._recording_var:
-            self._recording_var.set("Recording" if active else "Idle")
-
-    # ------------------------------------------------------------------
     # Menu callbacks
 
     def _on_reconnect_clicked(self) -> None:
@@ -737,38 +683,9 @@ class NeonEyeTrackerView:
         def builder(parent: tk.Widget) -> None:
             parent.columnconfigure(0, weight=1)
 
-            # Status LabelFrame
-            status_lf = ttk.LabelFrame(parent, text="Device Status")
-            status_lf.grid(row=0, column=0, sticky="new", padx=4, pady=(4, 2))
-            status_lf.columnconfigure(1, weight=1)
-
-            # Device row
-            ttk.Label(status_lf, text="Device:", style='Inframe.TLabel').grid(
-                row=0, column=0, sticky="w", padx=5, pady=2
-            )
-            ttk.Label(status_lf, textvariable=self.gui._device_var, style='Inframe.TLabel').grid(
-                row=0, column=1, sticky="e", padx=5, pady=2
-            )
-
-            # Status row
-            ttk.Label(status_lf, text="Status:", style='Inframe.TLabel').grid(
-                row=1, column=0, sticky="w", padx=5, pady=2
-            )
-            ttk.Label(status_lf, textvariable=self.gui._status_var, style='Inframe.TLabel').grid(
-                row=1, column=1, sticky="e", padx=5, pady=2
-            )
-
-            # Recording row
-            ttk.Label(status_lf, text="Recording:", style='Inframe.TLabel').grid(
-                row=2, column=0, sticky="w", padx=5, pady=2
-            )
-            ttk.Label(status_lf, textvariable=self.gui._recording_var, style='Inframe.TLabel').grid(
-                row=2, column=1, sticky="e", padx=5, pady=2
-            )
-
             # Capture Stats LabelFrame - 3-column layout matching Cameras module
             stats_lf = ttk.LabelFrame(parent, text="Capture Stats")
-            stats_lf.grid(row=1, column=0, sticky="new", padx=4, pady=(4, 2))
+            stats_lf.grid(row=0, column=0, sticky="new", padx=4, pady=(4, 2))
             stats_lf.columnconfigure(0, weight=1)
 
             # Define the fields (matching Cameras pattern)
@@ -903,42 +820,31 @@ class NeonEyeTrackerView:
             return
 
     # ------------------------------------------------------------------
-    # Runtime-to-view notifications
+    # Runtime-to-view notifications (no-ops, device status UI removed)
 
     def on_device_connected(self, device_name: str) -> None:
-        """Handle device connection."""
-        if not self.gui:
-            return
-        self.call_in_gui(self.gui.on_device_connected, device_name)
+        """Handle device connection (no-op)."""
+        pass
 
     def on_device_disconnected(self) -> None:
-        """Handle device disconnection."""
-        if not self.gui:
-            return
-        self.call_in_gui(self.gui.on_device_disconnected)
+        """Handle device disconnection (no-op)."""
+        pass
 
     def set_device_status(self, text: str, *, connected: bool) -> None:
-        """Update device status display."""
-        if not self.gui:
-            return
-        self.call_in_gui(self.gui.set_device_status, text, connected=connected)
+        """Update device status display (no-op)."""
+        pass
 
     def set_device_info(self, device_name: str) -> None:
-        """Update device name display."""
-        if not self.gui:
-            return
-        self.call_in_gui(self.gui.set_device_info, device_name)
+        """Update device name display (no-op)."""
+        pass
 
     def set_recording_state(self, active: bool) -> None:
-        """Update recording state display."""
-        if not self.gui:
-            return
-        self.call_in_gui(self.gui.set_recording_state, active)
+        """Update recording state display (no-op)."""
+        pass
 
     def update_recording_state(self) -> None:
-        """Sync recording state from model."""
-        recording = self.model.recording if hasattr(self.model, 'recording') else False
-        self.set_recording_state(recording)
+        """Sync recording state from model (no-op)."""
+        pass
 
     # ------------------------------------------------------------------
     # Window control
@@ -1028,6 +934,5 @@ class NeonEyeTrackerView:
         await self.action_callback(action, **kwargs)
 
     def _on_model_change(self, prop: str, value) -> None:
-        """Handle model property changes."""
-        if prop == "recording":
-            self.update_recording_state()
+        """Handle model property changes (no-op, device status UI removed)."""
+        pass
