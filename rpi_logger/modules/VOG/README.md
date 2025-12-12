@@ -1,15 +1,10 @@
 # VOG Module
 
-Visual Occlusion Glasses (VOG) module for controlling shutter glasses in vision
-research experiments.
-
-## Overview
-
-The VOG module controls electronic shutter glasses that can rapidly switch
-between clear (transparent) and opaque states. This enables researchers to
-control visual stimulus presentation with millisecond precision.
+The VOG (Visual Occlusion Glasses) module controls electronic shutter glasses for vision research experiments. The glasses can rapidly switch between clear (transparent) and opaque states with millisecond precision, enabling precise control of visual stimulus presentation.
 
 Devices are auto-detected when plugged in via USB.
+
+---
 
 ## Getting Started
 
@@ -18,39 +13,50 @@ Devices are auto-detected when plugged in via USB.
 3. Wait for the device tab to appear (indicates successful detection)
 4. Use the lens controls or start a recording session
 
+---
+
 ## User Interface
 
 ### Device Tabs
 
 Each connected device gets its own tab showing:
 
-- **Real-time Chart**: Displays stimulus state and shutter timing over 60 seconds
-- **Lens Controls**: Buttons to manually open/close lenses
-- **Results Panel**: Shows trial number and timing data (TSOT/TSCT)
-- **Configure Button**: Opens device settings dialog
+| Element | Description |
+|---------|-------------|
+| Real-time Chart | Stimulus state and shutter timing over 60 seconds |
+| Lens Controls | Buttons to manually open/close lenses |
+| Results Panel | Trial number and timing data (TSOT/TSCT) |
+| Configure | Opens device settings dialog |
 
 ### Lens Controls
 
-- **Clear/Open**: Opens the lens (transparent)
-- **Opaque/Close**: Closes the lens (blocks vision)
+| Button | Action |
+|--------|--------|
+| Clear/Open | Opens the lens (transparent) |
+| Opaque/Close | Closes the lens (blocks vision) |
 
 Wireless devices have additional buttons for independent left/right lens control.
 
 ### Results Display
 
 After each trial, the panel shows:
-- **Trial Number**: Current trial count
-- **TSOT**: Total Shutter Open Time (milliseconds)
-- **TSCT**: Total Shutter Close Time (milliseconds)
+
+| Metric | Description |
+|--------|-------------|
+| Trial Number | Current trial count |
+| TSOT | Total Shutter Open Time (milliseconds the participant could see) |
+| TSCT | Total Shutter Close Time (milliseconds the participant was occluded) |
+
+---
 
 ## Recording Sessions
 
 ### Starting a Session
 
-When you start a recording session from the main application:
-1. The device enters experiment mode
-2. The chart clears and begins fresh
-3. Trial counter resets to 1
+When you start a recording session:
+- Device enters experiment mode
+- Chart clears and begins fresh
+- Trial counter resets to 1
 
 ### During Recording
 
@@ -59,33 +65,72 @@ Each trial captures:
 - Accumulated open/close durations
 - Timestamps synchronized to system time
 
-### Stopping Recording
-
-When recording stops:
-- Device exits experiment mode
-- Data is saved to CSV files in the session directory
-- Chart data is preserved for review
+---
 
 ## Data Output
 
-Trial data is saved as CSV files:
+### File Location
 
 ```
-{session_dir}/VOG/{timestamp}_VOG_trial{N}_VOG_{port}.csv
+{session_dir}/VOG/
 ```
 
-CSV columns include device ID, timestamps, trial number, and shutter timing data.
+### File Naming
 
-## Configuration
+```
+{timestamp}_VOG_trial{NNN}_{device_type}_{port}.csv
+```
 
-Click the "Configure" button on any device tab to access settings.
+Example: `20251208_143022_VOG_trial001_sVOG_ttyACM0.csv`
 
-Common settings include:
-- **Open/Close Time**: Lens timing duration (ms)
-- **Debounce**: Button debounce time (ms)
-- **Opacity**: Lens transparency levels (0-100%)
+### sVOG CSV Columns (7 fields)
 
-The configuration dialog adapts to show available options based on the connected device type.
+For wired VOG devices:
+
+| Column | Description |
+|--------|-------------|
+| Device ID | Device identifier (e.g., "sVOG") |
+| Label | Device port/label (e.g., "ttyACM0") |
+| Unix time in UTC | Event timestamp (Unix seconds, 6 decimals) |
+| Milliseconds Since Record | Time since recording started (ms) |
+| Trial Number | Sequential trial count (1-based) |
+| TSOT | Total Shutter Open Time (milliseconds) |
+| TSCT | Total Shutter Close Time (milliseconds) |
+
+**Example row:**
+```
+sVOG,ttyACM0,1733649120.123456,5000,1,1500,3500
+```
+
+### wVOG CSV Columns (9 fields)
+
+For wireless VOG devices (same first 7 columns as sVOG, plus):
+
+| Column | Description |
+|--------|-------------|
+| Lens | Lens state (Open/Closed/Left/Right) |
+| Battery Percent | Device battery level (0-100%) |
+
+**Example row:**
+```
+wVOG,xbee_002,1733649120.456789,5500,2,3000,2500,Open,85
+```
+
+### Timing and Synchronization
+
+**Timing Precision:**
+- TSOT/TSCT: Millisecond precision (device firmware)
+- Unix time in UTC: Microsecond precision (6 decimals)
+- Lens state changes: Device-measured (1-5 ms typical accuracy)
+
+**Cross-Module Synchronization:**
+Use "Unix time in UTC" to correlate VOG events with:
+- Video frames (via camera `capture_time_unix`)
+- Audio samples (via audio `write_time_unix`)
+- DRT trials (via DRT `Unix time in UTC`)
+- Eye tracking data (via `record_time_unix`)
+
+---
 
 ## Experiment Types
 
@@ -123,13 +168,32 @@ Simple manual control mode for integrating with external equipment or custom exp
 
 **Use case:** When you need to control the glasses from other laboratory equipment, or for demonstrations and testing.
 
+---
+
+## Configuration
+
+Click **"Configure Unit"** on any device tab to access settings.
+
+| Setting | Description |
+|---------|-------------|
+| Open/Close Time | Lens timing duration (ms) |
+| Debounce | Button debounce time (ms) |
+| Opacity | Lens transparency levels (0-100%) |
+
+The configuration dialog adapts to show available options based on the connected device type.
+
+---
+
 ## Troubleshooting
 
 ### Device not detected
 
 1. Check USB connection
 2. Verify device is powered on
-3. Run `lsusb` to confirm device is visible to the system
+3. Check that your OS recognizes the device:
+   - Windows: Check Device Manager > Ports (COM & LPT)
+   - macOS: Check System Information > USB
+   - Linux: Run `lsusb` to list USB devices
 4. Check the log panel for connection errors
 
 ### No data after trial
@@ -140,22 +204,7 @@ Simple manual control mode for integrating with external equipment or custom exp
 
 ### Lens not responding
 
-1. Try the Configure > Refresh button to reload device state
+1. Try Configure > Refresh to reload device state
 2. Check battery level (wireless devices)
 3. Reconnect the USB cable
 4. Restart the module
-
-## Module Files
-
-```
-rpi_logger/modules/VOG/
-├── main_vog.py          # Entry point
-├── config.txt           # Module configuration
-├── vog/                 # VMC integration layer
-│   ├── runtime.py       # VMC-compatible runtime
-│   └── view.py          # Tkinter GUI
-└── vog_core/            # Core functionality
-    ├── vog_handler.py   # Per-device communication
-    ├── data_logger.py   # CSV output
-    └── protocols/       # Device protocol implementations
-```
