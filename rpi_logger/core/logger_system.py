@@ -110,6 +110,9 @@ class LoggerSystem:
         # Device system for scanning, UI, and connection lifecycle
         self.device_system = DeviceSystem()
         self.device_system.set_xbee_data_callback(self._route_xbee_to_module)
+        # Configure which modules support multiple simultaneous instances
+        # These modules auto-connect ALL their devices, not just the first one
+        self.device_system.set_multi_instance_modules(self.MULTI_INSTANCE_MODULES)
 
         # State
         self.event_logger: Optional['EventLogger'] = None
@@ -207,6 +210,10 @@ class LoggerSystem:
         # Transition to running phase
         self._state.enter_running_phase()
 
+        # Clear auto-connected devices set to allow future auto-connects
+        # if devices are reconnected during the session
+        self.device_system.clear_auto_connected_devices()
+
     # =========================================================================
     # Module Status Callback
     # =========================================================================
@@ -252,15 +259,14 @@ class LoggerSystem:
                     effective_id, "quitting", status.get_payload()
                 )
 
-                # Handle cleanup based on instance type
-                if instance_id and self._is_multi_instance_module(module_name):
-                    self._notify_instance_disconnected(instance_id)
-                    has_other_instances = self._has_other_instances(module_name)
-                    await self._state.on_module_quit(module_name, has_other_instances)
+                # Unified cleanup - find device and clean up (same for all modules)
+                device_id = self._find_device_for_instance(effective_id)
+                if device_id:
+                    await self._cleanup_device_disconnect(device_id, module_name)
                 else:
-                    self.module_manager.cleanup_stopped_process(module_name)
-                    self._notify_device_connected_for_module(module_name, False)
-                    await self._state.on_module_quit(module_name, has_other_instances=False)
+                    self.logger.warning(
+                        "No device found for instance %s, cleanup skipped", effective_id
+                    )
 
                 if self.ui_callback:
                     try:
@@ -319,12 +325,10 @@ class LoggerSystem:
                 if not self._state.is_shutting_down():
                     self.logger.warning("Module %s crashed/stopped unexpectedly", effective_id)
 
-                    if instance_id and self._is_multi_instance_module(module_name):
-                        self._notify_instance_disconnected(instance_id)
-                    else:
-                        self.module_manager.cleanup_stopped_process(module_name)
-                        await self.state_manager.set_actual_state(module_name, ActualState.CRASHED)
-                        self._notify_device_connected_for_module(module_name, False)
+                    # Unified cleanup (is_crash=True skips normal persistence)
+                    device_id = self._find_device_for_instance(effective_id)
+                    if device_id:
+                        await self._cleanup_device_disconnect(device_id, module_name, is_crash=True)
 
                     await self._state.on_module_crash(module_name)
 
@@ -344,42 +348,6 @@ class LoggerSystem:
             inst_id.startswith(module_prefix)
             for inst_id in self._device_instance_map.values()
         )
-
-    def _notify_instance_disconnected(self, instance_id: str) -> None:
-        """Notify UI that a specific module instance has disconnected.
-
-        This finds the device associated with the instance and updates its
-        connection state.
-        """
-        self.logger.info("Instance disconnected: %s", instance_id)
-        self.logger.info(
-            "Current device_instance_map: %s (looking for instance_id=%r)",
-            dict(self._device_instance_map), instance_id
-        )
-
-        # Find the device_id for this instance from our mapping
-        device_id = None
-        for dev_id, inst_id in list(self._device_instance_map.items()):
-            if inst_id == instance_id:
-                device_id = dev_id
-                break
-
-        if device_id:
-            self.logger.info("Notifying device %s disconnected (instance: %s)", device_id, instance_id)
-            self._unregister_device_instance(device_id)
-            self._notify_device_connected(device_id, False)
-        else:
-            # Fallback: try to extract device_id from instance_id
-            _, extracted_device_id = self._parse_instance_id(instance_id)
-            if extracted_device_id:
-                self.logger.info(
-                    "Notifying device %s disconnected (extracted from instance: %s)",
-                    extracted_device_id, instance_id
-                )
-                # Also unregister in fallback path to ensure map is cleaned up
-                # This is critical for other_instances_running check to work correctly
-                self._unregister_device_instance(extracted_device_id)
-                self._notify_device_connected(extracted_device_id, False)
 
     def _notify_device_connected(self, device_id: str, connected: bool) -> None:
         """Update device connection state in device_system."""
@@ -409,21 +377,6 @@ class LoggerSystem:
             self.device_system.set_device_connecting(device_id)
         else:
             self.device_system.set_device_connected(device_id, False)
-
-    def _notify_device_connected_for_module(self, module_name: str, connected: bool) -> None:
-        """Notify UI about connection state change for all devices of a module."""
-        self.logger.debug(
-            "Updating device state for module %s: connected=%s",
-            module_name, connected
-        )
-
-        # Get devices from device_system (single source of truth)
-        devices = self.device_system.get_devices_for_module(module_name)
-        self.logger.debug("Found %d devices for module %s", len(devices), module_name)
-
-        for device in devices:
-            # Update device_system directly
-            self.device_system.set_device_connected(device.device_id, connected)
 
     def notify_devices_changed(self) -> None:
         """Notify UI observers that the device list/state has changed.
@@ -877,6 +830,49 @@ class LoggerSystem:
             self.logger.debug("Unregistered device %s from instance %s", device_id, instance_id)
         return instance_id
 
+    def _find_device_for_instance(self, instance_id: str) -> Optional[str]:
+        """Find the device_id associated with an instance_id."""
+        for dev_id, inst_id in self._device_instance_map.items():
+            if inst_id == instance_id:
+                return dev_id
+        # Fallback: extract from instance_id format "MODULE:device"
+        _, extracted = self._parse_instance_id(instance_id)
+        return extracted
+
+    async def _cleanup_device_disconnect(
+        self, device_id: str, module_id: str, *, is_crash: bool = False
+    ) -> None:
+        """Unified cleanup after a device disconnects (from any path).
+
+        This is the single convergence point for all device disconnection:
+        - User clicks device label to disconnect
+        - User closes module window via X button
+        - Module crashes (is_crash=True)
+
+        Args:
+            device_id: The device that disconnected
+            module_id: The module that owns the device
+            is_crash: If True, skip normal persistence (crash uses on_module_crash separately)
+        """
+        # Get device info to check if internal
+        device = self.device_system.get_device(device_id)
+        is_internal = device.is_internal if device else False
+
+        self._unregister_device_instance(device_id)
+        self._notify_device_connected(device_id, False)
+
+        # Skip persistence for crash path (handled separately by on_module_crash)
+        if is_crash:
+            return
+
+        if not self._has_other_instances(module_id):
+            if is_internal:
+                # Internal modules (Notes, etc.): keep visible, just mark as not running
+                await self._state.on_internal_module_closed(module_id)
+            else:
+                # Hardware devices: disable the device type entirely
+                await self._state.on_user_disconnect(module_id)
+
     def _build_assign_device_command_builder(self, device: DeviceInfo) -> Callable[[str], str]:
         """Build a command builder function for assign_device.
 
@@ -1076,15 +1072,8 @@ class LoggerSystem:
         # This handles the STOPPING state and waiting for process exit
         await self.instance_manager.stop_instance(instance_id)
 
-        # Unregister device-to-instance mapping
-        self._unregister_device_instance(device_id)
-
-        # Update device state (UI update)
-        self._notify_device_connected(device_id, False)
-
-        # User explicitly disconnected - save state and disable module
-        if not self._has_other_instances(module_id):
-            await self._state.on_user_disconnect(module_id)
+        # Unified cleanup: unregister, update UI, persist state
+        await self._cleanup_device_disconnect(device_id, module_id)
 
         return True
 

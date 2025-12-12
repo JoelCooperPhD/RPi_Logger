@@ -15,7 +15,9 @@ Example content:
 }
 """
 
+import os
 import json
+import tempfile
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -74,8 +76,26 @@ class InstanceGeometryStore:
                 for instance_id, geom in self._cache.items()
             }
 
-            with open(self._file_path, 'w') as f:
-                json.dump(data, f, indent=2)
+            tmp_path: Optional[Path] = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    "w",
+                    dir=str(self._file_path.parent),
+                    delete=False,
+                    encoding="utf-8",
+                ) as tmp:
+                    tmp_path = Path(tmp.name)
+                    json.dump(data, tmp, indent=2)
+                    tmp.flush()
+                    os.fsync(tmp.fileno())
+
+                os.replace(tmp_path, self._file_path)
+            finally:
+                if tmp_path is not None:
+                    try:
+                        tmp_path.unlink()
+                    except FileNotFoundError:
+                        pass
 
             logger.debug("Saved geometry for %d instances", len(self._cache))
         except Exception as e:

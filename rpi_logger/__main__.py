@@ -59,7 +59,15 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
 
         # Import and run the module's main function
         import importlib
+        import signal
         module = importlib.import_module(module_path)
+
+        # Set up signal handlers for graceful shutdown in subprocesses
+        def signal_handler(sig, frame):
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
         if hasattr(module, 'main'):
             # Pass remaining args to the module

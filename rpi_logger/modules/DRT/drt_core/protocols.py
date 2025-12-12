@@ -111,15 +111,6 @@ WDRT_CONFIG_PARAMS = {
     'SPCT': 'intensity',    # Stimulus percent (intensity)
 }
 
-# wDRT ISO Standard preset (same timing as sDRT)
-WDRT_ISO_PRESET = {
-    'lowerISI': 3000,
-    'upperISI': 5000,
-    'stimDur': 1000,
-    'intensity': 100,  # Percentage (0-100)
-}
-
-
 # =============================================================================
 # Shared Constants
 # =============================================================================

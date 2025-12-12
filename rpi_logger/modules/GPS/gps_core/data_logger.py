@@ -7,17 +7,17 @@ Uses buffered writing with a background thread for performance.
 from __future__ import annotations
 
 import csv
-import logging
 import threading
 import time
 from pathlib import Path
 from queue import Queue, Empty
 from typing import Any, List, Optional, TextIO
 
+from rpi_logger.core.logging_utils import get_module_logger
 from .constants import GPS_CSV_HEADER, MPS_PER_KNOT
 from .parsers.nmea_types import GPSFixSnapshot
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class GPSDataLogger:
@@ -65,7 +65,7 @@ class GPSDataLogger:
         self._record_path: Optional[Path] = None
 
         # Buffered writing
-        self._write_queue: Queue[Optional[List[Any]]] = Queue()
+        self._write_queue: Queue[Optional[List[Any]]] = Queue(maxsize=1000)
         self._writer_thread: Optional[threading.Thread] = None
         self._dropped_records = 0
 
@@ -147,6 +147,12 @@ class GPSDataLogger:
 
         except Exception as exc:
             logger.error("Failed to start recording for %s: %s", self.device_id, exc)
+            # Ensure file handle is closed on error
+            if self._record_file:
+                try:
+                    self._record_file.close()
+                except Exception:
+                    pass
             self._record_file = None
             self._record_writer = None
             self._record_path = None
@@ -162,7 +168,10 @@ class GPSDataLogger:
             self._write_queue.put(None)  # Sentinel to stop
             self._writer_thread.join(timeout=5.0)
             if self._writer_thread.is_alive():
-                logger.warning("Writer thread did not stop in time for %s", self.device_id)
+                logger.warning("Writer thread did not stop in time for %s, retrying", self.device_id)
+                self._writer_thread.join(timeout=2.0)
+                if self._writer_thread.is_alive():
+                    logger.error("Writer thread still alive for %s, proceeding with cleanup", self.device_id)
         self._writer_thread = None
 
         # Close file handle

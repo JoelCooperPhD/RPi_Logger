@@ -144,6 +144,15 @@ def add_common_cli_arguments(
         help="Instance ID for multi-instance modules (e.g., DRT:ACM0). Used for per-instance geometry persistence.",
     )
 
+    # Instance-specific config path for multi-instance modules
+    parser.add_argument(
+        "--config-path",
+        dest="config_path",
+        type=Path,
+        default=None,
+        help="Instance-specific config file path (set by parent process for multi-instance modules).",
+    )
+
 
 RESOLUTION_PRESETS = {
     0: (1456, 1088, "Native - Full sensor resolution", "4:3"),

@@ -11,19 +11,6 @@ KMH_PER_KNOT = 1.852
 MPH_PER_KNOT = 1.15077945
 MPS_PER_KNOT = 0.514444
 
-# Fix quality descriptions (from NMEA GGA sentence)
-FIX_QUALITY_DESCRIPTIONS = {
-    0: "Invalid",
-    1: "GPS fix",
-    2: "DGPS fix",
-    3: "PPS fix",
-    4: "RTK",
-    5: "Float RTK",
-    6: "Dead reckoning",
-    7: "Manual",
-    8: "Simulation",
-}
-
 # Fix mode mapping (from NMEA GSA sentence)
 FIX_MODE_MAP = {
     1: "No fix",

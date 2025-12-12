@@ -73,6 +73,83 @@ def resolve_module_config_path(
     )
 
 
+def sanitize_instance_id(instance_id: str) -> str:
+    """Convert instance_id to safe filename component.
+
+    Example: "DRT:ACM0" -> "drt_acm0"
+    """
+    return instance_id.lower().replace(":", "_").replace("/", "_")
+
+
+def resolve_instance_config_path(
+    module_dir: Path,
+    module_id: str,
+    instance_id: str | None = None,
+    *,
+    filename: str = "config.txt",
+) -> ModuleConfigContext:
+    """Return config paths for a specific module instance.
+
+    For multi-instance modules, each instance gets its own config file to
+    prevent instances from overwriting each other's settings.
+
+    Args:
+        module_dir: Directory containing the module's template config.
+        module_id: Module identifier (e.g., "drt", "vog").
+        instance_id: Instance identifier (e.g., "DRT:ACM0"). If None,
+            falls back to resolve_module_config_path() behavior.
+        filename: Base config filename (default: "config.txt").
+
+    Returns:
+        ModuleConfigContext with instance-specific writable path like:
+            ~/.rpi_logger/module_configs/{module_id}/config.{safe_instance}.txt
+
+    Example:
+        resolve_instance_config_path(MODULE_DIR, "drt", "DRT:ACM0")
+        # Returns writable_path: ~/.rpi_logger/module_configs/drt/config.drt_acm0.txt
+    """
+    if not instance_id:
+        return resolve_module_config_path(module_dir, module_id, filename=filename)
+
+    template_path = module_dir / filename
+
+    # Build instance-specific filename
+    safe_instance = sanitize_instance_id(instance_id)
+    base_name, ext = os.path.splitext(filename)
+    instance_filename = f"{base_name}.{safe_instance}{ext}"
+
+    fallback_dir = USER_MODULE_CONFIG_DIR / module_id
+    try:
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning("Failed to create instance config dir %s: %s", fallback_dir, exc)
+
+    fallback_path = fallback_dir / instance_filename
+
+    # Migration: Copy template on first run for new instances
+    if not fallback_path.exists():
+        try:
+            if template_path.exists():
+                shutil.copy2(template_path, fallback_path)
+                logger.info(
+                    "Seeded instance config %s from template %s",
+                    fallback_path,
+                    template_path,
+                )
+            else:
+                fallback_path.touch()
+                logger.info("Created empty instance config %s", fallback_path)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("Failed to seed instance config %s: %s", fallback_path, exc)
+
+    return ModuleConfigContext(
+        module_id=module_id,
+        template_path=template_path,
+        writable_path=fallback_path,
+        using_template=False,
+    )
+
+
 def resolve_writable_module_config(
     module_dir: Path,
     module_id: str,

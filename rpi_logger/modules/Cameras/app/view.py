@@ -309,7 +309,7 @@ class CameraView:
 
     def _on_apply_config(self, camera_id: str, settings: Dict[str, str]) -> None:
         """Handle config apply from settings window."""
-        self._logger.info("_on_apply_config called: camera_id=%s, settings=%s", camera_id, settings)
+        self._logger.debug("_on_apply_config called: camera_id=%s, settings=%s", camera_id, settings)
         if not camera_id:
             self.set_status("No camera selected")
             return
@@ -317,7 +317,7 @@ class CameraView:
         self._camera_settings.update(settings)
 
         if self._config_handler:
-            self._logger.info("Calling config handler")
+            self._logger.debug("Calling config handler")
             try:
                 self._config_handler(camera_id, settings)
                 self.set_status(f"Config applied")

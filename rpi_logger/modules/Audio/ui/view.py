@@ -56,6 +56,7 @@ class AudioView:
         self._vmc_view.build_stub_content(self._build_content)
         self._model.subscribe(self._on_snapshot)
         self._rename_stub_label()
+        self._finalize_menus()
         self.logger.info("Audio view attached")
 
     # ------------------------------------------------------------------
@@ -126,6 +127,18 @@ class AudioView:
                 stub_frame.configure(text="Audio Control Panel")
             except Exception:
                 self.logger.debug("Unable to rename stub frame", exc_info=True)
+
+    def _finalize_menus(self) -> None:
+        """Finalize View and File menus with standard items."""
+        # Finalize View menu (Logger only - Audio doesn't use capture stats)
+        finalize_view = getattr(self._vmc_view, "finalize_view_menu", None)
+        if callable(finalize_view):
+            finalize_view(include_capture_stats=False)
+
+        # Finalize File menu (adds Quit)
+        finalize_file = getattr(self._vmc_view, "finalize_file_menu", None)
+        if callable(finalize_file):
+            finalize_file()
 
     def _build_device_label(self, snapshot: AudioSnapshot) -> str:
         selected = list(snapshot.selected_devices.values())

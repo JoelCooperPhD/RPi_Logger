@@ -251,7 +251,7 @@ class VOGTkinterGUI:
             # Primary: Use instance_id if available (for multi-instance modules)
             if hasattr(self.args, 'instance_id') and self.args.instance_id:
                 title = self.args.instance_id
-                self.logger.info("VOG using instance_id for title: %s", title)
+                self.logger.debug("VOG using instance_id for title: %s", title)
             # Fallback: Build from device info (original logic)
             elif self._port and self._device_type:
                 # Format: "VOG(USB):ACM0" or "VOG(XBee):ACM0"
@@ -270,13 +270,13 @@ class VOGTkinterGUI:
                     conn_type = "USB"
 
                 title = f"VOG({conn_type}):{port_short}"
-                self.logger.info("VOG using device info for title: %s", title)
+                self.logger.debug("VOG using device info for title: %s", title)
             else:
                 title = "VOG"
-                self.logger.info("VOG using default title: %s", title)
+                self.logger.debug("VOG using default title: %s", title)
 
             toplevel.title(title)
-            self.logger.info("VOG window title set to: %s", title)
+            self.logger.debug("VOG window title set to: %s", title)
         except Exception as e:
             self.logger.warning("Failed to update window title: %s", e)
 

@@ -1,0 +1,410 @@
+#include <Arduino.h>
+
+#include <bounce2.h>
+#include <chrono.h>
+#include <FlashStorage.h>
+#include <SerialCommand.h>
+#include <Adafruit_DotStar.h>
+#include <SPI.h>
+
+const int buttonPin = 0,
+          buttonPort = 1,
+          stimPort = 2,
+          stimPin = 3,
+          debounceInterval = 5;
+
+uint32_t nextTrial = 4294967295,
+         lowerISI,
+         upperISI,
+         stimDur,
+         intensity,
+         startMillis = 0;
+int32_t rt = -1;
+
+uint16_t trial = 0, clicks = 0;
+
+bool responded = false,
+     expActive = false;
+
+String name = "sDRT",
+       buildDate = "10/25/2021",
+       version = "1.1";
+
+/////////////////////////////////////////
+//Onboard LED Dotstar
+Adafruit_DotStar strip = Adafruit_DotStar(1, INTERNAL_DS_DATA, INTERNAL_DS_CLK, DOTSTAR_BGR);
+
+void dotstar_red()
+{
+  strip.setPixelColor(0, 50, 0, 0);
+  strip.show();
+}
+
+void dotstar_green()
+{
+  strip.setPixelColor(0, 0, 50, 0);
+  strip.show();
+}
+
+void dotstar_blue()
+{
+  strip.setPixelColor(0, 0, 0, 50); // blue
+  strip.show();
+}
+
+void dotstar_off()
+{
+  strip.setPixelColor(0, 0, 0, 0);
+  strip.show();
+}
+
+void setupDotstar()
+{
+  strip.begin();
+  dotstar_blue();
+}
+/////////////////////////////////////////
+//Flash
+FlashStorage(lowerISI_storage, uint16_t);
+FlashStorage(upperISI_storage, uint16_t);
+FlashStorage(stimDur_storage, uint16_t);
+FlashStorage(intensity_storage, uint16_t);
+
+/////////////////////////////////////////
+//setupParams
+
+void setupParams()
+{
+  lowerISI = lowerISI_storage.read();
+  upperISI = upperISI_storage.read();
+  stimDur = stimDur_storage.read();
+  intensity = intensity_storage.read();
+}
+
+/////////////////////////////////////////
+//Button
+Bounce bttn = Bounce(buttonPin, debounceInterval);
+
+void setupButton()
+{
+  pinMode(buttonPin, INPUT_PULLUP);
+}
+
+/////////////////////////////////////////
+//Side port
+void setupSidePort()
+{
+  pinMode(buttonPort, OUTPUT);
+  digitalWrite(buttonPort, 1);
+  pinMode(stimPort, OUTPUT);
+  digitalWrite(stimPort, 1);
+}
+
+/////////////////////////////////////////
+//Stimulus
+void setupStimulus()
+{
+  pinMode(stimPin, OUTPUT);
+}
+
+/////////////////////////////////////////
+//Timers
+
+Chrono swExp = Chrono();
+Chrono swTrial = Chrono();
+Chrono swStim = Chrono();
+Chrono swRT = Chrono();
+
+/////////////////////////////////////////
+//Experiment
+
+void initTrial()
+{
+  startMillis = swExp.elapsed();
+  swTrial.restart();
+  nextTrial = random(lowerISI, upperISI);
+  clicks = 0;
+  responded = false;
+
+  if (trial > 0)
+  {
+    analogWrite(stimPin, intensity);
+    digitalWrite(stimPort, 0);
+    delayMicroseconds(500);
+    digitalWrite(stimPort, 1);
+    Serial.println("stm>1");
+    rt = -1;
+    swStim.restart();
+    swRT.restart();
+    dotstar_red();
+  }
+}
+
+void sendResults()
+{
+    if (trial > 0) {
+      Serial.print("trl>");
+      Serial.print(startMillis);
+      Serial.print(",");
+      Serial.print(trial);
+      Serial.print(",");
+      Serial.print(rt);
+      Serial.println();
+  }
+}
+
+void handleResponse()
+{
+  if (!responded)
+  {
+    rt = swRT.elapsed();
+    responded = true;
+    analogWrite(stimPin, 0);
+    digitalWrite(buttonPort, 0);
+    delayMicroseconds(500);
+    digitalWrite(buttonPort, 1);
+    Serial.println("stm>0");
+    dotstar_off();
+
+    sendResults();
+  }
+  clicks += 1;
+  Serial.print("clk>");
+  Serial.println(clicks);
+}
+
+void setupTimers()
+{
+  swExp.stop();
+  swTrial.stop();
+}
+
+void exp_start()
+{
+  trial = 0;
+  expActive = true;
+  swExp.restart();
+  initTrial();
+  dotstar_off();
+}
+
+void endTrial()
+{
+  if (trial > 0)
+  {
+    if (!responded)
+    {
+      sendResults();
+    }
+    Serial.println("end>");
+  }
+  trial += 1;
+}
+
+void exp_stop()
+{
+  endTrial();
+  dotstar_blue();
+  expActive = false;
+  swExp.stop();
+  swTrial.stop();
+  analogWrite(stimPin, 0);
+  Serial.println("stm>0");
+}
+
+/////////////////////////////////////////
+//Serial
+SerialCommand msg = SerialCommand();
+
+//Get + Set
+
+void get_name()
+{
+  Serial.println(name);
+}
+
+void get_intensity()
+{
+  Serial.print("cfg>intensity:");
+  Serial.println(intensity_storage.read());
+}
+
+void set_intensity()
+{
+  char *arg;
+  arg = msg.next();
+  if (arg != NULL)
+  {
+    intensity = atoi(arg);
+    intensity_storage.write(intensity);
+    Serial.print("cfg>intensity:");
+    Serial.println(intensity_storage.read());
+  }
+}
+
+void get_lowerISI()
+{
+  Serial.print("cfg>lowerISI:");
+  Serial.println(lowerISI_storage.read());
+}
+
+void set_lowerISI()
+{
+  char *arg;
+  arg = msg.next();
+  if (arg != NULL)
+  {
+    lowerISI = atoi(arg);
+    lowerISI_storage.write(lowerISI);
+    Serial.print("cfg>lowerISI:");
+    Serial.println(lowerISI_storage.read());
+  }
+}
+
+void get_upperISI()
+{
+  Serial.print("cfg>upperISI:");
+  Serial.println(upperISI_storage.read());
+}
+
+void set_upperISI()
+{
+  char *arg;
+  arg = msg.next();
+  if (arg != NULL)
+  {
+    upperISI = atoi(arg);
+    upperISI_storage.write(upperISI);
+    Serial.print("cfg>upperISI:");
+    Serial.println(upperISI_storage.read());
+  }
+}
+
+void get_stimDur()
+{
+  Serial.print("cfg>stimDur:");
+  Serial.println(stimDur_storage.read());
+}
+
+void set_stimDur()
+{
+  char *arg;
+  arg = msg.next();
+  if (arg != NULL)
+  {
+    stimDur = atoi(arg);
+    stimDur_storage.write(stimDur);
+    Serial.print("cfg>stimDur:");
+    Serial.println(stimDur_storage.read());
+  }
+}
+
+void stim_on()
+{
+  analogWrite(stimPin, intensity);
+  Serial.println("stm>1");
+}
+
+void stim_off()
+{
+  analogWrite(stimPin, 0);
+  Serial.println("stm>0");
+}
+
+void get_config()
+{
+  Serial.print("cfg>");
+  Serial.print("name:");
+  Serial.print(name);
+  Serial.print(", ");
+  Serial.print("buildDate:");
+  Serial.print(buildDate);
+  Serial.print(", ");
+  Serial.print("version:");
+  Serial.print(version);
+  Serial.print(", ");
+  Serial.print("lowerISI:");
+  Serial.print(lowerISI_storage.read());
+  Serial.print(", ");
+  Serial.print("upperISI:");
+  Serial.print(upperISI_storage.read());
+  Serial.print(", ");
+  Serial.print("stimDur:");
+  Serial.print(stimDur_storage.read());
+  Serial.print(", ");
+  Serial.print("intensity:");
+  Serial.println(intensity_storage.read());
+}
+
+void unrecognized(const char *command)
+{
+  Serial.println("What?");
+}
+
+void setupParser()
+{
+  msg.addCommand("set_lowerISI", set_lowerISI);
+  msg.addCommand("set_upperISI", set_upperISI);
+  msg.addCommand("set_stimDur", set_stimDur);
+  msg.addCommand("set_intensity", set_intensity);
+  msg.addCommand("get_lowerISI", get_lowerISI);
+  msg.addCommand("get_upperISI", get_upperISI);
+  msg.addCommand("get_stimDur", get_stimDur);
+  msg.addCommand("get_intensity", get_intensity);
+  msg.addCommand("get_name", get_name);
+  msg.addCommand("get_config", get_config);
+  msg.addCommand("exp_start", exp_start);
+  msg.addCommand("exp_stop", exp_stop);
+  msg.addCommand("stim_on", stim_on);
+  msg.addCommand("stim_off", stim_off);
+  msg.setDefaultHandler(unrecognized);
+}
+
+/////////////////////////////////////////
+//MAIN LOOPS
+/////////////////////////////////////////
+
+void setup()
+{
+  Serial.begin(9600);
+  setupParams();
+  setupButton();
+  setupParser();
+  setupStimulus();
+  setupSidePort();
+  setupTimers();
+  setupDotstar();
+  randomSeed(analogRead(4));
+}
+
+void loop()
+{
+  if (Serial.available())
+  {
+    msg.readSerial();
+  }
+  if (expActive)
+  {
+    if (swTrial.hasPassed(nextTrial))
+    {
+      endTrial();
+      initTrial();
+    }
+    if (swStim.hasPassed(stimDur))
+    {
+      swStim.restart();
+      swStim.stop();
+      analogWrite(stimPin, 0);
+
+      Serial.println("stm>0");
+      dotstar_off();
+    }
+    if (bttn.update())
+    {
+      if (bttn.fallingEdge())
+      {
+        handleResponse();
+      }
+    }
+  }
+}

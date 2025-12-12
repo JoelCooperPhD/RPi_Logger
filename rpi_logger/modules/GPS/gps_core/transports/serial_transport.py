@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Optional
-import logging
 
+from rpi_logger.core.logging_utils import get_module_logger
 # Import as BaseGPSTransport for consistency with GPS naming convention
 from rpi_logger.core.devices.transports import BaseReadOnlyTransport as BaseGPSTransport
 from ..constants import DEFAULT_BAUD_RATE, DEFAULT_RECONNECT_DELAY
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 # Optional import - serial may not be available on all platforms
 try:

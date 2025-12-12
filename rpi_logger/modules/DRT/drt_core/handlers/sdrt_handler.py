@@ -8,8 +8,8 @@ Handles USB serial communication with sDRT-specific command/response protocol.
 import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any
-import logging
 
+from rpi_logger.core.logging_utils import get_module_logger
 from .base_handler import BaseDRTHandler
 from ..device_types import DRTDeviceType
 from ..transports import USBTransport
@@ -22,7 +22,7 @@ from ..protocols import (
     RESPONSE_DELIMITER,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class SDRTHandler(BaseDRTHandler):

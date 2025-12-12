@@ -16,10 +16,11 @@ from pathlib import Path
 import asyncio
 import logging
 
+from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.connection import ReconnectingMixin, ReconnectConfig
 from ..device_types import DRTDeviceType
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 def _task_exception_handler(task: asyncio.Task) -> None:

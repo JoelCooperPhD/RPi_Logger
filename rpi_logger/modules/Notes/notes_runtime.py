@@ -585,7 +585,20 @@ class NotesRuntime(ModuleRuntime):
             self._post_button.grid(row=0, column=1, padx=(0, 4), pady=4)
 
         self.view.build_stub_content(builder)
+        self._finalize_menus()
         self._render_history()
+
+    def _finalize_menus(self) -> None:
+        """Finalize View and File menus with standard items."""
+        # Finalize View menu (Logger only - Notes doesn't use capture stats)
+        finalize_view = getattr(self.view, "finalize_view_menu", None)
+        if callable(finalize_view):
+            finalize_view(include_capture_stats=False)
+
+        # Finalize File menu (adds Quit)
+        finalize_file = getattr(self.view, "finalize_file_menu", None)
+        if callable(finalize_file):
+            finalize_file()
 
     def _render_history(self) -> None:
         if not self._history_widget or tk is None:

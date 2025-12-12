@@ -66,6 +66,21 @@ class DiskGuard:
     def last_status(self) -> Optional[DiskStatus]:
         return self._last_status
 
+    def check(self, path: Path) -> bool:
+        """Synchronous check if disk space is sufficient.
+
+        Returns True if free space >= threshold, False otherwise.
+        """
+        status = self._check(path)
+        self._last_status = status
+        if not status.ok:
+            self._logger.warning(
+                "Disk guard blocking recording: free=%.2f GB threshold=%.2f GB",
+                status.free_gb,
+                status.threshold_gb,
+            )
+        return status.ok
+
     async def _loop(self, path: Path) -> None:
         try:
             while not self._stop_event.is_set():

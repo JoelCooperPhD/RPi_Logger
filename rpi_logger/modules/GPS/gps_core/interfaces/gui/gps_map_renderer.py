@@ -7,7 +7,6 @@ It supports trajectory visualization, compass rose, and scale bar overlays.
 from __future__ import annotations
 
 import io
-import logging
 import math
 import sqlite3
 from collections import deque
@@ -16,6 +15,7 @@ from typing import Deque, Optional, Tuple
 
 from PIL import Image, ImageDraw
 
+from rpi_logger.core.logging_utils import get_module_logger
 from ...constants import (
     TILE_SIZE,
     GRID_SIZE,
@@ -24,7 +24,7 @@ from ...constants import (
 )
 from ...parsers.nmea_types import GPSFixSnapshot
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class GPSMapRenderer:

@@ -18,7 +18,7 @@ from typing import Any, Deque, Dict, Optional
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
-from rpi_logger.core.commands import StatusMessage
+from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import ensure_structured_logger
 
 from ..gps_core.constants import DEFAULT_NMEA_HISTORY
@@ -86,6 +86,8 @@ class GPSModuleRuntime(ModuleRuntime):
         # Recording state
         self._recording_active = False
         self._active_trial_number: int = 1
+        self._suppress_recording_event = False
+        self._suppress_session_event = False
 
         # NMEA sentence history (for UI display)
         history_limit = max(1, int(getattr(self.args, "nmea_history", DEFAULT_NMEA_HISTORY)))
@@ -120,6 +122,8 @@ class GPSModuleRuntime(ModuleRuntime):
                 bind_runtime(self)
 
         await self._ensure_session_dir(self.model.session_dir)
+
+        self.model.subscribe(self._on_model_change)
 
         self.logger.info("GPS runtime ready; waiting for device assignments")
 
@@ -212,6 +216,33 @@ class GPSModuleRuntime(ModuleRuntime):
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
         """Handle user actions from the view."""
         return False
+
+    # ------------------------------------------------------------------
+    # Model observation
+
+    def _on_model_change(self, prop: str, value: Any) -> None:
+        """Handle model property changes."""
+        if prop == "recording":
+            if self._suppress_recording_event:
+                return
+            if self._loop:
+                self._loop.create_task(self._apply_recording_state(bool(value)))
+        elif prop == "session_dir":
+            if self._suppress_session_event:
+                return
+            if value:
+                path = Path(value)
+            else:
+                path = None
+            if self._loop:
+                self._loop.create_task(self._ensure_session_dir(path, update_model=False))
+
+    async def _apply_recording_state(self, active: bool) -> None:
+        """Apply recording state from model changes."""
+        if active:
+            await self._start_recording()
+        else:
+            await self._stop_recording()
 
     # ------------------------------------------------------------------
     # Device Assignment
@@ -439,7 +470,9 @@ class GPSModuleRuntime(ModuleRuntime):
 
         # Sync to model if requested
         if update_model:
+            self._suppress_session_event = True
             self.model.session_dir = self.session_dir
+            self._suppress_session_event = False
 
     # ------------------------------------------------------------------
     # GUI helpers

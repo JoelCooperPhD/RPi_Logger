@@ -24,6 +24,8 @@ State Persistence Rules:
 
 import asyncio
 import json
+import os
+import tempfile
 from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
@@ -143,14 +145,16 @@ class ModuleStatePersistence:
 
     async def on_user_disconnect(self, module_name: str) -> None:
         """
-        Called when user explicitly disconnects a device.
+        Called when user disconnects a hardware device (via label click or window close).
 
         Saves device_connected=False so module doesn't auto-connect on restart.
-        Also saves enabled=False since user doesn't want this module.
+        Also saves enabled=False since user doesn't want this device type.
+
+        For internal modules (Notes, etc.), use on_internal_module_closed instead.
         """
         if self._phase == AppPhase.SHUTTING_DOWN:
             self.logger.info(
-                "PERSIST SKIP: %s user disconnect (shutting down)",
+                "PERSIST SKIP: %s disconnect (shutting down)",
                 module_name
             )
             return
@@ -158,27 +162,16 @@ class ModuleStatePersistence:
         await self._write_device_connected(module_name, False)
         await self._write_enabled(module_name, False)
 
-    async def on_module_quit(self, module_name: str, has_other_instances: bool) -> None:
+    async def on_internal_module_closed(self, module_name: str) -> None:
         """
-        Called when a module quits gracefully.
+        Called when user closes an internal module window (Notes, etc.).
 
-        During normal operation: saves device_connected=False
-        During shutdown: skips save (preserve for restart)
-
-        Args:
-            module_name: The module that quit
-            has_other_instances: True if other instances of this module are still running
+        Only saves device_connected=False. Does NOT change enabled state,
+        so the module remains visible in the Devices list on restart.
         """
         if self._phase == AppPhase.SHUTTING_DOWN:
             self.logger.info(
-                "PERSIST SKIP: %s quit (shutting down, state preserved)",
-                module_name
-            )
-            return
-
-        if has_other_instances:
-            self.logger.info(
-                "PERSIST SKIP: %s quit (other instances still running)",
+                "PERSIST SKIP: %s internal close (shutting down)",
                 module_name
             )
             return
@@ -371,8 +364,26 @@ class ModuleStatePersistence:
                 }
 
                 def write_file():
-                    with open(STATE_FILE, 'w') as f:
-                        json.dump(state, f, indent=2)
+                    tmp_path: Optional[Path] = None
+                    try:
+                        with tempfile.NamedTemporaryFile(
+                            "w",
+                            dir=str(STATE_FILE.parent),
+                            delete=False,
+                            encoding="utf-8",
+                        ) as tmp:
+                            tmp_path = Path(tmp.name)
+                            json.dump(state, tmp, indent=2)
+                            tmp.flush()
+                            os.fsync(tmp.fileno())
+
+                        os.replace(tmp_path, STATE_FILE)
+                    finally:
+                        if tmp_path is not None:
+                            try:
+                                tmp_path.unlink()
+                            except FileNotFoundError:
+                                pass
 
                 await asyncio.to_thread(write_file)
 

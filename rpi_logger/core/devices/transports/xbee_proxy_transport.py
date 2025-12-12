@@ -85,8 +85,11 @@ class XBeeProxyTransport:
             return False
 
         try:
-            data_str = data.decode('utf-8', errors='replace').strip()
-            logger.debug(f"XBee proxy sending to {self.node_id}: '{data_str}'")
+            # Preserve line endings exactly as provided by the caller.
+            # Some device firmwares (notably MicroPython) are line-oriented and
+            # require '\n' terminators to process commands.
+            data_str = data.decode('utf-8', errors='replace')
+            logger.debug("XBee proxy sending to %s: %r", self.node_id, data_str)
             return await self._send_callback(self.node_id, data_str)
         except Exception as e:
             logger.error(f"XBee proxy write error to {self.node_id}: {e}")

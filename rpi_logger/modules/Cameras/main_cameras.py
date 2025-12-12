@@ -36,7 +36,10 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy  # type: ignore  # noqa: E402
 from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
-from rpi_logger.modules.base.config_paths import resolve_module_config_path  # noqa: E402
+from rpi_logger.modules.base.config_paths import (  # noqa: E402
+    ModuleConfigContext,
+    resolve_module_config_path,
+)
 from rpi_logger.cli.common import add_common_cli_arguments, add_config_to_args, install_signal_handlers  # noqa: E402
 from rpi_logger.modules.Cameras.config import CamerasConfig  # noqa: E402
 from .bridge import factory  # noqa: E402
@@ -48,7 +51,21 @@ logger = get_module_logger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID, filename="config.txt")
+    # Pre-parse to get --config-path if provided by parent process (multi-instance)
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config-path", type=Path, default=None)
+    pre_args, _ = pre_parser.parse_known_args(argv)
+
+    # Use parent-provided path (instance-specific) or resolve normally (shared)
+    if pre_args.config_path and pre_args.config_path.exists():
+        config_ctx = ModuleConfigContext(
+            module_id=MODULE_ID,
+            template_path=MODULE_DIR / "config.txt",
+            writable_path=pre_args.config_path,
+            using_template=False,
+        )
+    else:
+        config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID, filename="config.txt")
 
     # Build defaults from CamerasConfig - use to_dict() for flat config
     # Since CamerasConfig has nested structure, we need simpler defaults for CLI

@@ -12,18 +12,18 @@ reconnection with exponential backoff.
 from __future__ import annotations
 
 import asyncio
-import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 from rpi_logger.core.connection import ReconnectingMixin, ReconnectConfig
+from rpi_logger.core.logging_utils import get_module_logger
 from ..parsers.nmea_parser import NMEAParser
 from ..parsers.nmea_types import GPSFixSnapshot
 from ..transports import BaseGPSTransport
 from ..data_logger import GPSDataLogger
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 def _task_exception_handler(task: asyncio.Task) -> None:

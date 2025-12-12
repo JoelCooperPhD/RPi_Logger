@@ -1,0 +1,16 @@
+XB settings:
+
+Dongle:
+CE: 1
+A2: 7
+SC 7FFF
+AP: 1
+AO: 0
+BD: A
+
+Node:
+A1: 7
+SC: 7FFF
+AP: 1
+AO: 0
+BD: A

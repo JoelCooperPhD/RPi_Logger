@@ -20,9 +20,10 @@
 The codebase shows evidence of active development and architectural modernization (VMC migration). While the overall structure is sound, there are several areas requiring attention: deprecated legacy code that should be removed, inconsistent error handling patterns, and potential resource management issues in async contexts.
 
 ### Top Priority Items
-1. **CRITICAL**: Unbounded task creation in `/home/joel/Development/TheLogger/rpi_logger/core/module_manager.py:704` - `asyncio.create_task()` without tracking can leak tasks
-2. **CRITICAL**: Missing timeout on heartbeat recovery in `/home/joel/Development/TheLogger/rpi_logger/core/connection/heartbeat_monitor.py:191` - could hang indefinitely
-3. **HIGH**: Deprecated `BaseSystem`, `BaseMode`, `BaseGUIMode` classes still exported in `/home/joel/Development/TheLogger/rpi_logger/modules/base/__init__.py` - should be isolated or removed
+1. **CRITICAL**: Fire-and-forget asyncio tasks should retrieve/log exceptions (avoid "Task exception was never retrieved" spam); consider `rpi_logger/core/asyncio_utils.py`.
+2. **NOTE**: Heartbeat recovery already wraps callbacks in `asyncio.wait_for(..., timeout=self.callback_timeout)` (`rpi_logger/core/connection/heartbeat_monitor.py`).
+3. **NOTE**: `ModuleProcess.command_queue` is already bounded (`asyncio.Queue(maxsize=100)`) (`rpi_logger/core/module_process.py`).
+4. **HIGH**: Deprecated `BaseSystem`, `BaseMode`, `BaseGUIMode` classes still exported in `/home/joel/Development/TheLogger/rpi_logger/modules/base/__init__.py` - should be isolated or removed
 
 ---
 
@@ -33,11 +34,11 @@ Items that can be fixed quickly with significant benefit:
 | Item | Location | Type | Effort |
 |------|----------|------|--------|
 | Remove star import | `/home/joel/Development/TheLogger/rpi_logger/modules/EyeTracker/main_eye_tracker.py:35` | Pattern Drift | 5 min |
-| Add timeout to `_recovered_callback` | `/home/joel/Development/TheLogger/rpi_logger/core/connection/heartbeat_monitor.py:191` | Stability | 5 min |
+| Heartbeat recovered callback timeout present | `rpi_logger/core/connection/heartbeat_monitor.py` | Stability | done |
 | Remove debug print statements | `/home/joel/Development/TheLogger/rpi_logger/modules/Cameras/app/widgets/camera_settings_window.py:857-867` | Dead Code | 2 min |
 | Remove debug print statement | `/home/joel/Development/TheLogger/rpi_logger/modules/Cameras/app/widgets/sensor_info_dialog.py:339` | Dead Code | 1 min |
 | Clean up TODO comment | `/home/joel/Development/TheLogger/rpi_logger/core/connection/connection_coordinator.py:277` | Dead Code | 2 min |
-| Add task tracking for fire-and-forget tasks | `/home/joel/Development/TheLogger/rpi_logger/core/module_manager.py:704` | Stability | 15 min |
+| Add exception retrieval for fire-and-forget tasks | `rpi_logger/core/asyncio_utils.py` | Stability | 15 min |
 | Consolidate exception handling patterns | Multiple files | Pattern Drift | 30 min |
 
 ---
@@ -150,14 +151,14 @@ The codebase handles async operations extensively but has some areas where resou
 
 | Finding | Location | Description |
 |---------|----------|-------------|
-| Fire-and-forget task creation | `/home/joel/Development/TheLogger/rpi_logger/core/module_manager.py:704` | `asyncio.create_task()` without storing reference - task could be garbage collected |
-| Missing timeout on async callback | `/home/joel/Development/TheLogger/rpi_logger/core/connection/heartbeat_monitor.py:191` | `asyncio.create_task(self._recovered_callback(...))` has no timeout wrapper |
+| Fire-and-forget task exceptions | Various files | Tasks created without retrieving exceptions can spam logs ("Task exception was never retrieved") |
+| Heartbeat recovered callback timeout present | `rpi_logger/core/connection/heartbeat_monitor.py` | `_run_recovered_callback()` wraps callback in `asyncio.wait_for(..., timeout=self.callback_timeout)` |
 
 ### High Severity
 
 | Finding | Location | Description |
 |---------|----------|-------------|
-| Unbounded queue growth potential | `/home/joel/Development/TheLogger/rpi_logger/core/module_process.py:60` | `asyncio.Queue()` without maxsize |
+| `ModuleProcess.command_queue` bounded | `rpi_logger/core/module_process.py` | Uses `asyncio.Queue(maxsize=100)` |
 | 14 `while True` loops | Various files | Infinite loops require careful exit handling |
 | 70+ `asyncio.create_task()` calls | Various files | Many lack explicit task tracking |
 | Missing task cancellation handling | Multiple files | Some tasks created but not tracked for cleanup |
@@ -243,15 +244,15 @@ Modules with issues across multiple categories:
 
 - [ ] Remove debug print statements from `/home/joel/Development/TheLogger/rpi_logger/modules/Cameras/app/widgets/camera_settings_window.py`
 - [ ] Remove debug print statement from `/home/joel/Development/TheLogger/rpi_logger/modules/Cameras/app/widgets/sensor_info_dialog.py`
-- [ ] Add timeout wrapper to heartbeat recovery callback at `/home/joel/Development/TheLogger/rpi_logger/core/connection/heartbeat_monitor.py:191`
-- [ ] Track task reference at `/home/joel/Development/TheLogger/rpi_logger/core/module_manager.py:704`
+- [x] Heartbeat recovery callback already has timeout (`rpi_logger/core/connection/heartbeat_monitor.py`)
+- [x] Track task reference in `ModuleManager` (and ensure exceptions are retrieved/logged)
 - [ ] Replace star import in `/home/joel/Development/TheLogger/rpi_logger/modules/EyeTracker/main_eye_tracker.py:35`
 
 ### Short Term (This Month)
 
 - [ ] Complete TODO at `/home/joel/Development/TheLogger/rpi_logger/core/connection/connection_coordinator.py:277`
 - [ ] Audit all `pass` statements in except blocks - add logging or remove
-- [ ] Add maxsize to unbounded `asyncio.Queue()` in `/home/joel/Development/TheLogger/rpi_logger/core/module_process.py:60`
+- [x] `ModuleProcess.command_queue` already bounded (`asyncio.Queue(maxsize=100)`)
 - [ ] Standardize cleanup/shutdown/stop method naming across modules
 - [ ] Add unit tests for modules beyond GPS (start with core/)
 - [ ] Document the VMC architecture migration status and timeline

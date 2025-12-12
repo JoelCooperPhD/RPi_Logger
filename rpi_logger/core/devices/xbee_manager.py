@@ -16,6 +16,7 @@ from enum import Enum
 
 import serial.tools.list_ports
 
+from rpi_logger.core.asyncio_utils import create_logged_task
 from rpi_logger.core.logging_utils import get_module_logger
 from .device_registry import (
     DeviceType,
@@ -394,6 +395,9 @@ class XBeeManager:
         if self.on_status_change:
             await self.on_status_change('disconnected', '')
 
+        # Explicitly clear data handlers to prevent stale references
+        self._data_handlers.clear()
+
         self._state = XBeeManagerState.SCANNING if self._running else XBeeManagerState.DISABLED
         logger.info("XBee coordinator closed")
 
@@ -588,7 +592,12 @@ class XBeeManager:
             if self.on_data_received and self._loop:
                 def schedule_callback(n=node_id, d=data):
                     if self._loop.is_running():
-                        self._loop.create_task(self.on_data_received(n, d))
+                        create_logged_task(
+                            self.on_data_received(n, d),
+                            loop=self._loop,
+                            logger=logger,
+                            context=f"XBeeManager.on_data_received({n})",
+                        )
                 self._loop.call_soon_threadsafe(schedule_callback)
 
         except Exception as e:

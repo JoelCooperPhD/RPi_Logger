@@ -278,10 +278,35 @@ class RecordingManager(RecordingManagerBase):
         self._is_recording = False
         output_files = []
 
+        def _enqueue_stop_sentinel(queue: Optional[asyncio.Queue[Any]], sentinel: object) -> None:
+            """Ensure the writer sentinel is enqueued even if the queue is full.
+
+            If the queue is full, drop queued items until there's space. This
+            prevents stop_recording() from hanging forever awaiting a writer
+            task that is blocked on queue.get().
+            """
+            if queue is None:
+                return
+
+            try:
+                queue.put_nowait(sentinel)
+                return
+            except asyncio.QueueFull:
+                # Make room for the sentinel by dropping buffered items.
+                while True:
+                    with contextlib.suppress(asyncio.QueueEmpty):
+                        queue.get_nowait()
+                    try:
+                        queue.put_nowait(sentinel)
+                        return
+                    except asyncio.QueueFull:
+                        continue
+            except Exception:
+                return
+
         # Stop world video
         if self._world_frame_queue is not None:
-            with contextlib.suppress(Exception):
-                self._world_frame_queue.put_nowait(self._world_queue_sentinel)
+            _enqueue_stop_sentinel(self._world_frame_queue, self._world_queue_sentinel)
         if self._world_writer_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._world_writer_task
@@ -294,8 +319,7 @@ class RecordingManager(RecordingManagerBase):
 
         # Stop eyes video
         if self._eyes_frame_queue is not None:
-            with contextlib.suppress(Exception):
-                self._eyes_frame_queue.put_nowait(self._eyes_queue_sentinel)
+            _enqueue_stop_sentinel(self._eyes_frame_queue, self._eyes_queue_sentinel)
         if self._eyes_writer_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._eyes_writer_task
@@ -310,8 +334,7 @@ class RecordingManager(RecordingManagerBase):
 
         # Stop audio
         if self._audio_frame_queue is not None:
-            with contextlib.suppress(Exception):
-                self._audio_frame_queue.put_nowait(self._audio_queue_sentinel)
+            _enqueue_stop_sentinel(self._audio_frame_queue, self._audio_queue_sentinel)
         if self._audio_writer_task is not None:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._audio_writer_task

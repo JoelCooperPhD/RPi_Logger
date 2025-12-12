@@ -176,6 +176,12 @@ class DRTPlotter:
             cache_frame_data=False
         )
 
+    def stop_animation(self):
+        """Stop the animation loop to free resources."""
+        if self._ani is not None:
+            self._ani.event_source.stop()
+            self._ani = None
+
     def _init_animation(self):
         """Initialize animation - return empty list if no devices yet."""
         return self._plot_lines
@@ -218,6 +224,9 @@ class DRTPlotter:
         )
 
         self._rebuild_plot_lines()
+
+        # Restart animation if it was stopped (e.g., after previous device removal)
+        self._start_animation()
 
     def _rebuild_plot_lines(self):
         """Rebuild the list of plot lines for animation."""
@@ -350,7 +359,7 @@ class DRTPlotter:
 
     def start_session(self):
         """Start a new session - clear plot and start animation (blank)."""
-        self.logger.info("START SESSION: Clearing plot and starting animation (blank)")
+        self.logger.debug("Starting session: clearing plot and starting animation")
         self.clear_all()
         self.run = True
         self._session_active = True
@@ -358,12 +367,12 @@ class DRTPlotter:
 
     def start_recording(self):
         """Start recording - data will start appearing on plot."""
-        self.logger.info("START RECORDING: Data will start appearing")
+        self.logger.debug("Starting recording")
         if not self._session_active:
-            self.logger.info("  First recording - clearing plot")
+            self.logger.debug("First recording - clearing plot")
             self.start_session()
         else:
-            self.logger.info("  Resuming animation from frozen state")
+            self.logger.debug("Resuming animation from frozen state")
             self.run = True
 
         if self._device_added:
@@ -373,14 +382,14 @@ class DRTPlotter:
 
     def stop_recording(self):
         """Pause recording - creates gap in data, animation keeps marching."""
-        self.logger.info("STOP RECORDING: Creating gap, animation keeps marching")
+        self.logger.debug("Stop recording: creating gap, animation continues")
         if self._device_added:
             self._state_now = np.nan
         self._recording = False
 
     def stop(self):
         """Stop session completely - freeze animation."""
-        self.logger.info("STOP: Freezing animation completely")
+        self.logger.debug("Stopping session: freezing animation")
         if self._device_added and self._state_array is not None:
             idx = self._state_index
             self._state_array[idx] = np.nan
@@ -419,6 +428,9 @@ class DRTPlotter:
         self._device_id = None
         self._device_added = False
         self._rebuild_plot_lines()
+
+        # Stop animation to free CPU resources when no device is connected
+        self.stop_animation()
 
         self.logger.info("Removed device %s from plotter", device_id)
 

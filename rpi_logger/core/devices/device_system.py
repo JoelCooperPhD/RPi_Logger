@@ -33,6 +33,7 @@ Usage:
 import asyncio
 from typing import Callable, Awaitable, Any, Optional
 
+from rpi_logger.core.asyncio_utils import create_logged_task
 from rpi_logger.core.logging_utils import get_module_logger
 from .catalog import DeviceCatalog
 from .selection import DeviceSelectionModel, ConnectionKey
@@ -464,6 +465,25 @@ class DeviceSystem:
         """Request auto-connect for a module."""
         self._selection.set_auto_connect(module_id, True)
 
+    def set_multi_instance_modules(self, module_ids: set[str]) -> None:
+        """Set which modules support multiple simultaneous instances.
+
+        For these modules, auto-connect applies to ALL devices found,
+        not just the first one.
+
+        Args:
+            module_ids: Set of module IDs (e.g., {"DRT", "VOG", "CAMERAS"})
+        """
+        self._selection.set_multi_instance_modules(module_ids)
+
+    def clear_auto_connected_devices(self) -> None:
+        """Clear the set of auto-connected devices.
+
+        Call this after startup completes to allow future auto-connects
+        if devices are reconnected during the session.
+        """
+        self._selection.clear_auto_connected_devices()
+
     # =========================================================================
     # Internal Callbacks
     # =========================================================================
@@ -491,7 +511,11 @@ class DeviceSystem:
             result = self._on_connection_changed(interface, family, enabled)
             # If callback is async, schedule it
             if asyncio.iscoroutine(result):
-                asyncio.create_task(result)
+                create_logged_task(
+                    result,
+                    logger=logger,
+                    context=f"DeviceSystem.on_connection_changed({interface.value}:{family.value})",
+                )
 
     def _handle_ui_connect(self, device_id: str) -> None:
         """Handle device connect request from UI controller.
@@ -508,7 +532,11 @@ class DeviceSystem:
             self._pending_device_ops.add(device_id)
             result = self._on_connect_device(device_id)
             if asyncio.iscoroutine(result):
-                task = asyncio.create_task(result)
+                task = create_logged_task(
+                    result,
+                    logger=logger,
+                    context=f"DeviceSystem.connect({device_id})",
+                )
                 # Remove from pending when task completes
                 task.add_done_callback(
                     lambda t, did=device_id: self._pending_device_ops.discard(did)
@@ -532,7 +560,11 @@ class DeviceSystem:
             self._pending_device_ops.add(device_id)
             result = self._on_disconnect_device(device_id)
             if asyncio.iscoroutine(result):
-                task = asyncio.create_task(result)
+                task = create_logged_task(
+                    result,
+                    logger=logger,
+                    context=f"DeviceSystem.disconnect({device_id})",
+                )
                 # Remove from pending when task completes
                 task.add_done_callback(
                     lambda t, did=device_id: self._pending_device_ops.discard(did)

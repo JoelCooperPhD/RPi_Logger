@@ -337,7 +337,7 @@ class VOGModuleRuntime(ModuleRuntime):
 
             # Send ACK to confirm port release
             StatusMessage.send(
-                StatusType.DEVICE_UNASSIGNED,
+                "device_unassigned",
                 {
                     "device_id": self.device_id or "",
                     "port_released": port_released,
@@ -379,6 +379,13 @@ class VOGModuleRuntime(ModuleRuntime):
             node_id = command.get("node_id", "")
             data = command.get("data", "")
             await self._on_xbee_data(node_id, data)
+            return True
+
+        if action == "xbee_send_result":
+            # Acknowledgment of XBee send - currently just logged
+            node_id = command.get("node_id", "")
+            success = command.get("success", False)
+            self.logger.debug("XBee send result for %s: %s", node_id, success)
             return True
 
         return False

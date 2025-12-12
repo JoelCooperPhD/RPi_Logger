@@ -182,8 +182,8 @@ class CameraSettingsWindow:
         record_fps_values: Optional[List[str]] = None,
     ) -> None:
         """Update available resolution/FPS options for a camera."""
-        self._logger.info("update_camera_options: camera_id=%s, active=%s, resolutions=%s",
-                        camera_id, self._active_camera, preview_resolutions)
+        self._logger.debug("update_camera_options: camera_id=%s, active=%s, resolutions=%s",
+                         camera_id, self._active_camera, preview_resolutions)
         self._options.setdefault(camera_id, {})
         if preview_resolutions is not None:
             self._options[camera_id]["preview_resolutions"] = preview_resolutions
@@ -815,17 +815,17 @@ class CameraSettingsWindow:
 
     def _apply_resolution(self) -> None:
         """Apply resolution/FPS settings."""
-        self._logger.info("_apply_resolution called, active_camera=%s", self._active_camera)
+        self._logger.debug("_apply_resolution called, active_camera=%s", self._active_camera)
         if not self._active_camera:
             self._logger.warning("No active camera set - cannot apply")
             return
 
         settings = self._get_resolution_settings()
-        self._logger.info("Settings to apply: %s", settings)
+        self._logger.debug("Settings to apply: %s", settings)
         self._latest[self._active_camera] = settings
 
         if self._on_apply_resolution:
-            self._logger.info("Calling _on_apply_resolution callback")
+            self._logger.debug("Calling _on_apply_resolution callback")
             try:
                 self._on_apply_resolution(self._active_camera, settings)
             except Exception:
@@ -844,6 +844,13 @@ class CameraSettingsWindow:
                 self._logger.debug("Reprobe callback failed", exc_info=True)
 
     def _handle_close(self) -> None:
+        # Cancel any pending debounce timer to prevent callback on destroyed window
+        if self._debounce_id:
+            try:
+                self._window.after_cancel(self._debounce_id)
+            except Exception:
+                pass
+            self._debounce_id = None
         self.hide()
 
     # ------------------------------------------------------------------
@@ -870,7 +877,7 @@ class CameraSettingsWindow:
             if self._active_camera:
                 settings = self._latest.get(self._active_camera, dict(DEFAULT_SETTINGS))
                 opts = self._options.get(self._active_camera, {})
-                self._logger.info("_refresh_resolution_ui: settings=%s, opts=%s", settings, opts)
+                self._logger.debug("_refresh_resolution_ui: settings=%s, opts=%s", settings, opts)
 
                 # Update combobox values
                 if self._preview_res_combo:

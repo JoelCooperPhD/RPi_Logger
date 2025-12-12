@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import os
 import shutil
 from pathlib import Path
@@ -8,7 +7,9 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-logger = logging.getLogger(__name__)
+from rpi_logger.core.logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
 
 
 def _ffmpeg_available() -> bool:
@@ -151,7 +152,12 @@ class VideoEncoder:
                 await asyncio.wait_for(self._process.wait(), timeout=5)
             except asyncio.TimeoutError:  # pragma: no cover - defensive
                 self._process.terminate()
-                await asyncio.wait_for(self._process.wait(), timeout=2)
+                try:
+                    await asyncio.wait_for(self._process.wait(), timeout=2)
+                except asyncio.TimeoutError:
+                    # Force kill if terminate doesn't work
+                    self._process.kill()
+                    await self._process.wait()
             except Exception:  # pragma: no cover - defensive
                 self._process.terminate()
             finally:

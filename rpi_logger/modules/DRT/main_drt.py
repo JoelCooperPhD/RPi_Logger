@@ -43,14 +43,32 @@ from drt.runtime import DRTModuleRuntime
 from drt.view import DRTView
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.DRT.config import DRTConfig
-from rpi_logger.modules.base.config_paths import resolve_module_config_path
+from rpi_logger.modules.base.config_paths import (
+    ModuleConfigContext,
+    resolve_module_config_path,
+)
 from rpi_logger.cli.common import add_common_cli_arguments, add_config_to_args, install_signal_handlers
 
 logger = get_module_logger("MainDRT")
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+    # Pre-parse to get --config-path if provided by parent process (multi-instance)
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config-path", type=Path, default=None)
+    pre_args, _ = pre_parser.parse_known_args(argv)
+
+    # Use parent-provided path (instance-specific) or resolve normally (shared)
+    if pre_args.config_path and pre_args.config_path.exists():
+        config_ctx = ModuleConfigContext(
+            module_id=MODULE_ID,
+            template_path=MODULE_DIR / "config.txt",
+            writable_path=pre_args.config_path,
+            using_template=False,
+        )
+    else:
+        config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+
     defaults = asdict(DRTConfig())
 
     parser = argparse.ArgumentParser(description="DRT shell module")
@@ -125,7 +143,10 @@ async def main(argv: Optional[list[str]] = None) -> None:
     loop = asyncio.get_running_loop()
     install_signal_handlers(supervisor, loop)
 
-    await supervisor.run()
+    try:
+        await supervisor.run()
+    finally:
+        await supervisor.shutdown()
 
 
 if __name__ == "__main__":

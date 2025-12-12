@@ -124,8 +124,7 @@ class DRTTkinterGUI:
 
     def _build_ui(self, parent: tk.Widget):
         """Build the embedded UI with plotter and controls."""
-        self.logger.info("=== DRTTkinterGUI._build_ui STARTING ===")
-        self.logger.info("Parent widget: %s", parent)
+        self.logger.debug("Building DRTTkinterGUI UI")
 
         try:
             # Main frame
@@ -133,20 +132,18 @@ class DRTTkinterGUI:
             self._frame.pack(fill=tk.BOTH, expand=True)
             self._frame.columnconfigure(0, weight=1)
             self._frame.rowconfigure(0, weight=1)
-            self.logger.info("Created main frame: %s", self._frame)
 
             # Content frame
             self._content_frame = ttk.Frame(self._frame)
             self._content_frame.grid(row=0, column=0, sticky="NSEW")
             self._content_frame.columnconfigure(0, weight=1)
             self._content_frame.rowconfigure(0, weight=1)
-            self.logger.info("Created content frame: %s", self._content_frame)
 
             # Build device UI immediately with default device type
             self._build_device_ui(None, DRTDeviceType.SDRT)
-            self.logger.info("=== DRTTkinterGUI._build_ui COMPLETED ===")
+            self.logger.debug("DRTTkinterGUI UI build completed")
         except Exception as e:
-            self.logger.error("=== DRTTkinterGUI._build_ui FAILED: %s ===", e, exc_info=True)
+            self.logger.error("Failed to build DRTTkinterGUI UI: %s", e, exc_info=True)
 
     def _build_device_ui(self, port: Optional[str], device_type: DRTDeviceType):
         """Build UI components for the device.
@@ -654,7 +651,7 @@ class DRTView:
         self._override_help_menu()
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
-        self.logger.info("=== DRTView._build_embedded_gui STARTING ===")
+        self.logger.debug("Building embedded GUI")
 
         # Apply theme to root window
         try:
@@ -690,7 +687,7 @@ class DRTView:
         # Apply pending runtime binding if bind_runtime was called before GUI was created
         if self._runtime:
             gui.system = self._runtime
-            self.logger.info("Applied pending runtime binding to GUI (system=%s)", type(self._runtime).__name__)
+            self.logger.debug("Applied pending runtime binding to GUI")
 
         # Build capture stats content with DRT results
         self._build_capture_stats()
@@ -698,7 +695,7 @@ class DRTView:
         # Install menu items
         self._install_menu_items()
 
-        self.logger.info("=== DRTView._build_embedded_gui COMPLETED ===")
+        self.logger.debug("Embedded GUI build completed")
         return container
 
     def _build_capture_stats(self) -> None:

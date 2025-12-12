@@ -135,6 +135,8 @@ class StubCodexView:
         self._help_menu_label = "Help"
         self.help_menu: Optional[tk.Menu] = None
         self._data_subdir: Optional[str] = None
+        self._view_menu_finalized = False
+        self._file_menu_finalized = False
 
         try:
             self._event_loop = asyncio.get_running_loop()
@@ -319,25 +321,42 @@ class StubCodexView:
 
     def finalize_file_menu(self) -> None:
         """Add separator and Quit to File menu. Call after module setup."""
-        if self.file_menu is None:
+        if self.file_menu is None or self._file_menu_finalized:
             return
+        self._file_menu_finalized = True
         try:
             self.file_menu.add_separator()
             self.file_menu.add_command(label="Quit", command=self._on_quit_clicked)
         except tk.TclError:
             pass
 
-    def finalize_view_menu(self) -> None:
-        """Add Capture Stats and Logger toggles to View menu. Call after module setup."""
-        if self.view_menu is None:
+    def finalize_view_menu(self, *, include_capture_stats: bool = True) -> None:
+        """Add Logger toggle (and optionally Capture Stats) to View menu.
+
+        Args:
+            include_capture_stats: If False, hide the capture stats panel and
+                skip adding its toggle to the View menu.
+        """
+        if self.view_menu is None or self._view_menu_finalized:
             return
+        self._view_menu_finalized = True
+
+        if not include_capture_stats:
+            # Permanently hide capture stats panel for modules that don't use it
+            if self.io_view_frame is not None:
+                self.io_view_frame.grid_remove()
+                self._set_io_row_visible(False)
+            if self.io_view_visible_var is not None:
+                self.io_view_visible_var.set(False)
+
         try:
             self.view_menu.add_separator()
-            self.view_menu.add_checkbutton(
-                label="Show Capture Stats",
-                variable=self.io_view_visible_var,
-                command=self._toggle_io_view,
-            )
+            if include_capture_stats:
+                self.view_menu.add_checkbutton(
+                    label="Show Capture Stats",
+                    variable=self.io_view_visible_var,
+                    command=self._toggle_io_view,
+                )
             self.view_menu.add_checkbutton(
                 label="Show Logger",
                 variable=self.log_visible_var,

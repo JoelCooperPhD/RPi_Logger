@@ -20,6 +20,10 @@ from typing import Any, Optional
 import cv2
 import numpy as np
 
+from rpi_logger.core.logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
+
 try:
     import av
     _HAS_PYAV = True
@@ -276,9 +280,6 @@ class Encoder:
         self._worker.start()
 
     def _start_pyav(self) -> None:
-        import logging
-        log = logging.getLogger(__name__)
-
         self._container = av.open(self.video_path, "w")
         fps_fraction = Fraction(self._fps).limit_denominator(1000)
 
@@ -291,7 +292,7 @@ class Encoder:
         # Let PyAV manage time_base automatically - don't override it
         # The stream inherits time_base from the framerate (1/fps)
 
-        log.info("PyAV encoder: %s %dx%d @ %s fps",
+        logger.info("PyAV encoder: %s %dx%d @ %s fps",
                 self.video_path, self._resolution[0], self._resolution[1], fps_fraction)
         self._kind = "pyav"
 

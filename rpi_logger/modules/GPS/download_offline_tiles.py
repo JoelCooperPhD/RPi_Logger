@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """Download offline map tiles for the GPS module."""
 
+import logging
+import sys
 from pathlib import Path
+
+# Configure logging for CLI usage
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
 
 try:
     from tkintermapview import OfflineLoader
@@ -17,17 +27,17 @@ BOTTOM_RIGHT = (40.4, -111.7)
 ZOOM_MIN = 0
 ZOOM_MAX = 15
 
-print("Downloading tiles for GPS module:")
-print(f"  Region: {TOP_LEFT} -> {BOTTOM_RIGHT}")
-print(f"  Zoom levels: {ZOOM_MIN}-{ZOOM_MAX}")
-print(f"  Output: {DATABASE_PATH}")
-print()
+logger.info("Downloading tiles for GPS module:")
+logger.info("  Region: %s -> %s", TOP_LEFT, BOTTOM_RIGHT)
+logger.info("  Zoom levels: %d-%d", ZOOM_MIN, ZOOM_MAX)
+logger.info("  Output: %s", DATABASE_PATH)
+logger.info("")
 
 loader = OfflineLoader(
     path=str(DATABASE_PATH),
     tile_server="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
 )
 loader.save_offline_tiles(TOP_LEFT, BOTTOM_RIGHT, ZOOM_MIN, ZOOM_MAX)
-print("Done! Offline tiles saved to", DATABASE_PATH)
-print("Loaded sections:")
+logger.info("Done! Offline tiles saved to %s", DATABASE_PATH)
+logger.info("Loaded sections:")
 loader.print_loaded_sections()

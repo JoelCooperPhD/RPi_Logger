@@ -39,17 +39,6 @@ class NotesConfig:
     auto_start: bool = False
     last_archive_path: Optional[str] = None
 
-    # Preview settings (unused but present in config)
-    preview_width: int = 640
-    preview_height: int = 480
-    preview_fps: str = "unlimited"
-    save_width: int = 640
-    save_height: int = 480
-    save_fps: str = "unlimited"
-    save_format: str = "jpeg"
-    save_quality: int = 90
-    preview_resolution: str = "auto"
-
     # UI visibility (master logger integration)
     gui_io_stub_visible: bool = False
     gui_logger_visible: bool = False
@@ -82,16 +71,6 @@ class NotesConfig:
             history_limit=get_pref_int(prefs, "notes.history_limit", defaults.history_limit),
             auto_start=get_pref_bool(prefs, "notes.auto_start", defaults.auto_start),
             last_archive_path=get_pref_str(prefs, "notes.last_archive_path", "") or None,
-            # Preview settings
-            preview_width=get_pref_int(prefs, "preview_width", defaults.preview_width),
-            preview_height=get_pref_int(prefs, "preview_height", defaults.preview_height),
-            preview_fps=get_pref_str(prefs, "preview_fps", defaults.preview_fps),
-            save_width=get_pref_int(prefs, "save_width", defaults.save_width),
-            save_height=get_pref_int(prefs, "save_height", defaults.save_height),
-            save_fps=get_pref_str(prefs, "save_fps", defaults.save_fps),
-            save_format=get_pref_str(prefs, "save_format", defaults.save_format),
-            save_quality=get_pref_int(prefs, "save_quality", defaults.save_quality),
-            preview_resolution=get_pref_str(prefs, "preview_resolution", defaults.preview_resolution),
             # UI visibility
             gui_io_stub_visible=get_pref_bool(prefs, "gui_io_stub_visible", defaults.gui_io_stub_visible),
             gui_logger_visible=get_pref_bool(prefs, "gui_logger_visible", defaults.gui_logger_visible),

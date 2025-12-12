@@ -4,12 +4,9 @@ import sys
 import tkinter as tk
 import webbrowser
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import Callable, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_module_logger(__name__)
 

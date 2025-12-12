@@ -1,6 +1,7 @@
 
 import asyncio
 import logging
+from collections import deque
 from rpi_logger.core.logging_utils import get_module_logger
 import tkinter as tk
 from tkinter import ttk
@@ -13,6 +14,8 @@ import io
 from ..logger_system import LoggerSystem
 from ..config_manager import get_config_manager
 from ..paths import CONFIG_PATH, LOGO_PATH, ICON_PATH
+from ..update_checker import check_for_updates
+from .. import __version__
 from .main_controller import MainController
 from .timer_manager import TimerManager
 from .device_controller import DeviceUIController
@@ -28,7 +31,8 @@ class TextHandler(logging.Handler):
         self.text_widget = text_widget
         self.max_lines = 500
         self._closed = False
-        self._pending_after_ids: list[str] = []
+        # Use bounded deque to prevent unbounded memory growth during active logging
+        self._pending_after_ids: deque[str] = deque(maxlen=100)
         self.setFormatter(
             logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -121,7 +125,8 @@ class MainWindow:
         self.devices_panel: Optional[DevicesPanel] = None
         self._main_frame: Optional[ttk.Frame] = None
 
-        self._pending_tasks: list[asyncio.Task] = []
+        # Use set for O(1) removal and avoid race condition issues
+        self._pending_tasks: set[asyncio.Task] = set()
 
 
     def build_ui(self) -> None:
@@ -593,8 +598,18 @@ class MainWindow:
 
     def _schedule_task(self, coro) -> None:
         task = asyncio.create_task(coro)
-        self._pending_tasks.append(task)
-        task.add_done_callback(lambda t: self._pending_tasks.remove(t) if t in self._pending_tasks else None)
+        self._pending_tasks.add(task)
+        task.add_done_callback(lambda t: self._pending_tasks.discard(t))
+
+    async def _check_for_updates(self) -> None:
+        """Check for available updates and show dialog if found."""
+        try:
+            update_info = await check_for_updates(__version__)
+            if update_info and self.root:
+                from .dialogs import UpdateAvailableDialog
+                UpdateAvailableDialog(self.root, update_info)
+        except Exception as e:
+            self.logger.debug("Update check failed: %s", e)
 
     def save_window_geometry(self) -> None:
         """Save main window geometry to instance geometry store."""
@@ -635,6 +650,9 @@ class MainWindow:
         self.build_ui()
 
         await self.timer_manager.start_clock()
+
+        # Check for updates (non-blocking, silent on error)
+        self._schedule_task(self._check_for_updates())
 
         # Start USB device scanning automatically
         # IMPORTANT: Must complete before auto_start_modules to ensure

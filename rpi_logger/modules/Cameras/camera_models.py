@@ -103,16 +103,6 @@ class CameraModel:
     sensor_info: Optional[Dict[str, Any]] = None  # Detailed sensor/hardware info
 
 
-@dataclass
-class ModelLookupResult:
-    """Result of a model database lookup."""
-
-    model: Optional[CameraModel]
-    capabilities: CameraCapabilities
-    source: CapabilitySource  # DATABASE or PROBE
-    model_key: Optional[str] = None
-
-
 class CameraModelDatabase:
     """
     Database of known camera models and their capabilities.
@@ -482,7 +472,6 @@ class CameraModelDatabase:
 __all__ = [
     "CameraModelDatabase",
     "CameraModel",
-    "ModelLookupResult",
     "DEFAULT_MODELS_PATH",
     "extract_model_name",
     "copy_capabilities",

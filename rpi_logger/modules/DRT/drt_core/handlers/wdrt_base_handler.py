@@ -9,8 +9,8 @@ transport layer and minor configuration.
 import asyncio
 from pathlib import Path
 from typing import Optional, Dict, Any
-import logging
 
+from rpi_logger.core.logging_utils import get_module_logger
 from .base_handler import BaseDRTHandler
 from ..data_logger import DRTDataLogger
 from ..protocols import (
@@ -22,7 +22,7 @@ from ..protocols import (
 )
 from ..utils.rtc import format_rtc_sync
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class WDRTBaseHandler(BaseDRTHandler):

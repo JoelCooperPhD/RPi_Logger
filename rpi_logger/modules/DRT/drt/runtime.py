@@ -23,7 +23,7 @@ from rpi_logger.modules.DRT.drt_core.handlers import (
     WDRTWirelessHandler,
 )
 from rpi_logger.modules.DRT.drt_core.transports import USBTransport, XBeeProxyTransport
-from rpi_logger.core.commands import StatusMessage
+from rpi_logger.core.commands import StatusMessage, StatusType
 
 
 class DRTModuleRuntime(ModuleRuntime):

@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
+from rpi_logger.core.logging_utils import get_module_logger
+
 try:
     import tkinter as tk
     from tkinter import ttk, messagebox
@@ -62,7 +64,7 @@ class GPSConfigWindow:
         self.port = port
         self.system = system
         self.async_bridge = async_bridge
-        self.logger = logger or logging.getLogger(__name__)
+        self.logger = logger or get_module_logger(__name__)
 
         # Get current settings from system
         current_baud = getattr(system, 'baud_rate', 9600)

@@ -6,13 +6,13 @@ including the OzzMaker BerryGPS and similar UART-based receivers.
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
+from rpi_logger.core.logging_utils import get_module_logger
 from .base_handler import BaseGPSHandler
 from ..transports import BaseGPSTransport
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class GPSHandler(BaseGPSHandler):

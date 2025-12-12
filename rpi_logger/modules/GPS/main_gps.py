@@ -144,7 +144,10 @@ async def main(argv: Optional[list[str]] = None) -> None:
     loop = asyncio.get_running_loop()
     install_signal_handlers(supervisor, loop)
 
-    await supervisor.run()
+    try:
+        await supervisor.run()
+    finally:
+        await supervisor.shutdown()
 
 
 if __name__ == "__main__":

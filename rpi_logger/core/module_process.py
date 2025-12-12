@@ -36,6 +36,7 @@ class ModuleProcess:
         log_level: str = "info",
         window_geometry: Optional[WindowGeometry] = None,
         instance_id: Optional[str] = None,
+        config_path: Optional[Path] = None,
     ):
         self.module_info = module_info
         self.output_dir = Path(output_dir)
@@ -44,6 +45,7 @@ class ModuleProcess:
         self.log_level = log_level
         self.window_geometry = window_geometry
         self.instance_id = instance_id
+        self.config_path = config_path
 
         self.logger = get_module_logger(f"ModuleProcess.{module_info.name}")
 
@@ -106,6 +108,10 @@ class ModuleProcess:
             # Pass instance ID to subprocess for multi-instance modules
             if self.instance_id:
                 base_args.extend(["--instance-id", self.instance_id])
+
+            # Pass instance-specific config path for multi-instance modules
+            if self.config_path:
+                base_args.extend(["--config-path", str(self.config_path)])
 
             # Determine how to run the module
             if _is_frozen():
@@ -213,7 +219,9 @@ class ModuleProcess:
                 if not line:
                     break
 
-                line_str = line.decode().strip()
+                # Always decode defensively so a single bad byte doesn't stop
+                # draining the pipe (which can deadlock a chatty subprocess).
+                line_str = line.decode("utf-8", errors="replace").strip()
                 if line_str:
                     status = StatusMessage(line_str)
                     if status.is_valid():
@@ -234,7 +242,9 @@ class ModuleProcess:
                 if not line:
                     break
 
-                line_str = line.decode().strip()
+                # Always decode defensively so a single bad byte doesn't stop
+                # draining the pipe (which can deadlock a chatty subprocess).
+                line_str = line.decode("utf-8", errors="replace").strip()
                 if line_str:
                     self.logger.warning("Module stderr: %s", line_str)
 

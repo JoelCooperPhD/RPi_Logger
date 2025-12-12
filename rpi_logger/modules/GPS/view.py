@@ -356,6 +356,7 @@ class GPSView:
         self._stub_view.set_preview_title("GPS Preview")
         self.model.subscribe(self._on_model_change)
         self._override_help_menu()
+        self._finalize_menus()
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
         if not HAS_TK:
@@ -534,6 +535,18 @@ class GPSView:
                 GPSHelpDialog(root)
         except Exception as e:
             self.logger.error("Failed to show GPS help dialog: %s", e)
+
+    def _finalize_menus(self) -> None:
+        """Finalize View and File menus with standard items."""
+        # Finalize View menu (adds Capture Stats, Logger)
+        finalize_view = getattr(self._stub_view, "finalize_view_menu", None)
+        if callable(finalize_view):
+            finalize_view()
+
+        # Finalize File menu (adds Quit)
+        finalize_file = getattr(self._stub_view, "finalize_file_menu", None)
+        if callable(finalize_file):
+            finalize_file()
 
     # ------------------------------------------------------------------
     # Internal helpers

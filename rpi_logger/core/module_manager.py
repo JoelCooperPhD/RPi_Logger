@@ -9,6 +9,7 @@ acts primarily as a process manager that responds to state change events.
 """
 
 import asyncio
+from rpi_logger.core.asyncio_utils import create_logged_task
 from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
 from typing import Awaitable, Dict, List, Optional, Callable, Set
@@ -458,6 +459,15 @@ class ModuleManager:
             # Get cached geometry for this instance
             window_geometry = self.window_geometry_cache.get(instance_id)
 
+            # Resolve instance-specific config path for multi-instance modules
+            from rpi_logger.modules.base.config_paths import resolve_instance_config_path
+            config_ctx = resolve_instance_config_path(
+                module_info.directory,
+                module_info.module_id,
+                instance_id,
+            )
+            config_path = config_ctx.writable_path
+
             # Create and start process
             process = ModuleProcess(
                 module_info,
@@ -467,6 +477,7 @@ class ModuleManager:
                 log_level=self.log_level,
                 window_geometry=window_geometry,
                 instance_id=instance_id,
+                config_path=config_path,
             )
 
             try:
@@ -698,11 +709,12 @@ class ModuleManager:
 
         # Update state manager (don't await in sync context)
         # Track task to prevent garbage collection before completion
-        task = asyncio.create_task(
-            self.state_manager.set_actual_state(module_name, ActualState.STOPPED)
+        create_logged_task(
+            self.state_manager.set_actual_state(module_name, ActualState.STOPPED),
+            logger=self.logger,
+            context=f"ModuleManager.set_actual_state({module_name}, STOPPED)",
+            pending=self._pending_state_tasks,
         )
-        self._pending_state_tasks.add(task)
-        task.add_done_callback(self._pending_state_tasks.discard)
 
     async def _process_status_callback(
         self,

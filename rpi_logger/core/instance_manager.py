@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TYPE_CHECKING
 
+from rpi_logger.core.asyncio_utils import create_logged_task
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.instance_state import InstanceState, InstanceInfo, STATE_TIMEOUTS
 
@@ -667,8 +668,11 @@ class InstanceStateManager:
 
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(
-                self._ui_update_callback(info.device_id, connected, connecting)
+            create_logged_task(
+                self._ui_update_callback(info.device_id, connected, connecting),
+                loop=loop,
+                logger=logger,
+                context=f"InstanceManager.ui_update({info.device_id})",
             )
         except RuntimeError:
             pass

@@ -144,6 +144,7 @@ class StubCodexSupervisor:
 
         if self.view:
             self.view.attach_logging_handler()
+            self._finalize_view_menus()
 
         await self._run_hook(self.hooks.after_start, "after_start")
 
@@ -272,6 +273,25 @@ class StubCodexSupervisor:
         except Exception:
             self.logger.exception("Retry check raised an exception")
             return False
+
+    def _finalize_view_menus(self) -> None:
+        """Finalize View and File menus with standard items.
+
+        Called after runtime setup to ensure module-specific menu items
+        are added before the standard items (Capture Stats, Logger, Quit).
+        """
+        if not self.view:
+            return
+
+        # Finalize View menu (adds Capture Stats, Logger)
+        finalize_view = getattr(self.view, "finalize_view_menu", None)
+        if callable(finalize_view):
+            finalize_view()
+
+        # Finalize File menu (adds Quit)
+        finalize_file = getattr(self.view, "finalize_file_menu", None)
+        if callable(finalize_file):
+            finalize_file()
 
     # ------------------------------------------------------------------
     # Runtime management

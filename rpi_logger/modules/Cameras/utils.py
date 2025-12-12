@@ -34,28 +34,4 @@ def parse_resolution(raw: Any, default: Resolution) -> Resolution:
     return default
 
 
-def parse_fps(raw: Any, default: float) -> float:
-    """Parse FPS from various formats."""
-    if raw is None or raw == "":
-        return default
-    try:
-        return float(raw)
-    except Exception:
-        return default
-
-
-def parse_bool(raw: Any, default: bool) -> bool:
-    """Parse boolean from various formats."""
-    if raw is None:
-        return default
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, str):
-        return raw.lower() in ("true", "1", "yes", "on")
-    try:
-        return bool(raw)
-    except Exception:
-        return default
-
-
-__all__ = ["Resolution", "parse_resolution", "parse_fps", "parse_bool"]
+__all__ = ["Resolution", "parse_resolution"]

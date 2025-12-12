@@ -64,6 +64,11 @@ class StreamHandler:
         self._eyes_task_active = False
         self.camera_fps_tracker = RollingFPS(window_seconds=5.0)
         self._dropped_frames = 0
+        self._dropped_gaze = 0
+        self._dropped_imu = 0
+        self._dropped_events = 0
+        self._dropped_audio = 0
+        self._dropped_eyes = 0
         self._total_wait_ms = 0.0
         self._frame_queue: asyncio.Queue[FramePacket] = asyncio.Queue(maxsize=6)
         self._gaze_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=32)
@@ -104,6 +109,14 @@ class StreamHandler:
     ):
         if self.running:
             return
+
+        # Reset drop counters for new streaming session
+        self._dropped_frames = 0
+        self._dropped_gaze = 0
+        self._dropped_imu = 0
+        self._dropped_events = 0
+        self._dropped_audio = 0
+        self._dropped_eyes = 0
 
         self._video_task_active = True
         self._gaze_task_active = True
@@ -184,7 +197,7 @@ class StreamHandler:
                             )
                             self._last_frame_packet = packet
                             self.camera_fps_tracker.add_frame()
-                            self._enqueue_latest(self._frame_queue, packet, track_drops=True)
+                            self._enqueue_latest(self._frame_queue, packet, stream_name="frame")
                             self._frame_ready_event.set()  # Signal frame available
 
                     except Exception as e:
@@ -207,7 +220,7 @@ class StreamHandler:
                     break
 
                 self.last_gaze = gaze
-                self._enqueue_latest(self._gaze_queue, gaze)
+                self._enqueue_latest(self._gaze_queue, gaze, stream_name="gaze")
                 self._gaze_ready_event.set()  # Signal gaze available
 
         except asyncio.CancelledError:
@@ -226,7 +239,7 @@ class StreamHandler:
                     break
 
                 self.last_imu = imu
-                self._enqueue_latest(self._imu_queue, imu)
+                self._enqueue_latest(self._imu_queue, imu, stream_name="imu")
                 self._imu_ready_event.set()  # Signal IMU available
 
                 listener = self.imu_listener
@@ -252,7 +265,7 @@ class StreamHandler:
                     break
 
                 self.last_event = event
-                self._enqueue_latest(self._event_queue, event)
+                self._enqueue_latest(self._event_queue, event, stream_name="event")
                 self._event_ready_event.set()  # Signal event available
 
                 listener = self.event_listener
@@ -278,7 +291,7 @@ class StreamHandler:
                     break
 
                 self.last_audio = audio
-                self._enqueue_latest(self._audio_queue, audio)
+                self._enqueue_latest(self._audio_queue, audio, stream_name="audio")
                 self._audio_ready_event.set()
 
         except asyncio.CancelledError:
@@ -320,7 +333,7 @@ class StreamHandler:
                                 timestamp_unix_ns=getattr(frame, "timestamp_unix_ns", None),
                                 frame_index=self._eyes_frames,
                             )
-                            self._enqueue_latest(self._eyes_queue, packet)
+                            self._enqueue_latest(self._eyes_queue, packet, stream_name="eyes")
                             self._eyes_ready_event.set()
 
                     except Exception as e:
@@ -435,14 +448,37 @@ class StreamHandler:
         except asyncio.TimeoutError:
             return None
 
-    def _enqueue_latest(self, queue: asyncio.Queue, item: Any, *, track_drops: bool = False) -> None:
+    def _enqueue_latest(self, queue: asyncio.Queue, item: Any, *, stream_name: str = "") -> None:
         try:
             queue.put_nowait(item)
         except asyncio.QueueFull:
             with contextlib.suppress(asyncio.QueueEmpty):
                 _ = queue.get_nowait()
-            if track_drops:
+            # Track drops per stream type with periodic logging
+            if stream_name == "frame":
                 self._dropped_frames += 1
+                if self._dropped_frames == 1 or self._dropped_frames % 100 == 0:
+                    logger.warning("Frame queue overflow, dropped %d frames", self._dropped_frames)
+            elif stream_name == "gaze":
+                self._dropped_gaze += 1
+                if self._dropped_gaze == 1 or self._dropped_gaze % 100 == 0:
+                    logger.warning("Gaze queue overflow, dropped %d samples", self._dropped_gaze)
+            elif stream_name == "imu":
+                self._dropped_imu += 1
+                if self._dropped_imu == 1 or self._dropped_imu % 500 == 0:
+                    logger.warning("IMU queue overflow, dropped %d samples", self._dropped_imu)
+            elif stream_name == "event":
+                self._dropped_events += 1
+                if self._dropped_events == 1 or self._dropped_events % 100 == 0:
+                    logger.warning("Event queue overflow, dropped %d events", self._dropped_events)
+            elif stream_name == "audio":
+                self._dropped_audio += 1
+                if self._dropped_audio == 1 or self._dropped_audio % 100 == 0:
+                    logger.warning("Audio queue overflow, dropped %d frames", self._dropped_audio)
+            elif stream_name == "eyes":
+                self._dropped_eyes += 1
+                if self._dropped_eyes == 1 or self._dropped_eyes % 100 == 0:
+                    logger.warning("Eyes queue overflow, dropped %d frames", self._dropped_eyes)
             queue.put_nowait(item)
 
     @staticmethod

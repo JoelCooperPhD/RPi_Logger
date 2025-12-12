@@ -64,6 +64,14 @@ class DeviceSelectionModel:
         # Auto-connect module preferences
         self._auto_connect_modules: Set[str] = set()
 
+        # Multi-instance module IDs (e.g., {"DRT", "VOG", "CAMERAS"})
+        # For these modules, auto-connect applies to ALL devices, not just first
+        self._multi_instance_modules: Set[str] = set()
+
+        # Track which devices have already been auto-connected during this session
+        # Prevents double auto-connect for multi-instance modules
+        self._auto_connected_devices: Set[str] = set()
+
         # Observers
         self._connection_observers: list[StateObserver] = []
         self._device_state_observers: list[StateObserver] = []
@@ -223,16 +231,69 @@ class DeviceSelectionModel:
         """Set all auto-connect modules at once."""
         self._auto_connect_modules = modules.copy()
 
-    def consume_auto_connect(self, module_id: str) -> bool:
+    def consume_auto_connect_for_device(self, module_id: str, device_id: str) -> bool:
         """
-        Check and consume an auto-connect request.
+        Check and consume an auto-connect request for a specific device.
 
-        Returns True if the module was in auto-connect set (and removes it).
+        For multi-instance modules:
+            - Returns True if module should auto-connect AND this device hasn't been auto-connected yet
+            - Tracks this device as auto-connected (prevents double auto-connect)
+            - Does NOT remove module from auto-connect set (so other devices also auto-connect)
+
+        For single-instance modules:
+            - Removes module from auto-connect set (standard consume behavior)
+
+        Args:
+            module_id: The module ID (e.g., "Cameras", "DRT")
+            device_id: The specific device ID (e.g., "/dev/video0", "/dev/ttyACM0")
+
+        Returns:
+            True if this device should auto-connect, False otherwise.
         """
-        if module_id in self._auto_connect_modules:
+        # Check if module is in auto-connect set
+        if module_id not in self._auto_connect_modules:
+            return False
+
+        # Normalize module_id for multi-instance check
+        normalized = module_id.upper()
+
+        if normalized in self._multi_instance_modules:
+            # Multi-instance: track by device_id, keep module in set
+            if device_id in self._auto_connected_devices:
+                return False  # Already auto-connected this device
+            self._auto_connected_devices.add(device_id)
+            logger.debug(
+                "Multi-instance auto-connect: %s device %s (total: %d)",
+                module_id, device_id, len(self._auto_connected_devices)
+            )
+            return True
+        else:
+            # Single-instance: consume module from set
             self._auto_connect_modules.discard(module_id)
             return True
-        return False
+
+    def set_multi_instance_modules(self, modules: Set[str]) -> None:
+        """Set which modules support multiple simultaneous instances.
+
+        For these modules, auto-connect applies to ALL devices found,
+        not just the first one.
+
+        Args:
+            modules: Set of module IDs (uppercase, e.g., {"DRT", "VOG", "CAMERAS"})
+        """
+        self._multi_instance_modules = {m.upper() for m in modules}
+        logger.debug("Multi-instance modules: %s", self._multi_instance_modules)
+
+    def clear_auto_connected_devices(self) -> None:
+        """Clear the set of auto-connected devices.
+
+        Call this after startup completes to allow future auto-connects
+        if devices are reconnected.
+        """
+        count = len(self._auto_connected_devices)
+        self._auto_connected_devices.clear()
+        if count:
+            logger.debug("Cleared %d auto-connected devices", count)
 
     # =========================================================================
     # Observers

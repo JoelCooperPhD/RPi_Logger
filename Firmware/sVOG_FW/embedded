@@ -1,0 +1,626 @@
+#include <Arduino.h>
+#include <EEPROM.h>
+
+#define lens_pin 6
+#define button_pin 2
+
+const String deviceName = "VOG";
+const String deviceDate = "10/12/2021";
+const String deviceVer = "2.2";
+
+//EXPERIMENT > BLOCK > TRIAL
+
+//Variable Definitions//////////////////////////////////////////////////////////////
+String key, val, msg;
+
+int priorButton, currentButton, trialCounter;
+
+unsigned long millis_beginTrial = 0,
+              millis_beginState = 0,
+              millis_openElapsed = 0,
+              millis_closeElapsed = 0,
+              millis_currentState = 0,
+              millis_leadEdge = 0,
+              millis_trailEdge = 0,
+              millis_eitherEdge = 0;
+bool isOpen, openFlag = false, closeFlag = false, debounced, expRunning, trialRunning;
+
+unsigned long expTime = 0;
+
+//   EEPROM   ////////////////////////////////////////////////////////////////////
+int eeAddress_configName = 0;
+int eeAddress_configMaxOpen = 40;
+int eeAddress_configMaxClose = 45;
+int eeAddress_configDebounce = 50;
+int eeAddress_configClickMode = 55;
+int eeAddress_configButtonControl = 60;
+
+struct conf_struct //A struct or  similar is required for eeprom
+{
+  char named[40];
+  unsigned int maxOpen;
+  unsigned int maxClose;
+  unsigned int debounce;
+  unsigned int clickMode;
+  unsigned int buttonControl;
+};
+
+conf_struct conf = {"NHTSA", 1500, 1500, 20, 1, 0};
+
+//   LENS CONTROL
+void vog_open()
+{
+  if (!isOpen)
+  {
+    digitalWrite(lens_pin, HIGH);
+    millis_closeElapsed = millis_closeElapsed + millis() - millis_beginState;
+    millis_beginState = millis();
+    isOpen = true;
+    Serial.println("stm|1");
+  }
+  else if (isOpen)
+  {
+    millis_openElapsed = millis_openElapsed + millis() - millis_beginState;
+    Serial.println(millis_openElapsed);
+  }
+  openFlag = false;
+}
+void vog_close()
+{
+  if (isOpen)
+  {
+    digitalWrite(lens_pin, LOW);
+    millis_openElapsed = millis_openElapsed + millis() - millis_beginState;
+    millis_beginState = millis();
+    isOpen = false;
+    Serial.println("stm|0");
+  }
+  else if (!isOpen)
+  {
+    millis_closeElapsed = millis_closeElapsed + millis() - millis_beginState;
+  }
+  closeFlag = false;
+}
+
+// SERIAL CONTROL
+void report_state()
+{
+  Serial.println("data|" + String(trialCounter) + "," + String(millis_openElapsed) + "," + String(millis_closeElapsed));
+}
+void do_peekOpen()
+{
+  digitalWrite(lens_pin, HIGH);
+  Serial.println("stm|1");
+}
+void do_peekClose()
+{
+  digitalWrite(lens_pin, LOW);
+  Serial.println("stm|0");
+}
+void do_expStart()
+{
+  expRunning = true;
+  trialCounter = 0;
+  Serial.println("expStart");
+}
+void do_expStop()
+{
+  expRunning = false;
+  Serial.println("expStop");
+}
+void do_trialStart()
+{
+  if (expRunning){
+    if (!trialRunning){
+      trialCounter += 1;
+      millis_closeElapsed = 0;
+      millis_openElapsed = 0;
+      millis_beginTrial = millis();
+      trialRunning = true;
+      millis_beginState = millis();
+      Serial.println("stm|0");
+
+      if (conf.buttonControl == 0)
+      {
+        vog_open();
+      }
+
+      Serial.println("trialStart");
+    }
+    else{
+      Serial.print(expRunning);
+      Serial.print(", ");
+      Serial.println(trialRunning);
+    }
+  }
+  else
+  {
+    Serial.println("Initialize experiment prior to starting a trial");
+  }
+}
+void do_trialStop()
+{
+  if (expRunning && trialRunning)
+  {
+    vog_close();
+    trialRunning = false;
+    report_state();
+  }
+  else
+  {
+    Serial.println("Initialize experiment and start trial");
+  }
+}
+void do_factoryReset()
+{
+  for (int i = 0; i < 100; i++)
+  {
+    EEPROM.write(i, 0);
+  }
+
+  EEPROM.put(eeAddress_configName, "NHTSA");
+  EEPROM.put(eeAddress_configMaxOpen, 1500);
+  EEPROM.put(eeAddress_configMaxClose, 1500);
+  EEPROM.put(eeAddress_configDebounce, 20);
+  EEPROM.put(eeAddress_configClickMode, 1);
+
+  Serial.println("configName|NHTSA");
+  Serial.println("configMaxOpen|1500");
+  Serial.println("configMaxClose|1500");
+  Serial.println("configDebounce|20");
+  Serial.println("configClickMode|1");
+}
+void get_config()
+{
+    get_configName();
+    get_configMaxOpen();
+    get_configMaxClose();
+    get_configDebounce();
+    get_configClickMode();
+    get_configButtonControl();
+}
+void get_deviceName()
+{
+  Serial.println("deviceName|" + deviceName);
+}
+void get_deviceVer()
+{
+  Serial.println("deviceVer|" + deviceVer);
+}
+void get_deviceDate()
+{
+  Serial.println("deviceDate|" + deviceDate);
+}
+
+void get_trialCounter()
+{
+  Serial.println("trialCounter|" + trialCounter);
+}
+void get_openElapsed()
+{
+  Serial.println("openElapsed|" + millis_openElapsed);
+}
+void get_closedElapsed()
+{
+  Serial.println("closedElapsed|" + millis_closeElapsed);
+}
+
+void get_configName()
+{
+  EEPROM.get(eeAddress_configName, conf.named);
+  Serial.print("configName|");
+  Serial.println(conf.named);
+}
+void set_configName()
+{
+  val.toCharArray(conf.named, 40);
+  EEPROM.put(eeAddress_configName, conf.named);
+  EEPROM.get(eeAddress_configName, conf.named);
+  Serial.print("configName|");
+  Serial.println(conf.named);
+}
+void get_configMaxOpen()
+{
+  EEPROM.get(eeAddress_configMaxOpen, conf.maxOpen);
+  Serial.print("configMaxOpen|");
+  Serial.println(conf.maxOpen);
+}
+void set_configMaxOpen()
+{
+  conf.maxOpen = val.toInt();
+  EEPROM.put(eeAddress_configMaxOpen, conf.maxOpen);
+  EEPROM.get(eeAddress_configMaxOpen, conf.maxOpen);
+  Serial.print("configMaxOpen|");
+  Serial.println(conf.maxOpen);
+}
+void get_configMaxClose()
+{
+  EEPROM.get(eeAddress_configMaxClose, conf.maxClose);
+  Serial.print("configMaxClose|");
+  Serial.println(conf.maxClose);
+}
+void set_configMaxClose()
+{
+  conf.maxClose = val.toInt();
+  EEPROM.put(eeAddress_configMaxClose, conf.maxClose);
+  EEPROM.get(eeAddress_configMaxClose, conf.maxClose);
+  Serial.print("configMaxClose|");
+  Serial.println(conf.maxClose);
+}
+void get_configDebounce()
+{
+  EEPROM.get(eeAddress_configDebounce, conf.debounce);
+  Serial.print("configDebounce|");
+  Serial.println(conf.debounce);
+}
+void set_configDebounce()
+{
+  conf.debounce = val.toInt();
+  EEPROM.put(eeAddress_configDebounce, conf.debounce);
+  EEPROM.get(eeAddress_configDebounce, conf.debounce);
+  Serial.print("configDebounce|");
+  Serial.println(conf.debounce);
+}
+void get_configClickMode()
+{
+  EEPROM.get(eeAddress_configClickMode, conf.clickMode);
+  Serial.print("configClickMode|");
+  Serial.println(conf.clickMode);
+}
+void set_configClickMode()
+{
+  conf.clickMode = val.toInt();
+  EEPROM.put(eeAddress_configClickMode, conf.clickMode);
+  EEPROM.get(eeAddress_configClickMode, conf.clickMode);
+  Serial.print("configClickMode|");
+  Serial.println(conf.clickMode);
+}
+void get_configButtonControl()
+{
+  EEPROM.get(eeAddress_configButtonControl, conf.buttonControl);
+  Serial.print("configButtonControl|");
+  Serial.println(conf.buttonControl);
+}
+void set_configButtonControl()
+{
+  conf.buttonControl = val.toInt();
+  EEPROM.put(eeAddress_configButtonControl, conf.buttonControl);
+  EEPROM.get(eeAddress_configButtonControl, conf.buttonControl);
+  Serial.print("configButtonControl|");
+  Serial.println(conf.buttonControl);
+}
+// --main
+void parse_msg()
+{
+  msg = Serial.readStringUntil('\n');
+
+  if (msg.charAt(0) == '>' && msg.substring(msg.length() - 2, msg.length()) == "<<" && msg.indexOf("_") != -1)
+  {
+    key = msg.substring(1, msg.indexOf("|"));
+    val = msg.substring(msg.indexOf("|") + 1, msg.indexOf("<"));
+  }
+  else
+  {
+    Serial.readString();
+    msg = "";
+    key = "";
+    val = "";
+  }
+}
+void process_msg()
+{
+  // -----DO----- ACTIVE CONTROL FUNCTIONS FROM SERIAL
+  if (key.equals("do_peekOpen"))
+  {
+    do_peekOpen();
+  }
+  else if (key.equals("do_peekClose"))
+  {
+    do_peekClose();
+  }
+  else if (key.equals("do_expStart"))
+  {
+    do_expStart();
+  }
+  else if (key.equals("do_expStop"))
+  {
+    do_expStop();
+  }
+  else if (key.equals("do_trialStart"))
+  {
+    do_trialStart();
+  }
+  else if (key.equals("do_trialStop"))
+  {
+    do_trialStop();
+  }
+  else if (key.equals("do_factoryReset"))
+  {
+    do_factoryReset();
+  }
+
+  // -----GET----- DEVICE INFORMATION PARAMETERS FROM EEPROM
+  else if (key.equals("get_config"))
+  {
+    get_config();
+  } //
+  else if (key.equals("get_deviceName"))
+  {
+    get_deviceName();
+  } //
+  else if (key.equals("get_deviceDate"))
+  {
+    get_deviceDate();
+  } //
+  else if (key.equals("get_deviceVer"))
+  {
+    get_deviceVer();
+  } //
+
+  // -----GET----- RUNTIME VARIABLES
+  else if (key.equals("get_trialCounter"))
+  {
+    get_trialCounter();
+  } //
+  else if (key.equals("get_openElapsed"))
+  {
+    get_openElapsed();
+  } //
+  else if (key.equals("get_closedElapsed"))
+  {
+    get_closedElapsed();
+  } //
+
+  // -----GET/SET----- CONFIGURATION PARAMETERS
+  else if (key.equals("get_configName"))
+  {
+    get_configName();
+  } //
+  else if (key.equals("set_configName"))
+  {
+    set_configName();
+  } //
+  else if (key.equals("get_configMaxOpen"))
+  {
+    get_configMaxOpen();
+  } //
+  else if (key.equals("set_configMaxOpen"))
+  {
+    set_configMaxOpen();
+  } //
+  else if (key.equals("get_configMaxClose"))
+  {
+    get_configMaxClose();
+  } //
+  else if (key.equals("set_configMaxClose"))
+  {
+    set_configMaxClose();
+  } //
+  else if (key.equals("get_configDebounce"))
+  {
+    get_configDebounce();
+  } //
+  else if (key.equals("set_configDebounce"))
+  {
+    set_configDebounce();
+  } //
+  else if (key.equals("get_configClickMode"))
+  {
+    get_configClickMode();
+  } //
+  else if (key.equals("set_configClickMode"))
+  {
+    set_configClickMode();
+  } //
+  else if (key.equals("get_configButtonControl"))
+  {
+    get_configButtonControl();
+  } //
+  else if (key.equals("set_configButtonControl"))
+  {
+    set_configButtonControl();
+  } //
+  // -----FLUSH-----
+  else if (key.equals(""))
+  {
+  }
+}
+void serialEvent()
+{
+  if (Serial.available())
+  {
+    parse_msg();
+    process_msg();
+  }
+}
+
+// BUTTON CONTROL
+bool isButtonUp()
+{
+  return currentButton == 1;
+}
+bool wasButtonUp()
+{
+  return priorButton == 1;
+}
+bool isButtonDown()
+{
+  return currentButton == 0;
+}
+bool wasButtonDown()
+{
+  return priorButton == 0;
+}
+bool buttonFell()
+{
+  return (isButtonDown() && wasButtonUp()) ? true : false;
+}
+bool buttonRose()
+{
+  return (isButtonUp() && wasButtonDown()) ? true : false;
+}
+bool buttonControlsTrial()
+{
+  return conf.buttonControl == 0;
+}
+bool buttonControlsLens()
+{
+  return conf.buttonControl == 1;
+}
+bool buttonControlsPeek()
+{
+  return conf.buttonControl == 2;
+}
+// --click
+void process_click()
+{
+  if (debounced && buttonFell())
+  {
+    if (expRunning)
+    {
+      if (buttonControlsTrial())
+      {
+        trialRunning ? do_trialStop() : do_trialStart();
+      }
+      else if (buttonControlsPeek() && !isOpen)
+      {
+        trialRunning ? openFlag = true : openFlag;
+      }
+      debounced = false;
+    }
+    Serial.println("Click");
+  }
+
+  if (buttonRose())
+  {
+    millis_trailEdge = millis();
+  }
+
+  if (millis() > millis_trailEdge + conf.debounce)
+  {
+    debounced = true;
+  }
+}
+// --hold
+void processDepressed()
+{
+  if (expRunning && !trialRunning)
+  {
+    do_trialStart();
+  }
+  Serial.println("btn|1");
+  debounced = false;
+}
+void processReleased()
+{
+  if (expRunning && trialRunning)
+  {
+    do_trialStop();
+  }
+  Serial.println("btn|0");
+  debounced = false;
+}
+void process_hold()
+{
+  if (currentButton != priorButton)
+  {
+    millis_eitherEdge = millis();
+  }
+
+  if (debounced)
+  {
+    if (buttonFell() | buttonRose())
+    {
+      if (buttonControlsLens())
+      {
+        buttonFell() ? do_peekOpen() : do_peekClose();
+        debounced = false;
+      }
+      else if (buttonControlsTrial())
+      {
+        buttonFell() ? processDepressed() : processReleased();
+      }
+    }
+  }
+
+  if (!debounced && millis() >= millis_eitherEdge + conf.debounce)
+  {
+    debounced = true;
+  }
+}
+// --main
+void process_btn()
+{
+  currentButton = digitalRead(button_pin);
+  conf.clickMode ? process_click() : process_hold();
+  priorButton = currentButton;
+}
+
+// MAIN LOOPS////
+
+bool openTimeHasExpired()
+{
+  return millis() - millis_beginState >= conf.maxOpen;
+}
+bool closedTimeHasExpired()
+{
+  return millis() - millis_beginState >= conf.maxClose;
+}
+
+void setup()
+{
+  Serial.begin(115200);
+  pinMode(lens_pin, OUTPUT);
+  pinMode(button_pin, INPUT);
+  digitalWrite(button_pin, HIGH);
+
+  debounced = true;
+
+  EEPROM.get(eeAddress_configName, conf.named);
+  EEPROM.get(eeAddress_configMaxOpen, conf.maxOpen);
+  EEPROM.get(eeAddress_configMaxClose, conf.maxClose);
+  EEPROM.get(eeAddress_configDebounce, conf.debounce);
+  EEPROM.get(eeAddress_configClickMode, conf.clickMode);
+  EEPROM.get(eeAddress_configButtonControl, conf.buttonControl);
+}
+void loop()
+{
+  process_btn();
+
+  if (expRunning && trialRunning)
+  {
+
+    switch (conf.buttonControl)
+    {
+    case 0: //Button controls trial start/stop
+      if (isOpen && openTimeHasExpired())
+      {
+        vog_close();
+      }
+      else if (!isOpen && closedTimeHasExpired())
+      {
+        vog_open();
+      }
+      //delay(500);
+      break;
+
+    case 2: //Button controls "glance"
+      if (isOpen && openTimeHasExpired())
+      {
+        vog_close();
+      }
+      else if (openFlag)
+      {
+        if (closedTimeHasExpired())
+        {
+          vog_open();
+        }
+        else if (millis_openElapsed == 0)
+        {
+          vog_open();
+        }
+      }
+      break;
+    }
+  }
+}

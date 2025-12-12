@@ -16,6 +16,9 @@ import numpy as np
 from rpi_logger.modules.Cameras.config import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
 from rpi_logger.modules.Cameras.camera_core.backends.picam_color import get_picam_color_format
 from rpi_logger.modules.Cameras.camera_core.utils import to_snake_case
+from rpi_logger.core.logging_utils import get_module_logger
+
+logger = get_module_logger(__name__)
 
 # Try to import Picamera2 - may not be available on non-Pi platforms
 try:
@@ -87,25 +90,22 @@ class PicamCapture(CaptureHandle):
         return self._fps
 
     async def start(self) -> None:
-        import logging
-        log = logging.getLogger(__name__)
-
         cam_num = int(self._sensor_id) if self._sensor_id.isdigit() else 0
-        log.info("Opening Picamera2 sensor %s (cam_num=%d)", self._sensor_id, cam_num)
+        logger.info("Opening Picamera2 sensor %s (cam_num=%d)", self._sensor_id, cam_num)
 
         # Run all blocking Picamera2 operations in thread pool
-        await asyncio.to_thread(self._start_sync, cam_num, log)
+        await asyncio.to_thread(self._start_sync, cam_num)
         self._running = True
 
-    def _start_sync(self, cam_num: int, log) -> None:
+    def _start_sync(self, cam_num: int) -> None:
         try:
             Picamera2.close_camera(cam_num)
         except Exception:
             pass
 
-        log.info("Creating Picamera2 instance...")
+        logger.info("Creating Picamera2 instance...")
         self._cam = Picamera2(camera_num=cam_num)
-        log.info("Creating video configuration: %s @ %.1f fps", self._resolution, self._fps)
+        logger.info("Creating video configuration: %s @ %.1f fps", self._resolution, self._fps)
 
         config = self._cam.create_video_configuration(
             main={"size": self._resolution, "format": "RGB888"},
@@ -120,18 +120,18 @@ class PicamCapture(CaptureHandle):
                 "size": self._lores_size,
                 "format": "YUV420",
             }
-            log.info("Enabling lores stream: %s (YUV420)", self._lores_size)
+            logger.info("Enabling lores stream: %s (YUV420)", self._lores_size)
 
         controls = config.get("controls") or {}
         frame_duration_us = int(1_000_000 / self._fps)
         controls["FrameDurationLimits"] = (frame_duration_us, frame_duration_us)
         config["controls"] = controls
 
-        log.info("Configuring camera...")
+        logger.info("Configuring camera...")
         self._cam.configure(config)
-        log.info("Starting camera...")
+        logger.info("Starting camera...")
         self._cam.start()
-        log.info("Camera started successfully")
+        logger.info("Camera started successfully")
 
     async def frames(self) -> AsyncIterator[CaptureFrame]:
         import contextlib
@@ -209,11 +209,8 @@ class PicamCapture(CaptureHandle):
 
     def set_control(self, name: str, value: Any) -> bool:
         """Set a Picamera2 control value."""
-        import logging
-        log = logging.getLogger(__name__)
-
         if not self._cam:
-            log.warning("Cannot set control %s: camera not open", name)
+            logger.warning("Cannot set control %s: camera not open", name)
             return False
 
         try:
@@ -224,14 +221,14 @@ class PicamCapture(CaptureHandle):
                 if value in options:
                     value = options.index(value)
                 else:
-                    log.warning("Invalid enum value %s for %s", value, name)
+                    logger.warning("Invalid enum value %s for %s", value, name)
                     return False
 
             self._cam.set_controls({name: value})
-            log.debug("Set Picam control %s = %s", name, value)
+            logger.debug("Set Picam control %s = %s", name, value)
             return True
         except Exception as e:
-            log.warning("Failed to set Picam control %s: %s", name, e)
+            logger.warning("Failed to set Picam control %s: %s", name, e)
             return False
 
 
@@ -253,13 +250,11 @@ class USBCapture(CaptureHandle):
         return self._actual_fps
 
     async def start(self) -> None:
-        import logging
         import sys
         import cv2
 
-        log = logging.getLogger(__name__)
         device_id = int(self._dev_path) if self._dev_path.isdigit() else self._dev_path
-        log.info("Opening USB camera: %s", device_id)
+        logger.info("Opening USB camera: %s", device_id)
 
         # Prefer V4L2 on Linux
         backend = getattr(cv2, "CAP_V4L2", None) if sys.platform == "linux" else None
@@ -291,9 +286,9 @@ class USBCapture(CaptureHandle):
                     ["v4l2-ctl", "-d", device_id, "-c", "exposure_dynamic_framerate=0"],
                     capture_output=True, timeout=2.0
                 )
-                log.debug("Disabled exposure_dynamic_framerate for %s", device_id)
+                logger.debug("Disabled exposure_dynamic_framerate for %s", device_id)
             except Exception as e:
-                log.debug("Could not set exposure_dynamic_framerate: %s", e)
+                logger.debug("Could not set exposure_dynamic_framerate: %s", e)
 
         # Read a test frame to verify the camera works (with retry for cameras that need warmup)
         import time as _time
@@ -303,7 +298,7 @@ class USBCapture(CaptureHandle):
             success, _ = self._cap.read()
             if success:
                 break
-            log.debug("USB camera %s test frame attempt %d failed, retrying...", self._dev_path, attempt + 1)
+            logger.debug("USB camera %s test frame attempt %d failed, retrying...", self._dev_path, attempt + 1)
         if not success:
             self._cap.release()
             raise RuntimeError(f"USB camera {self._dev_path} opened but cannot read frames")
@@ -320,10 +315,10 @@ class USBCapture(CaptureHandle):
             self._actual_fps = self._requested_fps
 
         if abs(self._actual_fps - self._requested_fps) > 0.5:
-            log.warning("USB camera %s: requested %.1f fps but camera reports %.1f fps",
+            logger.warning("USB camera %s: requested %.1f fps but camera reports %.1f fps",
                        self._dev_path, self._requested_fps, self._actual_fps)
 
-        log.info("USB camera opened successfully: %dx%d @ %.1f fps (requested %.1f)",
+        logger.info("USB camera opened successfully: %dx%d @ %.1f fps (requested %.1f)",
                 actual_w, actual_h, self._actual_fps, self._requested_fps)
         self._running = True
 
@@ -377,6 +372,9 @@ class USBCapture(CaptureHandle):
             self._running = False
             if thread.is_alive():
                 thread.join(timeout=2.0)
+                if thread.is_alive():
+                    logger.warning("Capture thread did not stop in time, proceeding with cleanup")
+            self._capture_thread = None
 
     async def stop(self) -> None:
         self._running = False
@@ -393,14 +391,11 @@ class USBCapture(CaptureHandle):
 
     def set_control(self, name: str, value: Any) -> bool:
         """Set a USB camera control value via OpenCV or v4l2-ctl."""
-        import logging
         import sys
         import subprocess
 
-        log = logging.getLogger(__name__)
-
         if not self._cap or not self._cap.isOpened():
-            log.warning("Cannot set control %s: camera not open", name)
+            logger.warning("Cannot set control %s: camera not open", name)
             return False
 
         # Map of control names to OpenCV property IDs
@@ -441,13 +436,13 @@ class USBCapture(CaptureHandle):
                     new_value = self._cap.get(prop_id)
                     # Allow some tolerance for float comparisons
                     if abs(new_value - cv_value) < 1.0:
-                        log.debug("Set USB control %s = %s via OpenCV (verified)", name, value)
+                        logger.debug("Set USB control %s = %s via OpenCV (verified)", name, value)
                         return True
                     else:
-                        log.debug("OpenCV set %s returned True but value unchanged (old=%s, new=%s, target=%s)",
+                        logger.debug("OpenCV set %s returned True but value unchanged (old=%s, new=%s, target=%s)",
                                  name, old_value, new_value, cv_value)
             except Exception as e:
-                log.debug("OpenCV set error for %s: %s", name, e)
+                logger.debug("OpenCV set error for %s: %s", name, e)
 
         # Use v4l2-ctl on Linux (primary method for unreliable controls, fallback for others)
         if sys.platform == "linux" and self._dev_path.startswith("/dev/video"):
@@ -461,18 +456,18 @@ class USBCapture(CaptureHandle):
                     timeout=2.0,
                 )
                 if result.returncode == 0:
-                    log.debug("Set USB control %s = %s via v4l2-ctl", name, value)
+                    logger.debug("Set USB control %s = %s via v4l2-ctl", name, value)
                     return True
                 else:
-                    log.debug("v4l2-ctl set failed for %s: %s", name, result.stderr.strip())
+                    logger.debug("v4l2-ctl set failed for %s: %s", name, result.stderr.strip())
             except FileNotFoundError:
-                log.debug("v4l2-ctl not found")
+                logger.debug("v4l2-ctl not found")
             except subprocess.TimeoutExpired:
-                log.debug("v4l2-ctl timed out setting %s", name)
+                logger.debug("v4l2-ctl timed out setting %s", name)
             except Exception as e:
-                log.debug("v4l2-ctl error setting %s: %s", name, e)
+                logger.debug("v4l2-ctl error setting %s: %s", name, e)
 
-        log.warning("Unable to set USB control %s", name)
+        logger.warning("Unable to set USB control %s", name)
         return False
 
 

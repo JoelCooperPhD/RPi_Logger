@@ -81,22 +81,20 @@ class StateFacade:
 
     async def on_user_disconnect(self, module_name: str) -> None:
         """
-        Called when user explicitly disconnects a device.
+        Called when user disconnects a hardware device.
 
         Saves device_connected=False and enabled=False.
-        Skipped during shutdown phase.
+        For internal modules, use on_internal_module_closed instead.
         """
         await self._lifecycle.on_user_disconnect(module_name)
 
-    async def on_module_quit(self, module_name: str, has_other_instances: bool) -> None:
+    async def on_internal_module_closed(self, module_name: str) -> None:
         """
-        Called when a module quits gracefully.
+        Called when user closes an internal module window (Notes, etc.).
 
-        Args:
-            module_name: The module that quit
-            has_other_instances: True if other instances still running
+        Only saves device_connected=False. Module remains visible in Devices list.
         """
-        await self._lifecycle.on_module_quit(module_name, has_other_instances)
+        await self._lifecycle.on_internal_module_closed(module_name)
 
     async def on_module_crash(self, module_name: str) -> None:
         """

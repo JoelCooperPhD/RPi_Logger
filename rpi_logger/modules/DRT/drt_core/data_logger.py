@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Callable, Awaitable
 import logging
 
+from rpi_logger.core.logging_utils import get_module_logger
 from .protocols import SDRT_CSV_HEADER, WDRT_CSV_HEADER, RT_TIMEOUT_VALUE
 
-logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 
 class DRTDataLogger:

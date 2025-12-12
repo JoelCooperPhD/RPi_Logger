@@ -156,7 +156,7 @@ class CamerasRuntime(ModuleRuntime):
     async def handle_command(self, command: Dict[str, Any]) -> bool:
         """Handle commands from main logger."""
         action = (command.get("command") or "").lower()
-        self.logger.info("Received command: %s (keys: %s)", action, list(command.keys()))
+        self.logger.debug("Received command: %s (keys: %s)", action, list(command.keys()))
 
         if action == "assign_device":
             self.logger.info("Processing assign_device command")
@@ -516,14 +516,14 @@ class CamerasRuntime(ModuleRuntime):
 
     def _on_apply_config(self, camera_id: str, settings: Dict[str, str]) -> None:
         """Handle resolution/FPS config change from settings window."""
-        self.logger.info("_on_apply_config called: camera_id=%s, self._camera_id=%s",
-                        camera_id, self._camera_id.key if self._camera_id else None)
+        self.logger.debug("_on_apply_config called: camera_id=%s, self._camera_id=%s",
+                         camera_id, self._camera_id.key if self._camera_id else None)
         if camera_id != (self._camera_id.key if self._camera_id else None):
             self.logger.warning("Config apply for wrong camera: %s (expected %s)",
                               camera_id, self._camera_id.key if self._camera_id else None)
             return
 
-        self.logger.info("Applying config: %s", settings)
+        self.logger.debug("Applying config: %s", settings)
 
         # Parse record resolution and FPS (affects capture/recording)
         res_str = settings.get("record_resolution", "")
@@ -533,14 +533,14 @@ class CamerasRuntime(ModuleRuntime):
             try:
                 w, h = map(int, res_str.split("x"))
                 self._resolution = (w, h)
-                self.logger.info("Record resolution updated to %dx%d", w, h)
+                self.logger.debug("Record resolution updated to %dx%d", w, h)
             except ValueError:
                 self.logger.warning("Invalid record resolution: %s", res_str)
 
         if fps_str:
             try:
                 self._fps = float(fps_str)
-                self.logger.info("Record FPS updated to %.1f", self._fps)
+                self.logger.debug("Record FPS updated to %.1f", self._fps)
             except ValueError:
                 self.logger.warning("Invalid record FPS: %s", fps_str)
 
@@ -552,14 +552,14 @@ class CamerasRuntime(ModuleRuntime):
             try:
                 w, h = map(int, preview_res_str.split("x"))
                 self._preview_resolution = (w, h)
-                self.logger.info("Preview resolution updated to %dx%d", w, h)
+                self.logger.debug("Preview resolution updated to %dx%d", w, h)
             except ValueError:
                 self.logger.warning("Invalid preview resolution: %s", preview_res_str)
 
         if preview_fps_str:
             try:
                 self._preview_fps = float(preview_fps_str)
-                self.logger.info("Preview FPS updated to %.1f", self._preview_fps)
+                self.logger.debug("Preview FPS updated to %.1f", self._preview_fps)
             except ValueError:
                 self.logger.warning("Invalid preview FPS: %s", preview_fps_str)
 
@@ -588,8 +588,8 @@ class CamerasRuntime(ModuleRuntime):
         if not self._camera_id or not self._descriptor:
             return
 
-        self.logger.info("Reinitializing capture: %dx%d @ %.1f fps",
-                        self._resolution[0], self._resolution[1], self._fps)
+        self.logger.debug("Reinitializing capture: %dx%d @ %.1f fps",
+                         self._resolution[0], self._resolution[1], self._fps)
 
         # Stop current capture task
         if self._capture_task:
@@ -623,7 +623,7 @@ class CamerasRuntime(ModuleRuntime):
             self.logger.warning("Control change for wrong camera: %s", camera_id)
             return
 
-        self.logger.info("Control change: %s = %s", control_name, value)
+        self.logger.debug("Control change: %s = %s", control_name, value)
 
         if not self._capture:
             self.logger.warning("Cannot apply control - no capture active")
@@ -644,7 +644,7 @@ class CamerasRuntime(ModuleRuntime):
             self.logger.warning("Reprobe for wrong camera: %s", camera_id)
             return
 
-        self.logger.info("Reprobing camera capabilities")
+        self.logger.debug("Reprobing camera capabilities")
         asyncio.create_task(self._do_reprobe())
 
     async def _do_reprobe(self) -> None:
@@ -703,7 +703,7 @@ class CamerasRuntime(ModuleRuntime):
         fps_preview = 0.0
         fps_encode = 0.0
 
-        self.logger.info("Starting capture loop")
+        self.logger.debug("Starting capture loop")
 
         try:
             async for frame in self._capture.frames():

@@ -178,7 +178,9 @@ class DeviceLifecycleManager:
         logger.info(f"Device discovered: {display_name} ({event.device_id})")
 
         # 6. Check auto-connect
-        if self._selection.consume_auto_connect(event.module_id):
+        # Use device-aware method to support multi-instance modules (DRT, VOG, Cameras)
+        # which need to auto-connect ALL devices, not just the first one
+        if self._selection.consume_auto_connect_for_device(event.module_id, event.device_id):
             logger.info(f"Auto-connecting device {event.device_id} for module {event.module_id}")
             if self._connect_callback:
                 await self._connect_callback(event.device_id)

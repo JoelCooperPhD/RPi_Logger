@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any, Callable
+
+from rpi_logger.core.logging_utils import get_module_logger
 
 from .entities import AudioDeviceInfo, AudioSnapshot
 from .level_meter import LevelMeter
 
-_logger = logging.getLogger(__name__)
+logger = get_module_logger(__name__)
 
 # State persistence prefix for config keys
 _STATE_PREFIX = "audio"
@@ -42,7 +43,7 @@ class AudioState:
             try:
                 observer(snapshot)
             except Exception:
-                _logger.debug("Observer notification failed", exc_info=True)
+                logger.debug("Observer notification failed", exc_info=True)
 
     def snapshot(self) -> AudioSnapshot:
         return AudioSnapshot(
@@ -181,7 +182,7 @@ class AudioState:
         names_str = data.get("selected_device_names", "")
         if names_str:
             self._pending_restore_names = set(names_str.split("|"))
-            _logger.debug("Will restore selection for devices: %s", self._pending_restore_names)
+            logger.debug("Will restore selection for devices: %s", self._pending_restore_names)
         else:
             self._pending_restore_names = set()
 
@@ -209,7 +210,7 @@ class AudioState:
             if device.name in remaining_names:
                 if device.device_id not in self.selected_devices:
                     self.select_device(device)
-                    _logger.info("Auto-selected restored device: %s", device.name)
+                    logger.info("Auto-selected restored device: %s", device.name)
                     restored_count += 1
                 remaining_names.discard(device.name)
 
@@ -217,6 +218,6 @@ class AudioState:
         self._pending_restore_names = remaining_names
 
         if remaining_names:
-            _logger.debug("Still waiting for devices: %s", remaining_names)
+            logger.debug("Still waiting for devices: %s", remaining_names)
 
         return restored_count
