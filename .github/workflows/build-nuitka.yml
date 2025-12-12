@@ -172,7 +172,8 @@ jobs:
               libglib2.0-0 \
               patchelf \
               ccache \
-              build-essential
+              build-essential \
+              binutils
           run: |
             python3.11 -m ensurepip --upgrade
             python3.11 -m pip install --upgrade pip

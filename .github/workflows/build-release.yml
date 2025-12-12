@@ -235,7 +235,8 @@ jobs:
               libportaudio2 \
               libsndfile1 \
               libgl1-mesa-glx \
-              libglib2.0-0
+              libglib2.0-0 \
+              binutils
           run: |
             python3.11 -m ensurepip --upgrade
             python3.11 -m pip install --upgrade pip
