@@ -8,6 +8,82 @@ from __future__ import annotations
 
 import sys
 from multiprocessing import freeze_support
+from pathlib import Path
+
+def _setup_module_aliases() -> None:
+    """Register module aliases for packages that modules expect as top-level imports.
+
+    This is needed because:
+    - vmc package is at rpi_logger/modules/vmc but modules import 'from vmc import ...'
+    - notes_runtime is at rpi_logger/modules/Notes/notes_runtime but Notes imports 'from notes_runtime import ...'
+    """
+    # Register vmc package and all its submodules
+    try:
+        from rpi_logger.modules import vmc
+        sys.modules['vmc'] = vmc
+
+        # Register vmc submodules so 'from vmc.constants import ...' works
+        from rpi_logger.modules.vmc import constants as vmc_constants
+        from rpi_logger.modules.vmc import runtime as vmc_runtime
+        from rpi_logger.modules.vmc import runtime_helpers as vmc_runtime_helpers
+        from rpi_logger.modules.vmc import controller as vmc_controller
+        from rpi_logger.modules.vmc import model as vmc_model
+        from rpi_logger.modules.vmc import view as vmc_view
+        from rpi_logger.modules.vmc import preferences as vmc_preferences
+        from rpi_logger.modules.vmc import supervisor as vmc_supervisor
+        from rpi_logger.modules.vmc import migration as vmc_migration
+
+        sys.modules['vmc.constants'] = vmc_constants
+        sys.modules['vmc.runtime'] = vmc_runtime
+        sys.modules['vmc.runtime_helpers'] = vmc_runtime_helpers
+        sys.modules['vmc.controller'] = vmc_controller
+        sys.modules['vmc.model'] = vmc_model
+        sys.modules['vmc.view'] = vmc_view
+        sys.modules['vmc.preferences'] = vmc_preferences
+        sys.modules['vmc.supervisor'] = vmc_supervisor
+        sys.modules['vmc.migration'] = vmc_migration
+    except ImportError as e:
+        print(f"Warning: Could not register vmc module aliases: {e}", file=sys.stderr)
+
+    # Register notes_runtime for the Notes module
+    try:
+        from rpi_logger.modules.Notes import notes_runtime
+        sys.modules['notes_runtime'] = notes_runtime
+    except ImportError as e:
+        print(f"Warning: Could not register notes_runtime alias: {e}", file=sys.stderr)
+
+    # Register drt package and submodules for DRT module
+    try:
+        from rpi_logger.modules.DRT import drt as drt_pkg
+        from rpi_logger.modules.DRT.drt import runtime as drt_runtime
+        from rpi_logger.modules.DRT.drt import view as drt_view
+        sys.modules['drt'] = drt_pkg
+        sys.modules['drt.runtime'] = drt_runtime
+        sys.modules['drt.view'] = drt_view
+    except ImportError as e:
+        print(f"Warning: Could not register drt module aliases: {e}", file=sys.stderr)
+
+    # Register vog package and submodules for VOG module
+    try:
+        from rpi_logger.modules.VOG import vog as vog_pkg
+        from rpi_logger.modules.VOG.vog import runtime as vog_runtime
+        from rpi_logger.modules.VOG.vog import view as vog_view
+        sys.modules['vog'] = vog_pkg
+        sys.modules['vog.runtime'] = vog_runtime
+        sys.modules['vog.view'] = vog_view
+    except ImportError as e:
+        print(f"Warning: Could not register vog module aliases: {e}", file=sys.stderr)
+
+    # Register gps package and submodules for GPS module
+    try:
+        from rpi_logger.modules.GPS import gps as gps_pkg
+        from rpi_logger.modules.GPS.gps import runtime as gps_runtime
+        from rpi_logger.modules.GPS import view as gps_view_module
+        sys.modules['gps'] = gps_pkg
+        sys.modules['gps.runtime'] = gps_runtime
+        sys.modules['view'] = gps_view_module  # GPS imports 'view' directly
+    except ImportError as e:
+        print(f"Warning: Could not register gps module aliases: {e}", file=sys.stderr)
 
 
 def _run_module_subprocess(module_name: str, args: list[str]) -> None:
@@ -15,66 +91,62 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
 
     This allows the frozen executable to spawn module subprocesses by calling
     itself with --run-module <module_name> <args>.
+
+    For Nuitka compiled binaries, we use direct imports instead of importlib
+    because the modules are compiled into the binary and not available as
+    separate importable packages.
     """
     import asyncio
-    from pathlib import Path
+    import signal
 
-    # Map module names to their directory names and main module paths
-    module_info = {
-        'audio': ('Audio', 'rpi_logger.modules.Audio.main_audio'),
-        'cameras': ('Cameras', 'rpi_logger.modules.Cameras.main_cameras'),
-        'drt': ('DRT', 'rpi_logger.modules.DRT.main_drt'),
-        'eye_tracker': ('EyeTracker', 'rpi_logger.modules.EyeTracker.main_eye_tracker'),
-        'gps': ('GPS', 'rpi_logger.modules.GPS.main_gps'),
-        'notes': ('Notes', 'rpi_logger.modules.Notes.main_notes'),
-        'stub_codex': ('stub (codex)', 'rpi_logger.modules.stub (codex).main_stub_codex'),
-    }
+    # Set up module aliases BEFORE importing any modules
+    _setup_module_aliases()
 
     module_key = module_name.lower().replace('-', '_')
 
-    if module_key not in module_info:
-        print(f"Unknown module: {module_name}", file=sys.stderr)
-        print(f"Available modules: {', '.join(module_info.keys())}", file=sys.stderr)
-        sys.exit(1)
+    # Set up signal handlers for graceful shutdown in subprocesses
+    def signal_handler(sig, frame):
+        raise KeyboardInterrupt
 
-    dir_name, module_path = module_info[module_key]
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Set argv for the module
+    sys.argv = [f'rpi_logger.modules.{module_name}'] + args
 
     try:
-        # Determine the base path (frozen or normal)
-        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-            base_path = Path(sys._MEIPASS)
+        # Direct imports for each module - required for Nuitka compiled binaries
+        # where importlib.import_module() doesn't work
+        if module_key == 'audio':
+            from rpi_logger.modules.Audio.main_audio import main
+            asyncio.run(main())
+        elif module_key == 'cameras':
+            from rpi_logger.modules.Cameras.main_cameras import main
+            asyncio.run(main())
+        elif module_key == 'drt':
+            from rpi_logger.modules.DRT.main_drt import main
+            asyncio.run(main())
+        elif module_key == 'eye_tracker':
+            from rpi_logger.modules.EyeTracker.main_eye_tracker import main
+            asyncio.run(main())
+        elif module_key == 'gps':
+            from rpi_logger.modules.GPS.main_gps import main
+            asyncio.run(main())
+        elif module_key == 'notes':
+            from rpi_logger.modules.Notes.main_notes import main
+            asyncio.run(main())
+        elif module_key == 'vog':
+            from rpi_logger.modules.VOG.main_vog import main
+            asyncio.run(main())
+        elif module_key == 'stub_codex':
+            # Note: This module has a space in the directory name
+            # Python doesn't allow spaces in module names, so this needs special handling
+            print(f"Module stub_codex cannot be run in frozen mode", file=sys.stderr)
+            sys.exit(1)
         else:
-            base_path = Path(__file__).parent.parent
-
-        # Add the module's directory to sys.path so local imports work
-        # (modules use "from runtime import ..." style imports)
-        module_dir = base_path / 'rpi_logger' / 'modules' / dir_name
-        if module_dir.exists() and str(module_dir) not in sys.path:
-            sys.path.insert(0, str(module_dir))
-
-        # Also add stub (codex) for vmc imports
-        stub_dir = base_path / 'rpi_logger' / 'modules' / 'stub (codex)'
-        if stub_dir.exists() and str(stub_dir) not in sys.path:
-            sys.path.insert(0, str(stub_dir))
-
-        # Import and run the module's main function
-        import importlib
-        import signal
-        module = importlib.import_module(module_path)
-
-        # Set up signal handlers for graceful shutdown in subprocesses
-        def signal_handler(sig, frame):
-            raise KeyboardInterrupt
-
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-
-        if hasattr(module, 'main'):
-            # Pass remaining args to the module
-            sys.argv = [module_path] + args
-            asyncio.run(module.main())
-        else:
-            print(f"Module {module_path} has no main() function", file=sys.stderr)
+            available = ['audio', 'cameras', 'drt', 'eye_tracker', 'gps', 'notes', 'vog']
+            print(f"Unknown module: {module_name}", file=sys.stderr)
+            print(f"Available modules: {', '.join(available)}", file=sys.stderr)
             sys.exit(1)
 
     except Exception as e:

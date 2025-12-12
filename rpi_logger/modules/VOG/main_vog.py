@@ -46,8 +46,8 @@ from dataclasses import asdict
 from vmc import StubCodexSupervisor
 from vmc.constants import DISPLAY_NAME as STUB_DISPLAY_NAME
 
-from vog.runtime import VOGModuleRuntime
-from vog.view import VOGView
+from rpi_logger.modules.VOG.vog.runtime import VOGModuleRuntime
+from rpi_logger.modules.VOG.vog.view import VOGView
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.base.config_paths import (
     ModuleConfigContext,

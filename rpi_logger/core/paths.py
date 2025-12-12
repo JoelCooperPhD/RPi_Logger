@@ -9,12 +9,24 @@ from pathlib import Path
 
 def _is_nuitka() -> bool:
     """Check if running as a Nuitka compiled binary."""
-    return "__compiled__" in dir() or getattr(sys, 'frozen', False) and not hasattr(sys, '_MEIPASS')
+    # Check for Nuitka's __compiled__ marker in the global namespace
+    # or check sys.frozen without PyInstaller's _MEIPASS
+    return '__compiled__' in globals() or (getattr(sys, 'frozen', False) and not hasattr(sys, '_MEIPASS'))
 
 
 def _is_pyinstaller() -> bool:
     """Check if running as a PyInstaller bundle."""
     return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+
+def _get_nuitka_data_dir() -> Path:
+    """Get the data directory for Nuitka compiled binaries.
+
+    For onefile builds, files are extracted to a cache directory.
+    We use __file__ from this module which points to the extracted location.
+    """
+    # __file__ in compiled modules points to the extraction directory
+    return Path(__file__).resolve().parents[2]
 
 
 def _get_base_path() -> Path:
@@ -23,8 +35,9 @@ def _get_base_path() -> Path:
         # Running as PyInstaller bundle
         return Path(sys._MEIPASS)
     elif _is_nuitka():
-        # Running as Nuitka compiled binary - use executable directory
-        return Path(sys.executable).parent
+        # Running as Nuitka compiled binary
+        # For onefile, __file__ points to the cache extraction directory
+        return _get_nuitka_data_dir()
     else:
         # Running as normal Python script
         return Path(__file__).resolve().parents[2]

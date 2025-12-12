@@ -39,8 +39,8 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 from vmc import StubCodexSupervisor
 from vmc.constants import DISPLAY_NAME as STUB_DISPLAY_NAME
 
-from drt.runtime import DRTModuleRuntime
-from drt.view import DRTView
+from rpi_logger.modules.DRT.drt.runtime import DRTModuleRuntime
+from rpi_logger.modules.DRT.drt.view import DRTView
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.DRT.config import DRTConfig
 from rpi_logger.modules.base.config_paths import (
