@@ -219,7 +219,7 @@ jobs:
         uses: uraimo/run-on-arch-action@v2
         with:
           arch: aarch64
-          distro: ubuntu22.04
+          distro: ubuntu24.04
           githubToken: ${{ github.token }}
           install: |
             apt-get update
@@ -228,15 +228,16 @@ jobs:
               python3-pip \
               python3-venv \
               python3-tk \
+              python3-dev \
               libasound2-dev \
               libportaudio2 \
               libsndfile1 \
               libgl1-mesa-glx \
               libglib2.0-0
           run: |
-            python3 -m pip install --upgrade pip
-            pip3 install pyinstaller
-            pip3 install .
+            python3 -m pip install --upgrade pip --break-system-packages
+            pip3 install pyinstaller --break-system-packages
+            pip3 install . --break-system-packages
             pyinstaller rpi_logger.spec
             cd dist
             tar -czvf "RPi-Logger-RaspberryPi-arm64.tar.gz" "rpi-logger"

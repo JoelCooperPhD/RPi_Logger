@@ -1,0 +1,161 @@
+name: Build with Nuitka
+
+on:
+  workflow_dispatch:  # Manual trigger only for comparison testing
+    inputs:
+      version:
+        description: 'Version tag (e.g., v0.1.0)'
+        required: false
+        default: 'dev'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-nuitka:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install nuitka ordered-set zstandard
+          pip install .
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka `
+            --standalone `
+            --onefile `
+            --windows-console-mode=disable `
+            --enable-plugin=tk-inter `
+            --enable-plugin=numpy `
+            --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui `
+            --include-data-file=config.txt=config.txt `
+            --include-data-dir=rpi_logger/modules=rpi_logger/modules `
+            --output-filename="RPi-Logger.exe" `
+            --output-dir=dist `
+            rpi_logger/__main__.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RPi-Logger-Windows-Nuitka
+          path: dist/RPi-Logger.exe
+
+  build-macos-nuitka:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install nuitka ordered-set zstandard
+          pip install .
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka \
+            --standalone \
+            --macos-create-app-bundle \
+            --macos-app-name="RPi Logger" \
+            --enable-plugin=tk-inter \
+            --enable-plugin=numpy \
+            --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
+            --include-data-file=config.txt=config.txt \
+            --include-data-dir=rpi_logger/modules=rpi_logger/modules \
+            --output-dir=dist \
+            rpi_logger/__main__.py
+
+      - name: Create ZIP archive
+        run: |
+          cd dist
+          zip -r "RPi-Logger-macOS-Nuitka.zip" "RPi Logger.app" || zip -r "RPi-Logger-macOS-Nuitka.zip" *.app || zip -r "RPi-Logger-macOS-Nuitka.zip" __main__.dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RPi-Logger-macOS-Nuitka
+          path: dist/RPi-Logger-macOS-Nuitka.zip
+
+  build-linux-nuitka:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libportaudio2 \
+            libsndfile1 \
+            python3-tk \
+            libgl1-mesa-glx \
+            libglib2.0-0 \
+            patchelf \
+            ccache
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install nuitka ordered-set zstandard
+          pip install .
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka \
+            --standalone \
+            --onefile \
+            --enable-plugin=tk-inter \
+            --enable-plugin=numpy \
+            --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
+            --include-data-file=config.txt=config.txt \
+            --include-data-dir=rpi_logger/modules=rpi_logger/modules \
+            --output-filename=rpi-logger \
+            --output-dir=dist \
+            rpi_logger/__main__.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RPi-Logger-Linux-Nuitka
+          path: dist/rpi-logger
+
+  compare-sizes:
+    needs: [build-windows-nuitka, build-macos-nuitka, build-linux-nuitka]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all Nuitka artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Show artifact sizes
+        run: |
+          echo "## Nuitka Build Sizes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
+          for f in artifacts/*/*; do
+            size=$(du -h "$f" | cut -f1)
+            name=$(basename $(dirname "$f"))
+            echo "| $name | $size |" >> $GITHUB_STEP_SUMMARY
+          done
