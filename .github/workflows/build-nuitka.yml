@@ -139,68 +139,12 @@ jobs:
           name: RPi-Logger-Linux-Nuitka
           path: dist/rpi-logger
 
-  build-raspberry-pi-nuitka:
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up QEMU for ARM emulation
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Build for Raspberry Pi (ARM64)
-        uses: uraimo/run-on-arch-action@v2
-        with:
-          arch: aarch64
-          distro: ubuntu22.04
-          githubToken: ${{ github.token }}
-          install: |
-            apt-get update
-            apt-get install -y software-properties-common
-            add-apt-repository -y ppa:deadsnakes/ppa
-            apt-get update
-            apt-get install -y \
-              python3.11 \
-              python3.11-venv \
-              python3.11-dev \
-              python3.11-tk \
-              libasound2-dev \
-              libportaudio2 \
-              libsndfile1 \
-              libgl1-mesa-glx \
-              libglib2.0-0 \
-              patchelf \
-              ccache \
-              build-essential \
-              binutils
-          run: |
-            python3.11 -m ensurepip --upgrade
-            python3.11 -m pip install --upgrade pip
-            python3.11 -m pip install nuitka ordered-set zstandard
-            python3.11 -m pip install .
-            python3.11 -m nuitka \
-              --standalone \
-              --onefile \
-              --enable-plugin=tk-inter \
-              --assume-yes-for-downloads \
-              --jobs=1 \
-              --low-memory \
-              --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
-              --include-data-file=config.txt=config.txt \
-              --include-data-dir=rpi_logger/modules=rpi_logger/modules \
-              --output-filename=rpi-logger \
-              --output-dir=dist \
-              rpi_logger/__main__.py
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: RPi-Logger-RaspberryPi-Nuitka
-          path: dist/rpi-logger
+  # NOTE: Raspberry Pi Nuitka builds are not supported
+  # GCC crashes under QEMU ARM emulation when compiling Nuitka's large C files
+  # Use PyInstaller for Raspberry Pi builds instead (see build-release.yml)
 
   compare-sizes:
-    needs: [build-windows-nuitka, build-macos-nuitka, build-linux-nuitka, build-raspberry-pi-nuitka]
+    needs: [build-windows-nuitka, build-macos-nuitka, build-linux-nuitka]
     runs-on: ubuntu-latest
     steps:
       - name: Download all Nuitka artifacts
