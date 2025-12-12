@@ -48,16 +48,6 @@ class ReconnectConfig:
         return cls()
 
 
-@dataclass
-class ReconnectResult:
-    """Result of a reconnection attempt."""
-    success: bool
-    attempt: int
-    total_attempts: int
-    duration_ms: float
-    error: Optional[str] = None
-
-
 # Callback type for state change notifications
 ReconnectStateCallback = Callable[[str, ReconnectState, int, int], Awaitable[None]]
 
@@ -119,19 +109,6 @@ class ReconnectingMixin:
         self._reconnect_attempt = 0
         self._reconnect_callback = callback
         self._reconnect_device_id = device_id
-
-    def set_reconnect_callback(
-        self,
-        callback: ReconnectStateCallback,
-    ) -> None:
-        """
-        Set callback for reconnection state changes.
-
-        Callback signature: async def callback(device_id, state, attempt, max_attempts)
-
-        This is useful for updating UI status during reconnection.
-        """
-        self._reconnect_callback = callback
 
     async def _on_circuit_breaker_triggered(self) -> bool:
         """
@@ -258,20 +235,3 @@ class ReconnectingMixin:
     def reconnect_state(self) -> ReconnectState:
         """Get current reconnection state."""
         return self._reconnect_state
-
-    @property
-    def is_reconnecting(self) -> bool:
-        """Check if currently attempting reconnection."""
-        return self._reconnect_state == ReconnectState.RECONNECTING
-
-    @property
-    def reconnect_failed(self) -> bool:
-        """Check if reconnection has permanently failed."""
-        return self._reconnect_state == ReconnectState.FAILED
-
-    def reset_reconnect_state(self) -> None:
-        """Reset reconnection state (e.g., after manual reconnect)."""
-        self._reconnect_state = ReconnectState.CONNECTED
-        self._reconnect_attempt = 0
-        if hasattr(self, '_consecutive_errors'):
-            self._consecutive_errors = 0

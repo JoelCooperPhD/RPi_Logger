@@ -44,12 +44,6 @@ from .gui_utils import (
 )
 from .tkinter_gui_base import TkinterGUIBase
 from .tkinter_menu_base import TkinterMenuBase
-from .usb_serial_manager import (
-    USBDeviceConfig,
-    USBSerialDevice,
-    USBDeviceMonitor,
-    DeviceState,
-)
 from .metadata import (
     DeviceType,
     FrameMetadata,
@@ -97,10 +91,6 @@ __all__ = [
     'send_geometry_to_parent',
     'TkinterGUIBase',
     'TkinterMenuBase',
-    'USBDeviceConfig',
-    'USBSerialDevice',
-    'USBDeviceMonitor',
-    'DeviceState',
     # Phase 2: Cross-module standardization
     'DeviceType',
     'FrameMetadata',

@@ -52,11 +52,6 @@ class XBeeProxyTransport:
         self._dropped_messages = 0
 
     @property
-    def device_id(self) -> str:
-        """Return the device identifier (node ID)."""
-        return self.node_id
-
-    @property
     def is_connected(self) -> bool:
         """Check if the transport is connected."""
         return self._connected
@@ -153,16 +148,6 @@ class XBeeProxyTransport:
                 self._receive_buffer.get_nowait()
             except asyncio.QueueEmpty:
                 break
-
-    @property
-    def buffer_size(self) -> int:
-        """Return current number of messages in the receive buffer."""
-        return self._receive_buffer.qsize()
-
-    @property
-    def dropped_message_count(self) -> int:
-        """Return total number of messages dropped due to buffer overflow."""
-        return self._dropped_messages
 
     async def __aenter__(self):
         """Async context manager entry."""

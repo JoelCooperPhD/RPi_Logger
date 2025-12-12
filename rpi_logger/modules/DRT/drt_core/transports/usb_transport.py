@@ -6,8 +6,8 @@ Wraps pyserial with an async interface compatible with BaseTransport.
 """
 
 import asyncio
+import threading
 from typing import Optional
-import logging
 
 import serial
 
@@ -16,6 +16,9 @@ from rpi_logger.core.devices.transports import BaseTransport
 from ..protocols import DEFAULT_READ_TIMEOUT, DEFAULT_WRITE_TIMEOUT
 
 logger = get_module_logger(__name__)
+
+# Maximum buffer size to prevent memory exhaustion from malformed devices
+MAX_READ_BUFFER_SIZE = 65536  # 64KB
 
 
 class USBTransport(BaseTransport):
@@ -47,6 +50,8 @@ class USBTransport(BaseTransport):
         self.read_timeout = read_timeout
         self.write_timeout = write_timeout
         self._serial: Optional[serial.Serial] = None
+        self._lock = threading.Lock()  # Serialize access to serial port
+        self._read_buffer = b''  # Buffer for accumulating partial reads
 
     @property
     def is_connected(self) -> bool:
@@ -87,15 +92,25 @@ class USBTransport(BaseTransport):
 
     async def disconnect(self) -> None:
         """Close the serial connection."""
-        if self._serial:
-            try:
-                await asyncio.to_thread(self._serial.close)
-                logger.info("Disconnected from %s", self.port)
-            except Exception as e:
-                logger.error("Error disconnecting from %s: %s", self.port, e)
-            finally:
-                self._serial = None
-                self._connected = False
+        if not self._serial:
+            return
+
+        def _close_with_lock():
+            """Close serial port while holding lock to prevent read/write races."""
+            with self._lock:
+                if self._serial and self._serial.is_open:
+                    self._serial.close()
+                # Clear any buffered data
+                self._read_buffer = b''
+
+        try:
+            await asyncio.to_thread(_close_with_lock)
+            logger.info("Disconnected from %s", self.port)
+        except Exception as e:
+            logger.error("Error disconnecting from %s: %s", self.port, e)
+        finally:
+            self._serial = None
+            self._connected = False
 
     async def write(self, data: bytes) -> bool:
         """
@@ -111,9 +126,14 @@ class USBTransport(BaseTransport):
             logger.error("Cannot write to %s: not connected", self.port)
             return False
 
+        def _write_with_lock():
+            """Write data while holding the lock."""
+            with self._lock:
+                self._serial.write(data)
+                self._serial.flush()
+
         try:
-            await asyncio.to_thread(self._serial.write, data)
-            await asyncio.to_thread(self._serial.flush)
+            await asyncio.to_thread(_write_with_lock)
             logger.debug("Wrote to %s: %s", self.port, data)
             return True
         except serial.SerialException as e:
@@ -124,24 +144,51 @@ class USBTransport(BaseTransport):
         """
         Read a line from the serial port.
 
+        Uses internal buffering to handle partial reads properly.
+        Lock is only held briefly during buffer access, not during the read.
+
         Returns:
             The line read (decoded as UTF-8), or None if no data/timeout
         """
         if not self.is_connected:
             return None
 
-        try:
-            # Check if data is available (non-blocking check)
-            if not await asyncio.to_thread(lambda: self._serial.in_waiting > 0):
-                # No sleep here - the caller (handler read loop) manages timing
+        def _read_with_buffer():
+            """Read data and manage line buffer (single lock acquisition)."""
+            with self._lock:
+                # Read any available data
+                waiting = self._serial.in_waiting
+                if waiting > 0:
+                    new_data = self._serial.read(waiting)
+                    self._read_buffer += new_data
+
+                # Prevent buffer overflow from malformed devices
+                if len(self._read_buffer) > MAX_READ_BUFFER_SIZE:
+                    dropped_bytes = len(self._read_buffer) - MAX_READ_BUFFER_SIZE
+                    logger.warning(
+                        "Read buffer overflow on %s, dropping %d oldest bytes",
+                        self.port,
+                        dropped_bytes
+                    )
+                    # Keep most recent data, drop oldest
+                    self._read_buffer = self._read_buffer[-MAX_READ_BUFFER_SIZE:]
+
+                # Check if we have a complete line in the buffer
+                newline_pos = self._read_buffer.find(b'\n')
+                if newline_pos >= 0:
+                    # Extract the line (including newline)
+                    line = self._read_buffer[:newline_pos + 1]
+                    self._read_buffer = self._read_buffer[newline_pos + 1:]
+                    return line
                 return None
 
-            line_bytes = await asyncio.to_thread(self._serial.readline)
+        try:
+            line_bytes = await asyncio.to_thread(_read_with_buffer)
             if line_bytes:
                 line = line_bytes.decode('utf-8', errors='replace').strip()
-                if logger.isEnabledFor(logging.DEBUG):
+                if line:  # Only log non-empty lines
                     logger.debug("Read from %s: %s", self.port, line)
-                return line
+                return line if line else None
             return None
 
         except serial.SerialException as e:

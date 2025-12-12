@@ -72,21 +72,6 @@ class XBeeTransport:
             self._remote_device is not None
         )
 
-    @property
-    def buffer_size(self) -> int:
-        """Return current number of messages in the receive buffer."""
-        return self._receive_buffer.qsize()
-
-    @property
-    def dropped_message_count(self) -> int:
-        """Return total number of messages dropped due to buffer overflow."""
-        return self._dropped_messages
-
-    @property
-    def device_id(self) -> str:
-        """Return the device identifier (node ID)."""
-        return self.node_id
-
     async def connect(self) -> bool:
         """
         Mark the transport as connected.

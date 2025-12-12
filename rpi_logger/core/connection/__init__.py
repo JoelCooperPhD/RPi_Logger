@@ -14,7 +14,7 @@ from .retry_policy import RetryPolicy, RetryResult
 from .heartbeat_monitor import HeartbeatMonitor
 from .connection_coordinator import ConnectionCoordinator, ConnectionState, ConnectionEvent
 from .shutdown_coordinator import ShutdownCoordinator, ShutdownResult, ShutdownPhase
-from .reconnect_handler import ReconnectingMixin, ReconnectConfig, ReconnectState, ReconnectResult
+from .reconnect_handler import ReconnectingMixin, ReconnectConfig, ReconnectState
 
 __all__ = [
     # Command tracking
@@ -39,5 +39,4 @@ __all__ = [
     'ReconnectingMixin',
     'ReconnectConfig',
     'ReconnectState',
-    'ReconnectResult',
 ]
