@@ -120,7 +120,7 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 #    - Master launches modules with: --mode gui --output-dir {session_dir}/ModuleName/ --enable-commands
 #    - JSON protocol over stdin/stdout for commands and status
 #    - Each module runs independently and can be stopped individually
-gui_logger_visible = true
+gui_logger_visible = false
 camera_1_alias = Camera 1
 camera_2_alias = Camera 2
 enabled_connections = CSI:Camera,Network:EyeTracker-Neon,UART:GPS,USB:Camera,USB:DRT,USB:VOG
