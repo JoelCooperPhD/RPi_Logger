@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
-from .paths import MODULES_DIR
+from .paths import MODULES_DIR, _is_frozen
 from .logging_config import configure_logging
 from rpi_logger.modules.base.config_paths import resolve_module_config_path
 
@@ -91,6 +91,12 @@ def validate_module_structure(module_dir: Path, entry_point: Path) -> bool:
     if not entry_point.is_file():
         logger.warning("Entry point not found: %s", entry_point)
         return False
+
+    # Skip content validation when running as frozen app (PyInstaller/Nuitka)
+    # The .py files are included as data but may not be readable as text
+    if _is_frozen():
+        logger.debug("Skipping source validation for frozen app: %s", entry_point)
+        return True
 
     try:
         with open(entry_point, 'r', encoding='utf-8') as f:

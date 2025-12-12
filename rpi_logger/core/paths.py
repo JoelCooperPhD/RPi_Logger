@@ -7,19 +7,32 @@ import sys
 from pathlib import Path
 
 
+def _is_nuitka() -> bool:
+    """Check if running as a Nuitka compiled binary."""
+    return "__compiled__" in dir() or getattr(sys, 'frozen', False) and not hasattr(sys, '_MEIPASS')
+
+
+def _is_pyinstaller() -> bool:
+    """Check if running as a PyInstaller bundle."""
+    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+
+
 def _get_base_path() -> Path:
-    """Get the base path, handling both normal and PyInstaller frozen environments."""
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    """Get the base path, handling normal, PyInstaller, and Nuitka environments."""
+    if _is_pyinstaller():
         # Running as PyInstaller bundle
         return Path(sys._MEIPASS)
+    elif _is_nuitka():
+        # Running as Nuitka compiled binary - use executable directory
+        return Path(sys.executable).parent
     else:
         # Running as normal Python script
         return Path(__file__).resolve().parents[2]
 
 
 def _is_frozen() -> bool:
-    """Check if running as a PyInstaller bundle."""
-    return getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS')
+    """Check if running as a frozen/compiled application (PyInstaller or Nuitka)."""
+    return _is_pyinstaller() or _is_nuitka()
 
 
 # Base path (handles frozen vs normal)
@@ -86,4 +99,6 @@ __all__ = [
     'ICON_PATH',
     'ensure_directories',
     '_is_frozen',
+    '_is_nuitka',
+    '_is_pyinstaller',
 ]
