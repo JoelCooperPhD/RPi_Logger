@@ -35,7 +35,7 @@ jobs:
             --onefile `
             --windows-console-mode=disable `
             --enable-plugin=tk-inter `
-            --enable-plugin=numpy `
+            --assume-yes-for-downloads `
             --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui `
             --include-data-file=config.txt=config.txt `
             --include-data-dir=rpi_logger/modules=rpi_logger/modules `
@@ -72,7 +72,7 @@ jobs:
             --macos-create-app-bundle \
             --macos-app-name="RPi Logger" \
             --enable-plugin=tk-inter \
-            --enable-plugin=numpy \
+            --assume-yes-for-downloads \
             --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
             --include-data-file=config.txt=config.txt \
             --include-data-dir=rpi_logger/modules=rpi_logger/modules \
@@ -125,7 +125,7 @@ jobs:
             --standalone \
             --onefile \
             --enable-plugin=tk-inter \
-            --enable-plugin=numpy \
+            --assume-yes-for-downloads \
             --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
             --include-data-file=config.txt=config.txt \
             --include-data-dir=rpi_logger/modules=rpi_logger/modules \
@@ -183,7 +183,7 @@ jobs:
               --standalone \
               --onefile \
               --enable-plugin=tk-inter \
-              --enable-plugin=numpy \
+              --assume-yes-for-downloads \
               --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
               --include-data-file=config.txt=config.txt \
               --include-data-dir=rpi_logger/modules=rpi_logger/modules \
