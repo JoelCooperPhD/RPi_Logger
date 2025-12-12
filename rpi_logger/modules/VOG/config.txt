@@ -3,6 +3,6 @@ preview_resolution = auto
 view.show_io_panel = true
 view.show_logger = false
 enabled = true
-device_connected = true
+device_connected = false
 window_geometry = 320x200
 config_dialog_geometry = +1046+664

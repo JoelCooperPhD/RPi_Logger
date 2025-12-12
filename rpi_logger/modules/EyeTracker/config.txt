@@ -89,11 +89,11 @@ discovery_retry = 3.0     # Seconds between retries
 ################################################################################
 # MASTER LOGGER INTEGRATION
 ################################################################################
-enabled = true
+enabled = false
 preview_resolution = auto
 gui_io_stub_visible = false
 view.show_io_panel = true
 view.show_logger = true
 window_geometry = 1025x992+1996+367
-device_connected = true
+device_connected = false
 eyetracker_config_dialog_geometry = +392+790
