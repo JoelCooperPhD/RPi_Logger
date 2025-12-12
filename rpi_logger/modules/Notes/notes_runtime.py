@@ -351,8 +351,6 @@ class NotesRuntime(ModuleRuntime):
         self.auto_start = self.typed_config.auto_start
         if self.preferences.prefs:
             self.auto_start = self.preferences.auto_start(self.auto_start)
-            self.preferences.set_history_limit(self.history_limit)
-            self.preferences.set_auto_start(self.auto_start)
         self._module_dir: Optional[Path] = None
 
         self.archive: Optional[NotesArchive] = None
@@ -371,9 +369,6 @@ class NotesRuntime(ModuleRuntime):
             self._build_ui()
             if hasattr(self.view, 'set_data_subdir'):
                 self.view.set_data_subdir(self.MODULE_SUBDIR)
-
-        if self.preferences.prefs:
-            self.preferences.set_auto_start(self.auto_start)
 
         if self.auto_start:
             self._run_async(self._start_recording())
