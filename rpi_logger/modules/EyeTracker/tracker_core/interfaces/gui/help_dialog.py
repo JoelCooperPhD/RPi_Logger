@@ -49,7 +49,6 @@ Device Status Panel
    • Recording: Current recording state (Active/Idle)
 
 Controls
-   • Reconnect: Attempt to reconnect to device
    • Configure: Open device settings dialog
 
 
@@ -255,7 +254,7 @@ Device not detected:
    1. Check USB cable connection
    2. Verify Pupil Capture is running
    3. Check network settings if using WiFi
-   4. Click "Reconnect" button
+   4. Restart the module if needed
 
 No gaze data appearing:
    1. Ensure calibration was completed

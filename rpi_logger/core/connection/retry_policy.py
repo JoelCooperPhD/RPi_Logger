@@ -25,7 +25,6 @@ class RetryOutcome(Enum):
     """Outcome of a retry operation."""
     SUCCESS = "success"
     EXHAUSTED = "exhausted"  # All retries failed
-    ABORTED = "aborted"      # Retry was cancelled
 
 
 @dataclass
@@ -102,15 +101,6 @@ class RetryPolicy:
         self.max_delay = max_delay
         self.backoff_factor = backoff_factor
         self.jitter = jitter
-        self._aborted = False
-
-    def abort(self) -> None:
-        """Signal that retry should be aborted."""
-        self._aborted = True
-
-    def reset(self) -> None:
-        """Reset abort flag for reuse."""
-        self._aborted = False
 
     def get_delay(self, attempt: int) -> float:
         """
@@ -153,21 +143,11 @@ class RetryPolicy:
         Returns:
             RetryResult with outcome and attempt history
         """
-        self._aborted = False
         attempts: List[RetryAttempt] = []
         start_time = time.time()
         last_error: Optional[str] = None
 
         for attempt in range(1, self.max_attempts + 1):
-            if self._aborted:
-                return RetryResult(
-                    outcome=RetryOutcome.ABORTED,
-                    success=False,
-                    attempts=attempts,
-                    total_duration_ms=(time.time() - start_time) * 1000,
-                    final_error="Retry aborted",
-                )
-
             # Wait before retry (not before first attempt)
             if attempt > 1:
                 delay = self.get_delay(attempt)
@@ -249,23 +229,12 @@ class RetryPolicy:
         Returns:
             RetryResult with result_data containing the final result
         """
-        self._aborted = False
         attempts: List[RetryAttempt] = []
         start_time = time.time()
         last_error: Optional[str] = None
         last_result: Any = None
 
         for attempt in range(1, self.max_attempts + 1):
-            if self._aborted:
-                return RetryResult(
-                    outcome=RetryOutcome.ABORTED,
-                    success=False,
-                    attempts=attempts,
-                    total_duration_ms=(time.time() - start_time) * 1000,
-                    final_error="Retry aborted",
-                    result_data=last_result,
-                )
-
             if attempt > 1:
                 delay = self.get_delay(attempt)
                 if on_retry:

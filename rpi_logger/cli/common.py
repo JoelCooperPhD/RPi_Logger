@@ -236,6 +236,69 @@ def get_config_str(config: dict, key: str, default: str) -> str:
     return config.get(key, default)
 
 
+def get_config_path(config: dict, key: str, default: Path) -> Path:
+    """Get a Path value from config, returning default if missing or invalid."""
+    if key not in config:
+        return default
+    value = config[key]
+    if value is None:
+        return default
+    text = str(value).strip()
+    if not text:
+        return default
+    try:
+        return Path(text)
+    except Exception:
+        return default
+
+
+def add_config_to_args(
+    parser: argparse.ArgumentParser,
+    config_context: "ModuleConfigContext",
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    """Load config file and return values for CLI argument defaulting.
+
+    This is the unified entry point for modules to load their config files
+    during argument parsing. It:
+    1. Loads the config file from the writable path
+    2. Merges with provided defaults
+    3. Sets the config_path as a parser default
+
+    Args:
+        parser: ArgumentParser to configure with config_path default.
+        config_context: Module config context from resolve_module_config_path().
+        defaults: Default values dict (keys should match config file keys).
+
+    Returns:
+        Loaded config dict with defaults applied, for use in setting CLI defaults.
+
+    Example:
+        config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+        defaults = asdict(MyModuleConfig())
+        config = add_config_to_args(parser, config_ctx, defaults)
+
+        add_common_cli_arguments(
+            parser,
+            default_output=config.get("output_dir", defaults["output_dir"]),
+            ...
+        )
+    """
+    from rpi_logger.modules.base.config_loader import ConfigLoader
+
+    config = ConfigLoader.load(config_context.writable_path, defaults, strict=False)
+
+    # Store config path in parser defaults for later access
+    parser.set_defaults(config_path=config_context.writable_path)
+
+    return config
+
+
+# Type import for type checking only
+if False:  # TYPE_CHECKING equivalent that works at runtime
+    from rpi_logger.modules.base.config_paths import ModuleConfigContext
+
+
 def _try_prepare_log_destination(directory: Path, filename: str) -> tuple[Path | None, Exception | None]:
     try:
         directory.mkdir(parents=True, exist_ok=True)

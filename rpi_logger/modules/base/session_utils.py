@@ -1,9 +1,8 @@
 
 import datetime
-import logging
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Tuple
 
 from rpi_logger.core.logging_utils import get_module_logger
 

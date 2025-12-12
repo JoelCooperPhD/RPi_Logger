@@ -1,8 +1,6 @@
 
-import logging
 import re
 from collections import deque
-from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger

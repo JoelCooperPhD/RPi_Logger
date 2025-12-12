@@ -134,6 +134,7 @@ class StubCodexView:
         self._io_row_index = 1
         self._help_menu_label = "Help"
         self.help_menu: Optional[tk.Menu] = None
+        self._data_subdir: Optional[str] = None
 
         try:
             self._event_loop = asyncio.get_running_loop()
@@ -283,25 +284,15 @@ class StubCodexView:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         Theme.configure_menu(file_menu)
+        self.file_menu = file_menu
         menubar.add_cascade(label="File", menu=file_menu)
         file_menu.add_command(label="Open Log File", command=self._open_log_file)
-        file_menu.add_separator()
-        file_menu.add_command(label="Quit", command=self._on_quit_clicked)
+        file_menu.add_command(label="Open Data Folder", command=self._open_data_folder, state="disabled")
 
         view_menu = tk.Menu(menubar, tearoff=0)
         Theme.configure_menu(view_menu)
         self.view_menu = view_menu
         menubar.add_cascade(label="View", menu=view_menu)
-        view_menu.add_checkbutton(
-            label="Show Capture Stats",
-            variable=self.io_view_visible_var,
-            command=self._toggle_io_view,
-        )
-        view_menu.add_checkbutton(
-            label="Show Logger",
-            variable=self.log_visible_var,
-            command=self._toggle_log_visibility,
-        )
 
         help_menu = tk.Menu(menubar, tearoff=0)
         Theme.configure_menu(help_menu)
@@ -325,6 +316,35 @@ class StubCodexView:
         except tk.TclError:
             return None
         return menu
+
+    def finalize_file_menu(self) -> None:
+        """Add separator and Quit to File menu. Call after module setup."""
+        if self.file_menu is None:
+            return
+        try:
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="Quit", command=self._on_quit_clicked)
+        except tk.TclError:
+            pass
+
+    def finalize_view_menu(self) -> None:
+        """Add Capture Stats and Logger toggles to View menu. Call after module setup."""
+        if self.view_menu is None:
+            return
+        try:
+            self.view_menu.add_separator()
+            self.view_menu.add_checkbutton(
+                label="Show Capture Stats",
+                variable=self.io_view_visible_var,
+                command=self._toggle_io_view,
+            )
+            self.view_menu.add_checkbutton(
+                label="Show Logger",
+                variable=self.log_visible_var,
+                command=self._toggle_log_visibility,
+            )
+        except tk.TclError:
+            pass
 
     def add_view_submenu(self, label: str, *, tearoff: int = 0) -> Optional[tk.Menu]:
         if self.view_menu is None:
@@ -531,6 +551,45 @@ class StubCodexView:
         except Exception as exc:
             self.logger.error("Failed to open log file: %s", exc)
 
+    def set_data_subdir(self, name: str) -> None:
+        """Set the subdirectory name for the module's data folder."""
+        self._data_subdir = name
+
+    def _get_data_folder_path(self) -> Optional[Path]:
+        """Get the module's data folder path based on session_dir and data_subdir."""
+        session_dir = self.model.session_dir
+        if not session_dir or not self._data_subdir:
+            return None
+        return session_dir / self._data_subdir
+
+    def _update_data_folder_menu_state(self) -> None:
+        """Enable/disable the Open Data Folder menu item based on folder availability."""
+        if self.file_menu is None:
+            return
+        folder = self._get_data_folder_path()
+        state = "normal" if folder and folder.exists() else "disabled"
+        try:
+            self.file_menu.entryconfig("Open Data Folder", state=state)
+        except tk.TclError:
+            pass
+
+    def _open_data_folder(self) -> None:
+        """Open the module data folder in the system file manager."""
+        folder = self._get_data_folder_path()
+        if not folder or not folder.exists():
+            return
+        try:
+            if sys.platform.startswith('linux'):
+                subprocess.Popen(['xdg-open', str(folder)])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(folder)])
+            elif sys.platform == 'win32':
+                subprocess.Popen(['explorer', str(folder)])
+            else:
+                self.logger.warning("Unsupported platform for opening folders: %s", sys.platform)
+        except Exception as exc:
+            self.logger.error("Failed to open data folder: %s", exc)
+
     def _show_help(self) -> None:
         try:
             if self._help_callback:
@@ -617,6 +676,8 @@ class StubCodexView:
 
     def _on_model_change(self, prop: str, value) -> None:
         self.logger.debug("Model change: %s -> %s", prop, value)
+        if prop == "session_dir":
+            self._update_data_folder_menu_state()
 
     # ------------------------------------------------------------------
     # Lifecycle

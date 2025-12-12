@@ -21,13 +21,13 @@ from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from rpi_logger.core.commands import StatusMessage
 from rpi_logger.core.logging_utils import ensure_structured_logger
 
-from ..gps_core.config import load_config_file
 from ..gps_core.constants import DEFAULT_NMEA_HISTORY
 from ..gps_core.handlers import GPSHandler
 from ..gps_core.transports import SerialGPSTransport
 from ..gps_core.parsers.nmea_types import GPSFixSnapshot
 from ..gps_core.interfaces.gui import GPSMapRenderer
 from ..preferences import GPSPreferences
+from ..config import GPSConfig
 
 
 class GPSModuleRuntime(ModuleRuntime):
@@ -55,14 +55,16 @@ class GPSModuleRuntime(ModuleRuntime):
         self.view = context.view
         self.display_name = context.display_name
 
-        # Preferences
+        # Configuration - use typed config via preferences_scope
         scope_fn = getattr(context.model, "preferences_scope", None)
         pref_scope = scope_fn("gps") if callable(scope_fn) else None
         self.preferences = GPSPreferences(pref_scope)
 
-        # Config
         self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
-        self.config: Dict[str, Any] = load_config_file(self.config_path)
+        self.typed_config = GPSConfig.from_preferences(pref_scope, self.args) if pref_scope else GPSConfig()
+
+        # Keep dict config for backward compatibility during migration
+        self.config: Dict[str, Any] = self.typed_config.to_dict()
 
         # Session management
         self.session_prefix = str(getattr(self.args, "session_prefix", self.config.get("session_prefix", "gps")))

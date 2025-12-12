@@ -123,6 +123,8 @@ class CamerasRuntime(ModuleRuntime):
         if self.ctx.view:
             with contextlib.suppress(Exception):
                 self.ctx.view.set_preview_title("Camera")
+            if hasattr(self.ctx.view, 'set_data_subdir'):
+                self.ctx.view.set_data_subdir("Cameras")
 
         self.view.attach()
         self.view.bind_handlers(
@@ -493,11 +495,18 @@ class CamerasRuntime(ModuleRuntime):
         self.view.set_recording(False)
 
         if self._encoder:
+            frames_dropped = self._encoder.frames_dropped
             await asyncio.to_thread(self._encoder.stop)
             frame_count = self._encoder.frame_count
             duration = self._encoder.duration_sec
             self._encoder = None
-            self.logger.info("Recording stopped: %d frames, %.1fs", frame_count, duration)
+            if frames_dropped > 0:
+                self.logger.warning(
+                    "Recording stopped: %d frames, %.1fs (%d frames dropped due to backpressure)",
+                    frame_count, duration, frames_dropped
+                )
+            else:
+                self.logger.info("Recording stopped: %d frames, %.1fs", frame_count, duration)
 
         StatusMessage.send("recording_stopped", {
             "camera_id": self._camera_id.key if self._camera_id else None,
@@ -702,20 +711,18 @@ class CamerasRuntime(ModuleRuntime):
                 fps_window_frames += 1
                 now = time.monotonic()
 
-                # Recording: encode frame
+                # Recording: submit frame to encode worker
                 if self._is_recording and self._encoder:
-                    try:
-                        await asyncio.to_thread(
-                            self._encoder.write_frame,
-                            frame.data,
-                            timestamp=frame.wall_time,
-                            pts_time_ns=frame.sensor_timestamp_ns,
-                            color_format=frame.color_format,
-                        )
+                    queued = self._encoder.write_frame(
+                        frame.data,
+                        timestamp=frame.wall_time,
+                        pts_time_ns=frame.sensor_timestamp_ns,
+                        color_format=frame.color_format,
+                    )
+                    if queued:
                         encode_count += 1
                         fps_encode_frames += 1
-                    except Exception as e:
-                        self.logger.warning("Encode error: %s", e)
+                    # Note: backpressure (queue full) is handled by encoder worker
 
                 # Preview: display frame (throttled)
                 if frame_count % preview_interval == 0:
@@ -738,7 +745,7 @@ class CamerasRuntime(ModuleRuntime):
 
                 # Update metrics periodically
                 if frame_count % 30 == 0:
-                    self.view.update_metrics({
+                    metrics = {
                         "frames_captured": frame_count,
                         "frames_recorded": encode_count,
                         "is_recording": self._is_recording,
@@ -749,35 +756,58 @@ class CamerasRuntime(ModuleRuntime):
                         "target_fps": self._fps,
                         "target_record_fps": self._fps if self._is_recording else None,
                         "target_preview_fps": self._fps / preview_interval,
-                    })
+                    }
+                    # Include encoder worker stats when recording
+                    if self._is_recording and self._encoder:
+                        metrics["frames_dropped"] = self._encoder.frames_dropped
+                        metrics["encode_queue_depth"] = self._encoder.queue_depth
+                    self.view.update_metrics(metrics)
 
         except asyncio.CancelledError:
             self.logger.info("Capture loop cancelled")
         except Exception as e:
             self.logger.error("Capture loop error: %s", e, exc_info=True)
 
-    def _make_preview_frame(self, frame: CaptureFrame):
-        """Create preview frame from capture frame."""
+    def _make_preview_frame(self, frame: CaptureFrame) -> Optional[bytes]:
+        """Create preview frame from capture frame.
+
+        Returns PPM bytes ready for tk.PhotoImage(data=...), with:
+        - RGB color space (converted from BGR)
+        - Scaled to fit canvas dimensions while maintaining aspect ratio
+        - Serialized as PPM for fast PhotoImage creation on Tk thread
+        """
         import cv2
+        import io
+        from PIL import Image
 
         try:
             # Use lores stream if available (Picam with YUV420)
             if frame.lores_data is not None and frame.lores_format == "yuv420":
-                return yuv420_to_bgr(frame.lores_data)
+                bgr = yuv420_to_bgr(frame.lores_data)
+            else:
+                bgr = frame.data
 
-            # Resize main frame to configured preview resolution
-            h, w = frame.data.shape[:2]
-            target_w, target_h = self._preview_resolution
+            h, w = bgr.shape[:2]
 
-            # Only resize if different from source
+            # Get target size from view's canvas, fallback to configured resolution
+            target_w, target_h = self.view.get_canvas_size()
+
+            # Scale to fit canvas while maintaining aspect ratio
             if w != target_w or h != target_h:
-                # Maintain aspect ratio - fit within target dimensions
                 scale = min(target_w / w, target_h / h)
                 new_w = int(w * scale)
                 new_h = int(h * scale)
-                return cv2.resize(frame.data, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                if new_w > 0 and new_h > 0:
+                    bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-            return frame.data
+            # Convert BGR to RGB for PIL
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+
+            # Convert to PPM bytes for fast PhotoImage creation
+            img = Image.fromarray(rgb)
+            ppm_buffer = io.BytesIO()
+            img.save(ppm_buffer, format="PPM")
+            return ppm_buffer.getvalue()
 
         except Exception as e:
             self.logger.debug("Preview frame error: %s", e)

@@ -9,15 +9,11 @@ handlers can attempt reconnection with exponential backoff.
 from __future__ import annotations
 
 import asyncio
-import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Awaitable, Callable, Optional, TYPE_CHECKING
+from typing import Awaitable, Callable, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_module_logger("ReconnectHandler")
 
@@ -50,24 +46,6 @@ class ReconnectConfig:
     def default(cls) -> "ReconnectConfig":
         """Get default configuration."""
         return cls()
-
-    @classmethod
-    def aggressive(cls) -> "ReconnectConfig":
-        """More aggressive reconnection - more attempts, shorter delays."""
-        return cls(
-            max_reconnect_attempts=10,
-            base_reconnect_delay=0.5,
-            max_reconnect_delay=15.0,
-        )
-
-    @classmethod
-    def patient(cls) -> "ReconnectConfig":
-        """Patient reconnection - fewer attempts, longer delays."""
-        return cls(
-            max_reconnect_attempts=3,
-            base_reconnect_delay=5.0,
-            max_reconnect_delay=60.0,
-        )
 
 
 @dataclass

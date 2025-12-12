@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Awaitable
 
 from rpi_logger.core.logging_utils import get_module_logger
-from .device_registry import DeviceType, DeviceFamily, InterfaceType, get_spec
+from .device_registry import DeviceType, DeviceFamily, InterfaceType
 from .catalog import DeviceCatalog
 from .selection import DeviceSelectionModel, ConnectionState
 from .events import DeviceDiscoveredEvent, DeviceLostEvent, DeviceEvent

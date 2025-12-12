@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import shutil
 from dataclasses import dataclass
@@ -80,7 +79,20 @@ def resolve_writable_module_config(
     *,
     filename: str = "config.txt",
 ) -> Path:
-    """Backward-compatible helper that returns only the writable config path."""
+    """Backward-compatible helper that returns only the writable config path.
+
+    .. deprecated::
+        Use :func:`resolve_module_config_path` instead, which returns a
+        :class:`ModuleConfigContext` with both template and writable paths.
+    """
+    import warnings
+
+    warnings.warn(
+        "resolve_writable_module_config is deprecated. "
+        "Use resolve_module_config_path() which returns ModuleConfigContext.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     return resolve_module_config_path(
         module_dir,

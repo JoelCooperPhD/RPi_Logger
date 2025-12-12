@@ -38,43 +38,42 @@ _venv_site = PROJECT_ROOT / ".venv" / "lib" / f"python{sys.version_info.major}.{
 if _venv_site.exists() and str(_venv_site) not in sys.path:
     sys.path.insert(0, str(_venv_site))
 
+from dataclasses import asdict  # noqa: E402
+
 from vmc import StubCodexSupervisor  # noqa: E402
 
 from gps.runtime import GPSModuleRuntime  # noqa: E402
 from view import GPSView  # noqa: E402
-from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers  # noqa: E402
+from rpi_logger.cli.common import add_common_cli_arguments, add_config_to_args, install_signal_handlers  # noqa: E402
 from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
 from rpi_logger.modules.base.config_paths import resolve_module_config_path  # noqa: E402
-from rpi_logger.modules.GPS.gps_core.config import load_config_file  # noqa: E402
+
+from .config import GPSConfig  # noqa: E402
 
 logger = get_module_logger("MainGPS")
-CONFIG_CONTEXT = resolve_module_config_path(MODULE_DIR, "gps")
+MODULE_ID = "gps"
 
 
 def parse_args(argv: Optional[list[str]] = None):
     """Parse command-line arguments."""
-    config = load_config_file(CONFIG_CONTEXT.writable_path)
-
-    default_output = Path(config.get("output_dir", "gps_data"))
-    default_session_prefix = str(config.get("session_prefix", "gps"))
-    default_console = bool(config.get("console_output", False))
-    default_zoom = float(config.get("zoom", 13.0))
-    default_center_lat = float(config.get("center_lat", 40.7608))
-    default_center_lon = float(config.get("center_lon", -111.8910))
-    default_nmea_history = int(config.get("nmea_history", 30))
+    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+    defaults = asdict(GPSConfig())
 
     parser = argparse.ArgumentParser(description="GPS shell module")
+
+    # Load config using unified helper
+    config = add_config_to_args(parser, config_ctx, defaults)
 
     # Use common CLI arguments for standard options
     add_common_cli_arguments(
         parser,
-        default_output=default_output,
+        default_output=Path(config.get("output_dir", defaults["output_dir"])),
         allowed_modes=["gui", "headless"],
-        default_mode=str(config.get("default_mode", "gui")).lower(),
+        default_mode=str(config.get("default_mode", defaults["default_mode"])).lower(),
         include_session_prefix=True,
-        default_session_prefix=default_session_prefix,
+        default_session_prefix=str(config.get("session_prefix", defaults["session_prefix"])),
         include_console_control=True,
-        default_console_output=default_console,
+        default_console_output=bool(config.get("console_output", defaults["console_output"])),
         include_auto_recording=False,  # GPS doesn't use auto-recording
         include_parent_control=True,
         include_window_geometry=True,
@@ -85,38 +84,37 @@ def parse_args(argv: Optional[list[str]] = None):
         "--offline-db",
         dest="offline_db",
         type=Path,
-        default=config.get("offline_db", "offline_tiles.db"),
+        default=config.get("offline_db", defaults["offline_db"]),
         help="Path to the offline tiles database.",
     )
     parser.add_argument(
         "--center-lat",
         type=float,
-        default=default_center_lat,
+        default=float(config.get("center_lat", defaults["center_lat"])),
         help="Initial map latitude.",
     )
     parser.add_argument(
         "--center-lon",
         type=float,
-        default=default_center_lon,
+        default=float(config.get("center_lon", defaults["center_lon"])),
         help="Initial map longitude.",
     )
     parser.add_argument(
         "--zoom",
         type=float,
-        default=default_zoom,
+        default=float(config.get("zoom", defaults["zoom"])),
         help="Initial map zoom level.",
     )
     parser.add_argument(
         "--nmea-history",
         dest="nmea_history",
         type=int,
-        default=default_nmea_history,
+        default=int(config.get("nmea_history", defaults["nmea_history"])),
         help="Number of recent NMEA sentences shown in the diagnostics panel.",
     )
 
     args = parser.parse_args(argv)
-    args.config = config
-    args.config_file_path = CONFIG_CONTEXT.writable_path
+    # config_path is set by add_config_to_args
     return args
 
 
@@ -128,8 +126,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
         logger.error("GPS module must be launched by the logger controller (commands disabled).")
         return
 
-    display_name = args.config.get("display_name", "GPS")
-    setattr(args, "config_path", CONFIG_CONTEXT.writable_path)
+    # config_path is set by add_config_to_args in parse_args
+    config_path = getattr(args, "config_path", None)
+    defaults = GPSConfig()
 
     supervisor = StubCodexSupervisor(
         args,
@@ -137,9 +136,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
         logger.getChild("Supervisor"),
         runtime_factory=lambda context: GPSModuleRuntime(context),
         view_factory=GPSView,
-        display_name=display_name,
-        module_id="gps",
-        config_path=CONFIG_CONTEXT.writable_path,
+        display_name=defaults.display_name,
+        module_id=MODULE_ID,
+        config_path=config_path,
     )
 
     loop = asyncio.get_running_loop()

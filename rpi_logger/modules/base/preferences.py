@@ -9,7 +9,6 @@ This module provides:
 from __future__ import annotations
 
 import asyncio
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol, Set, runtime_checkable

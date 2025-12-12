@@ -921,21 +921,3 @@ class ModuleManager:
                 else:
                     self.forcefully_stopped_modules.discard(module_name)
                 self.logger.debug("Cleaned up stopped process: %s", module_name)
-
-    # =========================================================================
-    # Legacy Compatibility (deprecated)
-    # =========================================================================
-
-    @property
-    def module_enabled_state(self) -> Dict[str, bool]:
-        """Legacy property - use state_manager.get_desired_states() instead."""
-        return self.state_manager.get_desired_states()
-
-    @module_enabled_state.setter
-    def module_enabled_state(self, value: Dict[str, bool]) -> None:
-        """Legacy setter - sets desired states without reconciliation."""
-        for name, enabled in value.items():
-            # Set state without reconciliation (sync context)
-            self.state_manager._desired_state[name] = (
-                DesiredState.ENABLED if enabled else DesiredState.DISABLED
-            )

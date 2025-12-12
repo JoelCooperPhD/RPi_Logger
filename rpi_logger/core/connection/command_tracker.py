@@ -13,12 +13,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
-
-if TYPE_CHECKING:
-    from rpi_logger.core.module_process import ModuleProcess
 
 logger = get_module_logger("CommandTracker")
 

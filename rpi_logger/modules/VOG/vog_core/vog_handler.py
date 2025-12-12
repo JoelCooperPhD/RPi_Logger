@@ -14,7 +14,7 @@ from rpi_logger.core.commands import StatusMessage
 from rpi_logger.core.connection import ReconnectingMixin, ReconnectConfig
 from .transports import BaseTransport
 
-from .protocols import BaseVOGProtocol, VOGDataPacket, VOGResponse
+from .protocols import BaseVOGProtocol, VOGDataPacket
 from .protocols.base_protocol import ResponseType
 from .constants import COMMAND_DELAY
 from .data_logger import VOGDataLogger

@@ -31,38 +31,51 @@ _venv_site = PROJECT_ROOT / ".venv" / "lib" / f"python{sys.version_info.major}.{
 if _venv_site.exists() and str(_venv_site) not in sys.path:
     sys.path.insert(0, str(_venv_site))
 
+from dataclasses import asdict
+
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy
-from vmc.constants import PLACEHOLDER_GEOMETRY
 
 from notes_runtime import NotesRuntime
-from rpi_logger.modules.base.config_paths import resolve_module_config_path, resolve_writable_module_config
-from rpi_logger.modules.base.preferences import ModulePreferences
-from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers
+from rpi_logger.modules.base.config_paths import resolve_module_config_path
+from rpi_logger.cli.common import (
+    add_common_cli_arguments,
+    add_config_to_args,
+    install_signal_handlers,
+    get_config_bool,
+    get_config_int,
+    get_config_str,
+    get_config_path,
+)
+
+from rpi_logger.modules.Notes.config import NotesConfig
 
 DISPLAY_NAME = "Notes"
 MODULE_ID = "notes"
 DEFAULT_OUTPUT_SUBDIR = Path("notes")
 DEFAULT_HISTORY_LIMIT = 200
-CONFIG_PATH = resolve_writable_module_config(MODULE_DIR, MODULE_ID)
-PREFERENCES = ModulePreferences(CONFIG_PATH)
 
 logger = get_module_logger("MainNotes")
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    config = _load_notes_config()
+    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+    defaults = asdict(NotesConfig())
+
     parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} module")
+
+    # Load config using unified helper
+    config = add_config_to_args(parser, config_ctx, defaults)
 
     # Use common CLI arguments for standard options
     add_common_cli_arguments(
         parser,
-        default_output=_config_path(config, "output_dir", DEFAULT_OUTPUT_SUBDIR),
+        default_output=get_config_path(config, "output_dir", DEFAULT_OUTPUT_SUBDIR),
         allowed_modes=["gui", "headless"],
-        default_mode=_normalize_mode(_config_text(config, "mode") or "gui"),
+        default_mode=_normalize_mode(get_config_str(config, "mode", defaults["mode"])),
         include_session_prefix=True,
-        default_session_prefix=_config_text(config, "session_prefix") or MODULE_ID,
+        default_session_prefix=get_config_str(config, "session_prefix", defaults["session_prefix"]),
         include_console_control=True,
-        default_console_output=_config_bool(config, "console_output", False),
+        default_console_output=get_config_bool(config, "console_output", defaults["console_output"]),
         include_auto_recording=False,  # Notes uses its own --auto-start terminology
         include_parent_control=True,
         include_window_geometry=True,
@@ -72,7 +85,7 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--history-limit",
         type=int,
-        default=_config_int(config, "history_limit", DEFAULT_HISTORY_LIMIT),
+        default=get_config_int(config, "notes.history_limit", defaults["history_limit"]),
         help="Maximum number of notes retained in the on-screen history",
     )
 
@@ -90,67 +103,15 @@ def parse_args(argv: Optional[list[str]] = None):
         action="store_false",
         help="Disable automatic note collection on startup",
     )
-    parser.set_defaults(auto_start=_config_bool(config, "auto_start", False))
+    parser.set_defaults(auto_start=get_config_bool(config, "notes.auto_start", defaults["auto_start"]))
 
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # config_path is set by add_config_to_args
+    return args
 
 
 def build_runtime(context):
     return NotesRuntime(context)
-
-
-def _load_notes_config() -> dict[str, str]:
-    return PREFERENCES.snapshot()
-
-
-def _config_text(config: dict[str, str], key: str) -> Optional[str]:
-    raw = config.get(key)
-    if raw is None:
-        return None
-    text = str(raw).strip()
-    return text or None
-
-
-def _config_bool(config: dict[str, str], key: str, default: bool) -> bool:
-    text = _config_text(config, key)
-    if text is None:
-        return default
-    lowered = text.lower()
-    if lowered in {"1", "true", "yes", "on"}:
-        return True
-    if lowered in {"0", "false", "no", "off"}:
-        return False
-    return default
-
-
-def _config_int(config: dict[str, str], key: str, default: int) -> int:
-    text = _config_text(config, key)
-    if text is None:
-        return default
-    try:
-        return int(float(text))
-    except (TypeError, ValueError):
-        return default
-
-
-def _config_path(config: dict[str, str], key: str, default: Path) -> Path:
-    text = _config_text(config, key)
-    if text is None:
-        return default
-    try:
-        return Path(text)
-    except Exception:
-        return default
-
-
-def _config_optional_path(config: dict[str, str], key: str) -> Optional[Path]:
-    text = _config_text(config, key)
-    if text is None:
-        return None
-    try:
-        return Path(text)
-    except Exception:
-        return None
 
 
 def _normalize_mode(value: str) -> str:
@@ -167,10 +128,8 @@ async def main(argv: Optional[list[str]] = None) -> None:
         logger.error("Notes module must be launched by the logger controller.")
         return
 
-    module_dir = MODULE_DIR
-
-    config_context = resolve_module_config_path(MODULE_DIR, MODULE_ID)
-    setattr(args, "config_path", config_context.writable_path)
+    # config_path is set by add_config_to_args in parse_args
+    config_path = getattr(args, "config_path", None)
 
     def show_notes_help(parent):
         from rpi_logger.modules.Notes.help_dialog import NotesHelpDialog
@@ -178,13 +137,13 @@ async def main(argv: Optional[list[str]] = None) -> None:
 
     supervisor = StubCodexSupervisor(
         args,
-        module_dir,
+        MODULE_DIR,
         logger,
         runtime_factory=build_runtime,
         runtime_retry_policy=RuntimeRetryPolicy(interval=3.0, max_attempts=3),
         display_name=DISPLAY_NAME,
         module_id=MODULE_ID,
-        config_path=config_context.writable_path,
+        config_path=config_path,
         help_callback=show_notes_help,
     )
 

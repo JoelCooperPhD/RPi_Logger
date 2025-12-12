@@ -397,7 +397,7 @@ class DRTTkinterGUI:
     def _sync_control_states(self):
         """Enable/disable controls based on recording state.
 
-        Note: Device menu state is managed by DRTView._update_device_menu_state()
+        Note: Menu state is managed by DRTView._update_menu_state()
         """
         pass
 
@@ -646,7 +646,6 @@ class DRTView:
         self._initial_session_dir: Optional[Path] = None
         self._active_session_dir: Optional[Path] = None
         self._session_visual_active = False
-        self._device_menu: Optional[tk.Menu] = None
         self._battery_frame: Optional[ttk.Frame] = None
 
         self._bridge.mount(self._build_embedded_gui)
@@ -696,8 +695,8 @@ class DRTView:
         # Build capture stats content with DRT results
         self._build_capture_stats()
 
-        # Add Device menu
-        self._build_device_menu()
+        # Install menu items
+        self._install_menu_items()
 
         self.logger.info("=== DRTView._build_embedded_gui COMPLETED ===")
         return container
@@ -744,35 +743,44 @@ class DRTView:
 
         self._stub_view.build_io_stub_content(builder)
 
-    def _build_device_menu(self) -> None:
-        """Build the Device menu with Lens and Configure commands."""
-        self._device_menu = self._stub_view.add_menu("Device")
-        if not self._device_menu:
-            self.logger.warning("Failed to create Device menu")
-            return
+    def _install_menu_items(self) -> None:
+        """Add DRT items to File and View menus."""
+        # Add Configure to File menu
+        file_menu = getattr(self._stub_view, "file_menu", None)
+        if file_menu is not None:
+            file_menu.add_separator()
+            file_menu.add_command(
+                label="Configure...",
+                command=self._on_configure,
+            )
 
-        self._device_menu.add_command(
-            label="Stimulus: ON",
-            command=self._on_lens_on,
-        )
-        self._device_menu.add_command(
-            label="Stimulus: OFF",
-            command=self._on_lens_off,
-        )
-        self._device_menu.add_separator()
-        self._device_menu.add_command(
-            label="Configure...",
-            command=self._on_configure,
-        )
+        # Add Stimulus controls to View menu
+        view_menu = getattr(self._stub_view, "view_menu", None)
+        if view_menu is not None:
+            view_menu.add_command(
+                label="Stimulus: ON",
+                command=self._on_lens_on,
+            )
+            view_menu.add_command(
+                label="Stimulus: OFF",
+                command=self._on_lens_off,
+            )
+
+        # Finalize View menu (adds Capture Stats, Logger)
+        finalize_view = getattr(self._stub_view, "finalize_view_menu", None)
+        if callable(finalize_view):
+            finalize_view()
+
+        # Finalize File menu (adds Quit)
+        finalize_file = getattr(self._stub_view, "finalize_file_menu", None)
+        if callable(finalize_file):
+            finalize_file()
 
         # Initially disable menu items until device is connected
-        self._update_device_menu_state()
+        self._update_menu_state()
 
-    def _update_device_menu_state(self) -> None:
-        """Enable/disable Device menu items based on device connection and recording state."""
-        if not self._device_menu:
-            return
-
+    def _update_menu_state(self) -> None:
+        """Enable/disable menu items based on device connection and recording state."""
         # Determine if device is connected
         has_device = self.gui and self.gui._port is not None
 
@@ -782,12 +790,17 @@ class DRTView:
         # Menu items should be enabled if device connected and not recording
         state = 'normal' if (has_device and not recording) else 'disabled'
 
+        file_menu = getattr(self._stub_view, "file_menu", None)
+        view_menu = getattr(self._stub_view, "view_menu", None)
+
         try:
-            self._device_menu.entryconfigure("Stimulus: ON", state=state)
-            self._device_menu.entryconfigure("Stimulus: OFF", state=state)
-            self._device_menu.entryconfigure("Configure...", state=state)
+            if file_menu is not None:
+                file_menu.entryconfigure("Configure...", state=state)
+            if view_menu is not None:
+                view_menu.entryconfigure("Stimulus: ON", state=state)
+                view_menu.entryconfigure("Stimulus: OFF", state=state)
         except tk.TclError as e:
-            self.logger.debug("Failed to update device menu state: %s", e)
+            self.logger.debug("Failed to update menu state: %s", e)
 
     def _update_battery_display(self, device_type: DRTDeviceType = None) -> None:
         """Show/hide battery display based on device type (wDRT only)."""
@@ -836,6 +849,10 @@ class DRTView:
             loop = getattr(runtime, "_loop", None)
             if loop:
                 self.gui.async_bridge.bind_loop(loop)
+        # Set data folder subdirectory for File menu
+        if hasattr(self._stub_view, 'set_data_subdir'):
+            module_subdir = getattr(runtime, 'module_subdir', 'DRT')
+            self._stub_view.set_data_subdir(module_subdir)
 
     def attach_logging_handler(self) -> None:
         self._stub_view.attach_logging_handler()
@@ -856,14 +873,14 @@ class DRTView:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_connected, device_id, device_type)
-        self.call_in_gui(self._update_device_menu_state)
+        self.call_in_gui(self._update_menu_state)
         self.call_in_gui(self._update_battery_display, device_type)
 
     def on_device_disconnected(self, device_id: str, device_type: DRTDeviceType = None) -> None:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_disconnected, device_id, device_type)
-        self.call_in_gui(self._update_device_menu_state)
+        self.call_in_gui(self._update_menu_state)
         self.call_in_gui(self._update_battery_display, None)  # Hide battery on disconnect
 
     def on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
@@ -882,7 +899,7 @@ class DRTView:
         if not self.gui:
             return
         self.call_in_gui(self.gui.sync_recording_state)
-        self.call_in_gui(self._update_device_menu_state)
+        self.call_in_gui(self._update_menu_state)
 
     # ------------------------------------------------------------------
     # Window title

@@ -5,7 +5,6 @@ from pathlib import Path
 from rpi_logger.core.logging_utils import get_module_logger
 
 from .headless_controller import HeadlessController
-from ..logger_system import LoggerSystem
 
 
 class InteractiveShell:

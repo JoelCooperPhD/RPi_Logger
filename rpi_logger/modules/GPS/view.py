@@ -414,6 +414,10 @@ class GPSView:
             loop = getattr(runtime, "_loop", None)
             if loop:
                 self.gui.async_bridge.bind_loop(loop)
+        # Set data folder subdirectory for File menu
+        if hasattr(self._stub_view, 'set_data_subdir'):
+            module_subdir = getattr(runtime, 'module_subdir', 'GPS')
+            self._stub_view.set_data_subdir(module_subdir)
 
     def get_content_frame(self) -> Optional[Any]:
         """Get the content frame for runtime to build UI into."""

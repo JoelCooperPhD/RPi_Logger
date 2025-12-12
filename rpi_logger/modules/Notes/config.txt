@@ -1,5 +1,5 @@
 display_name = Notes
-enabled = true
+enabled = false
 internal = true
 visible = true
 preview_width = 640
@@ -19,4 +19,4 @@ notes.history_limit = 200
 notes.auto_start = false
 notes.last_archive_path = /home/joel/session_20251207_151248/Notes/20251207_151248_NOTES_trial001.csv
 device_connected = false
-window_geometry = 320x200
+window_geometry = 579x323+1176+299

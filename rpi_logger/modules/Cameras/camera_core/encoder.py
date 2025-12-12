@@ -3,14 +3,18 @@ Video encoder for the worker process.
 
 Supports PyAV (preferred) with OpenCV fallback.
 Handles overlay rendering and CSV timing logs.
+
+Uses a long-lived worker thread with bounded queue for backpressure.
 """
 from __future__ import annotations
 
 import csv
 import os
+import queue
+import threading
 import time
+from dataclasses import dataclass
 from fractions import Fraction
-from pathlib import Path
 from typing import Any, Optional
 
 import cv2
@@ -24,8 +28,167 @@ except Exception:
     _HAS_PYAV = False
 
 
+# Default queue size - provides ~1 second of buffering at 30fps
+_DEFAULT_QUEUE_SIZE = 30
+
+
+@dataclass(slots=True)
+class _FrameItem:
+    """Frame data queued for encoding."""
+    data: np.ndarray
+    timestamp: float
+    pts_time_ns: Optional[int]
+    color_format: str
+
+
+class _EncodeWorker:
+    """Long-lived encoding thread with bounded queue.
+
+    Processes frames from a queue in a dedicated thread, providing
+    clean backpressure when encoding can't keep up with capture.
+    """
+
+    def __init__(
+        self,
+        encoder: "Encoder",
+        queue_size: int = _DEFAULT_QUEUE_SIZE,
+    ) -> None:
+        self._encoder = encoder
+        self._queue: queue.Queue[Optional[_FrameItem]] = queue.Queue(maxsize=queue_size)
+        self._thread: Optional[threading.Thread] = None
+        self._running = False
+        self._error: Optional[Exception] = None
+        self._frames_dropped = 0
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        """Start the worker thread."""
+        if self._thread is not None:
+            return
+        self._running = True
+        self._error = None
+        self._frames_dropped = 0
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"encode-worker-{id(self)}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self, timeout: float = 5.0) -> None:
+        """Stop the worker thread and wait for completion."""
+        if not self._thread:
+            return
+
+        self._running = False
+        # Signal shutdown with None sentinel
+        try:
+            self._queue.put(None, block=False)
+        except queue.Full:
+            # Queue is full, drain one item to make room for sentinel
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._queue.put(None, block=False)
+            except queue.Full:
+                pass
+
+        self._thread.join(timeout=timeout)
+        if self._thread.is_alive():
+            # Thread didn't stop in time - it's a daemon so it'll be killed on exit
+            pass
+        self._thread = None
+
+    def submit(self, frame: np.ndarray, timestamp: float, pts_time_ns: Optional[int], color_format: str) -> bool:
+        """Submit a frame for encoding.
+
+        Returns True if frame was queued, False if queue is full (backpressure).
+        Non-blocking - returns immediately.
+        """
+        if not self._running or self._error:
+            return False
+
+        item = _FrameItem(
+            data=frame,
+            timestamp=timestamp,
+            pts_time_ns=pts_time_ns,
+            color_format=color_format,
+        )
+
+        try:
+            self._queue.put_nowait(item)
+            return True
+        except queue.Full:
+            with self._lock:
+                self._frames_dropped += 1
+            return False
+
+    @property
+    def frames_dropped(self) -> int:
+        """Number of frames dropped due to backpressure."""
+        with self._lock:
+            return self._frames_dropped
+
+    @property
+    def queue_depth(self) -> int:
+        """Current number of frames waiting to be encoded."""
+        return self._queue.qsize()
+
+    @property
+    def error(self) -> Optional[Exception]:
+        """Error from worker thread, if any."""
+        return self._error
+
+    def _run(self) -> None:
+        """Worker thread main loop."""
+        while self._running:
+            try:
+                item = self._queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+            if item is None:
+                # Shutdown sentinel
+                break
+
+            try:
+                self._encoder._write_frame_internal(
+                    item.data,
+                    timestamp=item.timestamp,
+                    pts_time_ns=item.pts_time_ns,
+                    color_format=item.color_format,
+                )
+            except Exception as e:
+                self._error = e
+                # Continue processing to drain queue on error
+
+        # Drain remaining frames on shutdown
+        while True:
+            try:
+                item = self._queue.get_nowait()
+                if item is None:
+                    continue
+                try:
+                    self._encoder._write_frame_internal(
+                        item.data,
+                        timestamp=item.timestamp,
+                        pts_time_ns=item.pts_time_ns,
+                        color_format=item.color_format,
+                    )
+                except Exception:
+                    pass  # Best effort on drain
+            except queue.Empty:
+                break
+
+
 class Encoder:
-    """Video encoder with optional overlay and timing CSV."""
+    """Video encoder with optional overlay and timing CSV.
+
+    Uses a dedicated worker thread with bounded queue for backpressure.
+    Frames are submitted via write_frame() and encoded asynchronously.
+    """
 
     def __init__(
         self,
@@ -37,6 +200,7 @@ class Encoder:
         csv_path: Optional[str] = None,
         trial_number: Optional[int] = None,
         use_pyav: Optional[bool] = None,
+        queue_size: Optional[int] = None,
     ) -> None:
         self.video_path = video_path
         self.csv_path = csv_path
@@ -45,6 +209,7 @@ class Encoder:
         self._overlay_enabled = overlay_enabled
         self._trial_number = trial_number
         self._use_pyav = use_pyav if use_pyav is not None else _HAS_PYAV
+        self._queue_size = queue_size if queue_size is not None else _DEFAULT_QUEUE_SIZE
 
         # Encoder state
         self._container: Any = None
@@ -66,6 +231,9 @@ class Encoder:
         self._csv_file = None
         self._csv_writer = None
 
+        # Worker thread
+        self._worker: Optional[_EncodeWorker] = None
+
     @property
     def duration_sec(self) -> float:
         if self._start_time_ns is None:
@@ -77,8 +245,22 @@ class Encoder:
         """Number of frames successfully written to video (matches CSV row count)."""
         return self._frame_count
 
+    @property
+    def frames_dropped(self) -> int:
+        """Number of frames dropped due to backpressure."""
+        if self._worker:
+            return self._worker.frames_dropped
+        return 0
+
+    @property
+    def queue_depth(self) -> int:
+        """Current number of frames waiting to be encoded."""
+        if self._worker:
+            return self._worker.queue_depth
+        return 0
+
     def start(self) -> None:
-        """Initialize encoder (blocking, call from thread)."""
+        """Initialize encoder and start worker thread."""
         self._start_time_ns = time.monotonic_ns()
 
         if self._use_pyav and _HAS_PYAV:
@@ -88,6 +270,10 @@ class Encoder:
 
         if self.csv_path:
             self._start_csv()
+
+        # Start worker thread
+        self._worker = _EncodeWorker(self, queue_size=self._queue_size)
+        self._worker.start()
 
     def _start_pyav(self) -> None:
         import logging
@@ -139,7 +325,24 @@ class Encoder:
         pts_time_ns: Optional[int] = None,
         color_format: str = "bgr",
     ) -> bool:
-        """Encode a single frame (blocking).
+        """Submit a frame for encoding (non-blocking).
+
+        Returns True if frame was queued, False if queue is full (backpressure).
+        The actual encoding happens asynchronously in the worker thread.
+        """
+        if not self._worker:
+            return False
+        return self._worker.submit(frame, timestamp, pts_time_ns, color_format)
+
+    def _write_frame_internal(
+        self,
+        frame: np.ndarray,
+        *,
+        timestamp: float,
+        pts_time_ns: Optional[int] = None,
+        color_format: str = "bgr",
+    ) -> bool:
+        """Encode a single frame (blocking, called by worker thread).
 
         Returns True if frame was successfully encoded, False otherwise.
         CSV timing is only written for successfully encoded frames.
@@ -262,7 +465,16 @@ class Encoder:
         return frame
 
     def stop(self) -> None:
-        """Finalize and close encoder (blocking)."""
+        """Finalize and close encoder (blocking).
+
+        Stops the worker thread first, draining any queued frames,
+        then finalizes the video container.
+        """
+        # Stop worker thread first - this drains queued frames
+        if self._worker:
+            self._worker.stop()
+            self._worker = None
+
         if self._kind == "pyav":
             self._finalize_pyav()
         else:

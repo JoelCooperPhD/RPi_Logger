@@ -14,7 +14,7 @@ from .theme.widgets import RoundedButton
 from ..logger_system import LoggerSystem
 from ..module_process import ModuleState
 from ..config_manager import get_config_manager
-from ..paths import CONFIG_PATH
+from ..paths import CONFIG_PATH, MASTER_LOG_FILE
 from ..shutdown_coordinator import get_shutdown_coordinator
 from ..devices import InterfaceType, DeviceFamily, DeviceCatalog
 from .timer_manager import TimerManager
@@ -444,6 +444,65 @@ class MainController:
             QuickStartDialog(self.root)
         except Exception as e:
             self.logger.error("Failed to show Help dialog: %s", e)
+
+    def open_last_session_location(self) -> None:
+        """Open the last session directory in the file manager.
+
+        This is the same folder that is used as the initial directory
+        when starting a new session.
+        """
+        try:
+            config_manager = get_config_manager()
+            config = config_manager.read_config(CONFIG_PATH)
+            last_dir = config_manager.get_str(config, 'last_session_dir', default='')
+
+            if not last_dir:
+                messagebox.showinfo(
+                    "No Session Location",
+                    "No previous session location found.\n\n"
+                    "Start a session first to set the location."
+                )
+                return
+
+            target_dir = Path(last_dir)
+            if not target_dir.exists():
+                messagebox.showwarning(
+                    "Location Not Found",
+                    f"The last session location no longer exists:\n\n{last_dir}"
+                )
+                return
+
+            if sys.platform == 'linux':
+                subprocess.Popen(['xdg-open', str(target_dir)])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(target_dir)])
+            elif sys.platform == 'win32':
+                subprocess.Popen(['explorer', str(target_dir)])
+
+            self.logger.info("Opened last session location: %s", target_dir)
+        except Exception as e:
+            self.logger.error("Failed to open last session location: %s", e)
+
+    def open_log_file(self) -> None:
+        """Open the master log file in the default application."""
+        try:
+            if not MASTER_LOG_FILE.exists():
+                messagebox.showinfo(
+                    "Log File Not Found",
+                    f"The log file does not exist yet:\n\n{MASTER_LOG_FILE}"
+                )
+                return
+
+            if sys.platform == 'linux':
+                subprocess.Popen(['xdg-open', str(MASTER_LOG_FILE)])
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', str(MASTER_LOG_FILE)])
+            elif sys.platform == 'win32':
+                subprocess.Popen(['notepad.exe', str(MASTER_LOG_FILE)])
+
+            self.logger.info("Opened log file: %s", MASTER_LOG_FILE)
+        except Exception as e:
+            self.logger.error("Failed to open log file: %s", e)
 
     def open_logs_directory(self) -> None:
         try:

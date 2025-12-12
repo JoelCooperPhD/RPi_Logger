@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict, Set
 import serial

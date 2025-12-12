@@ -3,7 +3,7 @@ from rpi_logger.core.logging_utils import get_module_logger
 import math
 import tkinter as tk
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Tuple, Optional
 
 from .logging_config import configure_logging
 

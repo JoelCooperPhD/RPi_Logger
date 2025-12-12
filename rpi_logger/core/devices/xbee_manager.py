@@ -10,8 +10,8 @@ a single coordinator, using the higher baudrate (921600) to support wDRT.
 """
 
 import asyncio
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Callable, Awaitable, Set, Any
+from dataclasses import dataclass
+from typing import Dict, Optional, Callable, Awaitable, Any
 from enum import Enum
 
 import serial.tools.list_ports
@@ -36,7 +36,6 @@ XBEE_PID = 0x6015
 try:
     from digi.xbee.devices import XBeeDevice, RemoteRaw802Device
     from digi.xbee.models.message import XBeeMessage
-    from digi.xbee.exception import XBeeException, TransmitException
     XBEE_AVAILABLE = True
 except ImportError:
     XBEE_AVAILABLE = False

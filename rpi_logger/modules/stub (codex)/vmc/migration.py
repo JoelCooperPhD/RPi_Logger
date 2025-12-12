@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Callable, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
 

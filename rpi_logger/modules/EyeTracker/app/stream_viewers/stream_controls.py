@@ -38,7 +38,7 @@ STREAM_CONFIGS = [
     StreamConfig("eyes", "Eyes"),
     StreamConfig("audio", "Audio"),
     StreamConfig("imu", "IMU"),
-    StreamConfig("events", "Events"),
+    StreamConfig("events", "Eye Events"),
 ]
 
 
@@ -90,10 +90,6 @@ class StreamControls:
         """
         if tk is None or menu is None:
             return
-
-        # Add separator and section header
-        menu.add_separator()
-        menu.add_command(label="Streams", state="disabled")
 
         # Add checkbox for each stream
         for cfg in STREAM_CONFIGS:

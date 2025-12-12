@@ -8,7 +8,7 @@ other characteristics that cannot be discovered through software probing.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 try:
     import tkinter as tk

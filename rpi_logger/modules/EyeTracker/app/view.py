@@ -484,11 +484,6 @@ class NeonEyeTrackerTkinterGUI:
     # ------------------------------------------------------------------
     # Menu callbacks
 
-    def _on_reconnect_clicked(self) -> None:
-        """Handle reconnect button click."""
-        if hasattr(self.system, 'request_reconnect') and self.async_bridge:
-            self.async_bridge.run_coroutine(self.system.request_reconnect())
-
     def _on_configure_clicked(self) -> None:
         """Handle configure button click."""
         if not self.root:
@@ -553,7 +548,6 @@ class NeonEyeTrackerView:
         self._bridge = LegacyTkViewBridge(self._stub_view, logger=self.logger.getChild("Bridge"))
         self.gui: Optional[NeonEyeTrackerTkinterGUI] = None
         self._runtime: Optional["EyeTrackerRuntime"] = None
-        self._controls_menu: Optional[Any] = None
         self._stream_controls: Optional[StreamControls] = None
 
         # Initialize preferences for config persistence
@@ -616,64 +610,41 @@ class NeonEyeTrackerView:
         # Build IO stub content (status panel)
         self._build_io_stub_content()
 
-        # Install Controls menu
-        self._install_controls_menu()
+        # Add items to File and View menus
+        self._install_menu_items()
 
         return container
 
-    def _install_controls_menu(self) -> None:
-        """Install the Controls menu with Configure, stream checkboxes, and Reconnect."""
-        if self._controls_menu is not None:
-            return
+    def _install_menu_items(self) -> None:
+        """Add eye tracker items to File and View menus."""
+        # Add Eye Tracker Settings to File menu
+        file_menu = getattr(self._stub_view, "file_menu", None)
+        if file_menu is not None:
+            file_menu.add_separator()
+            file_menu.add_command(
+                label="Eye Tracker Settings",
+                command=self._on_configure_menu,
+            )
 
-        menu = None
-        add_menu = getattr(self._stub_view, "add_menu", None)
-        menubar = getattr(self._stub_view, "menubar", None)
+        # Add stream controls to View menu (before Capture Stats/Logger)
+        view_menu = getattr(self._stub_view, "view_menu", None)
+        if view_menu is not None and self._stream_controls:
+            self._stream_controls.build_menu(view_menu)
 
-        if callable(add_menu):
-            try:
-                menu = add_menu("Controls")
-            except Exception:
-                menu = None
-        if menu is None and menubar is not None:
-            try:
-                menu = tk.Menu(menubar, tearoff=0)
-                menubar.add_cascade(label="Controls", menu=menu)
-            except Exception:
-                menu = None
+        # Finalize View menu (adds Capture Stats, Logger)
+        finalize_view = getattr(self._stub_view, "finalize_view_menu", None)
+        if callable(finalize_view):
+            finalize_view()
 
-        if menu is None:
-            return
-
-        self._controls_menu = menu
-
-        # Configure option
-        menu.add_command(
-            label="Configure...",
-            command=self._on_configure_menu,
-        )
-
-        # Add stream controls checkboxes
-        if self._stream_controls:
-            self._stream_controls.build_menu(menu)
-
-        menu.add_separator()
-
-        # Reconnect option
-        menu.add_command(
-            label="Reconnect",
-            command=self._on_reconnect_menu,
-        )
+        # Finalize File menu (adds Quit)
+        finalize_file = getattr(self._stub_view, "finalize_file_menu", None)
+        if callable(finalize_file):
+            finalize_file()
 
     def _on_configure_menu(self) -> None:
         """Handle Configure menu item click."""
         if self.gui:
             self.gui._on_configure_clicked()
-
-    def _on_reconnect_menu(self) -> None:
-        """Handle Reconnect menu item click."""
-        if self.gui:
-            self.gui._on_reconnect_clicked()
 
     def _build_io_stub_content(self) -> None:
         """Build the status panel in the IO stub area."""

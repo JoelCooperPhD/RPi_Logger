@@ -11,7 +11,7 @@ from typing import Iterable, Optional, Union
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 LOG_DATEFMT = "%Y-%m-%d %H:%M:%S"
-_DEFAULT_MAX_BYTES = 20 * 1024 * 1024
+_DEFAULT_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
 _DEFAULT_BACKUP_COUNT = 3
 
 _configured = False

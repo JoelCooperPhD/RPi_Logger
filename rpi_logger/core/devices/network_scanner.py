@@ -16,7 +16,7 @@ logger = get_module_logger("NetworkScanner")
 
 # Try to import zeroconf - it's optional
 try:
-    from zeroconf import ServiceBrowser, ServiceStateChange, Zeroconf, ServiceInfo
+    from zeroconf import ServiceStateChange, Zeroconf
     from zeroconf.asyncio import AsyncZeroconf, AsyncServiceBrowser
     ZEROCONF_AVAILABLE = True
 except ImportError:

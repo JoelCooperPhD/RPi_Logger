@@ -63,6 +63,9 @@ class CameraView:
         # UI elements
         self._canvas = None
         self._photo = None
+        self._canvas_image_id = None  # Reusable canvas image item
+        self._canvas_width = 0
+        self._canvas_height = 0
         self._status_label = None
         self._recording_indicator = None
         self._has_ui = False
@@ -148,6 +151,7 @@ class CameraView:
         # Canvas for video preview
         self._canvas = tk.Canvas(container, bg="black", highlightthickness=0)
         self._canvas.grid(row=0, column=0, sticky="nsew")
+        self._canvas.bind("<Configure>", self._on_canvas_configure)
 
         # Status bar at bottom
         status_frame = tk.Frame(container, bg=bg_color)
@@ -240,52 +244,39 @@ class CameraView:
             self._settings_window.bind_toggle_var(self._settings_toggle_var)
 
     def _install_settings_menu(self, tk) -> None:
-        """Add Configure menu item to the stub view's menu."""
+        """Add camera items to File and View menus."""
         if self._settings_menu:
             return
 
-        menu = None
-
-        # Try add_menu helper first
-        add_menu = getattr(self._stub_view, "add_menu", None)
-        if callable(add_menu):
-            try:
-                menu = add_menu("Controls")
-            except Exception:
-                menu = None
-
-        # Fall back to creating menu on menubar
-        if menu is None:
-            menubar = getattr(self._stub_view, "menubar", None)
-            if menubar is not None:
-                try:
-                    menu = tk.Menu(menubar, tearoff=0)
-                    menubar.add_cascade(label="Controls", menu=menu)
-                except Exception:
-                    menu = None
-
-        # Last resort: try module_menu attribute
-        if menu is None:
-            menu = getattr(self._stub_view, "module_menu", None)
-
-        if menu is None:
-            self._logger.debug("Settings menu unavailable; skipping menu wiring")
-            return
-
-        self._settings_menu = menu
-
-        if self._settings_toggle_var is not None:
-            menu.add_checkbutton(
-                label="Configure",
+        # Add Camera Settings to File menu
+        file_menu = getattr(self._stub_view, "file_menu", None)
+        if file_menu is not None and self._settings_toggle_var is not None:
+            file_menu.add_separator()
+            file_menu.add_checkbutton(
+                label="Camera Settings",
                 variable=self._settings_toggle_var,
                 command=self._toggle_settings_window,
             )
 
-        menu.add_separator()
-        menu.add_command(
-            label="Reprobe Camera",
-            command=lambda: self._on_reprobe(self._camera_id),
-        )
+        # Get the View menu from the stub view
+        view_menu = getattr(self._stub_view, "view_menu", None)
+        if view_menu is not None:
+            self._settings_menu = view_menu
+            # Reprobe camera command
+            view_menu.add_command(
+                label="Reprobe Camera",
+                command=lambda: self._on_reprobe(self._camera_id),
+            )
+
+        # Finalize View menu (adds Capture Stats, Logger)
+        finalize_view = getattr(self._stub_view, "finalize_view_menu", None)
+        if callable(finalize_view):
+            finalize_view()
+
+        # Finalize File menu (adds Quit)
+        finalize_file = getattr(self._stub_view, "finalize_file_menu", None)
+        if callable(finalize_file):
+            finalize_file()
 
     def _toggle_settings_window(self) -> None:
         """Toggle visibility of the settings window."""
@@ -301,6 +292,20 @@ class CameraView:
             self._settings_window.show()
         else:
             self._settings_window.hide()
+
+    def _on_canvas_configure(self, event) -> None:
+        """Handle canvas resize events."""
+        self._canvas_width = event.width
+        self._canvas_height = event.height
+        # Reset canvas image to force reposition on next frame
+        self._canvas_image_id = None
+
+    def get_canvas_size(self) -> tuple:
+        """Return current canvas dimensions for preview scaling."""
+        if self._canvas_width > 1 and self._canvas_height > 1:
+            return (self._canvas_width, self._canvas_height)
+        # Fallback to default preview size
+        return (640, 480)
 
     def _on_apply_config(self, camera_id: str, settings: Dict[str, str]) -> None:
         """Handle config apply from settings window."""
@@ -452,58 +457,47 @@ class CameraView:
 
         self._schedule_ui(update)
 
-    def push_frame(self, frame) -> None:
-        """Display a preview frame."""
+    def push_frame(self, ppm_data: Optional[bytes]) -> None:
+        """Display a preview frame (PPM bytes, pre-scaled in capture task)."""
         if not self._has_ui or not self._canvas:
             return
 
         self._frame_count += 1
 
         def update():
-            self._render_frame(frame)
+            self._render_frame(ppm_data)
 
         self._schedule_ui(update)
 
-    def _render_frame(self, frame) -> None:
-        """Render frame to canvas (must be called from UI thread)."""
+    def _render_frame(self, ppm_data: Optional[bytes]) -> None:
+        """Render PPM bytes to canvas (must be called from UI thread).
+
+        The image is pre-scaled and serialized as PPM by the capture task.
+        Only fast PPM decoding happens on the Tk thread.
+        """
         try:
-            from PIL import Image, ImageTk
-            import numpy as np
+            import tkinter as tk
 
-            if isinstance(frame, np.ndarray):
-                # Convert BGR to RGB for PIL
-                if len(frame.shape) == 3 and frame.shape[2] == 3:
-                    frame = frame[:, :, ::-1]
-                img = Image.fromarray(frame)
-            elif isinstance(frame, bytes):
-                # JPEG bytes
-                import io
-                img = Image.open(io.BytesIO(frame))
+            if ppm_data is None:
+                return
+
+            # Fast PhotoImage from PPM bytes (no PIL on Tk thread)
+            self._photo = tk.PhotoImage(data=ppm_data)
+
+            # Center position
+            x = self._canvas_width // 2 if self._canvas_width > 1 else 0
+            y = self._canvas_height // 2 if self._canvas_height > 1 else 0
+
+            # Reuse existing canvas image item or create new one
+            if self._canvas_image_id is not None:
+                # Update existing image in place (much faster than delete/create)
+                self._canvas.itemconfig(self._canvas_image_id, image=self._photo)
+                self._canvas.coords(self._canvas_image_id, x, y)
             else:
-                img = frame
-
-            # Get canvas size
-            canvas_w = self._canvas.winfo_width()
-            canvas_h = self._canvas.winfo_height()
-
-            if canvas_w > 1 and canvas_h > 1:
-                # Scale to fit canvas while maintaining aspect ratio
-                img_w, img_h = img.size
-                scale = min(canvas_w / img_w, canvas_h / img_h)
-                new_w = int(img_w * scale)
-                new_h = int(img_h * scale)
-                if new_w > 0 and new_h > 0:
-                    img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-            # Convert to PhotoImage
-            self._photo = ImageTk.PhotoImage(img)
-
-            # Center on canvas
-            x = canvas_w // 2 if canvas_w > 1 else 0
-            y = canvas_h // 2 if canvas_h > 1 else 0
-
-            self._canvas.delete("all")
-            self._canvas.create_image(x, y, image=self._photo, anchor="center")
+                # First frame or after canvas resize - create new item
+                self._canvas_image_id = self._canvas.create_image(
+                    x, y, image=self._photo, anchor="center"
+                )
 
         except Exception as e:
             if self._frame_count <= 3:

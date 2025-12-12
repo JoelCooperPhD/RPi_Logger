@@ -41,8 +41,10 @@ from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 try:  # Allow running as a script (no package context)
     from .preferences import NotesPreferences  # type: ignore
+    from .config import NotesConfig  # type: ignore
 except ImportError:  # pragma: no cover - fallback for script execution
     from preferences import NotesPreferences
+    from config import NotesConfig
 
 
 @dataclass(slots=True)
@@ -323,6 +325,10 @@ class NotesRuntime(ModuleRuntime):
         scope_fn = getattr(context.model, "preferences_scope", None)
         pref_scope = scope_fn("notes") if callable(scope_fn) else None
         self.preferences = NotesPreferences(pref_scope)
+
+        # Load typed config via preferences_scope
+        self.typed_config = NotesConfig.from_preferences(pref_scope, self.args) if pref_scope else NotesConfig()
+
         self.model = context.model
         self.controller = context.controller
         self.supervisor = context.supervisor
@@ -337,10 +343,12 @@ class NotesRuntime(ModuleRuntime):
         self._stop_event = asyncio.Event()
 
         self.project_root = context.module_dir.parent.parent
-        self.history_limit = max(1, int(getattr(self.args, "history_limit", 200)))
+
+        # Use typed config for history_limit and auto_start
+        self.history_limit = max(1, self.typed_config.history_limit)
         if self.preferences.prefs:
             self.history_limit = max(1, self.preferences.history_limit(self.history_limit))
-        self.auto_start = bool(getattr(self.args, "auto_start", False))
+        self.auto_start = self.typed_config.auto_start
         if self.preferences.prefs:
             self.auto_start = self.preferences.auto_start(self.auto_start)
             self.preferences.set_history_limit(self.history_limit)
@@ -361,6 +369,8 @@ class NotesRuntime(ModuleRuntime):
             self.logger.info("GUI view unavailable; Notes runtime running headless")
         else:
             self._build_ui()
+            if hasattr(self.view, 'set_data_subdir'):
+                self.view.set_data_subdir(self.MODULE_SUBDIR)
 
         if self.preferences.prefs:
             self.preferences.set_auto_start(self.auto_start)

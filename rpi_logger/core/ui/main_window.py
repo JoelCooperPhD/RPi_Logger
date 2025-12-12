@@ -17,7 +17,6 @@ from .main_controller import MainController
 from .timer_manager import TimerManager
 from .device_controller import DeviceUIController
 from .devices_panel import DevicesPanel
-from .theme.colors import Colors
 from .theme.styles import Theme
 from .theme.widgets import RoundedButton
 
@@ -212,6 +211,9 @@ class MainWindow:
         Theme.configure_menu(menubar)
         self.root.config(menu=menubar)
 
+        # Build File menu (first, leftmost)
+        self._build_file_menu(menubar)
+
         # Build Modules menu for enabling/disabling data logging modules
         self._build_modules_menu(menubar)
 
@@ -249,6 +251,26 @@ class MainWindow:
         help_menu.add_command(
             label="About",
             command=self.controller.show_about
+        )
+
+    def _build_file_menu(self, menubar: tk.Menu) -> None:
+        """Build the File menu with session location shortcuts."""
+        file_menu = tk.Menu(menubar, tearoff=0)
+        Theme.configure_menu(file_menu)
+        menubar.add_cascade(label="File", menu=file_menu)
+
+        file_menu.add_command(
+            label="Open Last Session Location",
+            command=self.controller.open_last_session_location
+        )
+        file_menu.add_command(
+            label="Open Log File",
+            command=self.controller.open_log_file
+        )
+        file_menu.add_separator()
+        file_menu.add_command(
+            label="Quit",
+            command=self.controller.on_shutdown
         )
 
     def _build_modules_menu(self, menubar: tk.Menu) -> None:

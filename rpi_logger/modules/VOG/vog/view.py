@@ -469,8 +469,7 @@ class VOGView:
         self._stub_view.set_preview_title("VOG Controls")
         self.model.subscribe(self._on_model_change)
         self._override_help_menu()
-        self._device_menu: Optional[tk.Menu] = None
-        self._build_device_menu()
+        self._install_menu_items()
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
         if not HAS_TK:
@@ -532,6 +531,10 @@ class VOGView:
             loop = getattr(runtime, "_loop", None)
             if loop:
                 self.gui.async_bridge.bind_loop(loop)
+        # Set data folder subdirectory for File menu
+        if hasattr(self._stub_view, 'set_data_subdir'):
+            module_subdir = getattr(runtime, 'module_subdir', 'VOG')
+            self._stub_view.set_data_subdir(module_subdir)
 
     def attach_logging_handler(self) -> None:
         self._stub_view.attach_logging_handler()
@@ -554,13 +557,13 @@ class VOGView:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_connected, port, device_type)
-        self.call_in_gui(self._update_device_menu_state)
+        self.call_in_gui(self._update_menu_state)
 
     def on_device_disconnected(self, port: str, device_type: str = None) -> None:
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_device_disconnected, port, device_type)
-        self.call_in_gui(self._update_device_menu_state)
+        self.call_in_gui(self._update_menu_state)
 
     def on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         if not self.gui:
@@ -571,7 +574,7 @@ class VOGView:
         if not self.gui:
             return
         self.call_in_gui(self.gui.sync_recording_state)
-        self.call_in_gui(self._update_device_menu_state)
+        self.call_in_gui(self._update_menu_state)
 
     # ------------------------------------------------------------------
     # Window title
@@ -700,37 +703,46 @@ class VOGView:
         self._stub_view.build_io_stub_content(builder)
 
     # ------------------------------------------------------------------
-    # Device menu
+    # Menu setup
 
-    def _build_device_menu(self) -> None:
-        """Build the Device menu with Lens and Configure commands."""
-        self._device_menu = self._stub_view.add_menu("Device")
-        if not self._device_menu:
-            self.logger.warning("Failed to create Device menu")
-            return
+    def _install_menu_items(self) -> None:
+        """Add VOG items to File and View menus."""
+        # Add Configure to File menu
+        file_menu = getattr(self._stub_view, "file_menu", None)
+        if file_menu is not None:
+            file_menu.add_separator()
+            file_menu.add_command(
+                label="Configure...",
+                command=self._on_configure,
+            )
 
-        self._device_menu.add_command(
-            label="Lens: ON",
-            command=self._on_lens_on,
-        )
-        self._device_menu.add_command(
-            label="Lens: OFF",
-            command=self._on_lens_off,
-        )
-        self._device_menu.add_separator()
-        self._device_menu.add_command(
-            label="Configure...",
-            command=self._on_configure,
-        )
+        # Add Lens controls to View menu
+        view_menu = getattr(self._stub_view, "view_menu", None)
+        if view_menu is not None:
+            view_menu.add_command(
+                label="Lens: ON",
+                command=self._on_lens_on,
+            )
+            view_menu.add_command(
+                label="Lens: OFF",
+                command=self._on_lens_off,
+            )
+
+        # Finalize View menu (adds Capture Stats, Logger)
+        finalize_view = getattr(self._stub_view, "finalize_view_menu", None)
+        if callable(finalize_view):
+            finalize_view()
+
+        # Finalize File menu (adds Quit)
+        finalize_file = getattr(self._stub_view, "finalize_file_menu", None)
+        if callable(finalize_file):
+            finalize_file()
 
         # Initially disable menu items until device is connected
-        self._update_device_menu_state()
+        self._update_menu_state()
 
-    def _update_device_menu_state(self) -> None:
-        """Enable/disable Device menu items based on device connection and recording state."""
-        if not self._device_menu:
-            return
-
+    def _update_menu_state(self) -> None:
+        """Enable/disable menu items based on device connection and recording state."""
         # Determine if device is connected
         has_device = self.gui and self.gui._port is not None
 
@@ -740,12 +752,17 @@ class VOGView:
         # Menu items should be enabled if device connected and not recording
         state = 'normal' if (has_device and not recording) else 'disabled'
 
+        file_menu = getattr(self._stub_view, "file_menu", None)
+        view_menu = getattr(self._stub_view, "view_menu", None)
+
         try:
-            self._device_menu.entryconfigure("Lens: ON", state=state)
-            self._device_menu.entryconfigure("Lens: OFF", state=state)
-            self._device_menu.entryconfigure("Configure...", state=state)
+            if file_menu is not None:
+                file_menu.entryconfigure("Configure...", state=state)
+            if view_menu is not None:
+                view_menu.entryconfigure("Lens: ON", state=state)
+                view_menu.entryconfigure("Lens: OFF", state=state)
         except tk.TclError as e:
-            self.logger.debug("Failed to update device menu state: %s", e)
+            self.logger.debug("Failed to update menu state: %s", e)
 
     def _on_lens_on(self) -> None:
         """Handle Lens: ON menu command."""

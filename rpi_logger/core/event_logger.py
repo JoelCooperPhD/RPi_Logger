@@ -4,7 +4,6 @@ import csv
 import datetime
 from rpi_logger.core.logging_utils import get_module_logger
 from pathlib import Path
-from typing import Optional
 
 import aiofiles
 

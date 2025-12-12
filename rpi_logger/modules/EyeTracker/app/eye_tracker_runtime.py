@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional, TYPE_CHECKING
@@ -16,6 +15,8 @@ from rpi_logger.core.logging_utils import ensure_structured_logger
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
+
+from ..config import EyeTrackerConfig
 
 if TYPE_CHECKING:
     from .view import NeonEyeTrackerView
@@ -69,6 +70,11 @@ class EyeTrackerRuntime(ModuleRuntime):
         # Config path for runtime access
         self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
 
+        # Load typed config via preferences_scope
+        scope_fn = getattr(context.model, "preferences_scope", None)
+        prefs = scope_fn("neon_eyetracker") if callable(scope_fn) else None
+        self.typed_config = EyeTrackerConfig.from_preferences(prefs, self.args) if prefs else EyeTrackerConfig()
+
         self.task_manager = BackgroundTaskManager("NeonEyeTrackerTasks", self.logger)
         timeout = getattr(self.args, "shutdown_timeout", 20.0)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=max(5.0, float(timeout)))
@@ -121,6 +127,9 @@ class EyeTrackerRuntime(ModuleRuntime):
         if self.view:
             self.view.bind_runtime(self)
             self.view.set_device_status("Waiting for device assignment...", connected=False)
+            stub_view = getattr(self.view, '_stub_view', None)
+            if stub_view and hasattr(stub_view, 'set_data_subdir'):
+                stub_view.set_data_subdir(MODULE_SUBDIR)
 
         self._device_ready_event = asyncio.Event()
 
@@ -172,9 +181,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             return await self._stop_recording_flow()
 
         # Device commands
-        if action in {"reconnect", "refresh_device", "eye_tracker_reconnect"}:
-            await self.request_reconnect()
-            return True
         if action == "assign_device":
             command_id = command.get("command_id")
             return await self._assign_device(command, command_id=command_id)
@@ -226,10 +232,6 @@ class EyeTrackerRuntime(ModuleRuntime):
                 stub_view.hide_window()
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
-        normalized = (action or "").lower()
-        if normalized in {"refresh_device", "eye_tracker_reconnect"}:
-            await self.request_reconnect()
-            return True
         return False
 
     async def healthcheck(self) -> bool:
@@ -394,32 +396,6 @@ class EyeTrackerRuntime(ModuleRuntime):
             self._device_ready_event.clear()
         if self.view:
             self.view.set_device_status("Stopped", connected=False)
-
-    async def request_reconnect(self) -> None:
-        """Request reconnection to the assigned device."""
-        if self._shutdown.is_set():
-            return
-
-        await self._stop_tracker()
-
-        if self._device_manager:
-            with contextlib.suppress(Exception):
-                await self._device_manager.cleanup()
-
-        # Cancel any pending reconnect task
-        if self._device_task and not self._device_task.done():
-            self._device_task.cancel()
-            self._device_task = None
-
-        if self._assigned_network_address:
-            if self.view:
-                self.view.set_device_status(
-                    f"Reconnecting to {self._assigned_network_address}...", connected=False
-                )
-            self._attempt_reconnect_to_assigned()
-        else:
-            if self.view:
-                self.view.set_device_status("Waiting for device assignment...", connected=False)
 
     # ------------------------------------------------------------------
     # Device assignment (from main UI)

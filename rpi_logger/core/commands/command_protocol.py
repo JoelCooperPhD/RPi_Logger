@@ -1,7 +1,6 @@
 
 import datetime
 import json
-import logging
 from typing import Any, Dict, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger

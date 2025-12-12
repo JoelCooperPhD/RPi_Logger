@@ -5,7 +5,7 @@ import hashlib
 from rpi_logger.core.logging_utils import get_module_logger
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable
 
 import aiofiles
 

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import sys
-import asyncio
 
 def main() -> int:
     from rpi_logger.app.master import run as _run_master
