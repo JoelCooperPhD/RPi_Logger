@@ -17,12 +17,12 @@ from typing import Any, Dict, Optional
 from vmc.runtime import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
-from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_file
 from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler
 from rpi_logger.modules.VOG.vog_core.device_types import VOGDeviceType
 from rpi_logger.modules.VOG.vog_core.protocols import SVOGProtocol, WVOGProtocol
 from rpi_logger.modules.VOG.vog_core.transports import USBTransport, XBeeProxyTransport, BaseTransport
 from rpi_logger.core.commands import StatusMessage
+from rpi_logger.modules.VOG.config import VOGConfig
 
 
 class VOGModuleRuntime(ModuleRuntime):
@@ -45,10 +45,16 @@ class VOGModuleRuntime(ModuleRuntime):
         self.view = context.view
         self.display_name = context.display_name
 
-        # Configuration
+        # Configuration - use typed config via preferences_scope
         self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
         self.config_file_path = self.config_path
-        self.config: Dict[str, Any] = load_config_file(self.config_path)
+
+        scope_fn = getattr(context.model, "preferences_scope", None)
+        prefs = scope_fn("vog") if callable(scope_fn) else None
+        self.typed_config = VOGConfig.from_preferences(prefs, self.args) if prefs else VOGConfig()
+
+        # Keep dict config for backward compatibility during migration
+        self.config: Dict[str, Any] = self.typed_config.to_dict()
 
         self.session_prefix = str(getattr(self.args, "session_prefix", self.config.get("session_prefix", "vog")))
         self.enable_gui_commands = bool(getattr(self.args, "enable_commands", False))

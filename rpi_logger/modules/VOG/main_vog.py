@@ -41,48 +41,49 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
 if str(MODULE_DIR) not in sys.path:
     sys.path.insert(0, str(MODULE_DIR))
 
+from dataclasses import asdict
+
 from vmc import StubCodexSupervisor
 from vmc.constants import DISPLAY_NAME as STUB_DISPLAY_NAME
 
 from vog.runtime import VOGModuleRuntime
 from vog.view import VOGView
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.VOG.vog_core.config.config_loader import load_config_file
 from rpi_logger.modules.base.config_paths import resolve_module_config_path
-from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers
+from rpi_logger.cli.common import add_common_cli_arguments, add_config_to_args, install_signal_handlers
+from rpi_logger.modules.VOG.config import VOGConfig
 
 logger = get_module_logger("MainVOG")
-CONFIG_CONTEXT = resolve_module_config_path(MODULE_DIR, "vog")
+MODULE_ID = "vog"
 
 
 def parse_args(argv: Optional[list[str]] = None):
     """Parse command line arguments."""
-    config = load_config_file(CONFIG_CONTEXT.writable_path)
-
-    default_output = Path(config.get('output_dir', 'vog_data'))
-    default_session_prefix = str(config.get('session_prefix', 'vog'))
-    default_console = bool(config.get('console_output', False))
+    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+    defaults = asdict(VOGConfig())
 
     parser = argparse.ArgumentParser(description="VOG (Visual Occlusion Glasses) module")
+
+    # Load config using unified helper
+    config = add_config_to_args(parser, config_ctx, defaults)
 
     # Use common CLI arguments for standard options
     add_common_cli_arguments(
         parser,
-        default_output=default_output,
+        default_output=Path(config.get("output_dir", defaults["output_dir"])),
         allowed_modes=["gui", "headless"],
-        default_mode=str(config.get('default_mode', 'gui')).lower(),
+        default_mode=str(config.get("default_mode", defaults["default_mode"])).lower(),
         include_session_prefix=True,
-        default_session_prefix=default_session_prefix,
+        default_session_prefix=str(config.get("session_prefix", defaults["session_prefix"])),
         include_console_control=True,
-        default_console_output=default_console,
+        default_console_output=bool(config.get("console_output", defaults["console_output"])),
         include_auto_recording=False,  # VOG doesn't use auto-recording
         include_parent_control=True,
         include_window_geometry=True,
     )
 
     args = parser.parse_args(argv)
-    args.config = config
-    args.config_file_path = CONFIG_CONTEXT.writable_path
+    # config_path is set by add_config_to_args
     return args
 
 
@@ -94,19 +95,19 @@ async def main(argv: Optional[list[str]] = None) -> None:
         logger.error("VOG module must be launched by the logger controller (commands disabled).")
         return
 
-    module_dir = Path(__file__).parent
-    display_name = args.config.get('display_name', 'VOG')
-    setattr(args, "config_path", CONFIG_CONTEXT.writable_path)
+    # config_path is set by add_config_to_args in parse_args
+    config_path = getattr(args, "config_path", None)
+    defaults = VOGConfig()
 
     supervisor = StubCodexSupervisor(
         args,
-        module_dir,
-        logger.getChild('Supervisor'),
+        MODULE_DIR,
+        logger.getChild("Supervisor"),
         runtime_factory=lambda context: VOGModuleRuntime(context),
         view_factory=VOGView,
-        display_name=display_name or STUB_DISPLAY_NAME,
-        module_id="vog",
-        config_path=CONFIG_CONTEXT.writable_path,
+        display_name=defaults.display_name or STUB_DISPLAY_NAME,
+        module_id=MODULE_ID,
+        config_path=config_path,
     )
 
     loop = asyncio.get_running_loop()
