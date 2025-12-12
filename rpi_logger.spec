@@ -42,7 +42,9 @@ def collect_module_files(module_name):
             if rel_path.parent == Path('.'):
                 dest = f'rpi_logger/modules/{module_name}'
             else:
-                dest = f'rpi_logger/modules/{module_name}/{rel_path.parent}'
+                # Use forward slashes for PyInstaller paths (cross-platform)
+                parent_path = str(rel_path.parent).replace('\\', '/')
+                dest = f'rpi_logger/modules/{module_name}/{parent_path}'
             files.append((str(py_file), dest))
         # Also collect config.txt if present
         config = module_dir / 'config.txt'
@@ -78,11 +80,12 @@ def collect_module_imports(module_name):
                 rel_path = py_file.parent.relative_to(module_dir)
                 if rel_path == Path('.'):
                     continue  # Already added
-                import_path = f'rpi_logger.modules.{module_name}.{str(rel_path).replace("/", ".")}'
+                import_path = f'rpi_logger.modules.{module_name}.{str(rel_path).replace(chr(92), ".").replace("/", ".")}'
             else:
                 # Module file
                 rel_path = py_file.relative_to(module_dir)
-                module_path = str(rel_path.with_suffix('')).replace('/', '.')
+                # Replace both forward and back slashes for cross-platform compatibility
+                module_path = str(rel_path.with_suffix('')).replace('\\', '.').replace('/', '.')
                 import_path = f'rpi_logger.modules.{module_name}.{module_path}'
             imports.append(import_path)
     return imports
