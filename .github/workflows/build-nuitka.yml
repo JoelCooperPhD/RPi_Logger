@@ -67,6 +67,14 @@ jobs:
             --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui `
             --include-data-file=config.txt=config.txt `
             --include-data-dir=rpi_logger/modules=rpi_logger/modules `
+            --include-data-file=rpi_logger/modules/Audio/main_audio.py=rpi_logger/modules/Audio/main_audio.py `
+            --include-data-file=rpi_logger/modules/Cameras/main_cameras.py=rpi_logger/modules/Cameras/main_cameras.py `
+            --include-data-file=rpi_logger/modules/DRT/main_drt.py=rpi_logger/modules/DRT/main_drt.py `
+            --include-data-file=rpi_logger/modules/EyeTracker/main_eye_tracker.py=rpi_logger/modules/EyeTracker/main_eye_tracker.py `
+            --include-data-file=rpi_logger/modules/GPS/main_gps.py=rpi_logger/modules/GPS/main_gps.py `
+            --include-data-file=rpi_logger/modules/Notes/main_notes.py=rpi_logger/modules/Notes/main_notes.py `
+            --include-data-file=rpi_logger/modules/VOG/main_vog.py=rpi_logger/modules/VOG/main_vog.py `
+            "--include-data-file=rpi_logger/modules/stub (codex)/main_stub_codex.py=rpi_logger/modules/stub (codex)/main_stub_codex.py" `
             --output-filename="RPi-Logger.exe" `
             --output-dir=dist `
             rpi_logger/__main__.py
@@ -132,6 +140,14 @@ jobs:
             --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
             --include-data-file=config.txt=config.txt \
             --include-data-dir=rpi_logger/modules=rpi_logger/modules \
+            --include-data-file=rpi_logger/modules/Audio/main_audio.py=rpi_logger/modules/Audio/main_audio.py \
+            --include-data-file=rpi_logger/modules/Cameras/main_cameras.py=rpi_logger/modules/Cameras/main_cameras.py \
+            --include-data-file=rpi_logger/modules/DRT/main_drt.py=rpi_logger/modules/DRT/main_drt.py \
+            --include-data-file=rpi_logger/modules/EyeTracker/main_eye_tracker.py=rpi_logger/modules/EyeTracker/main_eye_tracker.py \
+            --include-data-file=rpi_logger/modules/GPS/main_gps.py=rpi_logger/modules/GPS/main_gps.py \
+            --include-data-file=rpi_logger/modules/Notes/main_notes.py=rpi_logger/modules/Notes/main_notes.py \
+            --include-data-file=rpi_logger/modules/VOG/main_vog.py=rpi_logger/modules/VOG/main_vog.py \
+            "--include-data-file=rpi_logger/modules/stub (codex)/main_stub_codex.py=rpi_logger/modules/stub (codex)/main_stub_codex.py" \
             --output-dir=dist \
             rpi_logger/__main__.py
 
@@ -211,6 +227,14 @@ jobs:
             --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
             --include-data-file=config.txt=config.txt \
             --include-data-dir=rpi_logger/modules=rpi_logger/modules \
+            --include-data-file=rpi_logger/modules/Audio/main_audio.py=rpi_logger/modules/Audio/main_audio.py \
+            --include-data-file=rpi_logger/modules/Cameras/main_cameras.py=rpi_logger/modules/Cameras/main_cameras.py \
+            --include-data-file=rpi_logger/modules/DRT/main_drt.py=rpi_logger/modules/DRT/main_drt.py \
+            --include-data-file=rpi_logger/modules/EyeTracker/main_eye_tracker.py=rpi_logger/modules/EyeTracker/main_eye_tracker.py \
+            --include-data-file=rpi_logger/modules/GPS/main_gps.py=rpi_logger/modules/GPS/main_gps.py \
+            --include-data-file=rpi_logger/modules/Notes/main_notes.py=rpi_logger/modules/Notes/main_notes.py \
+            --include-data-file=rpi_logger/modules/VOG/main_vog.py=rpi_logger/modules/VOG/main_vog.py \
+            "--include-data-file=rpi_logger/modules/stub (codex)/main_stub_codex.py=rpi_logger/modules/stub (codex)/main_stub_codex.py" \
             --output-filename=rpi-logger \
             --output-dir=dist \
             rpi_logger/__main__.py
