@@ -5,10 +5,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
 
 MODULE_DIR = Path(__file__).resolve().parent
+MODULE_ID = "drt"
 
 
 def _find_project_root(start: Path) -> Path:
@@ -40,33 +42,30 @@ from vmc.constants import DISPLAY_NAME as STUB_DISPLAY_NAME
 from drt.runtime import DRTModuleRuntime
 from drt.view import DRTView
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.DRT.drt_core.config import load_config_file
+from rpi_logger.modules.DRT.config import DRTConfig
 from rpi_logger.modules.base.config_paths import resolve_module_config_path
-from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers
+from rpi_logger.cli.common import add_common_cli_arguments, add_config_to_args, install_signal_handlers
 
 logger = get_module_logger("MainDRT")
-CONFIG_CONTEXT = resolve_module_config_path(MODULE_DIR, "drt")
 
 
 def parse_args(argv: Optional[list[str]] = None):
-    config = load_config_file(CONFIG_CONTEXT.writable_path)
-
-    default_output = Path(config.get('output_dir', 'drt_data'))
-    default_session_prefix = str(config.get('session_prefix', 'drt'))
-    default_console = bool(config.get('console_output', False))
+    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID)
+    defaults = asdict(DRTConfig())
 
     parser = argparse.ArgumentParser(description="DRT shell module")
+    config = add_config_to_args(parser, config_ctx, defaults)
 
     # Use common CLI arguments for standard options
     add_common_cli_arguments(
         parser,
-        default_output=default_output,
+        default_output=Path(config.get("output_dir", defaults["output_dir"])),
         allowed_modes=["gui", "headless"],
-        default_mode=str(config.get('default_mode', 'gui')).lower(),
+        default_mode=str(config.get("default_mode", defaults["default_mode"])).lower(),
         include_session_prefix=True,
-        default_session_prefix=default_session_prefix,
+        default_session_prefix=str(config.get("session_prefix", defaults["session_prefix"])),
         include_console_control=True,
-        default_console_output=default_console,
+        default_console_output=bool(config.get("console_output", defaults["console_output"])),
         include_auto_recording=False,  # DRT doesn't use auto-recording
         include_parent_control=True,
         include_window_geometry=True,
@@ -83,26 +82,23 @@ def parse_args(argv: Optional[list[str]] = None):
     parser.add_argument(
         "--device-vid",
         type=lambda value: int(value, 0),
-        default=int(config.get('device_vid', 0x239A)),
+        default=int(config.get("device_vid", defaults["device_vid"])),
         help="USB vendor ID for the DRT device",
     )
     parser.add_argument(
         "--device-pid",
         type=lambda value: int(value, 0),
-        default=int(config.get('device_pid', 0x801E)),
+        default=int(config.get("device_pid", defaults["device_pid"])),
         help="USB product ID for the DRT device",
     )
     parser.add_argument(
         "--baudrate",
         type=int,
-        default=int(config.get('baudrate', 9600)),
+        default=int(config.get("baudrate", defaults["baudrate"])),
         help="Serial baudrate for the DRT device",
     )
 
-    args = parser.parse_args(argv)
-    args.config = config
-    args.config_file_path = CONFIG_CONTEXT.writable_path
-    return args
+    return parser.parse_args(argv)
 
 
 async def main(argv: Optional[list[str]] = None) -> None:
@@ -112,19 +108,18 @@ async def main(argv: Optional[list[str]] = None) -> None:
         logger.error("DRT module must be launched by the logger controller (commands disabled).")
         return
 
-    module_dir = Path(__file__).parent
-    display_name = args.config.get('display_name', 'DRT')
-    setattr(args, "config_path", CONFIG_CONTEXT.writable_path)
+    defaults = DRTConfig()
+    config_path = getattr(args, "config_path", None)
 
     supervisor = StubCodexSupervisor(
         args,
-        module_dir,
-        logger.getChild('Supervisor'),
+        MODULE_DIR,
+        logger.getChild("Supervisor"),
         runtime_factory=lambda context: DRTModuleRuntime(context),
         view_factory=DRTView,
-        display_name=display_name or STUB_DISPLAY_NAME,
-        module_id="drt",
-        config_path=CONFIG_CONTEXT.writable_path,
+        display_name=defaults.display_name or STUB_DISPLAY_NAME,
+        module_id=MODULE_ID,
+        config_path=config_path,
     )
 
     loop = asyncio.get_running_loop()

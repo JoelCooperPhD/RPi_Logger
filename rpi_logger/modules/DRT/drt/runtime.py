@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional
 from vmc.runtime import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
-from rpi_logger.modules.DRT.drt_core.config import load_config_file
+from rpi_logger.modules.DRT.config import DRTConfig
 from rpi_logger.modules.DRT.drt_core.device_types import DRTDeviceType
 from rpi_logger.modules.DRT.drt_core.handlers import (
     BaseDRTHandler,
@@ -45,18 +45,23 @@ class DRTModuleRuntime(ModuleRuntime):
         self.controller = context.controller
         self.view = context.view
         self.display_name = context.display_name
-        scope_fn = getattr(self.model, "preferences_scope", None)
-        pref_scope = scope_fn("drt") if callable(scope_fn) else None
-        from rpi_logger.modules.DRT.preferences import DRTPreferences
-        self.preferences = DRTPreferences(pref_scope)
-        self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
-        self.config_file_path = self.config_path
-        self.config: Dict[str, Any] = load_config_file(self.config_path)
 
-        self.session_prefix = str(getattr(self.args, "session_prefix", self.config.get("session_prefix", "drt")))
+        # Build typed config via preferences_scope
+        scope_fn = getattr(self.model, "preferences_scope", None)
+        prefs = scope_fn("drt") if callable(scope_fn) else None
+        self.typed_config = DRTConfig.from_preferences(prefs, self.args) if prefs else DRTConfig()
+        self.config: Dict[str, Any] = self.typed_config.to_dict()
+
+        # Legacy preferences adapter (for components that still need it)
+        from rpi_logger.modules.DRT.preferences import DRTPreferences
+        self.preferences = DRTPreferences(prefs)
+
+        self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
+        self.config_file_path = self.config_path  # Alias for backward compatibility with views
+        self.session_prefix = str(getattr(self.args, "session_prefix", self.typed_config.session_prefix))
         self.enable_gui_commands = bool(getattr(self.args, "enable_commands", False))
 
-        self.output_root: Path = Path(getattr(self.args, "output_dir", Path("drt_data")))
+        self.output_root: Path = Path(getattr(self.args, "output_dir", self.typed_config.output_dir))
         self.session_dir: Path = self.output_root
         self.module_subdir: str = "DRT"
         self.module_data_dir: Path = self.session_dir

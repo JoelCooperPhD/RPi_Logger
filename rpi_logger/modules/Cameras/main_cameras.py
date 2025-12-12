@@ -35,32 +35,44 @@ if _venv_site.exists() and str(_venv_site) not in sys.path:
     sys.path.insert(0, str(_venv_site))
 
 from vmc import StubCodexSupervisor, RuntimeRetryPolicy  # type: ignore  # noqa: E402
-from vmc.constants import PLACEHOLDER_GEOMETRY  # type: ignore  # noqa: E402
 from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
 from rpi_logger.modules.base.config_paths import resolve_module_config_path  # noqa: E402
-from rpi_logger.cli.common import add_common_cli_arguments, install_signal_handlers  # noqa: E402
+from rpi_logger.cli.common import add_common_cli_arguments, add_config_to_args, install_signal_handlers  # noqa: E402
+from rpi_logger.modules.Cameras.config import CamerasConfig  # noqa: E402
 from .bridge import factory  # noqa: E402
 
 DISPLAY_NAME = "Cameras"
 MODULE_ID = "cameras"
-DEFAULT_OUTPUT_SUBDIR = Path("cameras")
 
 logger = get_module_logger(__name__)
 
 
 def parse_args(argv: Optional[list[str]] = None):
+    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID, filename="config.txt")
+
+    # Build defaults from CamerasConfig - use to_dict() for flat config
+    # Since CamerasConfig has nested structure, we need simpler defaults for CLI
+    defaults = {
+        "output_dir": "cameras",
+        "session_prefix": MODULE_ID,
+        "console_output": False,
+        "default_mode": "gui",
+        "log_level": "info",
+    }
+
     parser = argparse.ArgumentParser(description=f"{DISPLAY_NAME} module")
+    config = add_config_to_args(parser, config_ctx, defaults)
 
     # Use common CLI arguments for standard options
     add_common_cli_arguments(
         parser,
-        default_output=DEFAULT_OUTPUT_SUBDIR,
+        default_output=Path(config.get("output_dir", defaults["output_dir"])),
         allowed_modes=["gui", "headless"],
-        default_mode="gui",
+        default_mode=str(config.get("default_mode", defaults["default_mode"])),
         include_session_prefix=True,
-        default_session_prefix=MODULE_ID,
+        default_session_prefix=str(config.get("session_prefix", defaults["session_prefix"])),
         include_console_control=True,
-        default_console_output=False,
+        default_console_output=bool(config.get("console_output", defaults["console_output"])),
         include_auto_recording=False,  # Cameras doesn't use auto-recording
         include_parent_control=True,
         include_window_geometry=True,
@@ -72,7 +84,7 @@ def parse_args(argv: Optional[list[str]] = None):
 
 async def main_async(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
-    config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID, filename="config.txt")
+    config_path = getattr(args, "config_path", None)
 
     def show_cameras_help(parent):
         from rpi_logger.modules.Cameras.app.help_dialog import CamerasHelpDialog
@@ -86,7 +98,7 @@ async def main_async(argv: Optional[list[str]] = None) -> None:
         module_id=MODULE_ID,
         runtime_factory=factory,
         runtime_retry_policy=RuntimeRetryPolicy(),
-        config_path=config_ctx.writable_path,
+        config_path=config_path,
         help_callback=show_cameras_help,
     )
 

@@ -32,7 +32,7 @@ from rpi_logger.modules.Cameras.camera_models import (
     extract_model_name,
     copy_capabilities,
 )
-from rpi_logger.modules.Cameras.config import load_config
+from rpi_logger.modules.Cameras.config import CamerasConfig
 from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
 from rpi_logger.modules.Cameras.storage.session_paths import resolve_session_paths
 from rpi_logger.modules.Cameras.app.view import CameraView
@@ -58,7 +58,12 @@ class CamerasRuntime(ModuleRuntime):
         self.ctx = ctx
         self.logger = ctx.logger.getChild("Cameras") if hasattr(ctx, "logger") else logger
         self.module_dir = ctx.module_dir
-        self.config = load_config(ctx.model.preferences, overrides=None, logger=self.logger)
+
+        # Build typed config via preferences_scope
+        scope_fn = getattr(ctx.model, "preferences_scope", None)
+        prefs = scope_fn("cameras") if callable(scope_fn) else None
+        self.typed_config = CamerasConfig.from_preferences(prefs, ctx.args, logger=self.logger) if prefs else CamerasConfig.from_preferences(None, ctx.args, logger=self.logger)
+        self.config = self.typed_config
 
         # Single camera state
         self._camera_id: Optional[CameraId] = None
