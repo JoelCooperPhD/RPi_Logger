@@ -1,5 +1,5 @@
 display_name = Audio
-enabled = false
+enabled = true
 gui_logger_visible = false
 gui_io_stub_visible = false
 view.show_io_panel = true

@@ -122,7 +122,7 @@ Example Rows:
 Timing Precision
    TSOT/TSCT:            Millisecond precision (device firmware)
    Unix time in UTC:     Microsecond precision (6 decimals)
-   Lens state changes:   Device-measured (±1-5 ms typical)
+   Lens state changes:   Device-measured (<50ms close, <15ms open)
 
 Lens State Timing
    Lens transitions are timestamped by the device firmware.

@@ -121,7 +121,7 @@ wVOG,xbee_002,1733649120.456789,5500,2,3000,2500,Open,85
 **Timing Precision:**
 - TSOT/TSCT: Millisecond precision (device firmware)
 - Unix time in UTC: Microsecond precision (6 decimals)
-- Lens state changes: Device-measured (1-5 ms typical accuracy)
+- Lens state changes: Device-measured (<50ms for close, <15ms for open, continuous state change)
 
 **Cross-Module Synchronization:**
 Use "Unix time in UTC" to correlate VOG events with:
