@@ -22,14 +22,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install UPX
-        run: choco install upx
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install nuitka ordered-set zstandard
+          pip install nuitka ordered-set zstandard Pillow
           pip install .
+
+      - name: Convert PNG to ICO
+        run: |
+          python -c "
+          from PIL import Image
+          img = Image.open('rpi_logger/core/ui/icon.png')
+          icon_sizes = [(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)]
+          img.save('rpi_logger/core/ui/icon.ico', format='ICO', sizes=icon_sizes)
+          "
 
       - name: Build with Nuitka
         run: |
@@ -39,8 +45,13 @@ jobs:
             --windows-console-mode=disable `
             --lto=yes `
             --enable-plugin=tk-inter `
-            --enable-plugin=upx `
             --assume-yes-for-downloads `
+            --windows-company-name="Red Scientific Inc." `
+            --windows-product-name="Logger" `
+            --windows-file-version=0.1.0.0 `
+            --windows-product-version=0.1.0.0 `
+            --windows-file-description="Data logging application for research" `
+            --windows-icon-from-ico=rpi_logger/core/ui/icon.ico `
             --nofollow-import-to=pytest `
             --nofollow-import-to=unittest `
             --nofollow-import-to=doctest `
@@ -74,15 +85,15 @@ jobs:
             --include-data-file=rpi_logger/modules/Notes/main_notes.py=rpi_logger/modules/Notes/main_notes.py `
             --include-data-file=rpi_logger/modules/VOG/main_vog.py=rpi_logger/modules/VOG/main_vog.py `
             "--include-data-file=rpi_logger/modules/stub (codex)/main_stub_codex.py=rpi_logger/modules/stub (codex)/main_stub_codex.py" `
-            --output-filename="RPi-Logger.exe" `
+            --output-filename="Logger.exe" `
             --output-dir=dist `
             rpi_logger/__main__.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPi-Logger-Windows-Nuitka
-          path: dist/RPi-Logger.exe
+          name: Logger-Windows-Nuitka
+          path: dist/Logger.exe
 
   build-macos-nuitka:
     runs-on: macos-latest
@@ -94,24 +105,36 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install UPX
-        run: brew install upx
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install nuitka ordered-set zstandard
           pip install .
 
+      - name: Convert PNG to ICNS
+        run: |
+          mkdir -p icon.iconset
+          sips -z 16 16   rpi_logger/core/ui/icon.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32   rpi_logger/core/ui/icon.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32   rpi_logger/core/ui/icon.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64   rpi_logger/core/ui/icon.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128 rpi_logger/core/ui/icon.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256 rpi_logger/core/ui/icon.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256 rpi_logger/core/ui/icon.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512 rpi_logger/core/ui/icon.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512 rpi_logger/core/ui/icon.png --out icon.iconset/icon_512x512.png
+          sips -z 1024 1024 rpi_logger/core/ui/icon.png --out icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o rpi_logger/core/ui/icon.icns
+
       - name: Build with Nuitka
         run: |
           python -m nuitka \
             --standalone \
             --macos-create-app-bundle \
-            --macos-app-name="RPi Logger" \
+            --macos-app-name="Logger" \
+            --macos-app-icon=rpi_logger/core/ui/icon.icns \
             --lto=yes \
             --enable-plugin=tk-inter \
-            --enable-plugin=upx \
             --assume-yes-for-downloads \
             --nofollow-import-to=pytest \
             --nofollow-import-to=unittest \
@@ -152,13 +175,13 @@ jobs:
       - name: Create ZIP archive
         run: |
           cd dist
-          zip -r "RPi-Logger-macOS-Nuitka.zip" "RPi Logger.app" || zip -r "RPi-Logger-macOS-Nuitka.zip" *.app || zip -r "RPi-Logger-macOS-Nuitka.zip" __main__.dist
+          zip -r "Logger-macOS-Nuitka.zip" "Logger.app" || zip -r "Logger-macOS-Nuitka.zip" *.app || zip -r "Logger-macOS-Nuitka.zip" __main__.dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPi-Logger-macOS-Nuitka
-          path: dist/RPi-Logger-macOS-Nuitka.zip
+          name: Logger-macOS-Nuitka
+          path: dist/Logger-macOS-Nuitka.zip
 
   build-linux-nuitka:
     runs-on: ubuntu-22.04
@@ -181,8 +204,7 @@ jobs:
             libgl1-mesa-glx \
             libglib2.0-0 \
             patchelf \
-            ccache \
-            upx
+            ccache
 
       - name: Install Python dependencies
         run: |
@@ -197,7 +219,6 @@ jobs:
             --onefile \
             --lto=yes \
             --enable-plugin=tk-inter \
-            --enable-plugin=upx \
             --assume-yes-for-downloads \
             --nofollow-import-to=pytest \
             --nofollow-import-to=unittest \
@@ -232,15 +253,15 @@ jobs:
             --include-data-file=rpi_logger/modules/Notes/main_notes.py=rpi_logger/modules/Notes/main_notes.py \
             --include-data-file=rpi_logger/modules/VOG/main_vog.py=rpi_logger/modules/VOG/main_vog.py \
             "--include-data-file=rpi_logger/modules/stub (codex)/main_stub_codex.py=rpi_logger/modules/stub (codex)/main_stub_codex.py" \
-            --output-filename=rpi-logger \
+            --output-filename=logger \
             --output-dir=dist \
             rpi_logger/__main__.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPi-Logger-Linux-Nuitka
-          path: dist/rpi-logger
+          name: Logger-Linux-Nuitka
+          path: dist/logger
 
   # NOTE: Raspberry Pi Nuitka builds are not supported
   # GCC crashes under QEMU ARM emulation when compiling Nuitka's large C files
