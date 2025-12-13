@@ -38,7 +38,6 @@ jobs:
             --onefile `
             --windows-console-mode=disable `
             --lto=yes `
-            --python-flag=no_docstrings `
             --enable-plugin=tk-inter `
             --enable-plugin=upx `
             --assume-yes-for-downloads `
@@ -111,7 +110,6 @@ jobs:
             --macos-create-app-bundle \
             --macos-app-name="RPi Logger" \
             --lto=yes \
-            --python-flag=no_docstrings \
             --enable-plugin=tk-inter \
             --enable-plugin=upx \
             --assume-yes-for-downloads \
@@ -198,7 +196,6 @@ jobs:
             --standalone \
             --onefile \
             --lto=yes \
-            --python-flag=no_docstrings \
             --enable-plugin=tk-inter \
             --enable-plugin=upx \
             --assume-yes-for-downloads \
