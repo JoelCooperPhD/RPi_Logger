@@ -132,7 +132,6 @@ class CamerasRuntime(ModuleRuntime):
             control_change=self._on_control_change,
             reprobe=self._on_reprobe,
         )
-        self.view.set_status("Waiting for camera assignment...")
 
         self.logger.info("Cameras runtime ready - waiting for device assignment")
         StatusMessage.send("ready")
@@ -313,7 +312,6 @@ class CamerasRuntime(ModuleRuntime):
                     sensor_info=self._known_model.sensor_info if self._known_model else None,
                     display_name=self._known_model.name if self._known_model else self._camera_name,
                 )
-            self.view.set_status(f"Camera ready: {self._camera_name}")
 
             # Update window title
             if self.ctx.view and display_name:
@@ -439,7 +437,6 @@ class CamerasRuntime(ModuleRuntime):
             self._capture = None
 
         self._is_assigned = False
-        self.view.set_status("Camera disconnected")
 
     # ------------------------------------------------------------------ Recording
 
@@ -479,7 +476,6 @@ class CamerasRuntime(ModuleRuntime):
         await asyncio.to_thread(self._encoder.start)
 
         self._is_recording = True
-        self.view.set_recording(True)
         self.logger.info("Recording started: %s", paths.video_path)
         StatusMessage.send("recording_started", {
             "video_path": str(paths.video_path),
@@ -492,7 +488,6 @@ class CamerasRuntime(ModuleRuntime):
             return
 
         self._is_recording = False
-        self.view.set_recording(False)
 
         if self._encoder:
             frames_dropped = self._encoder.frames_dropped
@@ -615,7 +610,6 @@ class CamerasRuntime(ModuleRuntime):
             name="camera_capture_loop"
         )
 
-        self.view.set_status(f"Resolution: {self._resolution[0]}x{self._resolution[1]} @ {self._fps:.0f} fps")
 
     def _on_control_change(self, camera_id: str, control_name: str, value: Any) -> None:
         """Handle camera control change (brightness, contrast, etc.)."""
@@ -652,8 +646,6 @@ class CamerasRuntime(ModuleRuntime):
         if not self._camera_id:
             return
 
-        self.view.set_status("Reprobing camera...")
-
         camera_type = self._camera_id.backend
         stable_id = self._camera_id.stable_id
         dev_path = self._camera_id.dev_path
@@ -670,12 +662,10 @@ class CamerasRuntime(ModuleRuntime):
                     sensor_info=self._known_model.sensor_info if self._known_model else None,
                     display_name=self._known_model.name if self._known_model else self._camera_name,
                 )
-                self.view.set_status("Camera reprobed successfully")
             else:
-                self.view.set_status("Reprobe failed - no capabilities returned")
+                self.logger.warning("Reprobe failed - no capabilities returned")
         except Exception as e:
             self.logger.error("Reprobe failed: %s", e)
-            self.view.set_status(f"Reprobe failed: {e}")
 
     # ------------------------------------------------------------------ Capture Loop
 

@@ -128,6 +128,10 @@ class MainWindow:
         # Use set for O(1) removal and avoid race condition issues
         self._pending_tasks: set[asyncio.Task] = set()
 
+        # Geometry tracking for continuous persistence
+        self._last_geometry: Optional[str] = None
+        self._geometry_save_handle: Optional[asyncio.Handle] = None
+        self._geometry_save_delay: float = 0.25  # seconds
 
     def build_ui(self) -> None:
         self.root = tk.Tk()
@@ -184,6 +188,10 @@ class MainWindow:
         self._build_logger_frame()
 
         self.root.protocol("WM_DELETE_WINDOW", self.controller.on_shutdown)
+
+        # Track geometry changes for continuous persistence
+        self._last_geometry = self.root.geometry()
+        self.root.bind("<Configure>", self._on_configure)
 
         self.controller.set_widgets(
             self.root,
@@ -610,6 +618,57 @@ class MainWindow:
                 UpdateAvailableDialog(self.root, update_info)
         except Exception as e:
             self.logger.debug("Update check failed: %s", e)
+
+    def _on_configure(self, event) -> None:
+        """Handle window configure events (move/resize) for geometry persistence."""
+        # Only respond to root window events, not child widgets
+        if event.widget != self.root:
+            return
+
+        try:
+            from rpi_logger.modules.base.gui_utils import get_frame_position
+
+            # Get current geometry using frame position compensation
+            try:
+                width, height, x, y = get_frame_position(self.root)
+            except ValueError:
+                return  # Can't get valid geometry
+
+            current_geometry = f"{width}x{height}+{x}+{y}"
+
+            # Only persist if geometry actually changed
+            if current_geometry != self._last_geometry:
+                self._last_geometry = current_geometry
+                self._schedule_geometry_persist()
+        except Exception:
+            pass  # Silently ignore errors during geometry tracking
+
+    def _schedule_geometry_persist(self) -> None:
+        """Schedule debounced geometry save to avoid excessive writes during drag."""
+        self._cancel_geometry_save_handle()
+
+        try:
+            loop = asyncio.get_event_loop()
+            self._geometry_save_handle = loop.call_later(
+                self._geometry_save_delay,
+                self.save_window_geometry
+            )
+        except RuntimeError:
+            # No event loop available, save immediately
+            self.save_window_geometry()
+
+    def _cancel_geometry_save_handle(self, flush: bool = False) -> None:
+        """Cancel any pending geometry save.
+
+        Args:
+            flush: If True, save geometry immediately before cancelling
+        """
+        if flush:
+            self.save_window_geometry()
+
+        if self._geometry_save_handle:
+            self._geometry_save_handle.cancel()
+            self._geometry_save_handle = None
 
     def save_window_geometry(self) -> None:
         """Save main window geometry to instance geometry store."""

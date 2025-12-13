@@ -127,7 +127,16 @@ class AudioRuntime(ModuleRuntime):
 
             # Enable the device (start audio stream)
             try:
-                await self.app.toggle_device(sounddevice_index, enabled=True)
+                success = await self.app.toggle_device(sounddevice_index, enabled=True)
+                if not success:
+                    # Clean up on failure
+                    self.app.state.remove_device(sounddevice_index)
+                    self.logger.error("Failed to enable audio device %s: stream failed to start", device_id)
+                    StatusMessage.send("device_error", {
+                        "device_id": device_id,
+                        "error": "Failed to start audio stream",
+                    }, command_id=command_id)
+                    return False
             except Exception as enable_err:
                 # Clean up on failure (same pattern as DRT)
                 self.app.state.remove_device(sounddevice_index)

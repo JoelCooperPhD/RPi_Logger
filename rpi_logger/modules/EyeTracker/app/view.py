@@ -91,7 +91,7 @@ class _SystemPlaceholder:
 
     def __init__(self, args=None):
         self.config = getattr(args, 'config', {})
-        self.config_file_path = getattr(args, 'config_file_path', None)
+        self.config_file_path = getattr(args, 'config_path', None)
 
 
 class _LoopAsyncBridge:
@@ -551,7 +551,7 @@ class NeonEyeTrackerView:
         self._stream_controls: Optional[StreamControls] = None
 
         # Initialize preferences for config persistence
-        config_path = getattr(args, "config_file_path", None)
+        config_path = getattr(args, "config_path", None)
         if config_path:
             self._preferences = ModulePreferences(Path(config_path))
         else:

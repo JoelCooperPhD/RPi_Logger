@@ -66,8 +66,6 @@ class CameraView:
         self._canvas_image_id = None  # Reusable canvas image item
         self._canvas_width = 0
         self._canvas_height = 0
-        self._status_label = None
-        self._recording_indicator = None
         self._has_ui = False
 
         # Metrics display elements (IO stub area)
@@ -87,7 +85,6 @@ class CameraView:
         # State
         self._camera_id: Optional[str] = None
         self._camera_name: Optional[str] = None
-        self._is_recording: bool = False
         self._frame_count: int = 0
         self._camera_settings: Dict[str, str] = dict(DEFAULT_SETTINGS)
         self._camera_options: Dict[str, List[str]] = {}
@@ -153,24 +150,6 @@ class CameraView:
         self._canvas.grid(row=0, column=0, sticky="nsew")
         self._canvas.bind("<Configure>", self._on_canvas_configure)
 
-        # Status bar at bottom
-        status_frame = tk.Frame(container, bg=bg_color)
-        status_frame.grid(row=1, column=0, sticky="ew", padx=4, pady=2)
-        status_frame.columnconfigure(1, weight=1)
-
-        # Recording indicator (red dot when recording)
-        self._recording_indicator = tk.Label(
-            status_frame, text="\u25cf", fg="gray", bg=bg_color,
-            font=("", 12)
-        )
-        self._recording_indicator.grid(row=0, column=0, padx=(0, 4))
-
-        # Status label
-        self._status_label = tk.Label(
-            status_frame, text="Waiting for camera...",
-            anchor="w", bg=bg_color, fg=fg_color
-        )
-        self._status_label.grid(row=0, column=1, sticky="w")
 
     def _install_metrics_display(self, tk, ttk) -> None:
         """Install the capture stats display into the IO stub content area."""
@@ -311,7 +290,6 @@ class CameraView:
         """Handle config apply from settings window."""
         self._logger.debug("_on_apply_config called: camera_id=%s, settings=%s", camera_id, settings)
         if not camera_id:
-            self.set_status("No camera selected")
             return
 
         self._camera_settings.update(settings)
@@ -320,7 +298,6 @@ class CameraView:
             self._logger.debug("Calling config handler")
             try:
                 self._config_handler(camera_id, settings)
-                self.set_status(f"Config applied")
             except Exception:
                 self._logger.debug("Config handler failed", exc_info=True)
         else:
@@ -340,13 +317,11 @@ class CameraView:
         """Handle reprobe request."""
         target = camera_id or self._camera_id
         if not target:
-            self.set_status("No camera to reprobe")
             return
 
         if self._reprobe_handler:
             try:
                 self._reprobe_handler(target)
-                self.set_status(f"Reprobing camera...")
             except Exception:
                 self._logger.debug("Reprobe handler failed", exc_info=True)
 
@@ -428,34 +403,6 @@ class CameraView:
                 display_name=display_name,
             )
 
-    def set_status(self, message: str) -> None:
-        """Update status message."""
-        self._logger.info(message)
-        if not self._has_ui or not self._status_label:
-            return
-
-        def update():
-            try:
-                self._status_label.config(text=message)
-            except Exception:
-                pass
-
-        self._schedule_ui(update)
-
-    def set_recording(self, is_recording: bool) -> None:
-        """Update recording indicator."""
-        self._is_recording = is_recording
-        if not self._has_ui or not self._recording_indicator:
-            return
-
-        def update():
-            try:
-                color = "red" if is_recording else "gray"
-                self._recording_indicator.config(fg=color)
-            except Exception:
-                pass
-
-        self._schedule_ui(update)
 
     def push_frame(self, ppm_data: Optional[bytes]) -> None:
         """Display a preview frame (PPM bytes, pre-scaled in capture task)."""

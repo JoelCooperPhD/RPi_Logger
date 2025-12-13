@@ -185,8 +185,8 @@ class AudioApp:
     # ------------------------------------------------------------------
     # Public helpers exposed to managers/commands
 
-    async def toggle_device(self, device_id: int, enabled: bool) -> None:
-        await self.device_manager.toggle_device(device_id, enabled)
+    async def toggle_device(self, device_id: int, enabled: bool) -> bool:
+        return await self.device_manager.toggle_device(device_id, enabled)
 
     async def start_recording(self, trial_number: int | None = None) -> bool:
         if trial_number is None:

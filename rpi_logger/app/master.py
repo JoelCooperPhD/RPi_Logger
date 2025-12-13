@@ -106,7 +106,7 @@ async def run_gui(args, logger_system: LoggerSystem) -> None:
     shutdown_task: Optional[asyncio.Task] = None
 
     async def cleanup_ui():
-        ui.save_window_geometry()
+        ui._cancel_geometry_save_handle(flush=True)
         ui.cleanup_log_handler()
         await ui.timer_manager.stop_all()
         if ui.root:
