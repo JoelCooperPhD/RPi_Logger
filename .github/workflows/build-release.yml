@@ -37,13 +37,13 @@ jobs:
       - name: Create ZIP archive
         run: |
           cd dist
-          Compress-Archive -Path "RPi Logger" -DestinationPath "RPi-Logger-Windows.zip"
+          Compress-Archive -Path "Logger" -DestinationPath "Logger-Windows.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPi-Logger-Windows
-          path: dist/RPi-Logger-Windows.zip
+          name: Logger-Windows
+          path: dist/Logger-Windows.zip
 
   build-macos:
     runs-on: macos-latest
@@ -67,13 +67,13 @@ jobs:
       - name: Create ZIP archive
         run: |
           cd dist
-          zip -r "RPi-Logger-macOS.zip" "RPi Logger.app"
+          zip -r "Logger-macOS.zip" "Logger.app"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPi-Logger-macOS
-          path: dist/RPi-Logger-macOS.zip
+          name: Logger-macOS
+          path: dist/Logger-macOS.zip
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -108,13 +108,13 @@ jobs:
       - name: Create tarball
         run: |
           cd dist
-          tar -czvf "RPi-Logger-Linux-x86_64.tar.gz" "rpi-logger"
+          tar -czvf "Logger-Linux-x86_64.tar.gz" "logger"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPi-Logger-Linux-x86_64
-          path: dist/RPi-Logger-Linux-x86_64.tar.gz
+          name: Logger-Linux-x86_64
+          path: dist/Logger-Linux-x86_64.tar.gz
 
   build-linux-appimage:
     runs-on: ubuntu-22.04
@@ -160,29 +160,24 @@ jobs:
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
           # Copy the built application
-          cp -r dist/rpi-logger/* AppDir/usr/bin/
+          cp -r dist/logger/* AppDir/usr/bin/
 
-          # Copy icon (use logo or create placeholder)
-          if [ -f "rpi_logger/core/ui/logo_100.png" ]; then
-            cp rpi_logger/core/ui/logo_100.png AppDir/usr/share/icons/hicolor/256x256/apps/rpi-logger.png
-            cp rpi_logger/core/ui/logo_100.png AppDir/rpi-logger.png
-          else
-            # Create a simple placeholder icon
-            convert -size 256x256 xc:navy -fill white -gravity center -pointsize 24 -annotate 0 "RPi\nLogger" AppDir/rpi-logger.png || true
-          fi
+          # Copy icon
+          cp rpi_logger/core/ui/icon_256.png AppDir/usr/share/icons/hicolor/256x256/apps/logger.png
+          cp rpi_logger/core/ui/icon_256.png AppDir/logger.png
 
           # Create desktop file
-          cat > AppDir/rpi-logger.desktop << 'EOF'
+          cat > AppDir/logger.desktop << 'EOF'
           [Desktop Entry]
           Type=Application
-          Name=RPi Logger
-          Exec=rpi-logger
-          Icon=rpi-logger
+          Name=Logger
+          Exec=logger
+          Icon=logger
           Categories=Utility;Science;
-          Comment=Cross-platform data logger with Raspberry Pi camera support
+          Comment=Data logging application for research
           EOF
 
-          cp AppDir/rpi-logger.desktop AppDir/usr/share/applications/
+          cp AppDir/logger.desktop AppDir/usr/share/applications/
 
           # Create AppRun
           cat > AppDir/AppRun << 'EOF'
@@ -191,19 +186,19 @@ jobs:
           HERE=${SELF%/*}
           export PATH="${HERE}/usr/bin:${PATH}"
           export LD_LIBRARY_PATH="${HERE}/usr/bin:${LD_LIBRARY_PATH}"
-          exec "${HERE}/usr/bin/rpi-logger" "$@"
+          exec "${HERE}/usr/bin/logger" "$@"
           EOF
           chmod +x AppDir/AppRun
 
       - name: Build AppImage
         run: |
-          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir RPi-Logger-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir Logger-x86_64.AppImage
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPi-Logger-Linux-AppImage
-          path: RPi-Logger-x86_64.AppImage
+          name: Logger-Linux-AppImage
+          path: Logger-x86_64.AppImage
 
   build-raspberry-pi:
     runs-on: ubuntu-22.04
@@ -244,13 +239,13 @@ jobs:
             python3.11 -m pip install .
             python3.11 -m PyInstaller rpi_logger.spec
             cd dist
-            tar -czvf "RPi-Logger-RaspberryPi-arm64.tar.gz" "rpi-logger"
+            tar -czvf "Logger-RaspberryPi-arm64.tar.gz" "logger"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RPi-Logger-RaspberryPi-arm64
-          path: dist/RPi-Logger-RaspberryPi-arm64.tar.gz
+          name: Logger-RaspberryPi-arm64
+          path: dist/Logger-RaspberryPi-arm64.tar.gz
 
   create-release:
     needs: [build-windows, build-macos, build-linux, build-linux-appimage, build-raspberry-pi]
@@ -271,23 +266,23 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
           files: |
-            artifacts/RPi-Logger-Windows/RPi-Logger-Windows.zip
-            artifacts/RPi-Logger-macOS/RPi-Logger-macOS.zip
-            artifacts/RPi-Logger-Linux-x86_64/RPi-Logger-Linux-x86_64.tar.gz
-            artifacts/RPi-Logger-Linux-AppImage/RPi-Logger-x86_64.AppImage
-            artifacts/RPi-Logger-RaspberryPi-arm64/RPi-Logger-RaspberryPi-arm64.tar.gz
+            artifacts/Logger-Windows/Logger-Windows.zip
+            artifacts/Logger-macOS/Logger-macOS.zip
+            artifacts/Logger-Linux-x86_64/Logger-Linux-x86_64.tar.gz
+            artifacts/Logger-Linux-AppImage/Logger-x86_64.AppImage
+            artifacts/Logger-RaspberryPi-arm64/Logger-RaspberryPi-arm64.tar.gz
           body: |
-            ## RPi Logger ${{ github.ref_name }}
+            ## Logger ${{ github.ref_name }}
 
             ### Downloads
 
             | Platform | File | Notes |
             |----------|------|-------|
-            | **Windows** | `RPi-Logger-Windows.zip` | Extract and run `RPi Logger.exe` |
-            | **macOS** | `RPi-Logger-macOS.zip` | Extract and run `RPi Logger.app` |
-            | **Linux (x86_64)** | `RPi-Logger-Linux-x86_64.tar.gz` | Extract and run `./rpi-logger` |
-            | **Linux (AppImage)** | `RPi-Logger-x86_64.AppImage` | Make executable and run directly |
-            | **Raspberry Pi** | `RPi-Logger-RaspberryPi-arm64.tar.gz` | Extract and run `./rpi-logger` |
+            | **Windows** | `Logger-Windows.zip` | Extract and run `Logger.exe` |
+            | **macOS** | `Logger-macOS.zip` | Extract and run `Logger.app` |
+            | **Linux (x86_64)** | `Logger-Linux-x86_64.tar.gz` | Extract and run `./logger` |
+            | **Linux (AppImage)** | `Logger-x86_64.AppImage` | Make executable and run directly |
+            | **Raspberry Pi** | `Logger-RaspberryPi-arm64.tar.gz` | Extract and run `./logger` |
 
             ### Installation
 
@@ -299,8 +294,8 @@ jobs:
 
             #### Linux AppImage
             ```bash
-            chmod +x RPi-Logger-x86_64.AppImage
-            ./RPi-Logger-x86_64.AppImage
+            chmod +x Logger-x86_64.AppImage
+            ./Logger-x86_64.AppImage
             ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

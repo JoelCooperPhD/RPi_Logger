@@ -20,8 +20,8 @@ is_macos = sys.platform == 'darwin'
 is_linux = sys.platform.startswith('linux')
 
 # Application metadata
-APP_NAME = 'RPi Logger'
-APP_BUNDLE_ID = 'com.rpilogger.app'
+APP_NAME = 'Logger'
+APP_BUNDLE_ID = 'com.redscientific.logger'
 APP_VERSION = '0.1.0'
 
 # Paths
@@ -190,7 +190,7 @@ if is_macos:
         a.scripts,
         [],
         exclude_binaries=True,
-        name='RPi Logger',
+        name='Logger',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
@@ -211,13 +211,13 @@ if is_macos:
         strip=False,
         upx=True,
         upx_exclude=[],
-        name='RPi Logger',
+        name='Logger',
     )
 
     app = BUNDLE(
         coll,
-        name='RPi Logger.app',
-        icon=None,  # Add icon path here if you have one: 'assets/icon.icns'
+        name='Logger.app',
+        icon=str(ROOT / 'rpi_logger' / 'core' / 'ui' / 'icon.icns') if (ROOT / 'rpi_logger' / 'core' / 'ui' / 'icon.icns').exists() else None,
         bundle_identifier=APP_BUNDLE_ID,
         info_plist={
             'CFBundleName': APP_NAME,
@@ -235,14 +235,14 @@ elif is_windows:
         a.scripts,
         [],
         exclude_binaries=True,
-        name='RPi Logger',
+        name='Logger',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
         upx=True,
         console=False,  # No console window
         disable_windowed_traceback=False,
-        icon=None,  # Add icon path here if you have one: 'assets/icon.ico'
+        icon=str(ROOT / 'rpi_logger' / 'core' / 'ui' / 'icon.ico') if (ROOT / 'rpi_logger' / 'core' / 'ui' / 'icon.ico').exists() else None,
         version_info=None,  # Can add version info file
     )
 
@@ -254,7 +254,7 @@ elif is_windows:
         strip=False,
         upx=True,
         upx_exclude=[],
-        name='RPi Logger',
+        name='Logger',
     )
 
 else:  # Linux / Raspberry Pi
@@ -263,7 +263,7 @@ else:  # Linux / Raspberry Pi
         a.scripts,
         [],
         exclude_binaries=True,
-        name='rpi-logger',
+        name='logger',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
@@ -280,5 +280,5 @@ else:  # Linux / Raspberry Pi
         strip=False,
         upx=True,
         upx_exclude=[],
-        name='rpi-logger',
+        name='logger',
     )
