@@ -37,7 +37,7 @@ from rpi_logger.core.window_manager import WindowGeometry
 
 class StateFacade:
     """
-    Unified interface for all state persistence in TheLogger.
+    Unified interface for all state persistence in Logger.
 
     This facade provides a single API for:
     - Module lifecycle state (enabled, device_connected, crash recovery)

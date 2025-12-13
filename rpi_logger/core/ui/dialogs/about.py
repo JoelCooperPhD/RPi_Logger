@@ -1,5 +1,5 @@
 """
-About dialog for TheLogger.
+About dialog for Logger.
 """
 
 import io

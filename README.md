@@ -1,4 +1,4 @@
-# TheLogger
+# Logger
 
 **Synchronized Multi-Sensor Data Collection for Research**
 

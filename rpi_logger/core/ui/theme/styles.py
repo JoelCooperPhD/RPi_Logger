@@ -1,5 +1,5 @@
 """
-TTK style configuration for TheLogger dark theme.
+TTK style configuration for Logger dark theme.
 """
 
 from tkinter import ttk

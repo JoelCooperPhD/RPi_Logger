@@ -1,5 +1,5 @@
 """
-Dialog windows for TheLogger UI.
+Dialog windows for Logger UI.
 """
 
 from .about import AboutDialog

@@ -1,7 +1,7 @@
 """GPS module entry point built on the shared stub VMC framework.
 
 This module manages GPS receivers that output standard NMEA sentences.
-Devices are assigned by TheLogger via the assign_device command.
+Devices are assigned by Logger via the assign_device command.
 """
 
 from __future__ import annotations

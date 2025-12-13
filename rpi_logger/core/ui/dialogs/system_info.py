@@ -1,5 +1,5 @@
 """
-System information dialog for TheLogger.
+System information dialog for Logger.
 """
 
 import platform

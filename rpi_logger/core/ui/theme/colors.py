@@ -1,5 +1,5 @@
 """
-Color palette for TheLogger UI.
+Color palette for Logger UI.
 
 Dark theme inspired by rei-simulator's design philosophy:
 - Dark backgrounds for reduced eye strain

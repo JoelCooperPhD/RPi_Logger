@@ -1,5 +1,5 @@
 """
-Quick start guide dialog for TheLogger.
+Quick start guide dialog for Logger.
 """
 
 import tkinter as tk

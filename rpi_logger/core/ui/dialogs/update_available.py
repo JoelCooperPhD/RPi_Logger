@@ -1,5 +1,5 @@
 """
-Update available dialog for TheLogger.
+Update available dialog for Logger.
 """
 
 import tkinter as tk

@@ -1,5 +1,5 @@
 """
-Update checker for TheLogger.
+Update checker for Logger.
 
 Checks GitHub releases API for new versions.
 """

@@ -1,5 +1,5 @@
 """
-Base module utilities for TheLogger modules.
+Base module utilities for Logger modules.
 
 This module provides shared utilities and base classes for module development.
 

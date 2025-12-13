@@ -1,5 +1,5 @@
 """
-Custom themed widgets for TheLogger UI.
+Custom themed widgets for Logger UI.
 """
 
 import tkinter as tk

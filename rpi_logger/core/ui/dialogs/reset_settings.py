@@ -1,5 +1,5 @@
 """
-Reset settings dialog for TheLogger.
+Reset settings dialog for Logger.
 """
 
 from pathlib import Path

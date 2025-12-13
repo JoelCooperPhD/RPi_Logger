@@ -11,5 +11,5 @@ Main components:
 - gps: Runtime package for VMC integration
 - view: GPS GUI view
 
-Device assignment is handled by TheLogger via assign_device commands.
+Device assignment is handled by Logger via assign_device commands.
 """

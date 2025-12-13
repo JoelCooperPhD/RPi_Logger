@@ -1,5 +1,5 @@
 """
-Theme module for TheLogger UI.
+Theme module for Logger UI.
 
 Provides color palette, TTK styles, and custom widgets for the dark theme.
 """
