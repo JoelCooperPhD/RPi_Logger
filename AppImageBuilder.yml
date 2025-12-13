@@ -19,15 +19,15 @@ script:
   - cp -r dist/rpi-logger/* AppDir/usr/bin/
 
   # Copy icon
-  - cp rpi_logger/core/ui/logo_100.png AppDir/usr/share/icons/hicolor/256x256/apps/rpi-logger.png
+  - cp rpi_logger/core/ui/icon_256.png AppDir/usr/share/icons/hicolor/256x256/apps/logger.png
 
 AppDir:
   path: ./AppDir
 
   app_info:
-    id: com.rpilogger.app
-    name: RPi Logger
-    icon: rpi-logger
+    id: com.redscientific.logger
+    name: Logger
+    icon: logger
     version: 0.1.0
     exec: usr/bin/rpi-logger
     exec_args: $@
