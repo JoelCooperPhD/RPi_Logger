@@ -411,3 +411,9 @@ class BaseDRTHandler(ABC, ReconnectingMixin):
             output_dir: New output directory path
         """
         self.output_dir = output_dir
+        # Subclasses should override _update_data_logger_output_dir if they have a data logger
+        self._update_data_logger_output_dir(output_dir)
+
+    def _update_data_logger_output_dir(self, output_dir: Path) -> None:
+        """Hook for subclasses to update their data logger's output directory."""
+        pass

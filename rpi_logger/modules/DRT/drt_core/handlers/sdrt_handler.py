@@ -73,6 +73,10 @@ class SDRTHandler(BaseDRTHandler):
         """Return the device type."""
         return DRTDeviceType.SDRT
 
+    def _update_data_logger_output_dir(self, output_dir: Path) -> None:
+        """Update the data logger's output directory."""
+        self._data_logger.output_dir = output_dir
+
     # =========================================================================
     # Command Methods
     # =========================================================================

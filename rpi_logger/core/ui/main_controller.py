@@ -222,6 +222,9 @@ class MainController:
 
     async def _start_trial_async(self) -> None:
         try:
+            # Update button immediately for responsive UI
+            self.trial_button.configure(text="Pause", style='danger')
+
             trial_label = self.trial_label_var.get() if self.trial_label_var else ""
             next_trial_num = self.trial_counter + 1
 
@@ -240,8 +243,6 @@ class MainController:
 
             self.trial_active = True
 
-            self.trial_button.configure(text="Pause", style='danger')
-
             await self.timer_manager.start_trial_timer()
 
             self.logger.info("Trial started")
@@ -249,9 +250,14 @@ class MainController:
         except Exception as e:
             self.logger.error("Error starting trial: %s", e, exc_info=True)
             messagebox.showerror("Error", f"Failed to start trial: {e}")
+            # Revert button state on failure
+            self.trial_button.configure(text="Record", style='success')
 
     async def _stop_trial_async(self) -> None:
         try:
+            # Update button immediately for responsive UI
+            self.trial_button.configure(text="Record", style='success')
+
             results = await self.logger_system.pause_all()
 
             failed = [name for name, success in results.items() if not success]
@@ -268,8 +274,6 @@ class MainController:
                 await self.logger_system.event_logger.log_button_press("trial_pause", f"trial={self.trial_counter}")
                 await self.logger_system.event_logger.log_trial_stop(self.trial_counter)
 
-            self.trial_button.configure(text="Record", style='success')
-
             self.trial_counter_label.config(text=f"{self.trial_counter}")
 
             await self.timer_manager.stop_trial_timer()
@@ -284,6 +288,8 @@ class MainController:
         except Exception as e:
             self.logger.error("Error stopping trial: %s", e, exc_info=True)
             messagebox.showerror("Error", f"Failed to stop trial: {e}")
+            # Revert button state on failure
+            self.trial_button.configure(text="Pause", style='danger')
 
     def on_shutdown(self) -> None:
         """Handle shutdown button click."""

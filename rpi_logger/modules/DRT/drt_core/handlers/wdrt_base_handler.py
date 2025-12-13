@@ -65,6 +65,10 @@ class WDRTBaseHandler(BaseDRTHandler):
         """Return the last known battery percentage."""
         return self._battery_percent
 
+    def _update_data_logger_output_dir(self, output_dir: Path) -> None:
+        """Update the data logger's output directory."""
+        self._data_logger.output_dir = output_dir
+
     # =========================================================================
     # Battery Polling
     # =========================================================================
