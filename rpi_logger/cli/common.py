@@ -153,6 +153,29 @@ def add_common_cli_arguments(
         help="Instance-specific config file path (set by parent process for multi-instance modules).",
     )
 
+    # Platform information (passed from parent process)
+    parser.add_argument(
+        "--platform",
+        dest="platform",
+        type=str,
+        default=None,
+        help="Platform identifier (linux, darwin, win32). Set by parent process.",
+    )
+    parser.add_argument(
+        "--architecture",
+        dest="architecture",
+        type=str,
+        default=None,
+        help="CPU architecture (x86_64, arm64, aarch64, armv7l). Set by parent process.",
+    )
+    parser.add_argument(
+        "--is-raspberry-pi",
+        dest="is_raspberry_pi",
+        action="store_true",
+        default=False,
+        help="Running on Raspberry Pi hardware. Set by parent process.",
+    )
+
 
 RESOLUTION_PRESETS = {
     0: (1456, 1088, "Native - Full sensor resolution", "4:3"),

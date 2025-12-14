@@ -1,42 +1,29 @@
 """
 USB Camera device scanner.
 
-Discovers USB cameras using:
-- Linux: /dev/video* + sysfs enumeration
-- macOS/Windows: OpenCV enumeration
+Discovers USB cameras using platform-specific backends:
+- Linux: sysfs + OpenCV (real device names from kernel)
+- macOS: AVFoundation + OpenCV (real device names via PyObjC)
+- Windows: OpenCV enumeration (generic names, could add WMI)
 
 This is separate from the CSI scanner which handles Pi cameras.
 """
 
 import asyncio
-import glob
-import sys
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, Optional, Dict, Awaitable
+from typing import Callable, Dict, Awaitable, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
 
+from .camera_backends import get_camera_backend, DiscoveredUSBCamera, CameraBackend
+
 logger = get_module_logger("USBCameraScanner")
 
-# Try to import OpenCV - required for USB camera discovery
+# Check OpenCV availability for backwards compatibility
 try:
     import cv2
     CV2_AVAILABLE = True
 except ImportError:
     CV2_AVAILABLE = False
-    logger.warning("cv2 not available - USB camera discovery disabled")
-
-
-@dataclass
-class DiscoveredUSBCamera:
-    """Represents a discovered USB camera device."""
-    device_id: str           # Unique ID (e.g., "usb:usb1-2")
-    stable_id: str           # USB bus path
-    dev_path: Optional[str]  # /dev/video* path
-    friendly_name: str       # Display name
-    hw_model: Optional[str]  # Hardware model if known
-    location_hint: Optional[str]  # USB port path
 
 
 # Callback types
@@ -48,7 +35,10 @@ class USBCameraScanner:
     """
     Continuously scans for USB camera devices.
 
-    Discovers USB cameras via /dev/video* (Linux) or OpenCV enumeration (Windows/macOS).
+    Uses platform-specific backends for camera discovery:
+    - Linux: LinuxCameraBackend (sysfs + OpenCV)
+    - macOS: MacOSCameraBackend (AVFoundation + OpenCV)
+    - Windows: WindowsCameraBackend (OpenCV)
     """
 
     DEFAULT_SCAN_INTERVAL = 2.0  # Scan every 2 seconds
@@ -68,6 +58,9 @@ class USBCameraScanner:
         self._scan_task: Optional[asyncio.Task] = None
         self._running = False
 
+        # Get platform-specific backend
+        self._backend: CameraBackend = get_camera_backend()
+
     @property
     def devices(self) -> Dict[str, DiscoveredUSBCamera]:
         """Get currently known devices (device_id -> device)."""
@@ -81,10 +74,6 @@ class USBCameraScanner:
     async def start(self) -> None:
         """Start USB camera device scanning."""
         if self._running:
-            return
-
-        if not CV2_AVAILABLE:
-            logger.warning("Cannot start USB camera scanner - cv2 not available")
             return
 
         self._running = True
@@ -180,158 +169,11 @@ class USBCameraScanner:
                     logger.error(f"Error in device lost callback: {e}")
 
     def _discover_usb_sync(self) -> list[DiscoveredUSBCamera]:
-        """Synchronous USB camera discovery (runs in thread)."""
-        if sys.platform == "linux":
-            return self._discover_usb_linux()
-        elif sys.platform == "win32":
-            return self._discover_usb_windows()
-        elif sys.platform == "darwin":
-            return self._discover_usb_macos()
-        else:
-            logger.warning(f"Unsupported platform for USB camera discovery: {sys.platform}")
-            return []
+        """Synchronous USB camera discovery (runs in thread).
 
-    def _discover_usb_linux(self) -> list[DiscoveredUSBCamera]:
-        """Discover USB cameras on Linux using /dev/video* and sysfs."""
-        cameras: list[DiscoveredUSBCamera] = []
-        indices = self._detect_from_dev_nodes()
-        ordered = self._prioritize_usb(indices)
-        seen_roots: dict[str, int] = {}
-
-        for index in ordered[:self.MAX_USB_DEVICES]:
-            dev_path = f"/dev/video{index}"
-            device_root = self._device_root(index)
-            if device_root is None:
-                logger.debug(f"Skipping non-USB video node: /dev/video{index}")
-                continue
-
-            root_key = str(device_root)
-            if root_key in seen_roots:
-                logger.debug(
-                    f"Skipping duplicate USB node /dev/video{index} for device "
-                    f"{device_root.name} (already using /dev/video{seen_roots[root_key]})"
-                )
-                continue
-            seen_roots[root_key] = index
-
-            base_name = self._read_sysfs_name(index) or f"video{index}"
-            friendly = self._format_friendly_name(base_name, device_root.name)
-            stable_id = self._stable_usb_id(device_root)
-
-            cameras.append(DiscoveredUSBCamera(
-                device_id=f"usb:{stable_id}",
-                stable_id=stable_id,
-                dev_path=dev_path,
-                friendly_name=friendly,
-                hw_model=base_name,  # Use actual sysfs name for model lookup
-                location_hint=str(device_root),
-            ))
-
-        logger.debug(f"Discovered {len(cameras)} USB cameras on Linux")
-        return cameras
-
-    def _discover_usb_windows(self) -> list[DiscoveredUSBCamera]:
-        """Discover USB cameras on Windows using OpenCV enumeration."""
-        cameras: list[DiscoveredUSBCamera] = []
-        for index in range(self.MAX_USB_DEVICES):
-            cap = cv2.VideoCapture(index)
-            if cap and cap.isOpened():
-                cap.release()
-                cameras.append(DiscoveredUSBCamera(
-                    device_id=f"usb:{index}",
-                    stable_id=str(index),
-                    dev_path=str(index),
-                    friendly_name=f"USB Camera {index}",
-                    hw_model="USB Camera",
-                    location_hint=None,
-                ))
-                logger.debug(f"Discovered Windows USB camera at index {index}")
-            else:
-                if cap:
-                    cap.release()
-                break
-        logger.debug(f"Discovered {len(cameras)} USB cameras on Windows")
-        return cameras
-
-    def _discover_usb_macos(self) -> list[DiscoveredUSBCamera]:
-        """Discover USB cameras on macOS using OpenCV enumeration."""
-        cameras: list[DiscoveredUSBCamera] = []
-        for index in range(self.MAX_USB_DEVICES):
-            cap = cv2.VideoCapture(index)
-            if cap and cap.isOpened():
-                cap.release()
-                cameras.append(DiscoveredUSBCamera(
-                    device_id=f"usb:{index}",
-                    stable_id=str(index),
-                    dev_path=str(index),
-                    friendly_name=f"USB Camera {index}",
-                    hw_model="USB Camera",
-                    location_hint=None,
-                ))
-                logger.debug(f"Discovered macOS USB camera at index {index}")
-            else:
-                if cap:
-                    cap.release()
-                break
-        logger.debug(f"Discovered {len(cameras)} USB cameras on macOS")
-        return cameras
-
-    # Linux-specific helpers
-
-    def _detect_from_dev_nodes(self) -> list[int]:
-        """Gather numeric indices from /dev/video*."""
-        candidates = sorted(glob.glob("/dev/video*"))
-        indices: list[int] = []
-        for path in candidates:
-            try:
-                index = int(Path(path).name.replace("video", ""))
-            except ValueError:
-                continue
-            indices.append(index)
-        if not indices:
-            indices = list(range(2))  # best-effort fallback probe set
-        return sorted(indices)
-
-    def _prioritize_usb(self, indices: list[int]) -> list[int]:
-        """Order indices with USB-backed devices first."""
-        usb_indices = [idx for idx in indices if self._is_usb(idx)]
-        non_usb = [idx for idx in indices if idx not in usb_indices]
-        return usb_indices + non_usb
-
-    def _is_usb(self, index: int) -> bool:
-        return self._device_root(index) is not None
-
-    def _device_root(self, index: int) -> Optional[Path]:
-        """Return the physical USB device root for a /dev/video index."""
-        try:
-            device_link = Path(f"/sys/class/video4linux/video{index}/device")
-            resolved = device_link.resolve()
-            if not any("usb" in part for part in resolved.parts):
-                return None
-            # Interface nodes look like "1-2:1.0"; trim to the device root ("1-2").
-            return resolved.parent if ":" in resolved.name else resolved
-        except Exception:
-            return None
-
-    def _read_sysfs_name(self, index: int) -> Optional[str]:
-        sys_name = Path(f"/sys/class/video4linux/video{index}/name")
-        try:
-            if sys_name.exists():
-                text = sys_name.read_text(encoding="utf-8").strip()
-                return text or None
-        except Exception:
-            return None
-        return None
-
-    def _stable_usb_id(self, device_root: Path) -> str:
-        """Build a stable identifier from the USB bus/port path."""
-        bus = device_root.parent.name if device_root.parent and device_root.parent.name.startswith("usb") else ""
-        prefix = f"{bus}-" if bus else ""
-        return f"{prefix}{device_root.name}"
-
-    def _format_friendly_name(self, base_name: str, port_label: str) -> str:
-        label = port_label.replace(":", "-") if port_label else ""
-        return f"USB:{base_name} [{label}]" if label else f"USB:{base_name}"
+        Delegates to the platform-specific backend for actual discovery.
+        """
+        return self._backend.discover_cameras(self.MAX_USB_DEVICES)
 
     def get_device(self, device_id: str) -> Optional[DiscoveredUSBCamera]:
         """Get a specific device by ID."""

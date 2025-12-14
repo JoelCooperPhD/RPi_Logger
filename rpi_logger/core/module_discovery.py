@@ -1,13 +1,13 @@
-
 import asyncio
 from rpi_logger.core.logging_utils import get_module_logger
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
 from .paths import MODULES_DIR, _is_frozen
 from .logging_config import configure_logging
+from .platform_info import get_platform_info
 from rpi_logger.modules.base.config_paths import resolve_module_config_path
 
 logger = get_module_logger("ModuleDiscovery")
@@ -24,6 +24,7 @@ class ModuleInfo:
     module_id: str = ""          # Lowercase identifier derived from entry name
     config_template_path: Optional[Path] = None  # Original config template path
     is_internal: bool = False    # True for internal/software-only modules (no hardware)
+    platforms: List[str] = field(default_factory=lambda: ["*"])  # Platform requirements
 
     def __repr__(self) -> str:
         return f"ModuleInfo(name={self.name}, entry={self.entry_point.name})"
@@ -156,7 +157,9 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
         logger.error("Modules directory not found: %s", modules_dir)
         return []
 
-    logger.info("Discovering modules in: %s", modules_dir)
+    # Get platform info for filtering modules by compatibility
+    platform_info = get_platform_info()
+    logger.info("Discovering modules in: %s (platform: %s)", modules_dir, platform_info.platform)
     discovered = []
 
     for module_dir in sorted(modules_dir.iterdir()):
@@ -219,13 +222,27 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
         display_name = module_name  # Default to module name
         is_visible = True
         is_internal = False
+        platforms = ["*"]  # Default: all platforms
         if config and isinstance(config, dict):
             display_name = config.get('display_name', display_name) or display_name
             is_visible = parse_bool(config.get('visible'), default=True)
             is_internal = parse_bool(config.get('internal'), default=False)
+            # Parse platforms as comma-separated list
+            platforms_str = config.get('platforms', '*')
+            platforms = [p.strip() for p in platforms_str.split(',') if p.strip()]
+            if not platforms:
+                platforms = ["*"]
 
         if not is_visible:
             logger.info("Module %s marked hidden via config, skipping", module_name)
+            continue
+
+        # Filter by platform compatibility
+        if not platform_info.supports(platforms):
+            logger.info(
+                "Module %s not compatible with platform %s (requires: %s), skipping",
+                module_name, platform_info.platform, platforms
+            )
             continue
 
         info = ModuleInfo(
@@ -237,6 +254,7 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
             module_id=module_id,
             config_template_path=config_template_path,
             is_internal=is_internal,
+            platforms=platforms,
         )
 
         discovered.append(info)

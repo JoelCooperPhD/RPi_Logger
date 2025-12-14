@@ -216,6 +216,164 @@
         "notes": "Budget USB camera suitable for basic video documentation. For research requiring precise timing or high frame rates, consider a global shutter camera like the IMX296."
       }
     },
+    "facetime_hd_camera_usb": {
+      "name": "FaceTime HD Camera(USB)",
+      "backend": "usb",
+      "match_patterns": [
+        "FaceTime HD Camera(USB):usb:0*"
+      ],
+      "capabilities": {
+        "modes": [
+          {
+            "size": [
+              640,
+              480
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1760,
+              990
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1280,
+              720
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1920,
+              1080
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          }
+        ],
+        "default_record": {
+          "size": [
+            1920,
+            1080
+          ],
+          "fps": 30.0,
+          "pixel_format": "MJPEG"
+        },
+        "default_preview": {
+          "size": [
+            640,
+            480
+          ],
+          "fps": 30.0,
+          "pixel_format": "MJPEG"
+        },
+        "controls": {
+          "Brightness": {
+            "name": "Brightness",
+            "type": "int",
+            "current": 0,
+            "backend_id": 10
+          },
+          "Contrast": {
+            "name": "Contrast",
+            "type": "int",
+            "current": 0,
+            "backend_id": 11
+          },
+          "Saturation": {
+            "name": "Saturation",
+            "type": "int",
+            "current": 0,
+            "backend_id": 12
+          },
+          "Hue": {
+            "name": "Hue",
+            "type": "int",
+            "current": 0,
+            "backend_id": 13
+          },
+          "Gain": {
+            "name": "Gain",
+            "type": "int",
+            "current": 0,
+            "backend_id": 14
+          },
+          "Gamma": {
+            "name": "Gamma",
+            "type": "int",
+            "current": 0,
+            "backend_id": 22
+          },
+          "Exposure": {
+            "name": "Exposure",
+            "type": "int",
+            "current": 0,
+            "backend_id": 15
+          },
+          "AutoExposure": {
+            "name": "AutoExposure",
+            "type": "bool",
+            "current": false,
+            "backend_id": 21
+          },
+          "WhiteBalanceBlueU": {
+            "name": "WhiteBalanceBlueU",
+            "type": "int",
+            "current": 0,
+            "backend_id": 17
+          },
+          "WhiteBalanceRedV": {
+            "name": "WhiteBalanceRedV",
+            "type": "int",
+            "current": 0,
+            "backend_id": 26
+          },
+          "Focus": {
+            "name": "Focus",
+            "type": "int",
+            "current": 0,
+            "backend_id": 28
+          },
+          "AutoFocus": {
+            "name": "AutoFocus",
+            "type": "bool",
+            "current": false,
+            "backend_id": 39
+          },
+          "Zoom": {
+            "name": "Zoom",
+            "type": "int",
+            "current": 0,
+            "backend_id": 27
+          },
+          "Backlight": {
+            "name": "Backlight",
+            "type": "int",
+            "current": 0,
+            "backend_id": 32
+          },
+          "Pan": {
+            "name": "Pan",
+            "type": "int",
+            "current": 0,
+            "backend_id": 33
+          },
+          "Tilt": {
+            "name": "Tilt",
+            "type": "int",
+            "current": 0,
+            "backend_id": 34
+          }
+        }
+      },
+      "tested": "2025-12-14"
+    },
     "hd_pro_webcam_c920": {
       "name": "HD Pro Webcam C920",
       "backend": "usb",
@@ -465,6 +623,322 @@
         "not_recommended_for": "High-speed motion analysis, recording rapid hand movements or quick head turns where rolling shutter artifacts would affect data quality",
         "notes": "High quality consumer webcam with glass lens and good low-light performance. Autofocus is helpful for varying distances but can be disabled if needed. Good all-around choice for general video documentation."
       }
+    },
+    "usb_camera_0_usb": {
+      "name": "USB Camera 0(USB)",
+      "backend": "usb",
+      "match_patterns": [
+        "USB Camera 0(USB):usb:0*"
+      ],
+      "capabilities": {
+        "modes": [
+          {
+            "size": [
+              640,
+              480
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1760,
+              1328
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1280,
+              720
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1920,
+              1080
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          }
+        ],
+        "default_record": {
+          "size": [
+            1920,
+            1080
+          ],
+          "fps": 30.0,
+          "pixel_format": "MJPEG"
+        },
+        "default_preview": {
+          "size": [
+            640,
+            480
+          ],
+          "fps": 30.0,
+          "pixel_format": "MJPEG"
+        },
+        "controls": {
+          "Brightness": {
+            "name": "Brightness",
+            "type": "int",
+            "current": 0,
+            "backend_id": 10
+          },
+          "Contrast": {
+            "name": "Contrast",
+            "type": "int",
+            "current": 0,
+            "backend_id": 11
+          },
+          "Saturation": {
+            "name": "Saturation",
+            "type": "int",
+            "current": 0,
+            "backend_id": 12
+          },
+          "Hue": {
+            "name": "Hue",
+            "type": "int",
+            "current": 0,
+            "backend_id": 13
+          },
+          "Gain": {
+            "name": "Gain",
+            "type": "int",
+            "current": 0,
+            "backend_id": 14
+          },
+          "Gamma": {
+            "name": "Gamma",
+            "type": "int",
+            "current": 0,
+            "backend_id": 22
+          },
+          "Exposure": {
+            "name": "Exposure",
+            "type": "int",
+            "current": 0,
+            "backend_id": 15
+          },
+          "AutoExposure": {
+            "name": "AutoExposure",
+            "type": "bool",
+            "current": false,
+            "backend_id": 21
+          },
+          "WhiteBalanceBlueU": {
+            "name": "WhiteBalanceBlueU",
+            "type": "int",
+            "current": 0,
+            "backend_id": 17
+          },
+          "WhiteBalanceRedV": {
+            "name": "WhiteBalanceRedV",
+            "type": "int",
+            "current": 0,
+            "backend_id": 26
+          },
+          "Focus": {
+            "name": "Focus",
+            "type": "int",
+            "current": 0,
+            "backend_id": 28
+          },
+          "AutoFocus": {
+            "name": "AutoFocus",
+            "type": "bool",
+            "current": false,
+            "backend_id": 39
+          },
+          "Zoom": {
+            "name": "Zoom",
+            "type": "int",
+            "current": 0,
+            "backend_id": 27
+          },
+          "Backlight": {
+            "name": "Backlight",
+            "type": "int",
+            "current": 0,
+            "backend_id": 32
+          },
+          "Pan": {
+            "name": "Pan",
+            "type": "int",
+            "current": 0,
+            "backend_id": 33
+          },
+          "Tilt": {
+            "name": "Tilt",
+            "type": "int",
+            "current": 0,
+            "backend_id": 34
+          }
+        }
+      },
+      "tested": "2025-12-13"
+    },
+    "usb_camera_1_usb": {
+      "name": "USB Camera 1(USB)",
+      "backend": "usb",
+      "match_patterns": [
+        "USB Camera 1(USB):usb:1*"
+      ],
+      "capabilities": {
+        "modes": [
+          {
+            "size": [
+              640,
+              480
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1760,
+              1328
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1280,
+              720
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1920,
+              1080
+            ],
+            "fps": 30.0,
+            "pixel_format": "MJPEG"
+          }
+        ],
+        "default_record": {
+          "size": [
+            1920,
+            1080
+          ],
+          "fps": 30.0,
+          "pixel_format": "MJPEG"
+        },
+        "default_preview": {
+          "size": [
+            640,
+            480
+          ],
+          "fps": 30.0,
+          "pixel_format": "MJPEG"
+        },
+        "controls": {
+          "Brightness": {
+            "name": "Brightness",
+            "type": "int",
+            "current": 0,
+            "backend_id": 10
+          },
+          "Contrast": {
+            "name": "Contrast",
+            "type": "int",
+            "current": 0,
+            "backend_id": 11
+          },
+          "Saturation": {
+            "name": "Saturation",
+            "type": "int",
+            "current": 0,
+            "backend_id": 12
+          },
+          "Hue": {
+            "name": "Hue",
+            "type": "int",
+            "current": 0,
+            "backend_id": 13
+          },
+          "Gain": {
+            "name": "Gain",
+            "type": "int",
+            "current": 0,
+            "backend_id": 14
+          },
+          "Gamma": {
+            "name": "Gamma",
+            "type": "int",
+            "current": 0,
+            "backend_id": 22
+          },
+          "Exposure": {
+            "name": "Exposure",
+            "type": "int",
+            "current": 0,
+            "backend_id": 15
+          },
+          "AutoExposure": {
+            "name": "AutoExposure",
+            "type": "bool",
+            "current": false,
+            "backend_id": 21
+          },
+          "WhiteBalanceBlueU": {
+            "name": "WhiteBalanceBlueU",
+            "type": "int",
+            "current": 0,
+            "backend_id": 17
+          },
+          "WhiteBalanceRedV": {
+            "name": "WhiteBalanceRedV",
+            "type": "int",
+            "current": 0,
+            "backend_id": 26
+          },
+          "Focus": {
+            "name": "Focus",
+            "type": "int",
+            "current": 0,
+            "backend_id": 28
+          },
+          "AutoFocus": {
+            "name": "AutoFocus",
+            "type": "bool",
+            "current": false,
+            "backend_id": 39
+          },
+          "Zoom": {
+            "name": "Zoom",
+            "type": "int",
+            "current": 0,
+            "backend_id": 27
+          },
+          "Backlight": {
+            "name": "Backlight",
+            "type": "int",
+            "current": 0,
+            "backend_id": 32
+          },
+          "Pan": {
+            "name": "Pan",
+            "type": "int",
+            "current": 0,
+            "backend_id": 33
+          },
+          "Tilt": {
+            "name": "Tilt",
+            "type": "int",
+            "current": 0,
+            "backend_id": 34
+          }
+        }
+      },
+      "tested": "2025-12-13"
     }
   }
 }

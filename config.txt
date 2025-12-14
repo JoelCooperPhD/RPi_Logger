@@ -25,7 +25,7 @@ session_prefix = session
 
 # Last used session directory (automatically updated when user selects location via UI)
 # This is where session data and recordings are actually saved
-last_session_dir = /home/joel
+last_session_dir = /Users/joelcooper
 
 
 ################################################################################

@@ -1,8 +1,11 @@
 # GPS module configuration
-enabled = true
+enabled = false
 
 # Display name shown in the module list
 display_name = GPS
+
+# Platform requirements - GPS requires Raspberry Pi hardware (BerryGPS)
+platforms = raspberry_pi
 
 # Default preview settings consumed by the GPS preview
 offline_db = offline_tiles.db

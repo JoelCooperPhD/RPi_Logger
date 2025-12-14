@@ -9,6 +9,7 @@ from typing import Awaitable, Callable, Optional
 from .commands import CommandMessage, StatusMessage, StatusType
 from .module_discovery import ModuleInfo
 from .config_manager import get_config_manager
+from .platform_info import get_platform_info
 from .window_manager import WindowGeometry
 from .paths import PROJECT_ROOT, _is_frozen
 from rpi_logger.modules.base import gui_utils
@@ -112,6 +113,10 @@ class ModuleProcess:
             # Pass instance-specific config path for multi-instance modules
             if self.config_path:
                 base_args.extend(["--config-path", str(self.config_path)])
+
+            # Pass platform information to subprocess
+            platform_info = get_platform_info()
+            base_args.extend(platform_info.to_cli_args())
 
             # Determine how to run the module
             if _is_frozen():

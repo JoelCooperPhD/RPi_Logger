@@ -25,6 +25,7 @@ from .module_state_manager import (
     RUNNING_STATES,
 )
 from .observers import UIStateObserver
+from .platform_info import get_platform_info
 from .state_facade import StateFacade
 from .commands import StatusMessage, CommandMessage
 from .window_manager import WindowManager, WindowGeometry
@@ -67,6 +68,11 @@ class LoggerSystem:
         ui_callback: Optional[Callable] = None,
     ):
         self.logger = get_module_logger("LoggerSystem")
+
+        # Detect platform early - before module discovery
+        self.platform_info = get_platform_info()
+        self.logger.info("Platform: %s", self.platform_info)
+
         self.idle_session_dir = Path(session_dir)
         self._session_dir = Path(session_dir)
         self.session_prefix = session_prefix
