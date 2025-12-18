@@ -1,5 +1,5 @@
 """
-Shared metadata structures for all RPi Logger modules.
+Shared metadata structures for all Logger modules.
 
 This module defines common data structures used across Eye Tracker, Cameras,
 and future modules to ensure consistent data representation.
@@ -26,7 +26,7 @@ class FrameMetadata:
     """
     Universal frame/sample metadata across all capture devices.
 
-    This is the canonical metadata structure used throughout RPi Logger.
+    This is the canonical metadata structure used throughout Logger.
     All modules should populate this structure when writing data.
 
     Required fields are common to all devices.

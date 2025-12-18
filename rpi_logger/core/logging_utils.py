@@ -1,4 +1,4 @@
-"""Shared logging helpers for the RPi Logger project."""
+"""Shared logging helpers for the Logger project."""
 
 from __future__ import annotations
 

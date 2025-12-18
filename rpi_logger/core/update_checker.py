@@ -15,7 +15,7 @@ from .logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 
-GITHUB_REPO = "redscientific/RS_Logger2"
+GITHUB_REPO = "JoelCooperPhD/RPi_Logger"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
@@ -107,7 +107,7 @@ def _fetch_latest_release() -> Optional[tuple]:
             RELEASES_API_URL,
             headers={
                 'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'RPi-Logger-Update-Checker'
+                'User-Agent': 'Logger-Update-Checker'
             }
         )
 

@@ -135,7 +135,7 @@ class MainWindow:
 
     def build_ui(self) -> None:
         self.root = tk.Tk()
-        self.root.title("Controller")
+        self.root.title("Logger")
 
         # Apply theme styles immediately after creating root window
         # This must happen before any ttk widgets are created

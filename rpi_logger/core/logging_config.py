@@ -1,4 +1,4 @@
-"""Centralized logging configuration for the RPi Logger project."""
+"""Centralized logging configuration for the Logger project."""
 
 from __future__ import annotations
 

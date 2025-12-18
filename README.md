@@ -41,8 +41,8 @@ All modules record with **frame-level synchronization** (~30ms accuracy) and exp
 ### Install
 
 ```bash
-git clone https://github.com/redscientific/RS_Logger2.git
-cd RS_Logger2
+git clone https://github.com/JoelCooperPhD/RPi_Logger.git
+cd RPi_Logger
 uv sync
 ```
 

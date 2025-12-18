@@ -37,7 +37,7 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     default_console_output = config_manager.get_bool(config, 'console_output', default=True)
 
     parser = argparse.ArgumentParser(
-        description="RPi Logger - Master logging orchestrator for multiple modules"
+        description="Logger - Master logging orchestrator for multiple modules"
     )
 
     parser.add_argument(
@@ -188,7 +188,7 @@ async def run_cli(args, logger_system: LoggerSystem) -> None:
 
 async def main(argv: Optional[list[str]] = None) -> None:
     """
-    Main entry point for the RPi Logger system.
+    Main entry point for the Logger system.
 
     Supports two modes:
     - GUI: Tkinter-based graphical interface (default)
@@ -216,7 +216,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
     )
 
     logger.info("=" * 60)
-    logger.info("RPi Logger - Master System Starting")
+    logger.info("Logger - Master System Starting")
     logger.info("=" * 60)
     logger.info("Mode: %s", args.mode)
     logger.info("Data directory: %s", args.data_dir)
@@ -248,7 +248,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
         await run_gui(args, logger_system)
 
     logger.info("=" * 60)
-    logger.info("RPi Logger - Master System Stopped")
+    logger.info("Logger - Master System Stopped")
     logger.info("=" * 60)
 
 def run(argv: Optional[list[str]] = None) -> int:

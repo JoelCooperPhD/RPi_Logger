@@ -1,4 +1,4 @@
-"""Application entrypoints for the master RPi Logger."""
+"""Application entrypoints for Logger."""
 
 from .master import main, parse_args, run_cli, run_gui, run
 

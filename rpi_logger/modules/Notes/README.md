@@ -150,7 +150,7 @@ Use the Timestamp column to correlate notes with:
 
 ### "Session required" message
 
-1. Start a session from the main RPi Logger first
+1. Start a session from the main Logger first
 2. Use "Start Session" button before adding notes
 
 ### Lost notes after crash

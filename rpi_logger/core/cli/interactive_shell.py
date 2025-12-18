@@ -9,7 +9,7 @@ from .headless_controller import HeadlessController
 
 class InteractiveShell:
     """
-    Interactive command-line shell for RPi Logger.
+    Interactive command-line shell for Logger.
 
     Provides a command prompt for remote control via SSH.
     """
@@ -23,7 +23,7 @@ class InteractiveShell:
         """Run the interactive shell."""
         self.logger.info("Starting interactive shell")
         print("\n" + "=" * 60)
-        print("RPi Logger - Interactive CLI")
+        print("Logger - Interactive CLI")
         print("=" * 60)
         print("Type 'help' for available commands, 'quit' to exit")
         print("=" * 60 + "\n")

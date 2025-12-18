@@ -1,4 +1,4 @@
-"""Top-level package for the reorganized RPi Logger application."""
+"""Top-level package for the Logger application."""
 
 from __future__ import annotations
 

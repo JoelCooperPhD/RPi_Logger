@@ -1,5 +1,5 @@
 """
-Standard status reporting for all RPi Logger modules.
+Standard status reporting for all Logger modules.
 
 Defines consistent JSON status format for module communication.
 """

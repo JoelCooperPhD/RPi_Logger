@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec file for RPi Logger.
+PyInstaller spec file for Logger.
 
 Build commands:
   - Windows/Linux: pyinstaller rpi_logger.spec

@@ -47,7 +47,7 @@ class AboutDialog:
 
         title_label = ttk.Label(
             main_frame,
-            text="RPi Logger"
+            text="Logger"
         )
         title_label.pack()
 

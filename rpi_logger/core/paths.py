@@ -1,4 +1,4 @@
-"""Centralized path constants for the RPi Logger system."""
+"""Centralized path constants for the Logger system."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 """
-Logger System - Main coordinator for the RPi Logger.
+Logger System - Main coordinator for Logger.
 
 This is the facade that coordinates between ModuleManager, SessionManager,
 WindowManager, and other components. It provides a unified API for the UI.

@@ -10,12 +10,12 @@ from ..theme import Theme
 
 QUICK_START_TEXT = """
 ═══════════════════════════════════════════════════════════════════
-                    RPi LOGGER QUICK START GUIDE
+                       LOGGER QUICK START GUIDE
 ═══════════════════════════════════════════════════════════════════
 
 OVERVIEW
 
-The RPi Logger is a multi-modal data collection system that coordinates
+Logger is a multi-modal data collection system that coordinates
 synchronized recording across cameras, microphones, eye tracking, behavioral
 tasks, and annotations. All modules are controlled from a single interface.
 

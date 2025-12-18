@@ -1,4 +1,4 @@
-# AppImageBuilder configuration for RPi Logger
+# AppImageBuilder configuration for Logger
 #
 # To build locally:
 #   1. First build with PyInstaller: pyinstaller rpi_logger.spec

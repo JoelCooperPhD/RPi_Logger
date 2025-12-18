@@ -172,7 +172,7 @@ History not updating:
    4. Restart module if display freezes
 
 Session required message:
-   1. Start a session from the main RPi Logger
+   1. Start a session from the main Logger
    2. Use "Start Session" button first
    3. Then add notes during recording
 
