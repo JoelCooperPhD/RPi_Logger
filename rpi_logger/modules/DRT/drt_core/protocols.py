@@ -42,10 +42,10 @@ SDRT_RESPONSES: Dict[str, str] = {
 # sDRT command line terminator
 SDRT_LINE_ENDING = '\n\r'
 
-# sDRT CSV logging fields (7 fields)
+# sDRT CSV logging fields
 SDRT_CSV_HEADER = (
-    "Device ID, Label, Unix time in UTC, Milliseconds Since Record, "
-    "Trial Number, Responses, Reaction Time"
+    "module,trial,device_id,label,device_time_ms,device_time_unix,record_time_unix,"
+    "record_time_mono,responses,reaction_time_ms"
 )
 
 # ISO Standard preset configuration for sDRT
@@ -95,10 +95,10 @@ WDRT_RESPONSES: Dict[str, str] = {
 # wDRT command line terminator
 WDRT_LINE_ENDING = '\n'
 
-# wDRT CSV logging fields (9 fields - adds Battery% and Device UTC)
+# wDRT CSV logging fields
 WDRT_CSV_HEADER = (
-    "Device ID, Label, Unix time in UTC, Milliseconds Since Record, "
-    "Trial Number, Responses, Reaction Time, Battery Percent, Device time in UTC"
+    "module,trial,device_id,label,device_time_ms,device_time_unix,record_time_unix,"
+    "record_time_mono,responses,reaction_time_ms,battery_percent"
 )
 
 # wDRT configuration parameter mapping

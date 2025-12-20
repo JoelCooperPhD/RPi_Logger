@@ -311,6 +311,7 @@ class Encoder:
         self._csv_writer = csv.writer(self._csv_file)
         self._csv_writer.writerow([
             "trial",
+            "device_time_unix",  # device time in Unix seconds (if available)
             "frame_index",  # 1-indexed frame number in video file
             "capture_time_unix",  # wall clock time when frame was captured
             "encode_time_mono",  # monotonic time when frame was encoded
@@ -373,6 +374,7 @@ class Encoder:
             pts_us = self._last_pts if self._kind == "pyav" else None
             self._csv_writer.writerow([
                 self._trial_number,
+                "",
                 self._frame_count,
                 f"{timestamp:.6f}",
                 f"{monotonic:.9f}",

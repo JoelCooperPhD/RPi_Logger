@@ -77,10 +77,10 @@ During Recording
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 File Naming Convention
-   {timestamp}_GPS_trial{NNN}.csv      - Parsed GPS data
+   {prefix}_GPS_trial{NNN}_{device_id}.csv  - Parsed GPS data
    {timestamp}_NMEA_trial{NNN}.txt     - Raw NMEA sentences
 
-   Example: 20251208_143022_GPS_trial001.csv
+   Example: 20251208_143022_GPS_trial001_GPS_serial0.csv
 
 Location
    {session_dir}/GPS/
@@ -90,34 +90,39 @@ Location
 3.6. CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-GPS CSV Columns (21 fields):
+GPS CSV Columns (26 fields):
 
-   Module                - Always "GPS"
+   module                - Module name ("GPS")
    trial                 - Trial number (integer)
-   timestamp_utc         - GPS UTC time (ISO 8601 format)
-   timestamp_unix        - Unix timestamp (seconds, 6 decimals)
-   record_time_mono      - Monotonic time (seconds, 9 decimals)
-   latitude              - Latitude (decimal degrees, + = North)
-   longitude             - Longitude (decimal degrees, + = East)
+   device_id             - GPS device identifier
+   label                 - Optional label (blank if unused)
+   device_time_iso       - GPS UTC time (ISO 8601 format)
+   device_time_unix      - GPS UTC time (Unix seconds)
+   record_time_unix      - Host capture time (Unix seconds, 6 decimals)
+   record_time_mono      - Host capture time (seconds, 9 decimals)
+   latitude_deg          - Latitude (decimal degrees, + = North)
+   longitude_deg         - Longitude (decimal degrees, + = East)
    altitude_m            - Altitude above MSL (meters, float)
-   geoid_separation_m    - Geoid separation (meters, float)
-   speed_knots           - Speed over ground (knots, float)
+   speed_mps             - Speed over ground (m/s, float)
    speed_kmh             - Speed over ground (km/h, float)
+   speed_knots           - Speed over ground (knots, float)
    speed_mph             - Speed over ground (mph, float)
-   heading_true          - True heading (degrees 0-360, float)
-   heading_magnetic      - Magnetic heading (degrees, float)
+   course_deg            - True course (degrees 0-360, float)
    fix_quality           - Fix type (0=None, 1=GPS, 2=DGPS, etc.)
-   fix_type              - Fix mode (1=None, 2=2D, 3=3D)
-   satellites_used       - Satellites in solution (integer)
+   fix_mode              - Fix mode (1=None, 2=2D, 3=3D)
+   fix_valid             - Fix valid flag (0/1)
+   satellites_in_use     - Satellites in solution (integer)
    satellites_in_view    - Total satellites visible (integer)
    hdop                  - Horizontal dilution of precision (float)
-   vdop                  - Vertical dilution of precision (float)
    pdop                  - Position dilution of precision (float)
+   vdop                  - Vertical dilution of precision (float)
+   sentence_type         - NMEA sentence type (GGA, RMC, etc.)
+   raw_sentence          - Raw NMEA sentence
 
 Example Row:
-   GPS,1,2024-12-08T14:30:22.500Z,1733665822.500000,12345.678901234,
-   -37.8136,144.9631,42.5,0.0,25.3,46.9,29.1,185.2,184.8,
-   1,3,8,12,1.2,1.8,2.1
+   GPS,1,GPS:serial0,,2024-12-08T14:30:22.500Z,1733665822.500000,1733665822.500000,12345.678901234,
+   -37.8136,144.9631,42.5,12.3,44.3,23.9,27.5,185.2,1,3,1,
+   8,12,1.2,1.8,2.1,GGA,$GPGGA,...
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -125,8 +130,9 @@ Example Row:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Timestamp Types:
-   timestamp_utc         - GPS satellite time (most accurate)
-   timestamp_unix        - Unix seconds from GPS
+   device_time_iso       - GPS satellite time (most accurate)
+   device_time_unix      - GPS UTC time as Unix seconds
+   record_time_unix      - Host wall clock (cross-system reference)
    record_time_mono      - Host monotonic clock
 
 Timing Accuracy:
@@ -135,10 +141,9 @@ Timing Accuracy:
    Serial latency:       ~10-50 ms from position to host
 
 Cross-Module Synchronization:
-   Use record_time_mono for cross-module sync:
-   • Correlate with camera encode_time_mono
-   • Correlate with audio write_time_monotonic
-   • Use timestamp_unix for absolute time reference
+   Use record_time_mono for cross-module sync.
+   • Correlate with audio record_time_mono
+   • Use record_time_unix for absolute time reference
 
 DOP Values (Dilution of Precision):
    < 1.0:  Ideal accuracy
@@ -289,4 +294,3 @@ class GPSHelpDialog:
         self.text_widget.config(state='normal')
         self.text_widget.insert('1.0', GPS_HELP_TEXT)
         self.text_widget.config(state='disabled')
-

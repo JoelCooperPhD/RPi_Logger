@@ -492,6 +492,7 @@ class DRTModuleRuntime(ModuleRuntime):
             self.logger.error("Cannot start recording - no device connected")
             return False
 
+        self.handler.set_active_trial_number(self.active_trial_number)
         self.handler._trial_label = self.trial_label
         try:
             started = await self.handler.start_experiment()

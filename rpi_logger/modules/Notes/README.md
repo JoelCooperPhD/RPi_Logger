@@ -65,42 +65,47 @@ Notes recording starts automatically when:
 ### File Location
 
 ```
-{session_dir}/Notes/{timestamp}_NOTES_trial{NNN}.csv
+{session_dir}/Notes/{prefix}_notes.csv
 ```
 
-Example: `20251208_143022_NOTES_trial001.csv`
+Example: `20251208_143022_NTS_trial001_notes.csv`
 
-### CSV Columns (4 fields)
+### CSV Columns (8 fields)
 
 | Column | Description |
 |--------|-------------|
-| Note | Row identifier (always "Note") |
+| module | Module name ("Notes") |
 | trial | Trial number (integer, 1-based) |
-| Content | Your annotation text (string) |
-| Timestamp | Unix timestamp (seconds with 6 decimal places) |
+| device_id | Device identifier ("notes") |
+| label | Optional label (blank if unused) |
+| device_time_unix | Device absolute time (Unix seconds, if available) |
+| record_time_unix | Host capture time (Unix seconds, 6 decimals) |
+| record_time_mono | Host capture time (seconds, 9 decimals) |
+| content | Your annotation text (string) |
 
 **Example row:**
 ```
-Note,1,Participant started task,1733649123.456789
+Notes,1,notes,,,1733649123.456789,12345.678901234,Participant started task
 ```
 
 ### Timing and Synchronization
 
 **Timestamp Precision:**
-- Unix timestamp with microsecond precision (6 decimal places)
+- record_time_unix with microsecond precision (6 decimal places)
+- record_time_mono with nanosecond precision (9 decimal places)
 - Recorded at the moment you press Enter/Post
 
 **Cross-Module Synchronization:**
-Use the Timestamp column to correlate notes with:
-- Video frames (via camera `capture_time_unix`)
-- Audio samples (via audio `write_time_unix`)
-- DRT trials (via `Unix time in UTC`)
+Use the record_time_unix/record_time_mono columns to correlate notes with:
+- Video frames (via camera `record_time_unix`)
+- Audio samples (via audio `record_time_unix`)
+- DRT trials (via `record_time_unix`)
 - Eye tracking data (via `record_time_unix`)
-- GPS position (via `timestamp_unix`)
+- GPS position (via `record_time_unix`)
 
 **Example: Finding video frame for a note**
-1. Read note Timestamp (e.g., `1733649123.456789`)
-2. Search camera timing CSV for nearest `capture_time_unix`
+1. Read note record_time_unix (e.g., `1733649123.456789`)
+2. Search camera timing CSV for nearest `record_time_unix`
 3. Use `frame_index` to locate frame in video file
 
 ---

@@ -125,7 +125,7 @@ class WDRTBaseHandler(BaseDRTHandler):
         self._buffered_trial_data = None
         self._recording = True
         self._data_logger.set_trial_label(self._trial_label)
-        self._data_logger.start_recording()
+        self._data_logger.start_recording(self._active_trial_number)
         return await self.send_command('start')
 
     async def stop_experiment(self) -> bool:

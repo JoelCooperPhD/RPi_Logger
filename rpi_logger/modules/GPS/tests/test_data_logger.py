@@ -116,11 +116,16 @@ class TestGPSDataLogger:
             row = next(reader)
 
         assert header == GPS_CSV_HEADER
-        assert int(row[0]) == 1  # trial
-        assert float(row[3]) == pytest.approx(48.1173)  # latitude
-        assert float(row[4]) == pytest.approx(11.5166)  # longitude
-        assert float(row[5]) == pytest.approx(545.4)  # altitude
-        assert row[19] == "GGA"  # sentence_type
+        assert row[0] == "GPS"  # module
+        assert int(row[1]) == 1  # trial
+        lat_idx = header.index("latitude_deg")
+        lon_idx = header.index("longitude_deg")
+        alt_idx = header.index("altitude_m")
+        sentence_idx = header.index("sentence_type")
+        assert float(row[lat_idx]) == pytest.approx(48.1173)  # latitude
+        assert float(row[lon_idx]) == pytest.approx(11.5166)  # longitude
+        assert float(row[alt_idx]) == pytest.approx(545.4)  # altitude
+        assert row[sentence_idx] == "GGA"  # sentence_type
 
     def test_log_fix_not_recording(self, tmp_path):
         """Test that logging when not recording returns False."""
@@ -176,8 +181,8 @@ class TestGPSDataLogger:
             row1 = next(reader)
             row2 = next(reader)
 
-        assert int(row1[0]) == 1
-        assert int(row2[0]) == 2
+        assert int(row1[1]) == 1
+        assert int(row2[1]) == 2
 
     def test_update_output_dir(self, tmp_path):
         """Test updating output directory."""
@@ -211,7 +216,8 @@ class TestGPSDataLogger:
             next(reader)  # Skip header
             row = next(reader)
 
-        speed_mps = float(row[6])  # speed_mps column
+        speed_idx = GPS_CSV_HEADER.index("speed_mps")
+        speed_mps = float(row[speed_idx])  # speed_mps column
         assert speed_mps == pytest.approx(5.14444, rel=0.01)
 
     def test_fix_valid_encoding(self, tmp_path):
@@ -234,8 +240,9 @@ class TestGPSDataLogger:
             row1 = next(reader)
             row2 = next(reader)
 
-        assert row1[13] == "1"  # fix_valid column
-        assert row2[13] == "0"
+        fix_valid_idx = GPS_CSV_HEADER.index("fix_valid")
+        assert row1[fix_valid_idx] == "1"  # fix_valid column
+        assert row2[fix_valid_idx] == "0"
 
     def test_dropped_records_counter(self, tmp_path):
         """Test that dropped records are tracked."""

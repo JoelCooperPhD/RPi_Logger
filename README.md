@@ -66,25 +66,36 @@ Record multiple trials per session. Each trial is saved with synchronized timest
 
 ## Data Output
 
+Recordings use a shared filename prefix:
+`{sessionToken}_{MODULECODE}_trial###_...`
+(sessionToken is the timestamp portion of the session directory name)
+
 ```
 session_YYYYMMDD_HHMMSS/
 ├── Cameras/
-│   ├── video.mp4
-│   └── frame_timing.csv
-├── AudioRecorder/
-│   ├── audio.wav
-│   └── chunk_timing.csv
-├── EyeTracker/
-│   ├── scene_video.mp4
-│   └── gaze_data.csv
+│   └── FaceTime_HD_0D0B7853/
+│       ├── 20251208_143022_CAM_trial001_FaceTime_HD_0D0B7853.avi
+│       └── 20251208_143022_CAM_trial001_FaceTime_HD_0D0B7853_timing.csv
+├── Audio/
+│   ├── 20251208_143022_AUD_trial001_MIC0_blue-yeti.wav
+│   └── 20251208_143022_AUD_trial001_MIC0_blue-yeti_timing.csv
+├── EyeTracker-Neon/
+│   ├── 20251208_143022_EYE_trial001_WORLD_1280x720_30fps.mp4
+│   ├── 20251208_143022_EYE_trial001_EYES_384x192_200fps.mp4
+│   ├── 20251208_143022_EYE_trial001_AUDIO.wav
+│   ├── 20251208_143022_EYE_trial001_GAZE.csv
+│   ├── 20251208_143022_EYE_trial001_IMU.csv
+│   ├── 20251208_143022_EYE_trial001_EVENTS.csv
+│   ├── 20251208_143022_EYE_trial001_FRAME_timing.csv
+│   └── 20251208_143022_EYE_trial001_AUDIO_timing.csv
 ├── DRT/
-│   └── response_data.csv
+│   └── 20251208_143022_DRT_trial001_DRT_ttyacm0.csv
 ├── VOG/
-│   └── shutter_timing.csv
+│   └── 20251208_143022_VOG_trial001_ttyacm0.csv
 ├── GPS/
-│   └── location_data.csv
+│   └── 20251208_143022_GPS_trial001_GPS_serial0.csv
 └── Notes/
-    └── annotations.csv
+    └── 20251208_143022_NTS_trial001_notes.csv
 ```
 
 ### Post-Processing

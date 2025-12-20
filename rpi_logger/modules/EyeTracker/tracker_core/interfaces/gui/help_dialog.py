@@ -189,8 +189,8 @@ Timing Accuracy:
 Cross-Module Synchronization:
    Use record_time_mono for precise cross-module sync:
    • Correlate with camera encode_time_mono
-   • Correlate with audio write_time_monotonic
-   • Correlate with DRT Unix timestamps
+   • Correlate with audio record_time_mono
+   • Correlate with DRT record_time_mono/record_time_unix
 
 Video-Gaze Alignment:
    Use FRAME CSV to correlate video frames with gaze data:

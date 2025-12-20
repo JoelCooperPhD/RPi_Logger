@@ -66,10 +66,10 @@ For each microphone, two files are created:
 
 | File | Description |
 |------|-------------|
-| `{timestamp}_AUDIO_trial{NNN}_MIC{id}_{name}.wav` | Audio recording |
-| `{timestamp}_AUDIOTIMING_trial{NNN}_MIC{id}_{name}.csv` | Timing data |
+| `{prefix}_MIC{id}_{name}.wav` | Audio recording |
+| `{prefix}_MIC{id}_{name}_timing.csv` | Timing data |
 
-Example: `20251208_143022_AUDIO_trial001_MIC0_usb-microphone.wav`
+Example: `20251208_143022_AUD_trial001_MIC0_usb-microphone.wav`
 
 ### WAV Audio Format
 
@@ -82,42 +82,50 @@ Example: `20251208_143022_AUDIO_trial001_MIC0_usb-microphone.wav`
 
 Multi-channel devices are recorded as mono using the first channel.
 
-### Timing CSV Columns (8 fields)
+### Timing CSV Columns (13 fields)
 
 The timing CSV contains per-chunk timing data for precise synchronization with other modules.
 
 | Column | Description |
 |--------|-------------|
-| Module | Always "Audio" |
+| module | Module name ("Audio") |
 | trial | Trial number (integer, 1-based) |
-| write_time_unix | System time when chunk was written (Unix seconds, 6 decimals) |
+| device_id | Device identifier (integer index) |
+| label | Device name |
+| device_time_unix | Device absolute time (Unix seconds, if available) |
+| device_time_seconds | Hardware ADC timestamp if available (seconds) |
+| record_time_unix | Host capture time (Unix seconds, 6 decimals) |
+| record_time_mono | Host capture time (seconds, 9 decimals) |
+| write_time_unix | Host write time (Unix seconds, 6 decimals) |
+| write_time_mono | Host write time (seconds, 9 decimals) |
 | chunk_index | Sequential chunk number (1-based) |
-| write_time_monotonic | High-precision monotonic clock (seconds, 9 decimals) |
-| adc_timestamp | Hardware ADC timestamp if available (seconds, 9 decimals) |
 | frames | Number of audio samples in this chunk |
 | total_frames | Cumulative sample count since recording started |
 
 **Example row:**
 ```
-Audio,1,1702080123.456789,1,12.345678901,12.345678901,2048,2048
+Audio,1,0,usb-microphone,,12.345678901,1702080123.456789,12.345678901,1702080123.457123,12.346012345,1,2048,2048
 ```
 
 ### Understanding the Timestamps
 
-The timing CSV provides three independent time sources for maximum flexibility:
+The timing CSV provides distinct capture and write timestamps for maximum flexibility:
 
 | Timestamp | Use Case |
 |-----------|----------|
-| write_time_unix | Cross-module synchronization (matches other modules' Unix timestamps) |
-| write_time_monotonic | Precise relative timing (never jumps or drifts) |
-| adc_timestamp | Sample-accurate sync (most precise, but may be empty on some devices) |
+| record_time_unix | Cross-module synchronization (capture time) |
+| record_time_mono | Precise relative timing (capture time, never jumps) |
+| write_time_unix | Disk write timing (useful for performance analysis) |
+| write_time_mono | Disk write timing (monotonic) |
+| device_time_unix | Device absolute time (Unix seconds, if available) |
+| device_time_seconds | Sample-accurate device timing (may be empty) |
 
 ### Calculating Audio Position
 
 To find the exact time of any sample in the recording:
 
 1. Find the chunk containing that sample using `total_frames`
-2. Use `write_time_monotonic` for that chunk as the base time
+2. Use `record_time_mono` for that chunk as the base time
 3. Calculate offset: `(sample_position_in_chunk / sample_rate)`
 
 To calculate recording duration:
@@ -162,6 +170,6 @@ duration_seconds = total_frames / sample_rate
 3. Verify the correct device is assigned
 4. Restart the module
 
-### Empty adc_timestamp in CSV
+### Empty device_time_seconds in CSV
 
-This is normal - not all audio devices provide hardware timestamps. Use `write_time_monotonic` for synchronization instead.
+This is normal - not all audio devices provide hardware timestamps. Use `record_time_mono` for synchronization instead.

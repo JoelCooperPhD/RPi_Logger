@@ -126,8 +126,8 @@ wVOG,xbee_002,1733649120.456789,5500,2,3000,2500,Open,85
 **Cross-Module Synchronization:**
 Use "Unix time in UTC" to correlate VOG events with:
 - Video frames (via camera `capture_time_unix`)
-- Audio samples (via audio `write_time_unix`)
-- DRT trials (via DRT `Unix time in UTC`)
+- Audio samples (via audio `record_time_unix`)
+- DRT trials (via DRT `record_time_unix`)
 - Eye tracking data (via `record_time_unix`)
 
 ---

@@ -46,7 +46,7 @@ else:
     TRACKER_IMPORT_ERROR = None
 
 # Module constants
-MODULE_SUBDIR = "NeonEyeTracker"
+MODULE_SUBDIR = "EyeTracker-Neon"
 
 
 class EyeTrackerRuntime(ModuleRuntime):

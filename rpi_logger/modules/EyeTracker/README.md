@@ -175,8 +175,8 @@ Video frame timing for synchronization:
 **Cross-Module Synchronization:**
 Use `record_time_mono` for precise cross-module sync with:
 - Camera `encode_time_mono`
-- Audio `write_time_monotonic`
-- DRT `Unix time in UTC`
+- Audio `record_time_mono`
+- DRT `record_time_mono`/`record_time_unix`
 
 **Video-Gaze Alignment:**
 Use FRAME CSV to correlate video frames with gaze data:

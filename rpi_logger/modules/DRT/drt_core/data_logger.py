@@ -4,12 +4,13 @@ Handles all file I/O for logging DRT trial data to CSV files.
 Supports both sDRT and wDRT data formats.
 """
 
-from datetime import datetime
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, Awaitable
 import logging
 
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.modules.base.storage_utils import module_filename_prefix
 from .protocols import SDRT_CSV_HEADER, WDRT_CSV_HEADER, RT_TIMEOUT_VALUE
 
 logger = get_module_logger(__name__)
@@ -24,7 +25,7 @@ class DRTDataLogger:
     - Data row formatting and appending
     - Event dispatching for logged data
 
-    Supports both sDRT (7 fields) and wDRT (9 fields) formats.
+    Supports both sDRT (10 fields) and wDRT (11 fields) formats.
     """
 
     def __init__(
@@ -51,6 +52,7 @@ class DRTDataLogger:
         self._csv_file = None
         self._csv_filepath: Optional[Path] = None
         self._csv_header_written = False
+        self._current_trial_number: Optional[int] = None
 
         # Trial label for CSV output
         self._trial_label: str = ""
@@ -82,19 +84,35 @@ class DRTDataLogger:
             return f"wDRT_{port_clean}"
         return f"DRT_{port_clean}"
 
-    def start_recording(self) -> None:
+    def start_recording(self, trial_number: Optional[int] = None) -> None:
         """Open CSV file for writing trial data (caches handle for session)."""
-        if self._csv_file is not None:
-            return  # Already open
+        if trial_number is None:
+            trial_number = 1
+        try:
+            trial_number = int(trial_number)
+        except (TypeError, ValueError):
+            trial_number = 1
+        if trial_number <= 0:
+            trial_number = 1
+
+        if self._csv_file is not None and self._current_trial_number == trial_number:
+            return  # Already open for this trial
 
         if not self.output_dir:
             return
 
         try:
+            if self._csv_file is not None:
+                current_label = self._trial_label
+                self.stop_recording()
+                self._trial_label = current_label
+
             self.output_dir.mkdir(parents=True, exist_ok=True)
             device_id_csv = self._format_device_id_for_csv()
-            filename = f"{device_id_csv}.csv"
+            prefix = module_filename_prefix(self.output_dir, "DRT", trial_number, code="DRT")
+            filename = f"{prefix}_{device_id_csv}.csv"
             self._csv_filepath = self.output_dir / filename
+            self._current_trial_number = trial_number
 
             # Check if we need to write header (file doesn't exist or is empty)
             self._csv_header_written = (
@@ -123,6 +141,7 @@ class DRTDataLogger:
                 self._csv_file = None
                 self._csv_filepath = None
         self._trial_label = ""
+        self._current_trial_number = None
 
     def log_trial(self, data: Dict[str, Any], click_count: int = 0) -> bool:
         """Log trial data to CSV file.
@@ -145,35 +164,42 @@ class DRTDataLogger:
             return False
 
         try:
+            try:
+                trial_number = int(data.get('trial_number', 0))
+            except (TypeError, ValueError):
+                trial_number = 0
+
             # Ensure file is open (may have been closed unexpectedly)
             if self._csv_file is None:
-                self.start_recording()
+                self.start_recording(self._current_trial_number or trial_number or 1)
             if self._csv_file is None:
                 logger.warning("Could not open CSV file, skipping data log")
                 return False
 
             # Common fields
             device_id_csv = self._format_device_id_for_csv()
-            unix_time = int(datetime.now().timestamp())
+            unix_time = time.time()
+            record_time_mono = time.perf_counter()
             device_timestamp = data.get('timestamp', 0)
-            trial_number = data.get('trial_number', 0)
             clicks = data.get('clicks', click_count)
             reaction_time = data.get('reaction_time', RT_TIMEOUT_VALUE)
-            label = self._trial_label if self._trial_label else "NA"
+            label = self._trial_label if self._trial_label else ""
 
             # Format CSV line based on device type
             if self.device_type == 'wdrt':
                 battery = data.get('battery', 0)
                 device_utc = data.get('device_utc', 0)
                 csv_line = (
-                    f"{device_id_csv},{label},{unix_time},{device_timestamp},"
-                    f"{trial_number},{clicks},{reaction_time},{battery},{device_utc}\n"
+                    f"DRT,{trial_number},{device_id_csv},{label},{device_timestamp},"
+                    f"{device_utc},{unix_time:.6f},{record_time_mono:.9f},"
+                    f"{clicks},{reaction_time},{battery}\n"
                 )
             else:
-                # sDRT format: 7 fields
+                # sDRT format
+                device_time_unix = ""
                 csv_line = (
-                    f"{device_id_csv},{label},{unix_time},{device_timestamp},"
-                    f"{trial_number},{clicks},{reaction_time}\n"
+                    f"DRT,{trial_number},{device_id_csv},{label},{device_timestamp},{device_time_unix},"
+                    f"{unix_time:.6f},{record_time_mono:.9f},{clicks},{reaction_time}\n"
                 )
 
             # Write to cached file handle (line-buffered, so flushes automatically)

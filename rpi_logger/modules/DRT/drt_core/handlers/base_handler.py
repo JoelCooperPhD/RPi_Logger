@@ -87,6 +87,7 @@ class BaseDRTHandler(ABC, ReconnectingMixin):
         self._trial_number = 0
         self._buffered_trial_data: Optional[Dict[str, Any]] = None
         self._trial_label: str = ""  # Condition/experiment label for CSV output
+        self._active_trial_number: int = 1
 
         # Track pending background tasks for cleanup
         self._pending_tasks: Set[asyncio.Task] = set()
@@ -111,6 +112,16 @@ class BaseDRTHandler(ABC, ReconnectingMixin):
     def is_recording(self) -> bool:
         """Check if recording is active."""
         return self._recording
+
+    def set_active_trial_number(self, trial_number: int) -> None:
+        """Set the active trial number for file naming."""
+        try:
+            value = int(trial_number)
+        except (TypeError, ValueError):
+            value = 1
+        if value <= 0:
+            value = 1
+        self._active_trial_number = value
 
     # =========================================================================
     # Lifecycle Methods

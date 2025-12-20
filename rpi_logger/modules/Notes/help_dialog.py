@@ -81,9 +81,9 @@ Auto-Recording
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 File Naming Convention
-   {timestamp}_NOTES_trial{NNN}.csv
+   {prefix}_notes.csv
 
-   Example: 20251208_143022_NOTES_trial001.csv
+   Example: 20251208_143022_NTS_trial001_notes.csv
 
 Location
    {session_dir}/Notes/
@@ -93,14 +93,18 @@ Location
 4.5. CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Notes CSV Columns (4 fields):
-   Note              - Row identifier (always "Note")
+Notes CSV Columns (8 fields):
+   module            - Module name ("Notes")
    trial             - Trial number (integer, 1-based)
-   Content           - User annotation text (string)
-   Timestamp         - Unix timestamp (seconds, 6 decimals)
+   device_id         - Device identifier ("notes")
+   label             - Optional label (blank if unused)
+   device_time_unix  - Device absolute time (Unix seconds, if available)
+   record_time_unix  - Host capture time (Unix seconds, 6 decimals)
+   record_time_mono  - Host capture time (seconds, 9 decimals)
+   content           - User annotation text (string)
 
 Example Row:
-   Note,1,Participant started task,1733649123.456789
+   Notes,1,notes,,,1733649123.456789,12345.678901234,Participant started task
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -108,20 +112,21 @@ Example Row:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Timestamp Precision
-   Unix timestamp:     Microsecond precision (6 decimals)
-   Recorded at:        Moment user presses Enter/Post
+   record_time_unix:    Microsecond precision (6 decimals)
+   record_time_mono:    Nanosecond precision (9 decimals)
+   Recorded at:         Moment user presses Enter/Post
 
 Cross-Module Synchronization
-   Use Timestamp to correlate notes with:
-   • Video frames (via camera capture_time_unix)
-   • Audio samples (via audio write_time_unix)
-   • DRT trials (via Unix time in UTC)
+   Use record_time_unix or record_time_mono to correlate notes with:
+   • Video frames (via camera record_time_unix)
+   • Audio samples (via audio record_time_unix)
+   • DRT trials (via record_time_unix)
    • Eye tracking data (via record_time_unix)
-   • GPS position (via timestamp_unix)
+   • GPS position (via record_time_unix)
 
 Example: Finding video frame for a note
-   1. Read note Timestamp (e.g., 1733649123.456789)
-   2. Search camera timing CSV for nearest capture_time_unix
+   1. Read note record_time_unix (e.g., 1733649123.456789)
+   2. Search camera timing CSV for nearest record_time_unix
    3. Use frame_index to locate frame in video file
 
 

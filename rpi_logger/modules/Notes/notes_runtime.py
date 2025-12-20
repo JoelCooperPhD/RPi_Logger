@@ -55,6 +55,7 @@ class NoteRecord:
     trial_number: int
     text: str
     timestamp: float
+    record_time_mono: float
     timestamp_iso: str
     elapsed: str
     modules: str
@@ -64,7 +65,16 @@ class NoteRecord:
 class NotesArchive:
     """Manage on-disk persistence for notes using proper CSV format."""
 
-    HEADER = ["Note", "trial", "Content", "Timestamp"]
+    HEADER = [
+        "module",
+        "trial",
+        "device_id",
+        "label",
+        "device_time_unix",
+        "record_time_unix",
+        "record_time_mono",
+        "content",
+    ]
 
     def __init__(self, base_dir: Path, logger: logging.Logger, *, encoding: str = "utf-8") -> None:
         self.base_dir = base_dir
@@ -153,16 +163,26 @@ class NotesArchive:
 
         # Preserve original text - CSV writer handles escaping
         timestamp = float(posted_at) if posted_at is not None else time.time()
+        record_time_mono = time.perf_counter()
         if self._start_timestamp is None:
             self._start_timestamp = timestamp
 
-        await asyncio.to_thread(self._append_row, cleaned, timestamp, trial_number)
+        await asyncio.to_thread(self._append_row, cleaned, timestamp, record_time_mono, trial_number)
 
         self.note_count += 1
 
         modules_str = ";".join(sorted(modules)) if modules else ""
         # Generate CSV-formatted line for display
-        file_line = self._format_csv_line(["Note", trial_number, cleaned, timestamp])
+        file_line = self._format_csv_line([
+            "Notes",
+            trial_number,
+            "notes",
+            "",
+            "",
+            timestamp,
+            record_time_mono,
+            cleaned,
+        ])
         iso_stamp = datetime.fromtimestamp(timestamp).isoformat(timespec="seconds")
         elapsed_display = self.format_elapsed(timestamp - self._start_timestamp)
 
@@ -171,6 +191,7 @@ class NotesArchive:
             trial_number=trial_number,
             text=cleaned,
             timestamp=timestamp,
+            record_time_mono=record_time_mono,
             timestamp_iso=iso_stamp,
             elapsed=elapsed_display,
             modules=modules_str,
@@ -200,8 +221,8 @@ class NotesArchive:
         return self.format_elapsed(time.time() - self._start_timestamp)
 
     def _resolve_file_path(self, trial_number: int) -> Path:
-        prefix = module_filename_prefix(self.base_dir, "Notes", trial_number, code="NOTES")
-        return self.base_dir / f"{prefix}.csv"
+        prefix = module_filename_prefix(self.base_dir, "Notes", trial_number, code="NTS")
+        return self.base_dir / f"{prefix}_notes.csv"
 
     def _write_header(self, path: Path) -> None:
         handle = path.open("w", encoding=self.encoding, newline="")
@@ -217,6 +238,25 @@ class NotesArchive:
         self._file_handle = handle
         self._csv_writer = writer
 
+    @staticmethod
+    def _resolve_header_indices(header: List[str]) -> dict[str, int]:
+        normalized = [value.strip().lower() for value in header]
+
+        def _first_index(names: Sequence[str], fallback: int) -> int:
+            for name in names:
+                try:
+                    return normalized.index(name)
+                except ValueError:
+                    continue
+            return fallback
+
+        return {
+            "trial": _first_index(("trial",), 1),
+            "record_time_unix": _first_index(("record_time_unix", "timestamp"), 4),
+            "record_time_mono": _first_index(("record_time_mono",), 5),
+            "content": _first_index(("content",), 2),
+        }
+
     def _count_existing_notes(self, path: Path) -> int:
         try:
             with path.open("r", encoding=self.encoding, newline="") as handle:
@@ -228,15 +268,16 @@ class NotesArchive:
         if len(rows) <= 1:  # Only header or empty
             return 0
 
+        indices = self._resolve_header_indices(rows[0])
         first_timestamp: Optional[float] = None
         count = 0
         for row in rows[1:]:  # Skip header
-            if len(row) < 4:
+            if len(row) <= indices["content"]:
                 continue
             count += 1
             if first_timestamp is None:
                 try:
-                    ts_candidate = float(row[3])
+                    ts_candidate = float(row[indices["record_time_unix"]])
                 except (ValueError, IndexError):
                     ts_candidate = None
                 if ts_candidate is not None:
@@ -246,17 +287,37 @@ class NotesArchive:
             self._start_timestamp = first_timestamp
         return count
 
-    def _append_row(self, text: str, timestamp: float, trial_number: int) -> None:
+    def _append_row(
+        self, text: str, record_time_unix: float, record_time_mono: float, trial_number: int
+    ) -> None:
         if not self.file_path:
             raise RuntimeError("Archive file path not set")
         if self._csv_writer and self._file_handle:
-            self._csv_writer.writerow(["Note", trial_number, text, timestamp])
+            self._csv_writer.writerow([
+                "Notes",
+                trial_number,
+                "notes",
+                "",
+                "",
+                record_time_unix,
+                record_time_mono,
+                text,
+            ])
             self._file_handle.flush()
         else:
             # Fallback: open in append mode if writer not available
             with self.file_path.open("a", encoding=self.encoding, newline="") as handle:
                 writer = csv.writer(handle)
-                writer.writerow(["Note", trial_number, text, timestamp])
+                writer.writerow([
+                    "Notes",
+                    trial_number,
+                    "notes",
+                    "",
+                    "",
+                    record_time_unix,
+                    record_time_mono,
+                    text,
+                ])
 
     def _read_records(self, limit: int, path: Path) -> List[NoteRecord]:
         try:
@@ -269,20 +330,25 @@ class NotesArchive:
         if len(rows) <= 1:  # Only header or empty
             return []
 
-        note_rows = [row for row in rows[1:] if len(row) >= 4]
+        indices = self._resolve_header_indices(rows[0])
+        note_rows = [row for row in rows[1:] if len(row) > indices["content"]]
         total_notes = len(note_rows)
         start_index = max(0, total_notes - max(1, limit))
         records: List[NoteRecord] = []
         for idx, row in enumerate(note_rows[start_index:], start=start_index + 1):
             try:
-                trial_number = int(row[1])
+                trial_number = int(row[indices["trial"]])
             except (ValueError, IndexError):
                 trial_number = 0
-            note_text = row[2] if len(row) > 2 else ""
+            note_text = row[indices["content"]] if len(row) > indices["content"] else ""
             try:
-                timestamp = float(row[3])
+                timestamp = float(row[indices["record_time_unix"]])
             except (ValueError, IndexError):
                 timestamp = 0.0
+            try:
+                record_time_mono = float(row[indices["record_time_mono"]])
+            except (ValueError, IndexError):
+                record_time_mono = 0.0
 
             if self._start_timestamp is None and timestamp:
                 self._start_timestamp = timestamp
@@ -297,6 +363,7 @@ class NotesArchive:
                     trial_number=trial_number,
                     text=note_text,
                     timestamp=timestamp,
+                    record_time_mono=record_time_mono,
                     timestamp_iso=iso_stamp or "",
                     elapsed=elapsed_display,
                     modules="",

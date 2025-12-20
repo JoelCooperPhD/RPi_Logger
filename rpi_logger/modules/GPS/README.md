@@ -72,40 +72,45 @@ Each data point captures:
 
 | File | Description |
 |------|-------------|
-| `{timestamp}_GPS_trial{NNN}.csv` | Parsed GPS data |
+| `{prefix}_GPS_trial{NNN}_{device_id}.csv` | Parsed GPS data |
 | `{timestamp}_NMEA_trial{NNN}.txt` | Raw NMEA sentences (optional) |
 
-Example: `20251208_143022_GPS_trial001.csv`
+Example: `20251208_143022_GPS_trial001_GPS_serial0.csv`
 
-### GPS CSV Columns (21 fields)
+### GPS CSV Columns (26 fields)
 
 | Column | Description |
 |--------|-------------|
-| Module | Always "GPS" |
+| module | Module name ("GPS") |
 | trial | Trial number (integer, 1-based) |
-| timestamp_utc | GPS UTC time (ISO 8601 format) |
-| timestamp_unix | Unix timestamp (seconds, 6 decimals) |
-| record_time_mono | Host monotonic time (seconds, 9 decimals) |
-| latitude | Latitude (decimal degrees, + = North) |
-| longitude | Longitude (decimal degrees, + = East) |
+| device_id | GPS device identifier |
+| label | Optional label (blank if unused) |
+| device_time_iso | GPS UTC time (ISO 8601) |
+| device_time_unix | GPS UTC time (Unix seconds) |
+| record_time_unix | Host capture time (Unix seconds, 6 decimals) |
+| record_time_mono | Host capture time (seconds, 9 decimals, `perf_counter`) |
+| latitude_deg | Latitude (decimal degrees, + = North) |
+| longitude_deg | Longitude (decimal degrees, + = East) |
 | altitude_m | Altitude above mean sea level (meters) |
-| geoid_separation_m | Geoid separation (meters) |
-| speed_knots | Speed over ground (knots) |
+| speed_mps | Speed over ground (m/s) |
 | speed_kmh | Speed over ground (km/h) |
+| speed_knots | Speed over ground (knots) |
 | speed_mph | Speed over ground (mph) |
-| heading_true | True heading (degrees 0-360) |
-| heading_magnetic | Magnetic heading (degrees) |
+| course_deg | True course (degrees 0-360) |
 | fix_quality | Fix type (0=None, 1=GPS, 2=DGPS, etc.) |
-| fix_type | Fix mode (1=None, 2=2D, 3=3D) |
-| satellites_used | Satellites in position solution |
+| fix_mode | Fix mode (1=None, 2=2D, 3=3D) |
+| fix_valid | Fix valid flag (0/1) |
+| satellites_in_use | Satellites in position solution |
 | satellites_in_view | Total satellites visible |
 | hdop | Horizontal dilution of precision |
-| vdop | Vertical dilution of precision |
 | pdop | Position dilution of precision |
+| vdop | Vertical dilution of precision |
+| sentence_type | NMEA sentence type (GGA, RMC, etc.) |
+| raw_sentence | Raw NMEA sentence |
 
 **Example row:**
 ```
-GPS,1,2024-12-08T14:30:22.500Z,1733665822.500000,12345.678901234,-37.8136,144.9631,42.5,0.0,25.3,46.9,29.1,185.2,184.8,1,3,8,12,1.2,1.8,2.1
+GPS,1,GPS:serial0,,2024-12-08T14:30:22.500Z,1733665822.500000,1733665822.500000,12345.678901234,-37.8136,144.9631,42.5,12.3,44.3,23.9,27.5,185.2,1,3,1,8,12,1.2,1.8,2.1,GGA,$GPGGA,...
 ```
 
 ### Timing and Synchronization
@@ -114,15 +119,15 @@ GPS,1,2024-12-08T14:30:22.500Z,1733665822.500000,12345.678901234,-37.8136,144.96
 
 | Timestamp | Source | Use Case |
 |-----------|--------|----------|
-| timestamp_utc | GPS satellites | Most accurate absolute time (atomic clock derived, ±100 ns) |
-| timestamp_unix | GPS time as Unix seconds | Cross-system time reference |
+| device_time_iso | GPS satellites | Most accurate absolute time (atomic clock derived, ±100 ns) |
+| device_time_unix | GPS time as Unix seconds | Cross-system time reference |
+| record_time_unix | Host wall clock | Cross-system time reference |
 | record_time_mono | Host monotonic clock | Cross-module synchronization |
 
 **Cross-Module Synchronization:**
-Use `record_time_mono` to correlate GPS with other modules:
-- Camera `encode_time_mono`
-- Audio `write_time_monotonic`
-- Use `timestamp_unix` for absolute time reference
+Use `record_time_mono` to correlate GPS with other modules.
+- Audio `record_time_mono`
+- Use `record_time_unix` for absolute time reference
 
 **DOP Values (Dilution of Precision):**
 

@@ -92,27 +92,31 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 #
 # 3. Session Organization:
 #    User selects save location (e.g., /home/user/Desktop)
-#    System creates timestamped subdirectory:
+#    System creates timestamped subdirectory. Recordings use a shared prefix:
+#      {sessionToken}_{MODULECODE}_trial###_...
 #
 #    /home/user/Desktop/
 #    └── session_20251014_120000/     # Session directory (created when user starts session)
-#        ├── logs/                    # Event logs
-#        │   └── events.db            # Session event database
-#        ├── Camera/                  # Camera module directory
-#        │   ├── camera.log           # Module log file
-#        │   └── recordings/          # Recordings directly here
-#        │       ├── video_cam0_*.h264
-#        │       └── ...
-#        ├── Audio/                   # Audio module directory
-#        │   ├── audio.log            # Module log file
-#        │   └── recordings/          # Recordings directly here
-#        │       ├── mic_0_*.wav
-#        │       └── ...
-#        └── EyeTracker-Neon/         # Pupil Labs Neon eye tracker directory
-#            ├── eyetracker.log       # Module log file
-#            └── recordings/          # Recordings directly here
-#                ├── gaze_*.csv
-#                └── ...
+#        ├── 20251014_120000_CONTROL.csv
+#        ├── Cameras/
+#        │   └── FaceTime_HD_0D0B7853/
+#        │       ├── 20251014_120000_CAM_trial001_FaceTime_HD_0D0B7853.avi
+#        │       └── 20251014_120000_CAM_trial001_FaceTime_HD_0D0B7853_timing.csv
+#        ├── Audio/
+#        │   ├── 20251014_120000_AUD_trial001_MIC0_blue-yeti.wav
+#        │   └── 20251014_120000_AUD_trial001_MIC0_blue-yeti_timing.csv
+#        ├── EyeTracker-Neon/
+#        │   ├── 20251014_120000_EYE_trial001_WORLD_1280x720_30fps.mp4
+#        │   ├── 20251014_120000_EYE_trial001_GAZE.csv
+#        │   └── ...
+#        ├── DRT/
+#        │   └── 20251014_120000_DRT_trial001_DRT_ttyacm0.csv
+#        ├── VOG/
+#        │   └── 20251014_120000_VOG_trial001_ttyacm0.csv
+#        ├── GPS/
+#        │   └── 20251014_120000_GPS_trial001_GPS_serial0.csv
+#        └── Notes/
+#            └── 20251014_120000_NTS_trial001_notes.csv
 #
 #    Master logger logs go to: logs/master.log
 #

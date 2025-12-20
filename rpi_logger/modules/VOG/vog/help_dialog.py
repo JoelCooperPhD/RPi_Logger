@@ -132,8 +132,8 @@ Lens State Timing
 Cross-Module Synchronization
    Use "Unix time in UTC" to correlate VOG events with:
    • Video frames (via camera capture_time_unix)
-   • Audio samples (via audio write_time_unix)
-   • DRT trials (wVOG Lens column syncs with wDRT)
+   • Audio samples (via audio record_time_unix)
+   • DRT trials (via DRT record_time_unix)
    • Eye tracking data (via record_time_unix)
 
 DRT Integration (wVOG only)

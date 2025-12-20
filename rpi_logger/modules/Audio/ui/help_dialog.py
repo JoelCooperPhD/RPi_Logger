@@ -52,10 +52,10 @@ Level Meters
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 File Naming Convention
-   {timestamp}_AUDIO_trial{NNN}_{device_id}_{device_name}.wav
-   {timestamp}_AUDIOTIMING_trial{NNN}_{device_id}_{device_name}.csv
+   {prefix}_MIC{id}_{device_name}.wav
+   {prefix}_MIC{id}_{device_name}_timing.csv
 
-   Example: 20251208_143022_AUDIO_trial001_0_usb-microphone.wav
+   Example: 20251208_143022_AUD_trial001_MIC0_usb-microphone.wav
 
 Location
    {session_dir}/Audio/
@@ -73,40 +73,52 @@ WAV Audio File
 4. TIMING CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-The AUDIOTIMING CSV contains per-chunk timing data for precise
+The audio timing CSV contains per-chunk timing data for precise
 synchronization with other modules.
 
 CSV Columns:
-   Module              - Always "Audio"
+   module              - Module name ("Audio")
    trial               - Trial number (integer)
-   write_time_unix     - System time when written (Unix seconds)
+   device_id           - Device identifier (integer index)
+   label               - Device name
+   device_time_unix    - Device absolute time (Unix seconds, if available)
+   device_time_seconds - Hardware ADC timestamp (seconds)
+   record_time_unix    - Host capture time (Unix seconds)
+   record_time_mono    - Host capture time (seconds, 9 decimals)
+   write_time_unix     - Host write time (Unix seconds)
+   write_time_mono     - Host write time (seconds, 9 decimals)
    chunk_index         - Sequential chunk number (1-based)
-   write_time_monotonic - Monotonic time (seconds, 9 decimals)
-   adc_timestamp       - Hardware ADC timestamp (seconds, 9 decimals)
    frames              - Audio frames in this chunk
    total_frames        - Cumulative frame count
 
 Example Row:
-   Audio,1,1702080123.456789,1,12.345678901,12.345678901,2048,2048
+   Audio,1,0,usb-microphone,,12.345678901,1702080123.456789,12.345678901,1702080123.457123,12.346012345,1,2048,2048
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 5. TIMING & SYNCHRONIZATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Timestamp Types (3 independent sources per chunk):
+Timestamp Types (capture + write + device):
 
-   write_time_unix      - System clock (may drift/jump)
+   record_time_unix     - Host capture clock (may drift/jump)
                           Precision: microseconds (6 decimals)
 
-   write_time_monotonic - Monotonic clock (never decreases)
+   record_time_mono     - Host monotonic capture clock (never decreases)
                           Precision: nanoseconds (9 decimals)
                           Best for relative timing calculations
 
-   adc_timestamp        - Hardware ADC timestamp from device
+   write_time_unix      - Host write clock (disk I/O timing)
+                          Precision: microseconds (6 decimals)
+
+   write_time_mono      - Host monotonic write clock
                           Precision: nanoseconds (9 decimals)
-                          Most accurate for sample-level sync
+
+   device_time_seconds  - Hardware ADC timestamp from device
+                          Precision: device-dependent
                           May be empty if device doesn't support
+
+   device_time_unix     - Device absolute time (Unix seconds, if available)
 
 Timing Accuracy
    • Timestamps recorded per audio chunk (typically 1024-4096 samples)
@@ -116,7 +128,7 @@ Timing Accuracy
 Calculating Audio Position
    To find the exact time of any sample:
    1. Find the chunk containing that sample (use total_frames)
-   2. Use write_time_monotonic for that chunk
+   2. Use record_time_mono for that chunk
    3. Offset by (sample_position_in_chunk / sample_rate)
 
 
@@ -156,9 +168,9 @@ Level meter shows no activity:
    3. Verify correct device is selected
    4. Restart the module
 
-Empty adc_timestamp in CSV:
+Empty device_time_unix or device_time_seconds in CSV:
    This is normal - not all audio devices provide hardware timestamps.
-   Use write_time_monotonic for synchronization instead.
+   Use record_time_mono for synchronization instead.
 
 
 """

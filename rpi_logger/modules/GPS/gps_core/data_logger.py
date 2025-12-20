@@ -14,6 +14,7 @@ from queue import Queue, Empty
 from typing import Any, List, Optional, TextIO
 
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.modules.base.storage_utils import module_filename_prefix
 from .constants import GPS_CSV_HEADER, MPS_PER_KNOT
 from .parsers.nmea_types import GPSFixSnapshot
 
@@ -114,8 +115,8 @@ class GPSDataLogger:
 
             # Generate filename
             device_safe = self._sanitize_device_id()
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            filename = f"{device_safe}_{timestamp}.csv"
+            prefix = module_filename_prefix(self.output_dir, "GPS", trial_number, code="GPS")
+            filename = f"{prefix}_{device_safe}.csv"
             path = self.output_dir / filename
 
             # Open file and write header
@@ -225,10 +226,25 @@ class GPSDataLogger:
             speed_mps = fix.speed_kmh / 3.6
 
         # Build row matching GPS_CSV_HEADER order
+        record_time_unix = time.time()
+        record_time_mono = time.perf_counter()
+
+        device_time_unix = ""
+        if fix.timestamp is not None:
+            try:
+                device_time_unix = fix.timestamp.timestamp()
+            except Exception:
+                device_time_unix = ""
+
         row = [
+            "GPS",
             self._trial_number,
-            time.time(),  # recorded_at_unix
+            self.device_id,
+            "",
             fix.timestamp.isoformat() if fix.timestamp else "",
+            device_time_unix,
+            record_time_unix,
+            record_time_mono,
             fix.latitude,
             fix.longitude,
             fix.altitude_m,

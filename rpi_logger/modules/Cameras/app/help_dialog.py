@@ -95,6 +95,7 @@ The timing CSV contains per-frame timing for precise synchronization.
 
 CSV Columns:
    trial             - Trial number (integer, may be empty)
+   device_time_unix  - Device absolute time (Unix seconds, if available)
    frame_index       - 1-based frame number in video file
    capture_time_unix - Wall clock when captured (Unix seconds)
    encode_time_mono  - Monotonic time when encoded (9 decimals)
@@ -102,11 +103,12 @@ CSV Columns:
    video_pts         - Presentation timestamp in video stream
 
 Example Row:
-   1,1,1733649120.123456,123.456789012,1733649120123456789,1
+   1,,1,1733649120.123456,123.456789012,1733649120123456789,1
 
 Notes:
    • sensor_timestamp_ns: Only for CSI cameras (Picamera2)
      USB cameras show empty/None for this field
+   • device_time_unix: May be empty if device does not provide an absolute clock
    • video_pts: Frame index used as PTS value
    • CSV row count = number of frames in video file
 

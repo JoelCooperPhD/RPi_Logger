@@ -89,9 +89,9 @@ During Recording
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 File Naming Convention
-   {timestamp}_DRT_trial{NNN}_{device_id}.csv
+   {prefix}_DRT_trial{NNN}_{device_id}.csv
 
-   Example: 20251208_143022_DRT_trial001_DRT_ttyACM0.csv
+   Example: 20251208_143022_DRT_trial001_DRT_dev_ttyacm0.csv
 
 Location
    {session_dir}/DRT/
@@ -101,32 +101,37 @@ Location
 3.6. CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-DRT CSV Columns (7 fields):
-   Device ID             - Full device identifier (e.g., "DRT_dev_ttyacm0")
-   Label                 - Trial/condition label, or "NA" if not set
-   Unix time in UTC      - Host timestamp when trial logged (Unix seconds)
-   Milliseconds Since Record - Device timestamp in ms since experiment start
-   Trial Number          - Sequential trial count (1-based)
-   Responses             - Button press count for this trial
-   Reaction Time         - Response latency in ms (-1 = miss/timeout)
+DRT CSV Columns (10 fields):
+   module                - Module name ("DRT")
+   trial                 - Sequential trial count (1-based)
+   device_id             - Device identifier (e.g., "DRT_dev_ttyacm0")
+   label                 - Trial/condition label (blank if not set)
+   device_time_ms        - Device timestamp in ms since experiment start
+   device_time_unix      - Device absolute time (Unix seconds, if available)
+   record_time_unix      - Host capture time (Unix seconds, 6 decimals)
+   record_time_mono      - Host capture time (seconds, 9 decimals)
+   responses             - Button press count for this trial
+   reaction_time_ms      - Response latency in ms (-1 = miss/timeout)
 
-wDRT CSV Columns (9 fields):
-   Device ID             - Full device identifier (e.g., "wDRT_dev_ttyacm0")
-   Label                 - Trial/condition label, or "NA" if not set
-   Unix time in UTC      - Host timestamp when trial logged (Unix seconds)
-   Milliseconds Since Record - Device timestamp in ms since experiment start
-   Trial Number          - Sequential trial count (1-based)
-   Responses             - Button press count for this trial
-   Reaction Time         - Response latency in ms (-1 = miss/timeout)
-   Battery Percent       - Device battery level (0-100%)
-   Device time in UTC    - Device's internal RTC timestamp (Unix seconds)
+wDRT CSV Columns (11 fields):
+   module                - Module name ("DRT")
+   trial                 - Sequential trial count (1-based)
+   device_id             - Device identifier (e.g., "wDRT_dev_ttyacm0")
+   label                 - Trial/condition label (blank if not set)
+   device_time_ms        - Device timestamp in ms since experiment start
+   device_time_unix      - Device RTC timestamp (Unix seconds)
+   record_time_unix      - Host capture time (Unix seconds, 6 decimals)
+   record_time_mono      - Host capture time (seconds, 9 decimals)
+   responses             - Button press count for this trial
+   reaction_time_ms      - Response latency in ms (-1 = miss/timeout)
+   battery_percent       - Device battery level (0-100%)
 
 Example Rows:
    DRT:
-   DRT_dev_ttyacm0,NA,1733649120,5000,1,1,342
+   DRT,1,DRT_dev_ttyacm0,,5000,,1733649120.123456,12345.678901234,1,342
 
    wDRT:
-   wDRT_dev_ttyacm0,NA,1733649120,5500,2,1,287,85,1733649118
+   DRT,2,wDRT_dev_ttyacm0,,5500,1733649118,1733649120.456789,12345.678901234,1,287,85
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -140,9 +145,10 @@ Reaction Time Measurement
    with typical accuracy of ±1-5 ms.
 
 Timestamp Precision
-   Unix time in UTC      - Integer seconds (host system time)
-   Milliseconds Since Record - Integer milliseconds (device time)
-   Reaction Time         - Integer milliseconds
+   record_time_unix      - Seconds with microsecond precision (host system time)
+   record_time_mono      - Seconds with nanosecond precision (host monotonic clock)
+   device_time_ms        - Integer milliseconds (device time)
+   reaction_time_ms      - Integer milliseconds
 
 Miss Detection
    A reaction time of -1 indicates a "miss":
@@ -150,11 +156,11 @@ Miss Detection
    • Stimulus duration elapsed without button press
 
 Cross-Module Synchronization
-   Use "Unix time in UTC" to correlate DRT events with:
+   Use record_time_unix or record_time_mono to correlate DRT events with:
    • Video frames (via camera timing CSV)
    • Audio samples (via audio timing CSV)
    • Eye tracking data (via gaze CSV)
-   • VOG lens states (wDRT Lens column when synced)
+   • VOG lens states (via VOG record_time_* fields)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -244,12 +244,17 @@ class AudioDeviceRecorder:
             csv_file = open(handle.timing_csv_path, 'w', newline='', encoding='utf-8')
             writer = csv.writer(csv_file)
             writer.writerow([
-                'Module',
+                'module',
                 'trial',
+                'device_id',
+                'label',
+                'device_time_unix',
+                'device_time_seconds',
+                'record_time_unix',
+                'record_time_mono',
                 'write_time_unix',
+                'write_time_mono',
                 'chunk_index',
-                'write_time_monotonic',
-                'adc_timestamp',
                 'frames',
                 'total_frames',
             ])
@@ -261,13 +266,20 @@ class AudioDeviceRecorder:
                     continue
                 try:
                     wave_handle.writeframes(chunk.data)
+                    write_time_unix = time.time()
+                    write_time_mono = time.perf_counter()
                     writer.writerow([
                         'Audio',
                         handle.trial_number,
-                        f"{chunk.unix_time:.6f}",
-                        chunk.chunk_index,
-                        f"{chunk.monotonic_time:.9f}",
+                        handle.device_id,
+                        handle.device_name,
+                        '',
                         f"{chunk.adc_timestamp:.9f}" if chunk.adc_timestamp is not None else '',
+                        f"{chunk.unix_time:.6f}",
+                        f"{chunk.monotonic_time:.9f}",
+                        f"{write_time_unix:.6f}",
+                        f"{write_time_mono:.9f}",
+                        chunk.chunk_index,
                         chunk.frames,
                         chunk.total_frames,
                     ])
@@ -301,17 +313,12 @@ class AudioDeviceRecorder:
             .replace("_", "-")
             .lower()
         )
-        prefix = module_filename_prefix(session_dir, "Audio", trial_number, code="AUDIO")
+        prefix = module_filename_prefix(session_dir, "Audio", trial_number, code="AUD")
         filename = f"{prefix}_MIC{self.device.device_id}_{safe_name}.wav"
         return session_dir / filename
 
     def _make_timing_filename(self, audio_path: Path) -> Path:
-        stem = audio_path.stem
-        if "_AUDIO_" in stem:
-            csv_stem = stem.replace("_AUDIO_", "_AUDIOTIMING_", 1)
-        else:
-            csv_stem = f"{stem}_timing"
-        return audio_path.with_name(f"{csv_stem}.csv")
+        return audio_path.with_name(f"{audio_path.stem}_timing.csv")
 
     def _extract_time_info(self, time_info) -> float | None:
         if not time_info:

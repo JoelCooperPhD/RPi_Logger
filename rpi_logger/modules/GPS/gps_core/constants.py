@@ -18,11 +18,16 @@ FIX_MODE_MAP = {
     3: "3D",
 }
 
-# GPS CSV header (21 fields)
+# GPS CSV header (26 fields)
 GPS_CSV_HEADER = [
+    "module",
     "trial",
-    "recorded_at_unix",
-    "gps_timestamp_iso",
+    "device_id",
+    "label",
+    "device_time_iso",
+    "device_time_unix",
+    "record_time_unix",
+    "record_time_mono",
     "latitude_deg",
     "longitude_deg",
     "altitude_m",
