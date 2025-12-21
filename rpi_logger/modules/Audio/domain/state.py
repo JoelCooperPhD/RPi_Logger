@@ -17,18 +17,21 @@ _STATE_PREFIX = "audio"
 
 
 class AudioState:
-    """Holds device + recording state and notifies observers on change."""
+    """Holds single device + recording state and notifies observers on change.
+
+    The audio module supports a single device at a time, assigned by the main logger.
+    Device discovery is handled externally - this module only receives assignments.
+    """
 
     def __init__(self) -> None:
-        self.devices: dict[int, AudioDeviceInfo] = {}
-        self.selected_devices: dict[int, AudioDeviceInfo] = {}
-        self.level_meters: dict[int, LevelMeter] = {}
+        self.device: AudioDeviceInfo | None = None
+        self.level_meter: LevelMeter | None = None
         self.session_dir: Path | None = None
         self.recording: bool = False
         self.trial_number: int = 1
         self._observers: list[Callable[[AudioSnapshot], None]] = []
-        self._status_text: str = "No audio devices detected"
-        self._pending_restore_names: set[str] = set()
+        self._status_text: str = "No audio device assigned"
+        self._pending_restore_name: str | None = None
 
     # ------------------------------------------------------------------
     # Observer helpers
@@ -47,9 +50,8 @@ class AudioState:
 
     def snapshot(self) -> AudioSnapshot:
         return AudioSnapshot(
-            devices=dict(self.devices),
-            selected_devices=dict(self.selected_devices),
-            level_meters=dict(self.level_meters),
+            device=self.device,
+            level_meter=self.level_meter,
             recording=self.recording,
             trial_number=self.trial_number,
             session_dir=self.session_dir,
@@ -59,40 +61,17 @@ class AudioState:
     # ------------------------------------------------------------------
     # State mutation helpers
 
-    def set_devices(self, devices: dict[int, AudioDeviceInfo]) -> None:
-        self.devices = dict(devices)
-        missing = [device_id for device_id in self.selected_devices.keys() if device_id not in devices]
-        for device_id in missing:
-            self.selected_devices.pop(device_id, None)
-            self.level_meters.pop(device_id, None)
-
-        for device_id, info in devices.items():
-            if device_id in self.selected_devices:
-                self.selected_devices[device_id] = info
-
-        # Try to restore previously-selected devices by name
-        self.try_restore_device_selection()
-
+    def set_device(self, device: AudioDeviceInfo) -> None:
+        """Set the single assigned device (replaces any existing)."""
+        self.device = device
+        self.level_meter = LevelMeter()
         self._update_status()
         self._notify()
 
-    def set_device(self, device_id: int, device: AudioDeviceInfo) -> None:
-        """Add or update a single device (used by centralized discovery)."""
-        self.devices[device_id] = device
-        if device_id in self.selected_devices:
-            self.selected_devices[device_id] = device
-
-        # Try to restore previously-selected devices by name
-        self.try_restore_device_selection()
-
-        self._update_status()
-        self._notify()
-
-    def remove_device(self, device_id: int) -> None:
-        """Remove a single device (used by centralized discovery)."""
-        self.devices.pop(device_id, None)
-        self.selected_devices.pop(device_id, None)
-        self.level_meters.pop(device_id, None)
+    def clear_device(self) -> None:
+        """Clear the assigned device."""
+        self.device = None
+        self.level_meter = None
         self._update_status()
         self._notify()
 
@@ -111,39 +90,14 @@ class AudioState:
         self._update_status()
         self._notify()
 
-    def ensure_meter(self, device_id: int) -> LevelMeter:
-        meter = self.level_meters.get(device_id)
-        if meter is None:
-            meter = LevelMeter()
-            self.level_meters[device_id] = meter
-            self._notify()
-        return meter
-
-    def select_device(self, device: AudioDeviceInfo) -> None:
-        if device.device_id in self.selected_devices:
-            return
-        self.selected_devices[device.device_id] = device
-        self.ensure_meter(device.device_id)
-        self._update_status()
-        self._notify()
-
-    def deselect_device(self, device_id: int) -> None:
-        if device_id not in self.selected_devices:
-            return
-        self.selected_devices.pop(device_id, None)
-        self.level_meters.pop(device_id, None)
-        self._update_status()
-        self._notify()
-
     def _update_status(self) -> None:
         if self.recording:
-            self._status_text = (
-                f"Recording trial {self.trial_number} ({len(self.selected_devices)} device(s))"
-            )
-        elif not self.devices:
-            self._status_text = "No audio devices detected"
+            device_name = self.device.name if self.device else "unknown"
+            self._status_text = f"Recording trial {self.trial_number} ({device_name})"
+        elif self.device is None:
+            self._status_text = "No audio device assigned"
         else:
-            self._status_text = f"{len(self.devices)} device(s) available"
+            self._status_text = f"Device ready: {self.device.name}"
 
     # ------------------------------------------------------------------
     # Status payload helpers
@@ -152,8 +106,9 @@ class AudioState:
         return {
             "recording": self.recording,
             "trial_number": self.trial_number,
-            "devices_available": len(self.devices),
-            "devices_selected": len(self.selected_devices),
+            "device_assigned": self.device is not None,
+            "device_name": self.device.name if self.device else None,
+            "device_id": self.device.device_id if self.device else None,
             "session_dir": str(self.session_dir) if self.session_dir else None,
             "status_message": self._status_text,
         }
@@ -162,62 +117,29 @@ class AudioState:
     # State persistence (StatePersistence protocol)
 
     def get_persistable_state(self) -> dict[str, Any]:
-        """Return state that should be persisted across restarts.
-
-        We persist device names rather than IDs because device IDs from
-        sounddevice can change between runs depending on enumeration order.
-        """
-        # Get names of selected devices
-        selected_names = [dev.name for dev in self.selected_devices.values()]
+        """Return state that should be persisted across restarts."""
         return {
-            "selected_device_names": "|".join(selected_names) if selected_names else "",
+            "device_name": self.device.name if self.device else "",
         }
 
     def restore_from_state(self, data: dict[str, Any]) -> None:
-        """Restore state from previously persisted data.
-
-        This marks devices for selection; actual selection happens when
-        devices become available (see try_restore_device_selection).
-        """
-        names_str = data.get("selected_device_names", "")
-        if names_str:
-            self._pending_restore_names = set(names_str.split("|"))
-            logger.debug("Will restore selection for devices: %s", self._pending_restore_names)
-        else:
-            self._pending_restore_names = set()
+        """Restore state from previously persisted data."""
+        name = data.get("device_name", "")
+        self._pending_restore_name = name if name else None
 
     @classmethod
     def state_prefix(cls) -> str:
         """Return the config key prefix for this state class."""
         return _STATE_PREFIX
 
-    def try_restore_device_selection(self) -> int:
-        """Try to select devices that match pending restore names.
+    def try_restore_device_selection(self) -> bool:
+        """Check if current device matches pending restore name.
 
-        Call this after devices are discovered/updated to automatically
-        select previously-selected devices.
-
-        Returns:
-            Number of devices that were auto-selected.
+        Returns True if the current device matches the persisted name.
         """
-        if not self._pending_restore_names:
-            return 0
-
-        restored_count = 0
-        remaining_names = set(self._pending_restore_names)
-
-        for device in self.devices.values():
-            if device.name in remaining_names:
-                if device.device_id not in self.selected_devices:
-                    self.select_device(device)
-                    logger.info("Auto-selected restored device: %s", device.name)
-                    restored_count += 1
-                remaining_names.discard(device.name)
-
-        # Update pending names to only those not yet found
-        self._pending_restore_names = remaining_names
-
-        if remaining_names:
-            logger.debug("Still waiting for devices: %s", remaining_names)
-
-        return restored_count
+        if not self._pending_restore_name or not self.device:
+            return False
+        if self.device.name == self._pending_restore_name:
+            self._pending_restore_name = None
+            return True
+        return False

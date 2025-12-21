@@ -53,12 +53,6 @@ class CommandRouter:
         if action == "stop_recording":
             await self.app.stop_recording()
             return True
-        if action == "toggle_device":
-            device_id = kwargs.get("device_id")
-            enabled = bool(kwargs.get("enabled", True))
-            if isinstance(device_id, int):
-                await self.app.toggle_device(device_id, enabled)
-                return True
         self.logger.debug("Unhandled user action: %s", action)
         return False
 

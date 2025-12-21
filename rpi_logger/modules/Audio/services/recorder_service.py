@@ -1,4 +1,4 @@
-"""Service that manages per-device AudioDeviceRecorder instances."""
+"""Service that manages a single AudioDeviceRecorder instance."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from .device_recorder import AudioDeviceRecorder, RecordingHandle
 
 
 class RecorderService:
-    """Manage AudioDeviceRecorder instances keyed by device id."""
+    """Manage a single AudioDeviceRecorder instance."""
 
     def __init__(
         self,
@@ -24,22 +24,23 @@ class RecorderService:
         self._default_sample_rate = max(1, int(sample_rate))
         self.start_timeout = start_timeout
         self.stop_timeout = stop_timeout
-        self.recorders: dict[int, AudioDeviceRecorder] = {}
+        self.recorder: AudioDeviceRecorder | None = None
 
     async def enable_device(self, device: AudioDeviceInfo, meter: LevelMeter) -> bool:
+        """Enable recording for the single device."""
         effective_rate = self._resolve_sample_rate(device)
-        recorder = self.recorders.get(device.device_id)
-        if recorder and recorder.sample_rate != effective_rate:
-            await self.disable_device(device.device_id)
-            recorder = None
-        if recorder is None:
-            recorder = AudioDeviceRecorder(device, effective_rate, meter, self.logger)
-            self.recorders[device.device_id] = recorder
+
+        # If there's an existing recorder with different rate, disable first
+        if self.recorder and self.recorder.sample_rate != effective_rate:
+            await self.disable_device()
+
+        if self.recorder is None:
+            self.recorder = AudioDeviceRecorder(device, effective_rate, meter, self.logger)
 
         self.logger.debug("Enabling recorder for device %d (%s)", device.device_id, device.name)
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(recorder.start_stream),
+                asyncio.to_thread(self.recorder.start_stream),
                 timeout=self.start_timeout,
             )
             return True
@@ -47,72 +48,69 @@ class RecorderService:
             self.logger.error("Timeout starting device %d", device.device_id)
         except Exception as exc:
             self.logger.error("Failed to start device %d: %s", device.device_id, exc)
-        self.recorders.pop(device.device_id, None)
+        self.recorder = None
         return False
 
-    async def disable_device(self, device_id: int) -> None:
-        recorder = self.recorders.pop(device_id, None)
+    async def disable_device(self) -> None:
+        """Disable the current device recorder."""
+        recorder = self.recorder
         if not recorder:
             return
-        self.logger.debug("Disabling recorder for device %d", device_id)
+        self.recorder = None
+        self.logger.debug("Disabling recorder for device %d", recorder.device.device_id)
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(recorder.stop_stream),
                 timeout=self.stop_timeout,
             )
         except Exception as exc:
-            self.logger.debug("Device %d stop raised: %s", device_id, exc)
+            self.logger.debug("Device stop raised: %s", exc)
 
     async def begin_recording(
         self,
-        device_ids: list[int],
         session_dir: Path,
         trial_number: int,
-    ) -> int:
-        started = 0
-        for device_id in device_ids:
-            recorder = self.recorders.get(device_id)
-            if not recorder:
-                continue
-            try:
-                self.logger.debug(
-                    "Starting recording thread for device %d (trial %d)",
-                    device_id,
-                    trial_number,
-                )
-                await asyncio.to_thread(recorder.begin_recording, session_dir, trial_number)
-                started += 1
-            except Exception as exc:
-                self.logger.error("Failed to prepare recorder %d: %s", device_id, exc)
-        return started
+    ) -> bool:
+        """Begin recording on the current device."""
+        if not self.recorder:
+            self.logger.warning("No recorder available for recording")
+            return False
 
-    async def finish_recording(self) -> list[RecordingHandle]:
-        tasks = []
-        for recorder in self.recorders.values():
-            tasks.append(asyncio.to_thread(recorder.finish_recording))
-        if not tasks:
-            return []
-        finished = await asyncio.gather(*tasks, return_exceptions=True)
-        results: list[RecordingHandle] = []
-        for maybe_path in finished:
-            if isinstance(maybe_path, Exception) or maybe_path is None:
-                continue
-            results.append(maybe_path)
-        self.logger.debug("Finished %d recording file(s)", len(results))
-        return results
+        try:
+            self.logger.debug(
+                "Starting recording thread for device %d (trial %d)",
+                self.recorder.device.device_id,
+                trial_number,
+            )
+            await asyncio.to_thread(self.recorder.begin_recording, session_dir, trial_number)
+            return True
+        except Exception as exc:
+            self.logger.error("Failed to prepare recorder: %s", exc)
+            return False
+
+    async def finish_recording(self) -> RecordingHandle | None:
+        """Finish recording and return the handle."""
+        if not self.recorder:
+            return None
+
+        try:
+            handle = await asyncio.to_thread(self.recorder.finish_recording)
+            if handle:
+                self.logger.debug("Finished recording: %s", handle.file_path.name)
+            return handle
+        except Exception as exc:
+            self.logger.error("Failed to finish recording: %s", exc)
+            return None
 
     async def stop_all(self) -> None:
-        device_ids = list(self.recorders.keys())
-        if device_ids:
-            self.logger.info("Stopping %d recorder(s)", len(device_ids))
-        tasks = [self.disable_device(device_id) for device_id in device_ids]
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        self.recorders.clear()
+        """Stop the recorder if active."""
+        if self.recorder:
+            self.logger.info("Stopping recorder")
+            await self.disable_device()
 
     @property
     def any_recording_active(self) -> bool:
-        return any(recorder.recording for recorder in self.recorders.values())
+        return self.recorder is not None and self.recorder.recording
 
     # ------------------------------------------------------------------
     # Internal helpers

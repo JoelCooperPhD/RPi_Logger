@@ -18,7 +18,7 @@ from vmc.runtime import RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 
 from ..config import AudioSettings
-from ..domain import AudioState
+from ..domain import AudioDeviceInfo, AudioState
 from ..services import RecorderService, SessionService
 from ..ui import AudioView
 from .command_router import CommandRouter
@@ -185,14 +185,18 @@ class AudioApp:
     # ------------------------------------------------------------------
     # Public helpers exposed to managers/commands
 
-    async def toggle_device(self, device_id: int, enabled: bool) -> bool:
-        return await self.device_manager.toggle_device(device_id, enabled)
+    async def enable_device(self, device: AudioDeviceInfo) -> bool:
+        """Enable an assigned device."""
+        return await self.device_manager.enable_device(device)
+
+    async def disable_device(self) -> bool:
+        """Disable the current device."""
+        return await self.device_manager.disable_device()
 
     async def start_recording(self, trial_number: int | None = None) -> bool:
         if trial_number is None:
             trial_number = self._pending_trial
-        selected_ids = list(self.state.selected_devices.keys())
-        started = await self.recording_manager.start(selected_ids, trial_number)
+        started = await self.recording_manager.start(trial_number)
         if started:
             self._pending_trial = trial_number + 1
         return started

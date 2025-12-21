@@ -1,25 +1,25 @@
 # Audio Module
 
-The Audio module records synchronized audio from USB microphones during experiment sessions. It supports multiple audio input devices and provides real-time level monitoring to help you verify audio is being captured correctly.
+The Audio module records synchronized audio from a USB microphone during experiment sessions. It operates with a single audio input device assigned by the main logger and provides real-time level monitoring to help you verify audio is being captured correctly.
 
-Devices are discovered by the main logger and automatically assigned to this module.
+The device is discovered and assigned by the main logger - no manual device selection is needed.
 
 ---
 
 ## Getting Started
 
-1. Connect your USB microphone(s)
+1. Connect your USB microphone
 2. Enable the Audio module from the Modules menu
-3. Wait for device assignment (level meters appear when ready)
+3. Wait for automatic device assignment (level meter appears when ready)
 4. Start a session to begin recording
 
 ---
 
 ## User Interface
 
-### Device Selection
+### Device Assignment
 
-Audio devices are assigned by the main logger. When a device is assigned, a level meter appears in the control panel.
+The audio device is automatically assigned by the main logger when the module starts. When a device is assigned, a level meter appears in the control panel. Only one audio device is supported per Audio module instance.
 
 ### Level Meters
 
@@ -40,13 +40,13 @@ For best results, aim for levels that occasionally touch yellow during normal sp
 ### Starting Recording
 
 When you start a recording session:
-- Audio streams are captured to WAV files
-- Timing data is logged to companion CSV files
-- Level meters continue to show real-time levels
+- Audio stream is captured to a WAV file
+- Timing data is logged to a companion CSV file
+- Level meter continues to show real-time levels
 
 ### During Recording
 
-- One WAV file is created per microphone
+- One WAV file is created for the assigned microphone
 - Audio is recorded continuously until you stop
 - Timing CSV tracks every audio chunk for synchronization
 
@@ -62,7 +62,7 @@ When you start a recording session:
 
 ### Files Generated
 
-For each microphone, two files are created:
+For the assigned microphone, two files are created:
 
 | File | Description |
 |------|-------------|
@@ -147,21 +147,20 @@ duration_seconds = total_frames / sample_rate
 
 ## Troubleshooting
 
-### Device not detected
+### Device not assigned
 
 1. Check USB connection
 2. Verify device is powered on
 3. Check system audio settings to confirm the device is recognized
-4. On Linux: Run `arecord -l` to list devices; ensure user is in 'audio' group
-5. On macOS: Check System Preferences > Sound > Input
-6. On Windows: Check Sound settings > Recording devices
+4. Verify the main logger has discovered the device
+5. Restart the module to trigger re-assignment
 
 ### No audio in recording
 
 1. Check input levels in the meter display - should show activity when you speak
 2. Verify microphone is not muted (check physical switches)
 3. Check system audio input settings
-4. Verify the correct device is selected as the input source
+4. Verify the correct device is assigned as the input source
 
 ### Level meter shows no activity
 

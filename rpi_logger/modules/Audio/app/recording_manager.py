@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from rpi_logger.core.commands import StatusType
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
@@ -44,21 +44,21 @@ class RecordingManager:
         self.state.set_session_dir(session_dir)
         return session_dir
 
-    async def start(self, device_ids: list[int], trial_number: int) -> bool:
-        self.logger.debug(
-            "Recording start requested for trial %d with devices %s",
-            trial_number,
-            device_ids,
-        )
+    async def start(self, trial_number: int) -> bool:
+        """Start recording on the assigned device."""
+        self.logger.debug("Recording start requested for trial %d", trial_number)
+
         if self.state.recording or self._start_lock.locked():
             self.logger.debug("Recording already active or starting")
             return False
+
         async with self._start_lock:
             if self.state.recording:
                 self.logger.debug("Recording already active inside lock")
                 return False
-            if not device_ids:
-                self.logger.warning("No devices selected for recording")
+
+            if self.state.device is None:
+                self.logger.warning("No device assigned for recording")
                 return False
 
             session_dir = await self.ensure_session_dir(self.state.session_dir)
@@ -67,9 +67,10 @@ class RecordingManager:
                 session_dir,
                 self._module_subdir,
             )
-            started = await self.recorder_service.begin_recording(device_ids, module_dir, trial_number)
-            if started == 0:
-                self.logger.error("No recorders ready; aborting start")
+
+            started = await self.recorder_service.begin_recording(module_dir, trial_number)
+            if not started:
+                self.logger.error("Recorder not ready; aborting start")
                 return False
 
             self.state.set_recording(True, trial_number)
@@ -78,16 +79,12 @@ class RecordingManager:
                 StatusType.RECORDING_STARTED,
                 {
                     "trial_number": trial_number,
-                    "devices": started,
+                    "device_id": self.state.device.device_id,
+                    "device_name": self.state.device.name,
                     "session_dir": str(session_dir),
                 },
             )
-            self.logger.info(
-                "Recording started for trial %d (%d device%s)",
-                trial_number,
-                started,
-                "s" if started != 1 else "",
-            )
+            self.logger.info("Recording started for trial %d", trial_number)
             return True
 
     async def stop(self) -> bool:
@@ -95,32 +92,32 @@ class RecordingManager:
         if not self.state.recording:
             return False
 
-        recordings = await self.recorder_service.finish_recording()
+        handle = await self.recorder_service.finish_recording()
         trial = self.state.trial_number
         self.state.set_recording(False, trial)
         self.module_bridge.set_recording(False, trial)
 
         session_dir = self._active_session_dir or self.state.session_dir
-        artifact_payload = []
-        for handle in recordings:
-            artifact_payload.append({
+
+        payload: dict[str, Any] = {
+            "trial_number": trial,
+            "session_dir": str(session_dir) if session_dir else None,
+        }
+
+        if handle:
+            payload["recording"] = {
                 "audio_file": str(handle.file_path),
                 "timing_csv": str(handle.timing_csv_path),
                 "device_id": handle.device_id,
                 "device_name": handle.device_name,
                 "start_time_unix": handle.start_time_unix,
                 "start_time_monotonic": handle.start_time_monotonic,
-            })
-        payload = {
-            "trial_number": trial,
-            "recordings": artifact_payload,
-            "session_dir": str(session_dir) if session_dir else None,
-        }
+            }
+
         self._emit_status(StatusType.RECORDING_STOPPED, payload)
         self.logger.info(
-            "Recording stopped (%d file%s)",
-            len(artifact_payload),
-            "s" if len(artifact_payload) != 1 else "",
+            "Recording stopped%s",
+            f" ({handle.file_path.name})" if handle else "",
         )
         return True
 

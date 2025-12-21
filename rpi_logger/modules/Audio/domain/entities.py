@@ -18,9 +18,8 @@ class AudioDeviceInfo:
 
 @dataclass(slots=True, frozen=True)
 class AudioSnapshot:
-    devices: dict[int, AudioDeviceInfo]
-    selected_devices: dict[int, AudioDeviceInfo]
-    level_meters: dict[int, LevelMeter]
+    device: AudioDeviceInfo | None
+    level_meter: LevelMeter | None
     recording: bool
     trial_number: int
     session_dir: Path | None

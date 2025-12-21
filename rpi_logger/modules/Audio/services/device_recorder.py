@@ -272,7 +272,7 @@ class AudioDeviceRecorder:
                         handle.trial_number,
                         'Audio',
                         handle.device_id,
-                        handle.device_name,
+                        "",
                         f"{chunk.unix_time:.6f}",
                         f"{chunk.monotonic_time:.9f}",
                         '',

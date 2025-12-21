@@ -15,20 +15,22 @@ AUDIO_HELP_TEXT = """
 
 OVERVIEW
 
-The Audio module records synchronized audio from USB microphones
-during experiment sessions. It supports multiple audio input
-devices and provides real-time level monitoring.
+The Audio module records synchronized audio from a USB microphone
+during experiment sessions. It operates with a single audio input
+device assigned by the main logger and provides real-time level
+monitoring to help you verify audio is being captured correctly.
 
-Devices are discovered by the main logger and assigned to this module.
+The device is discovered and assigned by the main logger - no manual
+device selection is needed.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 1. GETTING STARTED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-   1. Connect your USB microphone(s)
+   1. Connect your USB microphone
    2. Enable the Audio module from the Modules menu
-   3. Wait for device assignment (meters appear when ready)
+   3. Wait for automatic device assignment (level meter appears when ready)
    4. Start a session to begin recording
 
 
@@ -36,9 +38,11 @@ Devices are discovered by the main logger and assigned to this module.
 2. USER INTERFACE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Device Selection
-   Audio devices are assigned by the main logger.
-   Assigned devices show level meters in the control panel.
+Device Assignment
+   The audio device is automatically assigned by the main logger when
+   the module starts. When a device is assigned, a level meter appears
+   in the control panel. Only one audio device is supported per Audio
+   module instance.
 
 Level Meters
    Real-time audio level visualization:
@@ -150,22 +154,23 @@ Channels
                         TROUBLESHOOTING
 ═══════════════════════════════════════════════════════════════════
 
-Device not detected:
+Device not assigned:
    1. Check USB connection
    2. Verify device is powered on
-   3. Run 'arecord -l' to list available devices
-   4. Check that user is in the 'audio' group
+   3. Check system audio settings to confirm the device is recognized
+   4. Verify the main logger has discovered the device
+   5. Restart the module to trigger re-assignment
 
 No audio in recording:
-   1. Check input levels in the meter display
-   2. Verify microphone is not muted
-   3. Test with 'arecord -d 5 test.wav' in terminal
-   4. Check device permissions
+   1. Check input levels in the meter display - should show activity when you speak
+   2. Verify microphone is not muted (check physical switches)
+   3. Check system audio input settings
+   4. Verify the correct device is assigned as the input source
 
 Level meter shows no activity:
-   1. Speak into the microphone
-   2. Check physical mute switches
-   3. Verify correct device is selected
+   1. Speak into the microphone or tap it gently
+   2. Check physical mute switches on the microphone
+   3. Verify the correct device is assigned
    4. Restart the module
 
 Empty device_time_unix or device_time_seconds in CSV:
