@@ -244,14 +244,14 @@ class AudioDeviceRecorder:
             csv_file = open(handle.timing_csv_path, 'w', newline='', encoding='utf-8')
             writer = csv.writer(csv_file)
             writer.writerow([
-                'module',
                 'trial',
+                'module',
                 'device_id',
                 'label',
-                'device_time_unix',
-                'device_time_seconds',
                 'record_time_unix',
                 'record_time_mono',
+                'device_time_unix',
+                'device_time_seconds',
                 'write_time_unix',
                 'write_time_mono',
                 'chunk_index',
@@ -269,14 +269,14 @@ class AudioDeviceRecorder:
                     write_time_unix = time.time()
                     write_time_mono = time.perf_counter()
                     writer.writerow([
-                        'Audio',
                         handle.trial_number,
+                        'Audio',
                         handle.device_id,
                         handle.device_name,
-                        '',
-                        f"{chunk.adc_timestamp:.9f}" if chunk.adc_timestamp is not None else '',
                         f"{chunk.unix_time:.6f}",
                         f"{chunk.monotonic_time:.9f}",
+                        '',
+                        f"{chunk.adc_timestamp:.9f}" if chunk.adc_timestamp is not None else '',
                         f"{write_time_unix:.6f}",
                         f"{write_time_mono:.9f}",
                         chunk.chunk_index,

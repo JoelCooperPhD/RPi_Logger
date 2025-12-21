@@ -237,14 +237,14 @@ class GPSDataLogger:
                 device_time_unix = ""
 
         row = [
-            "GPS",
             self._trial_number,
+            "GPS",
             self.device_id,
             "",
-            fix.timestamp.isoformat() if fix.timestamp else "",
-            device_time_unix,
             record_time_unix,
             record_time_mono,
+            fix.timestamp.isoformat() if fix.timestamp else "",
+            device_time_unix,
             fix.latitude,
             fix.longitude,
             fix.altitude_m,

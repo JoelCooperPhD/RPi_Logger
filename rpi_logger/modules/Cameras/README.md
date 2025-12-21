@@ -99,22 +99,25 @@ Example: `trial_001_usb_0_001.avi`
 
 The timestamp overlay shows: `YYYY-MM-DDTHH:MM:SS.mmm #frame`
 
-### Timing CSV Columns (6 fields)
+### Timing CSV Columns (9 fields)
 
 The timing CSV contains per-frame timing for precise synchronization with other modules.
 
 | Column | Description |
 |--------|-------------|
-| trial | Trial number (integer, may be empty) |
+| trial | Trial number (integer, 1-based) |
+| module | Module name ("Cameras") |
+| device_id | Camera device identifier |
+| label | Optional label (blank if unused) |
+| record_time_unix | Wall clock time when captured (Unix seconds, 6 decimals) |
+| record_time_mono | Monotonic time when encoded (seconds, 9 decimals) |
 | frame_index | 1-based frame number in video file |
-| capture_time_unix | Wall clock time when captured (Unix seconds, 6 decimals) |
-| encode_time_mono | Monotonic time when encoded (seconds, 9 decimals) |
 | sensor_timestamp_ns | Hardware sensor timestamp in nanoseconds (CSI cameras only) |
 | video_pts | Presentation timestamp in video stream |
 
 **Example row:**
 ```
-1,1,1733649120.123456,123.456789012,1733649120123456789,1
+1,Cameras,usb_0_001,,1733649120.123456,123.456789012,1,1733649120123456789,1
 ```
 
 **Note:** `sensor_timestamp_ns` is only available for CSI cameras (Picamera2). USB cameras show empty/None for this field.

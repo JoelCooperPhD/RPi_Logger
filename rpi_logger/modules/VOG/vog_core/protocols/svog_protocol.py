@@ -112,7 +112,7 @@ class SVOGProtocol(BaseVOGProtocol):
         'Click': ResponseType.STIMULUS,
     }
 
-    CSV_HEADER_STRING = "Device ID, Label, Unix time in UTC, Milliseconds Since Record, Trial Number, Shutter Open, Shutter Closed"
+    CSV_HEADER_STRING = "trial,module,device_id,label,record_time_unix,record_time_mono,shutter_open,shutter_closed"
 
     def __init__(self):
         self.logger = get_module_logger("SVOGProtocol")
@@ -294,6 +294,16 @@ class SVOGProtocol(BaseVOGProtocol):
         """sVOG has no extended packet data."""
         return {}
 
-    def format_csv_row(self, packet, label: str, unix_time: int, ms_since_record: int) -> str:
+    def format_csv_row(
+        self,
+        packet,
+        label: str,
+        record_time_unix: float,
+        record_time_mono: float,
+    ) -> str:
         """Format sVOG packet as CSV row."""
-        return packet.to_csv_row(label, unix_time, ms_since_record)
+        return (
+            f"{packet.trial_number},VOG,{packet.device_id},{label},"
+            f"{record_time_unix:.6f},{record_time_mono:.9f},"
+            f"{packet.shutter_open},{packet.shutter_closed}"
+        )

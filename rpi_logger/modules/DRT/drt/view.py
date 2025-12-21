@@ -98,7 +98,7 @@ class DRTTkinterGUI:
         self._plotter: Optional[DRTPlotter] = None
 
         # Results display variables - initialized when root is available
-        self._trial_n: Optional[tk.StringVar] = None
+        self._stim_n: Optional[tk.StringVar] = None
         self._rt_var: Optional[tk.StringVar] = None
         self._click_count: Optional[tk.StringVar] = None
         self._battery_var: Optional[tk.StringVar] = None
@@ -175,7 +175,7 @@ class DRTTkinterGUI:
         if self._stats_initialized:
             return
 
-        self._trial_n = tk.StringVar(value="0")
+        self._stim_n = tk.StringVar(value="0")
         self._rt_var = tk.StringVar(value="-")
         self._click_count = tk.StringVar(value="0")
 
@@ -228,8 +228,8 @@ class DRTTkinterGUI:
         self._update_window_title()
 
         # Reset results
-        if self._trial_n:
-            self._trial_n.set("0")
+        if self._stim_n:
+            self._stim_n.set("0")
         if self._rt_var:
             self._rt_var.set("-")
         if self._click_count:
@@ -298,8 +298,8 @@ class DRTTkinterGUI:
             clicks = data.get('clicks', data.get('count'))
             battery = data.get('battery')
 
-            if trial_num is not None and self._trial_n:
-                self._trial_n.set(str(trial_num))
+            if trial_num is not None and self._stim_n:
+                self._stim_n.set(str(trial_num))
             if clicks is not None and self._click_count:
                 self._click_count.set(str(clicks))
             if rt is not None:
@@ -405,8 +405,8 @@ class DRTTkinterGUI:
         if self._plotter:
             self._plotter.start_session()
         # Reset results
-        if self._trial_n:
-            self._trial_n.set('0')
+        if self._stim_n:
+            self._stim_n.set('0')
         if self._rt_var:
             self._rt_var.set('-')
         if self._click_count:
@@ -712,11 +712,11 @@ class DRTView:
             for i in range(3):
                 row_frame.columnconfigure(i, weight=1)
 
-            # Trial Number
-            trial_frame = ttk.Frame(row_frame)
-            trial_frame.grid(row=0, column=0, sticky="nsew", padx=4)
-            ttk.Label(trial_frame, text="Trial:", style='TLabel').pack(side=tk.LEFT)
-            ttk.Label(trial_frame, textvariable=self.gui._trial_n, style='TLabel', width=6).pack(side=tk.LEFT, padx=(4, 0))
+            # Stimulus Number
+            stim_frame = ttk.Frame(row_frame)
+            stim_frame.grid(row=0, column=0, sticky="nsew", padx=4)
+            ttk.Label(stim_frame, text="Stim:", style='TLabel').pack(side=tk.LEFT)
+            ttk.Label(stim_frame, textvariable=self.gui._stim_n, style='TLabel', width=6).pack(side=tk.LEFT, padx=(4, 0))
 
             # Reaction Time
             rt_frame = ttk.Frame(row_frame)

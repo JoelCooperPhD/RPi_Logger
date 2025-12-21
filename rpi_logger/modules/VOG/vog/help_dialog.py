@@ -80,9 +80,10 @@ During Recording
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 File Naming Convention
-   {timestamp}_VOG_trial{NNN}_{device_type}_{port}.csv
+   {timestamp}_VOG_{port}.csv
 
-   Example: 20251208_143022_VOG_trial001_sVOG_ttyACM0.csv
+   Example: 20251208_143022_VOG_ttyACM0.csv
+   (Trial number is stored in the CSV data column.)
 
 Location
    {session_dir}/VOG/

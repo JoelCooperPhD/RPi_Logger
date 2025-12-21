@@ -21,7 +21,7 @@ from rpi_logger.modules.VOG.vog_core.vog_handler import VOGHandler
 from rpi_logger.modules.VOG.vog_core.device_types import VOGDeviceType
 from rpi_logger.modules.VOG.vog_core.protocols import SVOGProtocol, WVOGProtocol
 from rpi_logger.modules.VOG.vog_core.transports import USBTransport, XBeeProxyTransport, BaseTransport
-from rpi_logger.core.commands import StatusMessage
+from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.modules.VOG.config import VOGConfig
 
 
@@ -422,7 +422,9 @@ class VOGModuleRuntime(ModuleRuntime):
         elif prop == "session_dir":
             if self._suppress_session_event:
                 return
-            path = Path(value) if value else None
+            if not value:
+                return
+            path = Path(value)
             if self._loop:
                 self._loop.create_task(self._ensure_session_dir(path, update_model=False))
 
@@ -501,6 +503,9 @@ class VOGModuleRuntime(ModuleRuntime):
 
     async def _start_recording(self) -> bool:
         """Start trial/recording (sends trl>1)."""
+        if self._recording_active:
+            self.logger.debug("Recording already active for %s", self.device_id)
+            return True
         if not self.handler:
             self.logger.error("Cannot start recording - no device connected")
             return False
@@ -526,6 +531,12 @@ class VOGModuleRuntime(ModuleRuntime):
         # Notify view
         if self.view:
             self.view.update_recording_state()
+        StatusMessage.send(StatusType.RECORDING_STARTED, {
+            "device_id": self.device_id,
+            "trial_number": self.active_trial_number,
+            "trial_label": self.trial_label,
+            "session_dir": str(self.module_data_dir) if self.module_data_dir else None,
+        })
 
         return True
 
@@ -549,6 +560,11 @@ class VOGModuleRuntime(ModuleRuntime):
         # Notify view
         if self.view:
             self.view.update_recording_state()
+        StatusMessage.send(StatusType.RECORDING_STOPPED, {
+            "device_id": self.device_id,
+            "trial_number": self.active_trial_number,
+            "session_dir": str(self.module_data_dir) if self.module_data_dir else None,
+        })
 
     # ------------------------------------------------------------------
     # Peek control

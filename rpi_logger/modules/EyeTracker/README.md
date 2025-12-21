@@ -100,54 +100,74 @@ Our module receives these streams and can downsample/resize locally for smaller 
 | Resolution | Configurable (default 1280x720, downsampled from 1600x1200) |
 | Frame Rate | Configurable (default 10 fps, downsampled from 30 Hz) |
 
-### GAZEDATA CSV Columns (11 fields)
+### GAZE CSV Columns (36 fields)
 
-Extended gaze data including pupil measurements:
+Gaze data with standard prefix columns followed by device-specific measurements:
 
 | Column | Description |
 |--------|-------------|
-| Module | Always "EyeTracker-Neon" |
 | trial | Trial number (integer, 1-based) |
-| gaze_timestamp | Device timestamp (Unix seconds, 6 decimals) |
-| norm_pos_x | Normalized X position (0-1, where 0=left, 1=right) |
-| norm_pos_y | Normalized Y position (0-1, where 0=top, 1=bottom) |
-| confidence | Gaze confidence (0-1, higher = more reliable) |
-| worn | Glasses worn status (True/False) |
-| pupil_left_diam | Left pupil diameter (mm) |
-| pupil_right_diam | Right pupil diameter (mm) |
-| record_time_unix | System timestamp (Unix seconds, 6 decimals) |
-| record_time_mono | Monotonic time (seconds, 9 decimals) |
+| module | Module name ("EyeTracker") |
+| device_id | Device identifier ("eye_tracker") |
+| label | Optional trial label |
+| record_time_unix | System capture time (Unix seconds, 6 decimals) |
+| record_time_mono | Monotonic capture time (seconds, 9 decimals) |
+| timestamp | Device gaze timestamp (Unix seconds) |
+| timestamp_ns | Device timestamp in nanoseconds |
+| stream_type | Data stream type |
+| worn | Glasses worn status (0/1) |
+| x, y | Normalized gaze position (0-1) |
+| left_x, left_y | Left eye gaze (0-1) |
+| right_x, right_y | Right eye gaze (0-1) |
+| pupil_diameter_left | Left pupil diameter (mm) |
+| pupil_diameter_right | Right pupil diameter (mm) |
+| eyeball_center_*_x/y/z | 3D eye center positions |
+| optical_axis_*_x/y/z | 3D gaze direction vectors |
+| eyelid_*_top/bottom | Eyelid angles |
+| eyelid_aperture_* | Eyelid openness |
 
-### EVENT CSV Columns
+### EVENTS CSV Columns (24 fields)
 
-Eye events with variable fields based on event type:
+Eye events with standard prefix columns:
 
 | Column | Description |
 |--------|-------------|
-| Module | Always "EyeTracker-Neon" |
-| trial | Trial number |
+| trial | Trial number (integer, 1-based) |
+| module | Module name ("EyeTracker") |
+| device_id | Device identifier ("eye_tracker") |
+| label | Optional trial label |
+| record_time_unix | System capture time (Unix seconds, 6 decimals) |
+| record_time_mono | Monotonic capture time (seconds, 9 decimals) |
+| timestamp | Device event timestamp (Unix seconds) |
+| timestamp_ns | Device timestamp in nanoseconds |
 | event_type | fixation, blink, or saccade |
-| start_timestamp | Event start (Unix seconds) |
-| end_timestamp | Event end (Unix seconds) |
-| duration_ms | Event duration (milliseconds) |
+| event_subtype | Event category |
+| confidence | Event confidence (0-1) |
+| duration | Event duration (seconds) |
+| start_time_ns, end_time_ns | Event time range |
+| start_gaze_x/y, end_gaze_x/y | Gaze positions |
+| mean_gaze_x/y | Average gaze position |
+| amplitude_pixels, amplitude_angle_deg | Saccade amplitude |
+| mean_velocity, max_velocity | Saccade velocity |
 
-Additional fields for specific event types:
-- **Fixations**: centroid_x, centroid_y, dispersion
-- **Blinks**: left_closed, right_closed
-- **Saccades**: amplitude, direction
+### IMU CSV Columns (19 fields)
 
-### IMU CSV Columns (10 fields)
-
-Head motion data:
+Head motion data with standard prefix columns:
 
 | Column | Description |
 |--------|-------------|
-| Module | Always "EyeTracker-Neon" |
-| trial | Trial number |
-| timestamp | Device timestamp (Unix seconds) |
-| accel_x, accel_y, accel_z | Accelerometer (m/s²) |
+| trial | Trial number (integer, 1-based) |
+| module | Module name ("EyeTracker") |
+| device_id | Device identifier ("eye_tracker") |
+| label | Optional trial label |
+| record_time_unix | System capture time (Unix seconds, 6 decimals) |
+| record_time_mono | Monotonic capture time (seconds, 9 decimals) |
+| timestamp | Device IMU timestamp (Unix seconds) |
+| timestamp_ns | Device timestamp in nanoseconds |
 | gyro_x, gyro_y, gyro_z | Gyroscope (rad/s) |
-| record_time_mono | Monotonic time (seconds, 9 decimals) |
+| accel_x, accel_y, accel_z | Accelerometer (m/s²) |
+| quat_w, quat_x, quat_y, quat_z | Orientation quaternion |
+| temperature | Sensor temperature |
 
 ### FRAME CSV Columns (6 fields)
 

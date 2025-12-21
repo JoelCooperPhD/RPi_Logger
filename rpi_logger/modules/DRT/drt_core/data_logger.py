@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, Callable, Awaitable
 import logging
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.base.storage_utils import module_filename_prefix
+from rpi_logger.modules.base.storage_utils import derive_session_token
 from .protocols import SDRT_CSV_HEADER, WDRT_CSV_HEADER, RT_TIMEOUT_VALUE
 
 logger = get_module_logger(__name__)
@@ -84,8 +84,20 @@ class DRTDataLogger:
             return f"wDRT_{port_clean}"
         return f"DRT_{port_clean}"
 
+    def _build_session_filepath(self) -> Optional[Path]:
+        if not self.output_dir:
+            return None
+
+        token = derive_session_token(self.output_dir, "DRT")
+        device_id_csv = self._format_device_id_for_csv()
+        if device_id_csv.lower().startswith("drt_"):
+            filename = f"{token}_{device_id_csv}.csv"
+        else:
+            filename = f"{token}_DRT_{device_id_csv}.csv"
+        return self.output_dir / filename
+
     def start_recording(self, trial_number: Optional[int] = None) -> None:
-        """Open CSV file for writing trial data (caches handle for session)."""
+        """Open CSV file for writing trial data (single file per session)."""
         if trial_number is None:
             trial_number = 1
         try:
@@ -95,7 +107,15 @@ class DRTDataLogger:
         if trial_number <= 0:
             trial_number = 1
 
-        if self._csv_file is not None and self._current_trial_number == trial_number:
+        target_path = self._build_session_filepath()
+        if target_path is None:
+            return
+
+        if (
+            self._csv_file is not None
+            and self._current_trial_number == trial_number
+            and self._csv_filepath == target_path
+        ):
             return  # Already open for this trial
 
         if not self.output_dir:
@@ -108,10 +128,7 @@ class DRTDataLogger:
                 self._trial_label = current_label
 
             self.output_dir.mkdir(parents=True, exist_ok=True)
-            device_id_csv = self._format_device_id_for_csv()
-            prefix = module_filename_prefix(self.output_dir, "DRT", trial_number, code="DRT")
-            filename = f"{prefix}_{device_id_csv}.csv"
-            self._csv_filepath = self.output_dir / filename
+            self._csv_filepath = target_path
             self._current_trial_number = trial_number
 
             # Check if we need to write header (file doesn't exist or is empty)
@@ -186,20 +203,22 @@ class DRTDataLogger:
             label = self._trial_label if self._trial_label else ""
 
             # Format CSV line based on device type
+            # Column order: trial,module,device_id,label,record_time_unix,record_time_mono,...
             if self.device_type == 'wdrt':
                 battery = data.get('battery', 0)
                 device_utc = data.get('device_utc', 0)
                 csv_line = (
-                    f"DRT,{trial_number},{device_id_csv},{label},{device_timestamp},"
-                    f"{device_utc},{unix_time:.6f},{record_time_mono:.9f},"
+                    f"{trial_number},DRT,{device_id_csv},{label},{unix_time:.6f},"
+                    f"{record_time_mono:.9f},{device_timestamp},{device_utc},"
                     f"{clicks},{reaction_time},{battery}\n"
                 )
             else:
                 # sDRT format
                 device_time_unix = ""
                 csv_line = (
-                    f"DRT,{trial_number},{device_id_csv},{label},{device_timestamp},{device_time_unix},"
-                    f"{unix_time:.6f},{record_time_mono:.9f},{clicks},{reaction_time}\n"
+                    f"{trial_number},DRT,{device_id_csv},{label},{unix_time:.6f},"
+                    f"{record_time_mono:.9f},{device_timestamp},{device_time_unix},"
+                    f"{clicks},{reaction_time}\n"
                 )
 
             # Write to cached file handle (line-buffered, so flushes automatically)

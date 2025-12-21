@@ -521,10 +521,10 @@ class VOGHandler(ReconnectingMixin):
         await self._data_logger.log_trial_data(packet, trial_number, label)
 
     def _get_trial_label(self, trial_number: int) -> str:
-        """Get trial label from system or use trial number."""
+        """Get trial label from system (experimenter-provided label)."""
         if self.system and hasattr(self.system, 'trial_label') and self.system.trial_label:
             return self.system.trial_label
-        return str(trial_number)
+        return ""
 
     async def _on_data_logged(self, event_type: str, payload: Dict[str, Any]) -> None:
         """Callback from data logger when trial is logged."""

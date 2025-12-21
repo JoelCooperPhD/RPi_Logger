@@ -28,11 +28,18 @@ class CommandRouter:
         if action == "stop_recording":
             await self.app.stop_recording()
             return True
+        if action == "pause":
+            await self.app.stop_recording()
+            return True
         if action == "get_status":
             self.app._emit_status(StatusType.STATUS_REPORT, self.app.state.status_payload())
             return True
         if action == "start_session":
             await self.app.ensure_session_dir()
+            return True
+        if action == "stop_session":
+            await self.app.stop_recording()
+            self.app.state.set_session_dir(None)
             return True
         self.logger.debug("Unhandled command: %s", action)
         return False

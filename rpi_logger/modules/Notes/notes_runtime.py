@@ -66,13 +66,13 @@ class NotesArchive:
     """Manage on-disk persistence for notes using proper CSV format."""
 
     HEADER = [
-        "module",
         "trial",
+        "module",
         "device_id",
         "label",
-        "device_time_unix",
         "record_time_unix",
         "record_time_mono",
+        "device_time_unix",
         "content",
     ]
 
@@ -174,13 +174,13 @@ class NotesArchive:
         modules_str = ";".join(sorted(modules)) if modules else ""
         # Generate CSV-formatted line for display
         file_line = self._format_csv_line([
-            "Notes",
             trial_number,
+            "Notes",
             "notes",
-            "",
             "",
             timestamp,
             record_time_mono,
+            "",
             cleaned,
         ])
         iso_stamp = datetime.fromtimestamp(timestamp).isoformat(timespec="seconds")
@@ -251,10 +251,10 @@ class NotesArchive:
             return fallback
 
         return {
-            "trial": _first_index(("trial",), 1),
+            "trial": _first_index(("trial",), 0),
             "record_time_unix": _first_index(("record_time_unix", "timestamp"), 4),
             "record_time_mono": _first_index(("record_time_mono",), 5),
-            "content": _first_index(("content",), 2),
+            "content": _first_index(("content",), 7),
         }
 
     def _count_existing_notes(self, path: Path) -> int:
@@ -294,13 +294,13 @@ class NotesArchive:
             raise RuntimeError("Archive file path not set")
         if self._csv_writer and self._file_handle:
             self._csv_writer.writerow([
-                "Notes",
                 trial_number,
+                "Notes",
                 "notes",
-                "",
                 "",
                 record_time_unix,
                 record_time_mono,
+                "",
                 text,
             ])
             self._file_handle.flush()
@@ -309,13 +309,13 @@ class NotesArchive:
             with self.file_path.open("a", encoding=self.encoding, newline="") as handle:
                 writer = csv.writer(handle)
                 writer.writerow([
-                    "Notes",
                     trial_number,
+                    "Notes",
                     "notes",
-                    "",
                     "",
                     record_time_unix,
                     record_time_mono,
+                    "",
                     text,
                 ])
 

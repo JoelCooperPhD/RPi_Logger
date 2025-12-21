@@ -81,14 +81,14 @@ Example: `20251208_143022_GPS_trial001_GPS_serial0.csv`
 
 | Column | Description |
 |--------|-------------|
-| module | Module name ("GPS") |
 | trial | Trial number (integer, 1-based) |
+| module | Module name ("GPS") |
 | device_id | GPS device identifier |
 | label | Optional label (blank if unused) |
-| device_time_iso | GPS UTC time (ISO 8601) |
-| device_time_unix | GPS UTC time (Unix seconds) |
 | record_time_unix | Host capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Host capture time (seconds, 9 decimals, `perf_counter`) |
+| device_time_iso | GPS UTC time (ISO 8601) |
+| device_time_unix | GPS UTC time (Unix seconds) |
 | latitude_deg | Latitude (decimal degrees, + = North) |
 | longitude_deg | Longitude (decimal degrees, + = East) |
 | altitude_m | Altitude above mean sea level (meters) |
@@ -110,7 +110,7 @@ Example: `20251208_143022_GPS_trial001_GPS_serial0.csv`
 
 **Example row:**
 ```
-GPS,1,GPS:serial0,,2024-12-08T14:30:22.500Z,1733665822.500000,1733665822.500000,12345.678901234,-37.8136,144.9631,42.5,12.3,44.3,23.9,27.5,185.2,1,3,1,8,12,1.2,1.8,2.1,GGA,$GPGGA,...
+1,GPS,GPS:serial0,,1733665822.500000,12345.678901234,2024-12-08T14:30:22.500Z,1733665822.500000,-37.8136,144.9631,42.5,12.3,44.3,23.9,27.5,185.2,1,3,1,8,12,1.2,1.8,2.1,GGA,$GPGGA,...
 ```
 
 ### Timing and Synchronization

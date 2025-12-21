@@ -44,8 +44,8 @@ SDRT_LINE_ENDING = '\n\r'
 
 # sDRT CSV logging fields
 SDRT_CSV_HEADER = (
-    "module,trial,device_id,label,device_time_ms,device_time_unix,record_time_unix,"
-    "record_time_mono,responses,reaction_time_ms"
+    "trial,module,device_id,label,record_time_unix,record_time_mono,"
+    "device_time_ms,device_time_unix,responses,reaction_time_ms"
 )
 
 # ISO Standard preset configuration for sDRT
@@ -97,8 +97,8 @@ WDRT_LINE_ENDING = '\n'
 
 # wDRT CSV logging fields
 WDRT_CSV_HEADER = (
-    "module,trial,device_id,label,device_time_ms,device_time_unix,record_time_unix,"
-    "record_time_mono,responses,reaction_time_ms,battery_percent"
+    "trial,module,device_id,label,record_time_unix,record_time_mono,"
+    "device_time_ms,device_time_unix,responses,reaction_time_ms,battery_percent"
 )
 
 # wDRT configuration parameter mapping

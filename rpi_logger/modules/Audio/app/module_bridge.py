@@ -65,6 +65,9 @@ class ModuleBridge:
         elif prop == "session_dir":
             if self._suppress_session:
                 return
+            if not value:
+                self._on_session_change(None)
+                return
             self._on_session_change(value)
 
 

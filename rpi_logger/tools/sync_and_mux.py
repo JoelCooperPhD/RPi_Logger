@@ -307,7 +307,46 @@ def discover_trial_numbers(session_dir: Path) -> list[int]:
         if match:
             trial_numbers.add(int(match.group(1)))
 
+    if not trial_numbers:
+        trial_numbers.update(_discover_trials_from_csv(session_dir / "DRT", trial_indices=(3, 1, 0)))
+        trial_numbers.update(_discover_trials_from_csv(session_dir / "VOG", trial_indices=(0, 4)))
+
     return sorted(trial_numbers)
+
+
+def _discover_trials_from_csv(module_dir: Path, trial_indices: tuple[int, ...]) -> set[int]:
+    trials: set[int] = set()
+    if not module_dir.exists() or not module_dir.is_dir():
+        return trials
+
+    for csv_path in module_dir.glob("*.csv"):
+        trials.update(_extract_trials_from_csv(csv_path, trial_indices))
+
+    return trials
+
+
+def _extract_trials_from_csv(csv_path: Path, trial_indices: tuple[int, ...]) -> set[int]:
+    trials: set[int] = set()
+    try:
+        with csv_path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = [part.strip() for part in line.split(",")]
+                for trial_index in trial_indices:
+                    if len(parts) <= trial_index:
+                        continue
+                    try:
+                        trial_number = int(parts[trial_index])
+                    except ValueError:
+                        continue
+                    if trial_number > 0:
+                        trials.add(trial_number)
+                        break
+    except Exception as exc:
+        logger.debug("Failed to parse trials from %s: %s", csv_path, exc)
+    return trials
 
 
 async def process_trial(session_dir: Path, trial_number: int, mux: bool = True):

@@ -237,6 +237,8 @@ class AudioApp:
 
     def _handle_bridge_session_event(self, value: Any) -> None:
         if not value:
+            self.state.set_session_dir(None)
+            self.logger.debug("Bridge session directory cleared")
             return
         try:
             path = Path(value)

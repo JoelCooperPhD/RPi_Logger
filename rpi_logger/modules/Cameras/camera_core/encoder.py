@@ -203,6 +203,7 @@ class Encoder:
         overlay_enabled: bool = True,
         csv_path: Optional[str] = None,
         trial_number: Optional[int] = None,
+        device_id: Optional[str] = None,
         use_pyav: Optional[bool] = None,
         queue_size: Optional[int] = None,
     ) -> None:
@@ -212,6 +213,7 @@ class Encoder:
         self._fps = fps
         self._overlay_enabled = overlay_enabled
         self._trial_number = trial_number
+        self._device_id = device_id or ""
         self._use_pyav = use_pyav if use_pyav is not None else _HAS_PYAV
         self._queue_size = queue_size if queue_size is not None else _DEFAULT_QUEUE_SIZE
 
@@ -311,10 +313,12 @@ class Encoder:
         self._csv_writer = csv.writer(self._csv_file)
         self._csv_writer.writerow([
             "trial",
-            "device_time_unix",  # device time in Unix seconds (if available)
+            "module",
+            "device_id",
+            "label",
+            "record_time_unix",  # wall clock time when frame was captured
+            "record_time_mono",  # monotonic time when frame was encoded
             "frame_index",  # 1-indexed frame number in video file
-            "capture_time_unix",  # wall clock time when frame was captured
-            "encode_time_mono",  # monotonic time when frame was encoded
             "sensor_timestamp_ns",  # hardware sensor timestamp (if available)
             "video_pts",  # presentation timestamp in video stream
         ])
@@ -374,10 +378,12 @@ class Encoder:
             pts_us = self._last_pts if self._kind == "pyav" else None
             self._csv_writer.writerow([
                 self._trial_number,
+                "Cameras",
+                self._device_id,
                 "",
-                self._frame_count,
                 f"{timestamp:.6f}",
                 f"{monotonic:.9f}",
+                self._frame_count,
                 pts_time_ns,
                 pts_us,
             ])

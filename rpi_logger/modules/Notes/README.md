@@ -74,18 +74,18 @@ Example: `20251208_143022_NTS_trial001_notes.csv`
 
 | Column | Description |
 |--------|-------------|
-| module | Module name ("Notes") |
 | trial | Trial number (integer, 1-based) |
+| module | Module name ("Notes") |
 | device_id | Device identifier ("notes") |
 | label | Optional label (blank if unused) |
-| device_time_unix | Device absolute time (Unix seconds, if available) |
 | record_time_unix | Host capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Host capture time (seconds, 9 decimals) |
+| device_time_unix | Device absolute time (Unix seconds, if available) |
 | content | Your annotation text (string) |
 
 **Example row:**
 ```
-Notes,1,notes,,,1733649123.456789,12345.678901234,Participant started task
+1,Notes,notes,,1733649123.456789,12345.678901234,,Participant started task
 ```
 
 ### Timing and Synchronization

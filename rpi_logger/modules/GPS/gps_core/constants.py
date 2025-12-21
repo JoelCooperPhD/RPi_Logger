@@ -20,14 +20,14 @@ FIX_MODE_MAP = {
 
 # GPS CSV header (26 fields)
 GPS_CSV_HEADER = [
-    "module",
     "trial",
+    "module",
     "device_id",
     "label",
-    "device_time_iso",
-    "device_time_unix",
     "record_time_unix",
     "record_time_mono",
+    "device_time_iso",
+    "device_time_unix",
     "latitude_deg",
     "longitude_deg",
     "altitude_m",

@@ -67,8 +67,12 @@ Record multiple trials per session. Each trial is saved with synchronized timest
 ## Data Output
 
 Recordings use a shared filename prefix:
-`{sessionToken}_{MODULECODE}_trial###_...`
-(sessionToken is the timestamp portion of the session directory name)
+Most modules use `{sessionToken}_{MODULECODE}_trial###_...`
+(sessionToken is the timestamp portion of the session directory name).
+
+DRT and VOG append to a single file per session:
+`{sessionToken}_DRT_{device_id}.csv`
+`{sessionToken}_VOG_{port}.csv`
 
 ```
 session_YYYYMMDD_HHMMSS/
@@ -89,9 +93,9 @@ session_YYYYMMDD_HHMMSS/
 │   ├── 20251208_143022_EYE_trial001_FRAME_timing.csv
 │   └── 20251208_143022_EYE_trial001_AUDIO_timing.csv
 ├── DRT/
-│   └── 20251208_143022_DRT_trial001_DRT_ttyacm0.csv
+│   └── 20251208_143022_DRT_ttyacm0.csv
 ├── VOG/
-│   └── 20251208_143022_VOG_trial001_ttyacm0.csv
+│   └── 20251208_143022_VOG_ttyacm0.csv
 ├── GPS/
 │   └── 20251208_143022_GPS_trial001_GPS_serial0.csv
 └── Notes/

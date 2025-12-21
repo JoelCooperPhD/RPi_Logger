@@ -25,7 +25,7 @@ session_prefix = session
 
 # Last used session directory (automatically updated when user selects location via UI)
 # This is where session data and recordings are actually saved
-last_session_dir = /Users/joelcooper
+last_session_dir = /home/joel
 
 
 ################################################################################
@@ -92,8 +92,11 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 #
 # 3. Session Organization:
 #    User selects save location (e.g., /home/user/Desktop)
-#    System creates timestamped subdirectory. Recordings use a shared prefix:
+#    System creates timestamped subdirectory. Most recordings use a shared prefix:
 #      {sessionToken}_{MODULECODE}_trial###_...
+#    DRT and VOG append to a single file per session:
+#      {sessionToken}_DRT_{device_id}.csv
+#      {sessionToken}_VOG_{port}.csv
 #
 #    /home/user/Desktop/
 #    └── session_20251014_120000/     # Session directory (created when user starts session)
@@ -110,9 +113,9 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 #        │   ├── 20251014_120000_EYE_trial001_GAZE.csv
 #        │   └── ...
 #        ├── DRT/
-#        │   └── 20251014_120000_DRT_trial001_DRT_ttyacm0.csv
+#        │   └── 20251014_120000_DRT_ttyacm0.csv
 #        ├── VOG/
-#        │   └── 20251014_120000_VOG_trial001_ttyacm0.csv
+#        │   └── 20251014_120000_VOG_ttyacm0.csv
 #        ├── GPS/
 #        │   └── 20251014_120000_GPS_trial001_GPS_serial0.csv
 #        └── Notes/

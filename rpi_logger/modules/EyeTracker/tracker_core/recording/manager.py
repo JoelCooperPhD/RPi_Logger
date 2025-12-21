@@ -16,6 +16,7 @@ import contextlib
 import csv
 import datetime
 import io
+import time
 import wave
 from pathlib import Path
 from typing import Optional, Any, TYPE_CHECKING
@@ -38,8 +39,9 @@ if TYPE_CHECKING:
 
 logger = get_module_logger(__name__)
 
-# CSV Headers
+# CSV Headers - Standard prefix: trial,module,device_id,label,record_time_unix,record_time_mono
 GAZE_HEADER = (
+    "trial,module,device_id,label,record_time_unix,record_time_mono,"
     "timestamp,timestamp_ns,stream_type,worn,x,y,"
     "left_x,left_y,right_x,right_y,"
     "pupil_diameter_left,pupil_diameter_right,"
@@ -52,11 +54,13 @@ GAZE_HEADER = (
 )
 
 IMU_HEADER = (
+    "trial,module,device_id,label,record_time_unix,record_time_mono,"
     "timestamp,timestamp_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,"
     "quat_w,quat_x,quat_y,quat_z,temperature"
 )
 
 EVENTS_HEADER = (
+    "trial,module,device_id,label,record_time_unix,record_time_mono,"
     "timestamp,timestamp_ns,event_type,event_subtype,confidence,duration,"
     "start_time_ns,end_time_ns,start_gaze_x,start_gaze_y,end_gaze_x,end_gaze_y,"
     "mean_gaze_x,mean_gaze_y,amplitude_pixels,amplitude_angle_deg,"
@@ -440,7 +444,7 @@ class RecordingManager(RecordingManagerBase):
             pass  # Queue was set to None during operation
 
     def write_gaze_sample(self, gaze: Optional[Any]) -> None:
-        """Write a gaze sample to CSV (30 columns)."""
+        """Write a gaze sample to CSV."""
         if not self._is_recording or self._gaze_writer is None or gaze is None:
             return
 
@@ -449,7 +453,9 @@ class RecordingManager(RecordingManagerBase):
             return  # Skip duplicate
 
         try:
-            line = self._compose_gaze_line(gaze)
+            record_time_unix = time.time()
+            record_time_mono = time.perf_counter()
+            line = self._compose_gaze_line(gaze, record_time_unix, record_time_mono)
             self._gaze_writer.enqueue(line)
             self._last_gaze_timestamp = timestamp
             self._gaze_samples_written += 1
@@ -462,6 +468,8 @@ class RecordingManager(RecordingManagerBase):
             return
 
         try:
+            record_time_unix = time.time()
+            record_time_mono = time.perf_counter()
             timestamp = getattr(imu, "timestamp_unix_seconds", None)
             timestamp_ns = getattr(imu, "timestamp_unix_ns", None)
 
@@ -471,6 +479,14 @@ class RecordingManager(RecordingManagerBase):
             temperature = getattr(imu, "temperature", None)
 
             fields = [
+                # Standard prefix columns
+                self._fmt(self._current_trial_number),
+                "EyeTracker",
+                self._fmt(self.device_id),
+                self._fmt(self._trial_label or ""),
+                f"{record_time_unix:.6f}",
+                f"{record_time_mono:.9f}",
+                # IMU-specific columns
                 self._fmt(timestamp),
                 self._fmt(timestamp_ns),
                 *gyro,
@@ -489,6 +505,8 @@ class RecordingManager(RecordingManagerBase):
             return
 
         try:
+            record_time_unix = time.time()
+            record_time_mono = time.perf_counter()
             timestamp = getattr(event, "timestamp_unix_seconds", None)
             timestamp_ns = getattr(event, "timestamp_unix_ns", None)
             event_type = getattr(event, "type", None) or getattr(event, "event_type", None)
@@ -503,6 +521,14 @@ class RecordingManager(RecordingManagerBase):
                 duration = (end_ns - start_ns) / 1e9
 
             fields = [
+                # Standard prefix columns
+                self._fmt(self._current_trial_number),
+                "EyeTracker",
+                self._fmt(self.device_id),
+                self._fmt(self._trial_label or ""),
+                f"{record_time_unix:.6f}",
+                f"{record_time_mono:.9f}",
+                # Event-specific columns
                 self._fmt(timestamp),
                 self._fmt(timestamp_ns),
                 self._fmt(event_type),
@@ -708,8 +734,10 @@ class RecordingManager(RecordingManagerBase):
             logger.error("Failed to prepare audio frame: %s", exc)
             return None, None, []
 
-    def _compose_gaze_line(self, gaze: Any) -> str:
-        """Compose a 30-column gaze CSV line."""
+    def _compose_gaze_line(
+        self, gaze: Any, record_time_unix: float, record_time_mono: float
+    ) -> str:
+        """Compose a gaze CSV line with standard prefix columns."""
         timestamp = getattr(gaze, "timestamp_unix_seconds", None)
         timestamp_ns = getattr(gaze, "timestamp_unix_ns", None)
         stream_type = type(gaze).__name__
@@ -731,6 +759,14 @@ class RecordingManager(RecordingManagerBase):
             right_y = getattr(right_point, "y", None)
 
         fields = [
+            # Standard prefix columns
+            self._fmt(self._current_trial_number),
+            "EyeTracker",
+            self._fmt(self.device_id),
+            self._fmt(self._trial_label or ""),
+            f"{record_time_unix:.6f}",
+            f"{record_time_mono:.9f}",
+            # Gaze-specific columns
             self._fmt(timestamp),
             self._fmt(timestamp_ns),
             self._fmt(stream_type),

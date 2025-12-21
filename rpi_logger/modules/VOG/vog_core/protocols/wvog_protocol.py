@@ -92,7 +92,7 @@ class WVOGProtocol(BaseVOGProtocol):
         'typ': 'experiment_type',    # cycle, peek, eblind, direct
     }
 
-    CSV_HEADER_STRING = "Device ID, Label, Unix time in UTC, Milliseconds Since Record, Trial Number, Shutter Open, Shutter Closed, Total, Lens, Battery Percent"
+    CSV_HEADER_STRING = "trial,module,device_id,label,record_time_unix,record_time_mono,shutter_open,shutter_closed,shutter_total,lens,battery_percent"
 
     def __init__(self):
         self.logger = get_module_logger("WVOGProtocol")
@@ -321,8 +321,17 @@ class WVOGProtocol(BaseVOGProtocol):
             'device_unix_time': packet.device_unix_time,
         }
 
-    def format_csv_row(self, packet, label: str, unix_time: int, ms_since_record: int) -> str:
+    def format_csv_row(
+        self,
+        packet,
+        label: str,
+        record_time_unix: float,
+        record_time_mono: float,
+    ) -> str:
         """Format wVOG packet as CSV row (extended format)."""
-        return (f"{packet.device_id}, {label}, {unix_time}, {ms_since_record}, "
-                f"{packet.trial_number}, {packet.shutter_open}, {packet.shutter_closed}, "
-                f"{packet.shutter_total}, {packet.lens}, {packet.battery_percent}")
+        return (
+            f"{packet.trial_number},VOG,{packet.device_id},{label},"
+            f"{record_time_unix:.6f},{record_time_mono:.9f},"
+            f"{packet.shutter_open},{packet.shutter_closed},"
+            f"{packet.shutter_total},{packet.lens},{packet.battery_percent}"
+        )

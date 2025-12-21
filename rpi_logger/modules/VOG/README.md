@@ -78,42 +78,44 @@ Each trial captures:
 ### File Naming
 
 ```
-{timestamp}_VOG_trial{NNN}_{device_type}_{port}.csv
+    {timestamp}_VOG_{port}.csv
 ```
 
-Example: `20251208_143022_VOG_trial001_sVOG_ttyACM0.csv`
+Example: `20251208_143022_VOG_ttyACM0.csv` (trial number is stored in the CSV data column)
 
-### sVOG CSV Columns (7 fields)
+### sVOG CSV Columns (8 fields)
 
 For wired VOG devices:
 
 | Column | Description |
 |--------|-------------|
-| Device ID | Device identifier (e.g., "sVOG") |
-| Label | Device port/label (e.g., "ttyACM0") |
-| Unix time in UTC | Event timestamp (Unix seconds, 6 decimals) |
-| Milliseconds Since Record | Time since recording started (ms) |
-| Trial Number | Sequential trial count (1-based) |
-| TSOT | Total Shutter Open Time (milliseconds) |
-| TSCT | Total Shutter Close Time (milliseconds) |
+| trial | Sequential trial count (1-based) |
+| module | Module name ("VOG") |
+| device_id | Device identifier (e.g., "sVOG") |
+| label | Trial/condition label (blank if not set) |
+| record_time_unix | Host capture time (Unix seconds, 6 decimals) |
+| record_time_mono | Host capture time (seconds, 9 decimals) |
+| shutter_open | Total Shutter Open Time (milliseconds) |
+| shutter_closed | Total Shutter Close Time (milliseconds) |
 
 **Example row:**
 ```
-sVOG,ttyACM0,1733649120.123456,5000,1,1500,3500
+1,VOG,sVOG,,1733649120.123456,12345.678901234,1500,3500
 ```
 
-### wVOG CSV Columns (9 fields)
+### wVOG CSV Columns (11 fields)
 
-For wireless VOG devices (same first 7 columns as sVOG, plus):
+For wireless VOG devices (same first 8 columns as sVOG, plus):
 
 | Column | Description |
 |--------|-------------|
-| Lens | Lens state (Open/Closed/Left/Right) |
-| Battery Percent | Device battery level (0-100%) |
+| shutter_total | Combined shutter time (milliseconds) |
+| lens | Lens state (Open/Closed/Left/Right) |
+| battery_percent | Device battery level (0-100%) |
 
 **Example row:**
 ```
-wVOG,xbee_002,1733649120.456789,5500,2,3000,2500,Open,85
+2,VOG,wVOG,,1733649120.456789,12345.678901234,3000,2500,5500,Open,85
 ```
 
 ### Timing and Synchronization

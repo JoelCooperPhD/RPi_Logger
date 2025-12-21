@@ -179,6 +179,13 @@ class EyeTrackerRuntime(ModuleRuntime):
             return await self._start_recording_flow(command)
         if action in ("stop_recording", "pause"):
             return await self._stop_recording_flow()
+        if action == "stop_session":
+            if self._recording_manager and self._recording_manager.is_recording:
+                await self._stop_recording_flow()
+            self._trial_label = ""
+            self._session_dir = None
+            self._module_data_dir = None
+            return True
 
         # Device commands
         if action == "assign_device":
@@ -761,5 +768,8 @@ class EyeTrackerRuntime(ModuleRuntime):
         if prop == "recording":
             if self.view:
                 self.view.set_recording_state(bool(value))
-        elif prop == "session_dir" and isinstance(value, Path):
-            self._session_dir = value
+        elif prop == "session_dir":
+            if not value:
+                self._session_dir = None
+            else:
+                self._session_dir = value if isinstance(value, Path) else Path(value)

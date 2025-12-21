@@ -25,7 +25,7 @@ Devices are auto-detected when plugged in via USB.
 
 The main display shows:
 - **Upper plot** - Stimulus state (ON/OFF) over time
-- **Lower plot** - Reaction time bar chart for each trial
+- **Lower plot** - Reaction time bar chart for each stimulus
 
 During recording, the chart scrolls to show a 60-second window of stimulus activity and reaction times.
 
@@ -33,7 +33,7 @@ During recording, the chart scrolls to show a 60-second window of stimulus activ
 
 | Field | Description |
 |-------|-------------|
-| Trial | Current trial number |
+| Stim | Current stimulus number |
 | RT | Last reaction time in milliseconds (or "Miss") |
 | Responses | Total button press count |
 | Battery | Battery level (wDRT only) |
@@ -53,7 +53,7 @@ During recording, the chart scrolls to show a 60-second window of stimulus activ
 When you start a recording session:
 - Device enters experiment mode
 - Chart clears and begins fresh
-- Trial counter resets
+- Stim counter resets
 - Stimulus cycle begins automatically
 
 ### During Recording
@@ -63,7 +63,7 @@ The DRT device automatically:
 - Records reaction time for each stimulus
 - Marks misses when no response before timeout
 
-Each trial captures:
+Each stimulus captures:
 - Stimulus onset time
 - Response time (or miss indicator)
 - Reaction time (response - onset)
@@ -75,50 +75,50 @@ Each trial captures:
 ### File Location
 
 ```
-{session_dir}/DRT/{prefix}_DRT_trial{NNN}_{device_id}.csv
+{session_dir}/DRT/{prefix}_DRT_{device_id}.csv
 ```
 
-Example: `20251208_143022_DRT_trial001_DRT_dev_ttyacm0.csv`
+Example: `20251208_143022_DRT_dev_ttyacm0.csv` (stim number is stored in the CSV data column)
 
 ### DRT CSV Columns (10 fields)
 
 | Column | Description |
 |--------|-------------|
+| trial | Sequential stimulus count (1-based) |
 | module | Module name ("DRT") |
-| trial | Sequential trial count (1-based) |
 | device_id | Device identifier (e.g., "DRT_dev_ttyacm0") |
 | label | Trial/condition label (blank if not set) |
-| device_time_ms | Device timestamp in ms since experiment start |
-| device_time_unix | Device absolute time (Unix seconds, if available) |
 | record_time_unix | Host capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Host capture time (seconds, 9 decimals) |
-| responses | Button press count for this trial |
+| device_time_ms | Device timestamp in ms since experiment start |
+| device_time_unix | Device absolute time (Unix seconds, if available) |
+| responses | Button press count for this stimulus |
 | reaction_time_ms | Response latency in ms (-1 = miss/timeout) |
 
 **Example row:**
 ```
-DRT,1,DRT_dev_ttyacm0,,5000,,1733649120.123456,12345.678901234,1,342
+1,DRT,DRT_dev_ttyacm0,,1733649120.123456,12345.678901234,5000,,1,342
 ```
 
 ### wDRT CSV Columns (11 fields)
 
 | Column | Description |
 |--------|-------------|
+| trial | Sequential stimulus count (1-based) |
 | module | Module name ("DRT") |
-| trial | Sequential trial count (1-based) |
 | device_id | Device identifier (e.g., "wDRT_dev_ttyacm0") |
 | label | Trial/condition label (blank if not set) |
-| device_time_ms | Device timestamp in ms since experiment start |
-| device_time_unix | Device RTC timestamp (Unix seconds) |
 | record_time_unix | Host capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Host capture time (seconds, 9 decimals) |
-| responses | Button press count for this trial |
+| device_time_ms | Device timestamp in ms since experiment start |
+| device_time_unix | Device RTC timestamp (Unix seconds) |
+| responses | Button press count for this stimulus |
 | reaction_time_ms | Response latency in ms (-1 = miss/timeout) |
 | battery_percent | Device battery level (0-100%) |
 
 **Example row:**
 ```
-DRT,2,wDRT_dev_ttyacm0,,5500,1733649118,1733649120.456789,12345.678901234,1,287,85
+2,DRT,wDRT_dev_ttyacm0,,1733649120.456789,12345.678901234,5500,1733649118,1,287,85
 ```
 
 ### Timing and Synchronization

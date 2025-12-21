@@ -230,10 +230,9 @@ class GPSModuleRuntime(ModuleRuntime):
         elif prop == "session_dir":
             if self._suppress_session_event:
                 return
-            if value:
-                path = Path(value)
-            else:
-                path = None
+            if not value:
+                return
+            path = Path(value)
             if self._loop:
                 self._loop.create_task(self._ensure_session_dir(path, update_model=False))
 
@@ -394,6 +393,11 @@ class GPSModuleRuntime(ModuleRuntime):
             update_state = getattr(self.view, "update_recording_state", None)
             if callable(update_state):
                 update_state()
+        StatusMessage.send(StatusType.RECORDING_STARTED, {
+            "device_ids": list(self.handlers.keys()),
+            "trial_number": self._active_trial_number,
+            "session_dir": str(self.module_data_dir) if self.module_data_dir else None,
+        })
 
     async def _stop_recording(self) -> None:
         """Stop recording on all connected devices."""
@@ -410,6 +414,11 @@ class GPSModuleRuntime(ModuleRuntime):
             update_state = getattr(self.view, "update_recording_state", None)
             if callable(update_state):
                 update_state()
+        StatusMessage.send(StatusType.RECORDING_STOPPED, {
+            "device_ids": list(self.handlers.keys()),
+            "trial_number": self._active_trial_number,
+            "session_dir": str(self.module_data_dir) if self.module_data_dir else None,
+        })
 
     # ------------------------------------------------------------------
     # Data callbacks

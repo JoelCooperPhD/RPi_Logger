@@ -4,12 +4,12 @@ Handles all file I/O for logging VOG trial data to CSV files.
 """
 
 import asyncio
-from datetime import datetime
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, Awaitable
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.base.storage_utils import module_filename_prefix
+from rpi_logger.modules.base.storage_utils import derive_session_token
 
 from .protocols import BaseVOGProtocol, VOGDataPacket
 
@@ -68,6 +68,11 @@ class VOGDataLogger:
         """Convert port path to safe filename component."""
         return self.port.lstrip('/').replace('/', '_').replace('\\', '_').lower()
 
+    def _resolve_data_file(self) -> Path:
+        token = derive_session_token(self.output_dir, "VOG")
+        port_name = self._sanitize_port_name()
+        return self.output_dir / f"{token}_VOG_{port_name}.csv"
+
     async def log_trial_data(
         self,
         packet: VOGDataPacket,
@@ -85,20 +90,17 @@ class VOGDataLogger:
             Path to the data file, or None if logging failed
         """
         try:
-            # Build filename
-            prefix = module_filename_prefix(self.output_dir, "VOG", trial_number, code="VOG")
-            port_name = self._sanitize_port_name()
-            data_file = self.output_dir / f"{prefix}_{port_name}.csv"
+            data_file = self._resolve_data_file()
 
-            # Prepare row data
+            # Prepare row data - use provided label or empty string
             if label is None:
-                label = str(trial_number)
+                label = ""
 
-            unix_time = int(datetime.now().timestamp())
-            ms_since_record = self._calculate_ms_since_record()
+            record_time_unix = time.time()
+            record_time_mono = time.perf_counter()
 
             # Format CSV line using protocol's polymorphic method
-            line = self.protocol.format_csv_row(packet, label, unix_time, ms_since_record)
+            line = self.protocol.format_csv_row(packet, label, record_time_unix, record_time_mono)
             header = self.protocol.csv_header
 
             # Batch all file I/O into a single thread call
@@ -114,7 +116,7 @@ class VOGDataLogger:
             )
 
             # Dispatch logged event
-            await self._dispatch_logged_event(packet, trial_number, label, unix_time, ms_since_record, data_file)
+            await self._dispatch_logged_event(packet, trial_number, label, record_time_unix, record_time_mono, data_file)
 
             return data_file
 
@@ -160,8 +162,8 @@ class VOGDataLogger:
         packet: VOGDataPacket,
         trial_number: int,
         label: str,
-        unix_time: int,
-        ms_since_record: int,
+        record_time_unix: float,
+        record_time_mono: float,
         data_file: Path,
     ) -> None:
         """Dispatch trial_logged event via callback."""
@@ -172,8 +174,8 @@ class VOGDataLogger:
             'device_id': packet.device_id,
             'device_type': self.device_type,
             'label': label,
-            'unix_time': unix_time,
-            'ms_since_record': ms_since_record,
+            'record_time_unix': record_time_unix,
+            'record_time_mono': record_time_mono,
             'trial_number': trial_number,
             'shutter_open': packet.shutter_open,
             'shutter_closed': packet.shutter_closed,

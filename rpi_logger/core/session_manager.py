@@ -51,6 +51,7 @@ class SessionManager:
 
         results = {}
         tasks = []
+        task_modules = []
 
         for module_name, process in module_processes.items():
             if not process.is_running():
@@ -60,11 +61,12 @@ class SessionManager:
                 self.logger.warning("Module %s not initialized, skipping session start", module_name)
                 results[module_name] = False
             else:
+                task_modules.append(module_name)
                 tasks.append(self._start_session_module(module_name, process))
 
         if tasks:
             task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for module_name, result in zip(module_processes.keys(), task_results):
+            for module_name, result in zip(task_modules, task_results):
                 if isinstance(result, Exception):
                     self.logger.error("Error starting session for %s: %s", module_name, result)
                     results[module_name] = False
@@ -100,6 +102,7 @@ class SessionManager:
 
         results = {}
         tasks = []
+        task_modules = []
 
         for module_name, process in module_processes.items():
             if not process.is_running():
@@ -109,11 +112,12 @@ class SessionManager:
                 self.logger.warning("Module %s not initialized, skipping session stop", module_name)
                 results[module_name] = False
             else:
+                task_modules.append(module_name)
                 tasks.append(self._stop_session_module(module_name, process))
 
         if tasks:
             task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for module_name, result in zip(module_processes.keys(), task_results):
+            for module_name, result in zip(task_modules, task_results):
                 if isinstance(result, Exception):
                     self.logger.error("Error stopping session for %s: %s", module_name, result)
                     results[module_name] = False
@@ -155,8 +159,9 @@ class SessionManager:
                         trial_number if trial_number else "N/A",
                         trial_label if trial_label else "N/A")
 
-        if self.recording:
+        if self.recording or self.is_any_recording(module_processes):
             self.logger.warning("Already recording")
+            self.recording = True
             return {}
 
         # Update output directory for all modules
@@ -165,6 +170,7 @@ class SessionManager:
 
         results = {}
         tasks = []
+        task_modules = []
 
         for module_name, process in module_processes.items():
             if not process.is_running():
@@ -174,18 +180,19 @@ class SessionManager:
                 self.logger.warning("Module %s not initialized, skipping recording", module_name)
                 results[module_name] = False
             else:
+                task_modules.append(module_name)
                 tasks.append(self._record_module(module_name, process, trial_number, trial_label))
 
         if tasks:
             task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for module_name, result in zip(module_processes.keys(), task_results):
+            for module_name, result in zip(task_modules, task_results):
                 if isinstance(result, Exception):
                     self.logger.error("Error starting recording for %s: %s", module_name, result)
                     results[module_name] = False
                 else:
                     results[module_name] = result
 
-        self.recording = True
+        self.recording = any(results.values())
         return results
 
     async def _record_module(
@@ -219,12 +226,13 @@ class SessionManager:
         """
         self.logger.info("Pausing recording on all modules")
 
-        if not self.recording:
+        if not self.recording and not self.is_any_recording(module_processes):
             self.logger.warning("Not recording")
             return {}
 
         results = {}
         tasks = []
+        task_modules = []
 
         for module_name, process in module_processes.items():
             if not process.is_running():
@@ -234,18 +242,22 @@ class SessionManager:
                 self.logger.warning("Module %s not initialized, skipping pause", module_name)
                 results[module_name] = False
             else:
+                task_modules.append(module_name)
                 tasks.append(self._pause_module(module_name, process))
 
         if tasks:
             task_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for module_name, result in zip(module_processes.keys(), task_results):
+            for module_name, result in zip(task_modules, task_results):
                 if isinstance(result, Exception):
                     self.logger.error("Error pausing recording for %s: %s", module_name, result)
                     results[module_name] = False
                 else:
                     results[module_name] = result
 
-        self.recording = False
+        if any(results.values()):
+            self.recording = False
+        else:
+            self.recording = self.is_any_recording(module_processes)
         return results
 
     async def _pause_module(self, module_name: str, process: ModuleProcess) -> bool:

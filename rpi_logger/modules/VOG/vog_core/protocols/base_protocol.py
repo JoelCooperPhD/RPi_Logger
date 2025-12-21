@@ -190,14 +190,20 @@ class BaseVOGProtocol(ABC):
         pass
 
     @abstractmethod
-    def format_csv_row(self, packet: VOGDataPacket, label: str, unix_time: int, ms_since_record: int) -> str:
+    def format_csv_row(
+        self,
+        packet: VOGDataPacket,
+        label: str,
+        record_time_unix: float,
+        record_time_mono: float,
+    ) -> str:
         """Format packet as CSV row for this device type.
 
         Args:
             packet: Data packet from device
             label: Trial label
-            unix_time: Host system unix timestamp
-            ms_since_record: Milliseconds since recording started
+            record_time_unix: Unix timestamp when data was recorded (UTC)
+            record_time_mono: Monotonic time for precise interval measurement
 
         Returns:
             CSV formatted string (no newline)

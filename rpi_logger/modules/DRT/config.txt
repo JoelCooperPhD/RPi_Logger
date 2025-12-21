@@ -6,4 +6,4 @@ view.show_io_panel = true
 display_name = DRT
 window_geometry = 533x317+1155+814
 config_dialog_geometry = +636+1065
-enabled = false
+enabled = true

@@ -210,10 +210,9 @@ class DRTModuleRuntime(ModuleRuntime):
         elif prop == "session_dir":
             if self._suppress_session_event:
                 return
-            if value:
-                path = Path(value)
-            else:
-                path = None
+            if not value:
+                return
+            path = Path(value)
             if self._loop:
                 self._loop.create_task(self._ensure_session_dir(path, update_model=False))
 
@@ -488,6 +487,9 @@ class DRTModuleRuntime(ModuleRuntime):
 
     async def _start_recording(self) -> bool:
         self.logger.debug("_start_recording called, device_id: %s", self.device_id)
+        if self._recording_active:
+            self.logger.debug("Recording already active for %s", self.device_id)
+            return True
         if not self.handler:
             self.logger.error("Cannot start recording - no device connected")
             return False
@@ -508,6 +510,12 @@ class DRTModuleRuntime(ModuleRuntime):
         self._recording_active = True
         if self.view:
             self.view.update_recording_state()
+        StatusMessage.send(StatusType.RECORDING_STARTED, {
+            "device_id": self.device_id,
+            "trial_number": self.active_trial_number,
+            "trial_label": self.trial_label,
+            "session_dir": str(self.module_data_dir) if self.module_data_dir else None,
+        })
         return True
 
     async def _stop_recording(self) -> None:
@@ -528,6 +536,11 @@ class DRTModuleRuntime(ModuleRuntime):
         self.trial_label = ""
         if self.view:
             self.view.update_recording_state()
+        StatusMessage.send(StatusType.RECORDING_STOPPED, {
+            "device_id": self.device_id,
+            "trial_number": self.active_trial_number,
+            "session_dir": str(self.module_data_dir) if self.module_data_dir else None,
+        })
 
     # ------------------------------------------------------------------
     # Session helpers

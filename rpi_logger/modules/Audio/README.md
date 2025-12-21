@@ -88,14 +88,14 @@ The timing CSV contains per-chunk timing data for precise synchronization with o
 
 | Column | Description |
 |--------|-------------|
-| module | Module name ("Audio") |
 | trial | Trial number (integer, 1-based) |
+| module | Module name ("Audio") |
 | device_id | Device identifier (integer index) |
 | label | Device name |
-| device_time_unix | Device absolute time (Unix seconds, if available) |
-| device_time_seconds | Hardware ADC timestamp if available (seconds) |
 | record_time_unix | Host capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Host capture time (seconds, 9 decimals) |
+| device_time_unix | Device absolute time (Unix seconds, if available) |
+| device_time_seconds | Hardware ADC timestamp if available (seconds) |
 | write_time_unix | Host write time (Unix seconds, 6 decimals) |
 | write_time_mono | Host write time (seconds, 9 decimals) |
 | chunk_index | Sequential chunk number (1-based) |
@@ -104,7 +104,7 @@ The timing CSV contains per-chunk timing data for precise synchronization with o
 
 **Example row:**
 ```
-Audio,1,0,usb-microphone,,12.345678901,1702080123.456789,12.345678901,1702080123.457123,12.346012345,1,2048,2048
+1,Audio,0,usb-microphone,1702080123.456789,12.345678901,,12.345678901,1702080123.457123,12.346012345,1,2048,2048
 ```
 
 ### Understanding the Timestamps
