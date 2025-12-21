@@ -178,8 +178,8 @@ class NotesArchive:
             "Notes",
             "notes",
             "",
-            timestamp,
-            record_time_mono,
+            f"{timestamp:.6f}",
+            f"{record_time_mono:.9f}",
             "",
             cleaned,
         ])
@@ -298,8 +298,8 @@ class NotesArchive:
                 "Notes",
                 "notes",
                 "",
-                record_time_unix,
-                record_time_mono,
+                f"{record_time_unix:.6f}",
+                f"{record_time_mono:.9f}",
                 "",
                 text,
             ])
@@ -313,8 +313,8 @@ class NotesArchive:
                     "Notes",
                     "notes",
                     "",
-                    record_time_unix,
-                    record_time_mono,
+                    f"{record_time_unix:.6f}",
+                    f"{record_time_mono:.9f}",
                     "",
                     text,
                 ])

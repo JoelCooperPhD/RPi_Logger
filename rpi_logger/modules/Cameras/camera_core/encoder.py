@@ -374,7 +374,7 @@ class Encoder:
 
         # CSV logging - only for successfully encoded frames
         if self._csv_writer:
-            monotonic = time.monotonic()
+            monotonic = time.perf_counter()
             pts_us = self._last_pts if self._kind == "pyav" else None
             self._csv_writer.writerow([
                 self._trial_number,
