@@ -70,9 +70,10 @@ Recordings use a shared filename prefix:
 Most modules use `{sessionToken}_{MODULECODE}_trial###_...`
 (sessionToken is the timestamp portion of the session directory name).
 
-DRT and VOG append to a single file per session:
+DRT, VOG, and GPS append to a single file per session:
 `{sessionToken}_DRT_{device_id}.csv`
 `{sessionToken}_VOG_{port}.csv`
+`{sessionToken}_GPS_{device_id}.csv`
 
 ```
 session_YYYYMMDD_HHMMSS/
@@ -97,7 +98,7 @@ session_YYYYMMDD_HHMMSS/
 ├── VOG/
 │   └── 20251208_143022_VOG_ttyacm0.csv
 ├── GPS/
-│   └── 20251208_143022_GPS_trial001_GPS_serial0.csv
+│   └── 20251208_143022_GPS_serial0.csv
 └── Notes/
     └── 20251208_143022_NTS_trial001_notes.csv
 ```

@@ -72,10 +72,10 @@ Each data point captures:
 
 | File | Description |
 |------|-------------|
-| `{prefix}_GPS_trial{NNN}_{device_id}.csv` | Parsed GPS data |
+| `{timestamp}_GPS_{device_id}.csv` | Parsed GPS data (appended per session) |
 | `{timestamp}_NMEA_trial{NNN}.txt` | Raw NMEA sentences (optional) |
 
-Example: `20251208_143022_GPS_trial001_GPS_serial0.csv`
+Example: `20251208_143022_GPS_serial0.csv` (trial number is stored in the CSV data column)
 
 ### GPS CSV Columns (26 fields)
 

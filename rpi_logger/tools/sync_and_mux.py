@@ -310,6 +310,7 @@ def discover_trial_numbers(session_dir: Path) -> list[int]:
     if not trial_numbers:
         trial_numbers.update(_discover_trials_from_csv(session_dir / "DRT", trial_indices=(3, 1, 0)))
         trial_numbers.update(_discover_trials_from_csv(session_dir / "VOG", trial_indices=(0, 4)))
+        trial_numbers.update(_discover_trials_from_csv(session_dir / "GPS", trial_indices=(0,)))
 
     return sorted(trial_numbers)
 

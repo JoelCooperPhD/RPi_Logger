@@ -77,10 +77,10 @@ During Recording
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 File Naming Convention
-   {prefix}_GPS_trial{NNN}_{device_id}.csv  - Parsed GPS data
+   {timestamp}_GPS_{device_id}.csv     - Parsed GPS data (appended per session)
    {timestamp}_NMEA_trial{NNN}.txt     - Raw NMEA sentences
 
-   Example: 20251208_143022_GPS_trial001_GPS_serial0.csv
+   Example: 20251208_143022_GPS_serial0.csv (trial number is stored in the CSV data column)
 
 Location
    {session_dir}/GPS/
@@ -92,14 +92,14 @@ Location
 
 GPS CSV Columns (26 fields):
 
-   module                - Module name ("GPS")
    trial                 - Trial number (integer)
+   module                - Module name ("GPS")
    device_id             - GPS device identifier
    label                 - Optional label (blank if unused)
-   device_time_iso       - GPS UTC time (ISO 8601 format)
-   device_time_unix      - GPS UTC time (Unix seconds)
    record_time_unix      - Host capture time (Unix seconds, 6 decimals)
    record_time_mono      - Host capture time (seconds, 9 decimals)
+   device_time_iso       - GPS UTC time (ISO 8601 format)
+   device_time_unix      - GPS UTC time (Unix seconds)
    latitude_deg          - Latitude (decimal degrees, + = North)
    longitude_deg         - Longitude (decimal degrees, + = East)
    altitude_m            - Altitude above MSL (meters, float)
@@ -120,7 +120,7 @@ GPS CSV Columns (26 fields):
    raw_sentence          - Raw NMEA sentence
 
 Example Row:
-   GPS,1,GPS:serial0,,2024-12-08T14:30:22.500Z,1733665822.500000,1733665822.500000,12345.678901234,
+   1,GPS,GPS:serial0,,1733665822.500000,12345.678901234,2024-12-08T14:30:22.500Z,1733665822.500000,
    -37.8136,144.9631,42.5,12.3,44.3,23.9,27.5,185.2,1,3,1,
    8,12,1.2,1.8,2.1,GGA,$GPGGA,...
 

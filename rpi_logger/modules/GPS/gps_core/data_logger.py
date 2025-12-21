@@ -14,7 +14,7 @@ from queue import Queue, Empty
 from typing import Any, List, Optional, TextIO
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.base.storage_utils import module_filename_prefix
+from rpi_logger.modules.base.storage_utils import derive_session_token
 from .constants import GPS_CSV_HEADER, MPS_PER_KNOT
 from .parsers.nmea_types import GPSFixSnapshot
 
@@ -94,6 +94,18 @@ class GPSDataLogger:
         # GPS:serial0 -> GPS_serial0
         return self.device_id.replace(":", "_").replace("/", "_").replace("\\", "_")
 
+    def _build_session_filepath(self) -> Optional[Path]:
+        if not self.output_dir:
+            return None
+
+        token = derive_session_token(self.output_dir, "GPS")
+        device_safe = self._sanitize_device_id()
+        if device_safe.lower().startswith("gps_"):
+            filename = f"{token}_{device_safe}.csv"
+        else:
+            filename = f"{token}_GPS_{device_safe}.csv"
+        return self.output_dir / filename
+
     def start_recording(self, trial_number: int = 1) -> Optional[Path]:
         """Open CSV file and start writer thread.
 
@@ -107,6 +119,12 @@ class GPSDataLogger:
             logger.debug("Recording already active for %s", self.device_id)
             return self._record_path
 
+        try:
+            trial_number = int(trial_number)
+        except (TypeError, ValueError):
+            trial_number = 1
+        if trial_number <= 0:
+            trial_number = 1
         self._trial_number = trial_number
         self._dropped_records = 0
 
@@ -115,14 +133,16 @@ class GPSDataLogger:
 
             # Generate filename
             device_safe = self._sanitize_device_id()
-            prefix = module_filename_prefix(self.output_dir, "GPS", trial_number, code="GPS")
-            filename = f"{prefix}_{device_safe}.csv"
-            path = self.output_dir / filename
+            path = self._build_session_filepath()
+            if path is None:
+                return None
+            needs_header = not path.exists() or path.stat().st_size == 0
 
             # Open file and write header
-            handle = path.open("w", encoding="utf-8", newline="")
+            handle = path.open("a", encoding="utf-8", newline="")
             writer = csv.writer(handle)
-            writer.writerow(GPS_CSV_HEADER)
+            if needs_header:
+                writer.writerow(GPS_CSV_HEADER)
 
             self._record_file = handle
             self._record_writer = writer

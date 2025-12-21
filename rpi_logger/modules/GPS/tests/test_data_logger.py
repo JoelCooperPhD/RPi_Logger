@@ -116,8 +116,8 @@ class TestGPSDataLogger:
             row = next(reader)
 
         assert header == GPS_CSV_HEADER
-        assert row[0] == "GPS"  # module
-        assert int(row[1]) == 1  # trial
+        assert int(row[0]) == 1  # trial
+        assert row[1] == "GPS"  # module
         lat_idx = header.index("latitude_deg")
         lon_idx = header.index("longitude_deg")
         alt_idx = header.index("altitude_m")
@@ -181,8 +181,8 @@ class TestGPSDataLogger:
             row1 = next(reader)
             row2 = next(reader)
 
-        assert int(row1[1]) == 1
-        assert int(row2[1]) == 2
+        assert int(row1[0]) == 1
+        assert int(row2[0]) == 2
 
     def test_update_output_dir(self, tmp_path):
         """Test updating output directory."""
