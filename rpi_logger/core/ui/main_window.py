@@ -193,6 +193,10 @@ class MainWindow:
         self._last_geometry = self.root.geometry()
         self.root.bind("<Configure>", self._on_configure)
 
+        # Restore window visibility after system sleep/wake
+        self.root.bind("<Map>", self._on_window_restore)
+        self.root.bind("<FocusIn>", self._on_window_restore)
+
         self.controller.set_widgets(
             self.root,
             self.module_vars,
@@ -618,6 +622,16 @@ class MainWindow:
                 UpdateAvailableDialog(self.root, update_info)
         except Exception as e:
             self.logger.debug("Update check failed: %s", e)
+
+    def _on_window_restore(self, event) -> None:
+        """Restore window visibility after system sleep/wake."""
+        if event.widget != self.root:
+            return
+        try:
+            self.root.deiconify()
+            self.root.lift()
+        except tk.TclError:
+            pass
 
     def _on_configure(self, event) -> None:
         """Handle window configure events (move/resize) for geometry persistence."""

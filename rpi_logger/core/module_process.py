@@ -426,7 +426,7 @@ class ModuleProcess:
         # Send result back to module
         await self.send_command(CommandMessage.xbee_send_result(node_id, success))
 
-    async def stop(self, timeout: float = 10.0) -> None:
+    async def stop(self, timeout: float = 3.0) -> None:
         """
         Stop the module process with ACK-based device unassignment.
 
