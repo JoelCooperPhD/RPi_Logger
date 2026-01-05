@@ -540,7 +540,11 @@ class NotesRuntime(ModuleRuntime):
         try:
             self.task_manager.create(coro)
         except RuntimeError:
-            asyncio.create_task(coro)
+            try:
+                asyncio.create_task(coro)
+            except RuntimeError:
+                # No running event loop - close coroutine to prevent warning
+                coro.close()  # type: ignore[union-attr]
 
     def _on_enter_pressed(self, event: Any):  # type: ignore[override]
         if not tk or event.state & 0x1:

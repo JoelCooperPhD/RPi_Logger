@@ -1,14 +1,4 @@
-"""
-Base DRT Handler
-
-Abstract base class defining the interface for all DRT device handlers.
-Each device type (sDRT, wDRT USB, wDRT Wireless) implements this interface
-with their specific protocol.
-
-Implements self-healing circuit breaker via ReconnectingMixin - instead of
-permanently exiting after N consecutive errors, the handler will attempt
-reconnection with exponential backoff.
-"""
+"""Base DRT handler with self-healing circuit breaker."""
 
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, Callable, Awaitable, Set
@@ -36,31 +26,14 @@ def _task_exception_handler(task: asyncio.Task) -> None:
 
 
 class BaseDRTHandler(ABC, ReconnectingMixin):
-    """
-    Abstract base class for DRT device handlers.
-
-    Defines the common interface that all DRT handlers must implement.
-    Handles device communication, experiment control, and data logging.
-
-    Inherits ReconnectingMixin to provide self-healing circuit breaker behavior.
-    Instead of permanently exiting after consecutive errors, the handler will
-    attempt to reconnect with exponential backoff.
-    """
+    """Base for DRT handlers with device communication, experiment control, and logging."""
 
     def __init__(
         self,
         device_id: str,
         output_dir: Path,
-        transport: Any  # BaseTransport - avoiding circular import
+        transport: Any
     ):
-        """
-        Initialize the handler.
-
-        Args:
-            device_id: Unique identifier for this device (e.g., port name or XBee node ID)
-            output_dir: Directory for data output files
-            transport: Transport layer for device communication
-        """
         self.device_id = device_id
         self.output_dir = output_dir
         self.transport = transport
@@ -361,7 +334,7 @@ class BaseDRTHandler(ABC, ReconnectingMixin):
             logger.error("Error during reconnect attempt for %s: %s", self.device_id, e)
             return False
 
-    def _create_background_task(self, coro) -> asyncio.Task:
+    def _create_background_task(self, coro) -> Optional[asyncio.Task]:
         """
         Create a tracked background task with exception handling.
 
@@ -369,12 +342,18 @@ class BaseDRTHandler(ABC, ReconnectingMixin):
             coro: Coroutine to run
 
         Returns:
-            The created task
+            The created task, or None if no event loop is running
         """
-        task = asyncio.create_task(coro)
-        self._pending_tasks.add(task)
-        task.add_done_callback(self._on_task_done)
-        return task
+        try:
+            task = asyncio.create_task(coro)
+            self._pending_tasks.add(task)
+            task.add_done_callback(self._on_task_done)
+            return task
+        except RuntimeError:
+            # No running event loop (e.g., in tests or sync context)
+            # Close the coroutine to prevent "was never awaited" warning
+            coro.close()
+            return None
 
     def _on_task_done(self, task: asyncio.Task) -> None:
         """Callback when a background task completes."""

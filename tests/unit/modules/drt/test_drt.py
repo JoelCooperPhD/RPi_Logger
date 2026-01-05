@@ -140,25 +140,27 @@ class TestDRTConfig:
 
 
 class TestConfigLoader:
-    """Tests for the config file loader."""
+    """Tests for the DRTConfig dataclass defaults."""
 
-    def test_defaults_dict_structure(self):
-        """Test that DEFAULTS dict has expected structure."""
-        from rpi_logger.modules.DRT.drt_core.config.config_loader import DEFAULTS
+    def test_defaults_structure(self):
+        """Test that DRTConfig has expected default attributes."""
+        from rpi_logger.modules.DRT.config import DRTConfig
 
-        assert "enabled" in DEFAULTS
-        assert "device_vid" in DEFAULTS
-        assert "device_pid" in DEFAULTS
-        assert "baudrate" in DEFAULTS
-        assert "output_dir" in DEFAULTS
+        config = DRTConfig()
+        assert hasattr(config, "enabled")
+        assert hasattr(config, "device_vid")
+        assert hasattr(config, "device_pid")
+        assert hasattr(config, "baudrate")
+        assert hasattr(config, "output_dir")
 
     def test_default_vid_pid_values(self):
         """Test USB VID/PID default values."""
-        from rpi_logger.modules.DRT.drt_core.config.config_loader import DEFAULTS
+        from rpi_logger.modules.DRT.config import DRTConfig
 
-        assert DEFAULTS["device_vid"] == 0x239A
-        assert DEFAULTS["device_pid"] == 0x801E
-        assert DEFAULTS["baudrate"] == 9600
+        config = DRTConfig()
+        assert config.device_vid == 0x239A
+        assert config.device_pid == 0x801E
+        assert config.baudrate == 9600
 
 
 # =============================================================================
