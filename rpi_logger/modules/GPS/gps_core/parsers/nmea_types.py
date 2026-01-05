@@ -8,11 +8,7 @@ from typing import Optional
 
 @dataclass(slots=True)
 class GPSFixSnapshot:
-    """Lightweight structure that mirrors the latest GPS fix.
-
-    This dataclass holds all GPS fix data extracted from NMEA sentences.
-    It is designed to be updated incrementally as new sentences arrive.
-    """
+    """GPS fix data from NMEA sentences, updated incrementally."""
 
     timestamp: Optional[dt.datetime] = None
     latitude: Optional[float] = None

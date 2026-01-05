@@ -1,8 +1,4 @@
-"""GPS data logger for CSV file output.
-
-Handles all file I/O for logging GPS data to CSV files.
-Uses buffered writing with a background thread for performance.
-"""
+"""GPS CSV logger with buffered async writing via background thread."""
 
 from __future__ import annotations
 
@@ -22,26 +18,7 @@ logger = get_module_logger(__name__)
 
 
 class GPSDataLogger:
-    """Handles CSV logging for GPS data.
-
-    Features:
-    - Buffered async writing via background thread
-    - Configurable flush threshold
-    - Drop detection for overload scenarios
-
-    The logger maintains a write queue and background thread to avoid
-    blocking the main processing loop during disk I/O.
-
-    Example:
-        data_logger = GPSDataLogger(output_dir, "GPS:serial0")
-        data_logger.start_recording(trial_number=1)
-
-        # During GPS processing
-        data_logger.log_fix(fix, "GGA", raw_sentence)
-
-        # When done
-        data_logger.stop_recording()
-    """
+    """CSV logger with buffered async writing and drop detection."""
 
     def __init__(
         self,
@@ -49,28 +26,16 @@ class GPSDataLogger:
         device_id: str,
         flush_threshold: int = 32,
     ):
-        """Initialize the data logger.
-
-        Args:
-            output_dir: Directory for output CSV files
-            device_id: Device identifier for filename (e.g., "GPS:serial0")
-            flush_threshold: Number of rows to buffer before flushing to disk
-        """
+        """Initialize logger with output dir, device ID, and flush threshold."""
         self.output_dir = output_dir
         self.device_id = device_id
         self._flush_threshold = flush_threshold
-
-        # File handles
         self._record_file: Optional[TextIO] = None
         self._record_writer: Optional[csv.writer] = None
         self._record_path: Optional[Path] = None
-
-        # Buffered writing
         self._write_queue: Queue[Optional[List[Any]]] = Queue(maxsize=1000)
         self._writer_thread: Optional[threading.Thread] = None
         self._dropped_records = 0
-
-        # Recording state
         self._recording = False
         self._trial_number = 1
 
@@ -90,8 +55,7 @@ class GPSDataLogger:
         return self._dropped_records
 
     def _sanitize_device_id(self) -> str:
-        """Convert device ID to safe filename component."""
-        # GPS:serial0 -> GPS_serial0
+        """Convert device ID to safe filename component (GPS:serial0 -> GPS_serial0)."""
         return self.device_id.replace(":", "_").replace("/", "_").replace("\\", "_")
 
     def _build_session_filepath(self) -> Optional[Path]:
@@ -107,14 +71,7 @@ class GPSDataLogger:
         return self.output_dir / filename
 
     def start_recording(self, trial_number: int = 1) -> Optional[Path]:
-        """Open CSV file and start writer thread.
-
-        Args:
-            trial_number: Trial number for the session
-
-        Returns:
-            Path to the CSV file, or None if failed
-        """
+        """Open CSV file and start writer thread. Returns path or None if failed."""
         if self._recording:
             logger.debug("Recording already active for %s", self.device_id)
             return self._record_path
@@ -130,15 +87,12 @@ class GPSDataLogger:
 
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Generate filename
             device_safe = self._sanitize_device_id()
             path = self._build_session_filepath()
             if path is None:
                 return None
             needs_header = not path.exists() or path.stat().st_size == 0
 
-            # Open file and write header
             handle = path.open("a", encoding="utf-8", newline="")
             writer = csv.writer(handle)
             if needs_header:
@@ -148,7 +102,6 @@ class GPSDataLogger:
             self._record_writer = writer
             self._record_path = path
 
-            # Clear queue and start writer thread
             while not self._write_queue.empty():
                 try:
                     self._write_queue.get_nowait()
@@ -156,9 +109,7 @@ class GPSDataLogger:
                     break
 
             self._writer_thread = threading.Thread(
-                target=self._writer_loop,
-                name=f"GPSWriter-{device_safe}",
-                daemon=True,
+                target=self._writer_loop, name=f"GPSWriter-{device_safe}", daemon=True
             )
             self._writer_thread.start()
 
@@ -168,7 +119,6 @@ class GPSDataLogger:
 
         except Exception as exc:
             logger.error("Failed to start recording for %s: %s", self.device_id, exc)
-            # Ensure file handle is closed on error
             if self._record_file:
                 try:
                     self._record_file.close()
@@ -184,9 +134,8 @@ class GPSDataLogger:
         if not self._recording:
             return
 
-        # Signal writer thread to stop
         if self._writer_thread and self._writer_thread.is_alive():
-            self._write_queue.put(None)  # Sentinel to stop
+            self._write_queue.put(None)
             self._writer_thread.join(timeout=5.0)
             if self._writer_thread.is_alive():
                 logger.warning("Writer thread did not stop in time for %s, retrying", self.device_id)
@@ -195,20 +144,14 @@ class GPSDataLogger:
                     logger.error("Writer thread still alive for %s, proceeding with cleanup", self.device_id)
         self._writer_thread = None
 
-        # Close file handle
-        handle = self._record_file
-        if handle:
+        if self._record_file:
             try:
-                handle.close()
+                self._record_file.close()
             except Exception as exc:
                 logger.debug("Error closing recording file: %s", exc)
 
         if self._dropped_records > 0:
-            logger.warning(
-                "GPS recording stopped with %d dropped records for %s",
-                self._dropped_records,
-                self.device_id,
-            )
+            logger.warning("GPS recording stopped with %d dropped records for %s", self._dropped_records, self.device_id)
 
         record_path = self._record_path
         self._record_file = None
@@ -219,33 +162,17 @@ class GPSDataLogger:
         if record_path:
             logger.info("Stopped GPS recording: %s", record_path)
 
-    def log_fix(
-        self,
-        fix: GPSFixSnapshot,
-        sentence_type: str,
-        raw_sentence: str,
-    ) -> bool:
-        """Queue a fix record for writing.
-
-        Args:
-            fix: Current GPS fix data
-            sentence_type: NMEA sentence type (e.g., "GGA", "RMC")
-            raw_sentence: Raw NMEA sentence string
-
-        Returns:
-            True if record was queued, False if dropped
-        """
+    def log_fix(self, fix: GPSFixSnapshot, sentence_type: str, raw_sentence: str) -> bool:
+        """Queue fix record for writing. Returns True if queued, False if dropped."""
         if not self._recording or not self._record_writer:
             return False
 
-        # Calculate speed in m/s
         speed_mps = None
         if fix.speed_knots is not None:
             speed_mps = fix.speed_knots * MPS_PER_KNOT
         elif fix.speed_kmh is not None:
             speed_mps = fix.speed_kmh / 3.6
 
-        # Build row matching GPS_CSV_HEADER order
         record_time_unix = time.time()
         record_time_mono = time.perf_counter()
 
@@ -257,69 +184,35 @@ class GPSDataLogger:
                 device_time_unix = ""
 
         row = [
-            self._trial_number,
-            "GPS",
-            self.device_id,
-            "",
-            f"{record_time_unix:.6f}",
-            f"{record_time_mono:.9f}",
-            fix.timestamp.isoformat() if fix.timestamp else "",
-            device_time_unix,
-            fix.latitude,
-            fix.longitude,
-            fix.altitude_m,
-            speed_mps,
-            fix.speed_kmh,
-            fix.speed_knots,
-            fix.speed_mph,
-            fix.course_deg,
-            fix.fix_quality,
-            fix.fix_mode or "",
-            1 if fix.fix_valid else 0,
-            fix.satellites_in_use,
-            fix.satellites_in_view,
-            fix.hdop,
-            fix.pdop,
-            fix.vdop,
-            sentence_type,
-            raw_sentence,
+            self._trial_number, "GPS", self.device_id, "",
+            f"{record_time_unix:.6f}", f"{record_time_mono:.9f}",
+            fix.timestamp.isoformat() if fix.timestamp else "", device_time_unix,
+            fix.latitude, fix.longitude, fix.altitude_m, speed_mps,
+            fix.speed_kmh, fix.speed_knots, fix.speed_mph, fix.course_deg,
+            fix.fix_quality, fix.fix_mode or "", 1 if fix.fix_valid else 0,
+            fix.satellites_in_use, fix.satellites_in_view,
+            fix.hdop, fix.pdop, fix.vdop, sentence_type, raw_sentence,
         ]
 
-        # Queue for async writing
         try:
             self._write_queue.put_nowait(row)
             return True
         except Exception:
             self._dropped_records += 1
             if self._dropped_records % 50 == 1:
-                logger.warning(
-                    "GPS record queue overflow for %s (dropped: %d)",
-                    self.device_id,
-                    self._dropped_records,
-                )
+                logger.warning("GPS record queue overflow for %s (dropped: %d)", self.device_id, self._dropped_records)
             return False
 
     def update_trial_number(self, trial_number: int) -> None:
-        """Update the trial number for subsequent records.
-
-        Args:
-            trial_number: New trial number
-        """
+        """Update trial number for subsequent records."""
         self._trial_number = trial_number
 
     def update_output_dir(self, output_dir: Path) -> None:
-        """Update the output directory (for session changes).
-
-        Note: This only affects future recordings. If recording is active,
-        stop_recording should be called first.
-
-        Args:
-            output_dir: New output directory
-        """
+        """Update output directory (only affects future recordings)."""
         self.output_dir = output_dir
 
     def _writer_loop(self) -> None:
-        """Background thread that writes queued records to disk."""
+        """Background thread writing queued records to disk."""
         writer = self._record_writer
         handle = self._record_file
         if not writer or not handle:
@@ -330,14 +223,12 @@ class GPSDataLogger:
             try:
                 row = self._write_queue.get(timeout=0.5)
             except Empty:
-                # Flush pending buffer on timeout
                 if buffer:
                     self._flush_buffer(writer, handle, buffer)
                     buffer.clear()
                 continue
 
             if row is None:
-                # Sentinel - flush and exit
                 if buffer:
                     self._flush_buffer(writer, handle, buffer)
                 break
@@ -347,20 +238,11 @@ class GPSDataLogger:
                 self._flush_buffer(writer, handle, buffer)
                 buffer.clear()
 
-    def _flush_buffer(
-        self,
-        writer: csv.writer,
-        handle: TextIO,
-        buffer: List[List[Any]],
-    ) -> None:
+    def _flush_buffer(self, writer: csv.writer, handle: TextIO, buffer: List[List[Any]]) -> None:
         """Write buffered rows to disk."""
         try:
             for row in buffer:
                 writer.writerow(row)
             handle.flush()
         except Exception as exc:
-            logger.error(
-                "Failed to flush %d GPS records to disk: %s",
-                len(buffer),
-                exc,
-            )
+            logger.error("Failed to flush %d GPS records to disk: %s", len(buffer), exc)

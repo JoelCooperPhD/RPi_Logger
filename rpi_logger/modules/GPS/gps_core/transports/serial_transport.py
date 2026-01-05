@@ -1,8 +1,4 @@
-"""Serial UART transport for GPS receivers.
-
-This module provides serial transport using serial_asyncio for efficient
-non-blocking I/O with UART-based GPS receivers like the BerryGPS.
-"""
+"""Serial UART transport using serial_asyncio for non-blocking GPS I/O."""
 
 from __future__ import annotations
 
@@ -16,34 +12,20 @@ from ..constants import DEFAULT_BAUD_RATE, DEFAULT_RECONNECT_DELAY
 
 logger = get_module_logger(__name__)
 
-# Optional import - serial may not be available on all platforms
 try:
     import serial  # type: ignore
     import serial_asyncio  # type: ignore
     SERIAL_AVAILABLE = True
+    SERIAL_IMPORT_ERROR = None
 except ImportError as exc:
     serial = None  # type: ignore
     serial_asyncio = None  # type: ignore
     SERIAL_AVAILABLE = False
     SERIAL_IMPORT_ERROR = exc
-else:
-    SERIAL_IMPORT_ERROR = None
 
 
 class SerialGPSTransport(BaseGPSTransport):
-    """Serial UART transport for GPS receivers.
-
-    Uses serial_asyncio for efficient async I/O. This is well-suited for
-    continuous NMEA streaming from GPS receivers.
-
-    Example:
-        transport = SerialGPSTransport("/dev/serial0", 9600)
-        async with transport:
-            while True:
-                line = await transport.read_line()
-                if line:
-                    print(line)
-    """
+    """Serial UART transport for GPS receivers using serial_asyncio."""
 
     def __init__(
         self,
@@ -51,13 +33,7 @@ class SerialGPSTransport(BaseGPSTransport):
         baudrate: int = DEFAULT_BAUD_RATE,
         reconnect_delay: float = DEFAULT_RECONNECT_DELAY,
     ):
-        """Initialize the serial transport.
-
-        Args:
-            port: Serial port path (e.g., '/dev/serial0' or '/dev/ttyUSB0')
-            baudrate: Serial baudrate (default 9600 for most GPS)
-            reconnect_delay: Delay before reconnect attempts in seconds
-        """
+        """Initialize with port, baudrate, and reconnect delay."""
         super().__init__()
         self.port = port
         self.baudrate = baudrate
@@ -78,11 +54,7 @@ class SerialGPSTransport(BaseGPSTransport):
         return self._last_error
 
     async def connect(self) -> bool:
-        """Open the serial connection.
-
-        Returns:
-            True if connection was successful
-        """
+        """Open serial connection. Returns True if successful."""
         if not SERIAL_AVAILABLE:
             self._last_error = f"Serial module not available: {SERIAL_IMPORT_ERROR}"
             logger.error(self._last_error)
@@ -115,7 +87,7 @@ class SerialGPSTransport(BaseGPSTransport):
             return False
 
     async def disconnect(self) -> None:
-        """Close the serial connection with verification."""
+        """Close serial connection with verification."""
         if self._writer is None:
             self._connected = False
             return
@@ -125,44 +97,28 @@ class SerialGPSTransport(BaseGPSTransport):
         self._reader = None
         self._connected = False
 
-        # Close the writer - log actual errors instead of suppressing
         try:
             writer.close()
         except OSError as e:
-            # OSError is expected if port is already closed/disconnected
             logger.debug("Expected error closing serial writer on %s: %s", self.port, e)
         except Exception as e:
-            # Unexpected errors should be logged at warning level
             logger.warning("Error closing serial writer on %s: %s", self.port, e)
 
-        # Wait for close to complete with extended timeout
         if hasattr(writer, "wait_closed"):
             try:
                 await asyncio.wait_for(writer.wait_closed(), timeout=2.0)
             except asyncio.TimeoutError:
-                logger.warning(
-                    "Timeout waiting for serial close on %s (port may still be held)",
-                    self.port
-                )
-                # Add small delay to give OS time to release port
+                logger.warning("Timeout waiting for serial close on %s (port may still be held)", self.port)
                 await asyncio.sleep(0.2)
             except Exception as e:
                 logger.debug("Error in wait_closed for serial on %s: %s", self.port, e)
         else:
-            # No wait_closed available - add delay to let OS release port
             await asyncio.sleep(0.1)
 
         logger.info("Disconnected from GPS on %s", self.port)
 
     async def read_line(self, timeout: float = 1.0) -> Optional[str]:
-        """Read a line (NMEA sentence) from the GPS.
-
-        Args:
-            timeout: Maximum time to wait for a complete line
-
-        Returns:
-            The line read (decoded, stripped), or None if timeout/error
-        """
+        """Read NMEA sentence from GPS. Returns decoded line or None."""
         if not self.is_connected or self._reader is None:
             return None
 
@@ -178,26 +134,15 @@ class SerialGPSTransport(BaseGPSTransport):
             return None
 
         if not line:
-            # EOF - stream ended
             logger.warning("Serial stream ended on %s (EOF)", self.port)
             self._last_error = "Stream ended (EOF)"
             return None
 
-        # Decode and strip (NMEA is ASCII)
         decoded = line.decode("ascii", errors="ignore").strip()
         return decoded if decoded else None
 
     async def read_sentences(self, timeout: float = 1.0):
-        """Async generator that yields NMEA sentences.
-
-        This is a convenience method for continuous reading.
-
-        Args:
-            timeout: Timeout for each read attempt
-
-        Yields:
-            NMEA sentences starting with '$'
-        """
+        """Async generator yielding NMEA sentences starting with '$'."""
         while self.is_connected:
             line = await self.read_line(timeout=timeout)
             if line and line.startswith("$"):
