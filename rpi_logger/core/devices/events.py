@@ -233,10 +233,12 @@ def discovered_camera_device(
     location_hint: str | None = None,
 ) -> DeviceDiscoveredEvent:
     """Create a discovery event for a camera device (USB or CSI)."""
+    # Determine family based on interface type
+    family = DeviceFamily.CAMERA_USB if interface == InterfaceType.USB else DeviceFamily.CAMERA_CSI
     return DeviceDiscoveredEvent(
         device_id=device_id,
         device_type=device_type,
-        family=DeviceFamily.CAMERA,
+        family=family,
         interface=interface,
         raw_name=friendly_name,
         port=None,

@@ -214,7 +214,7 @@ class DeviceSystem:
             self._scanner_registry[(InterfaceType.USB, DeviceFamily.AUDIO)] = self._audio_scanner
 
         if self._usb_camera_scanner:
-            self._scanner_registry[(InterfaceType.USB, DeviceFamily.CAMERA)] = self._usb_camera_scanner
+            self._scanner_registry[(InterfaceType.USB, DeviceFamily.CAMERA_USB)] = self._usb_camera_scanner
 
         # Network devices
         if self._network_scanner:
@@ -230,7 +230,7 @@ class DeviceSystem:
 
         # CSI cameras (if available)
         if self._csi_scanner:
-            self._scanner_registry[(InterfaceType.CSI, DeviceFamily.CAMERA)] = self._csi_scanner
+            self._scanner_registry[(InterfaceType.CSI, DeviceFamily.CAMERA_CSI)] = self._csi_scanner
 
     # =========================================================================
     # Properties

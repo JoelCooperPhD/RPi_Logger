@@ -60,33 +60,39 @@ class DeviceCatalog:
             "Detection response task devices"
         ),
         FamilyMetadata(
-            DeviceFamily.CAMERA,
-            "Cameras",
+            DeviceFamily.CAMERA_USB,
+            "Cameras-USB",
             2,
-            "Camera devices (USB and CSI)"
+            "USB camera devices"
+        ),
+        FamilyMetadata(
+            DeviceFamily.CAMERA_CSI,
+            "Cameras-CSI",
+            3,
+            "Raspberry Pi CSI camera devices"
         ),
         FamilyMetadata(
             DeviceFamily.EYE_TRACKER,
             "EyeTracker-Neon",
-            3,
+            4,
             "Pupil Labs Neon eye tracker"
         ),
         FamilyMetadata(
             DeviceFamily.AUDIO,
             "Audio",
-            4,
+            5,
             "Audio input devices"
         ),
         FamilyMetadata(
             DeviceFamily.GPS,
             "GPS",
-            5,
+            6,
             "GPS receivers"
         ),
         FamilyMetadata(
             DeviceFamily.INTERNAL,
             "Notes",
-            6,
+            7,
             "Internal software-only modules"
         ),
     )

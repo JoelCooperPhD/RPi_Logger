@@ -28,7 +28,8 @@ class DeviceFamily(Enum):
     DRT = "DRT"
     EYE_TRACKER = "EyeTracker-Neon"
     AUDIO = "Audio"          # Microphones
-    CAMERA = "Camera"        # USB cameras and Pi CSI cameras
+    CAMERA_USB = "Camera-USB"    # USB cameras
+    CAMERA_CSI = "Camera-CSI"    # Raspberry Pi CSI cameras
     INTERNAL = "Internal"    # Software-only modules (no hardware)
     GPS = "GPS"              # GPS receivers
 
@@ -206,8 +207,8 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
     # USB Camera devices (discovered via /dev/video* enumeration)
     DeviceType.USB_CAMERA: DeviceSpec(
         device_type=DeviceType.USB_CAMERA,
-        family=DeviceFamily.CAMERA,
-        interface_type=InterfaceType.USB,  # USB interface, Camera device family
+        family=DeviceFamily.CAMERA_USB,
+        interface_type=InterfaceType.USB,
         vid=None,  # Cameras discovered via /dev/video* enumeration, not VID/PID
         pid=None,
         baudrate=0,  # Not a serial device
@@ -218,8 +219,8 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
     # Pi CSI Camera devices (discovered via Picamera2)
     DeviceType.PI_CAMERA: DeviceSpec(
         device_type=DeviceType.PI_CAMERA,
-        family=DeviceFamily.CAMERA,
-        interface_type=InterfaceType.CSI,  # CSI interface, Camera device family
+        family=DeviceFamily.CAMERA_CSI,
+        interface_type=InterfaceType.CSI,
         vid=None,  # Discovered via Picamera2.global_camera_info()
         pid=None,
         baudrate=0,  # Not a serial device
@@ -399,7 +400,8 @@ def get_connection_display_name(family: DeviceFamily) -> str:
         DeviceFamily.EYE_TRACKER: "EyeTracker-Neon",
         DeviceFamily.AUDIO: "Microphone",
         DeviceFamily.INTERNAL: "Notes",
-        DeviceFamily.CAMERA: "Camera",
+        DeviceFamily.CAMERA_USB: "Cameras-USB",
+        DeviceFamily.CAMERA_CSI: "Cameras-CSI",
         DeviceFamily.GPS: "GPS",
     }
     return display_names.get(family, family.value)
