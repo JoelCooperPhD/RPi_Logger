@@ -30,7 +30,7 @@ class APIController:
 
     This class wraps LoggerSystem and provides async methods for all
     operations that can be performed via the GUI. It maintains session
-    and trial state similar to HeadlessController.
+    and trial state.
     """
 
     def __init__(self, logger_system: LoggerSystem):

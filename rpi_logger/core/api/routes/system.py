@@ -1,6 +1,4 @@
-"""
-System Routes - Health, status, platform, shutdown endpoints.
-"""
+"""System Routes - Health, status, platform, shutdown endpoints."""
 
 from aiohttp import web
 
@@ -18,34 +16,24 @@ def setup_system_routes(app: web.Application, controller: APIController) -> None
 
 async def health_handler(request: web.Request) -> web.Response:
     """GET /api/v1/health - Health check."""
-    controller: APIController = request.app["controller"]
-    result = await controller.health_check()
-    return web.json_response(result)
+    return web.json_response(await request.app["controller"].health_check())
 
 
 async def status_handler(request: web.Request) -> web.Response:
     """GET /api/v1/status - Full system status."""
-    controller: APIController = request.app["controller"]
-    result = await controller.get_status()
-    return web.json_response(result)
+    return web.json_response(await request.app["controller"].get_status())
 
 
 async def platform_handler(request: web.Request) -> web.Response:
     """GET /api/v1/platform - Platform information."""
-    controller: APIController = request.app["controller"]
-    result = await controller.get_platform_info()
-    return web.json_response(result)
+    return web.json_response(await request.app["controller"].get_platform_info())
 
 
 async def system_info_handler(request: web.Request) -> web.Response:
     """GET /api/v1/info/system - Detailed system info (CPU, memory, disk)."""
-    controller: APIController = request.app["controller"]
-    result = await controller.get_system_info()
-    return web.json_response(result)
+    return web.json_response(await request.app["controller"].get_system_info())
 
 
 async def shutdown_handler(request: web.Request) -> web.Response:
     """POST /api/v1/shutdown - Initiate graceful shutdown."""
-    controller: APIController = request.app["controller"]
-    result = await controller.shutdown()
-    return web.json_response(result)
+    return web.json_response(await request.app["controller"].shutdown())

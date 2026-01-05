@@ -124,45 +124,37 @@ async def error_handling_middleware(request: web.Request, handler: Callable) -> 
 
 
 def create_json_response(data: dict, status: int = 200) -> web.Response:
-    """
-    Helper to create a JSON response with proper content type.
-
-    Args:
-        data: Dictionary to serialize as JSON
-        status: HTTP status code (default: 200)
-
-    Returns:
-        aiohttp Response with JSON body
-    """
+    """Create JSON response with proper content type."""
     return web.json_response(data, status=status)
 
 
-def create_error_response(
-    code: str,
-    message: str,
-    status: int = 400,
-    details: dict = None
-) -> web.Response:
-    """
-    Helper to create a standardized error response.
-
-    Args:
-        code: Error code (e.g., "MODULE_NOT_FOUND")
-        message: Human-readable error message
-        status: HTTP status code (default: 400)
-        details: Optional additional details
-
-    Returns:
-        aiohttp Response with error JSON
-    """
-    error = {
-        "error": {
-            "code": code,
-            "message": message,
-        },
-        "status": status,
-    }
+def create_error_response(code: str, message: str, status: int = 400, details: dict = None) -> web.Response:
+    """Create standardized error response."""
+    error = {"error": {"code": code, "message": message}, "status": status}
     if details:
         error["error"]["details"] = details
-
     return web.json_response(error, status=status)
+
+
+async def parse_json_body(request: web.Request, required: bool = True):
+    """Parse JSON body with error handling. Returns (body, error_response)."""
+    try:
+        body = await request.json()
+    except Exception:
+        if required:
+            return None, create_error_response("INVALID_BODY", "Request body must be valid JSON", status=400)
+        return {}, None
+    if required and not body:
+        return None, create_error_response("EMPTY_BODY", "Request body must contain data", status=400)
+    return body, None
+
+
+def result_to_response(result, not_found_code: str = "NOT_FOUND", not_found_msg: str = "Resource not found"):
+    """Convert controller result dict to response, handling success/error patterns."""
+    if result is None:
+        return create_error_response(not_found_code, not_found_msg, status=404)
+    if isinstance(result, dict) and result.get("error"):
+        return create_error_response(result.get("error_code", "ERROR"), result["error"], status=400)
+    if isinstance(result, dict) and "success" in result:
+        return web.json_response(result, status=200 if result["success"] else 400)
+    return web.json_response(result)

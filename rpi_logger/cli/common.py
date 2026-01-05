@@ -220,26 +220,21 @@ def parse_resolution(value: str) -> Tuple[int, int]:
         )
 
 
-def positive_int(value: str) -> int:
+def _positive_number(value: str, typ: type, name: str):
+    """Generic positive number validator for argparse."""
     try:
-        parsed = int(value)
+        parsed = typ(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("Value must be an integer") from exc
-
+        raise argparse.ArgumentTypeError(f"Value must be a {name}") from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError("Value must be positive")
     return parsed
 
+def positive_int(value: str) -> int:
+    return _positive_number(value, int, "integer")
 
 def positive_float(value: str) -> float:
-    try:
-        parsed = float(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("Value must be a number") from exc
-
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("Value must be positive")
-    return parsed
+    return _positive_number(value, float, "number")
 
 
 def ensure_directory(path: Path) -> Path:
@@ -247,41 +242,41 @@ def ensure_directory(path: Path) -> Path:
     return path
 
 
-def get_config_int(config: dict, key: str, default: int) -> int:
-    return int(config.get(key, default)) if key in config else default
+def _get_config_value(config: dict, key: str, default, converter=None):
+    """Generic config value getter with optional type conversion."""
+    if key not in config:
+        return default
+    value = config[key]
+    if converter:
+        try:
+            return converter(value)
+        except Exception:
+            return default
+    return value
 
+def get_config_int(config: dict, key: str, default: int) -> int:
+    return _get_config_value(config, key, default, int)
 
 def get_config_float(config: dict, key: str, default: float) -> float:
-    return float(config.get(key, default)) if key in config else default
-
+    return _get_config_value(config, key, default, float)
 
 def get_config_bool(config: dict, key: str, default: bool) -> bool:
-    if key in config:
-        value = config[key]
-        if isinstance(value, bool):
-            return value
-        return str(value).lower() in ('true', '1', 'yes', 'on')
-    return default
-
+    if key not in config:
+        return default
+    value = config[key]
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in ('true', '1', 'yes', 'on')
 
 def get_config_str(config: dict, key: str, default: str) -> str:
     return config.get(key, default)
 
-
 def get_config_path(config: dict, key: str, default: Path) -> Path:
     """Get a Path value from config, returning default if missing or invalid."""
-    if key not in config:
+    if key not in config or config[key] is None:
         return default
-    value = config[key]
-    if value is None:
-        return default
-    text = str(value).strip()
-    if not text:
-        return default
-    try:
-        return Path(text)
-    except Exception:
-        return default
+    text = str(config[key]).strip()
+    return Path(text) if text else default
 
 
 def add_config_to_args(

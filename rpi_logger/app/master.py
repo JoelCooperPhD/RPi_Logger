@@ -16,7 +16,6 @@ if _venv_path.exists() and str(_venv_path) not in sys.path:
 
 from rpi_logger.core import LoggerSystem, get_shutdown_coordinator
 from rpi_logger.core.ui import MainWindow
-from rpi_logger.core.cli import HeadlessController, InteractiveShell
 from rpi_logger.core.paths import CONFIG_PATH, MASTER_LOG_FILE, ensure_directories
 from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.core.logging_config import configure_logging
@@ -57,9 +56,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
     parser.add_argument(
         "--mode",
-        choices=['gui', 'interactive', 'cli'],
+        choices=['gui'],
         default='gui',
-        help="Execution mode: gui (default, Tkinter UI), interactive (command-line shell), cli (alias for interactive)"
+        help="Execution mode: gui (Tkinter UI)"
     )
 
     parser.add_argument(
@@ -196,60 +195,13 @@ async def run_gui(args, logger_system: LoggerSystem) -> None:
             await shutdown_coordinator.initiate_shutdown("finally block")
 
 
-async def run_cli(args, logger_system: LoggerSystem) -> None:
-    """Run in CLI interactive mode."""
-    logger.info("Starting in CLI interactive mode")
-
-    controller = HeadlessController(logger_system)
-    shell = InteractiveShell(controller)
-    shutdown_coordinator = get_shutdown_coordinator()
-    shutdown_task: Optional[asyncio.Task] = None
-
-    shutdown_coordinator.register_cleanup(
-        lambda: _cleanup_logger_system(logger_system)
-    )
-
-    # Start API server if enabled (cleanup registered inside _setup_api_server)
-    await _setup_api_server(args, logger_system, shutdown_coordinator)
-
-    loop = asyncio.get_running_loop()
-
-    def signal_handler():
-        nonlocal shutdown_task
-        if shutdown_task is None or shutdown_task.done():
-            shutdown_task = asyncio.create_task(
-                shutdown_coordinator.initiate_shutdown("signal")
-            )
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, signal_handler)
-        except NotImplementedError:
-            pass  # Windows doesn't support add_signal_handler
-
-    await controller.auto_start_modules()
-
-    try:
-        await shell.run()
-    except KeyboardInterrupt:
-        await shutdown_coordinator.initiate_shutdown("keyboard interrupt")
-    except Exception as e:
-        logger.error("Unexpected error: %s", e, exc_info=True)
-        await shutdown_coordinator.initiate_shutdown("exception")
-    finally:
-        if not shutdown_coordinator.is_complete:
-            await shutdown_coordinator.initiate_shutdown("finally block")
-
-
 async def main(argv: Optional[list[str]] = None) -> None:
     """
     Main entry point for the Logger system.
 
-    Supports two modes:
-    - GUI: Tkinter-based graphical interface (default)
-    - CLI/Interactive: Command-line shell for remote control
+    Runs in GUI mode with Tkinter-based graphical interface.
 
-    Optional REST API (--api flag) can run alongside either mode,
+    Optional REST API (--api flag) can run alongside the GUI,
     providing HTTP endpoints for programmatic control.
 
     Shutdown Sequence:
@@ -300,12 +252,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
     for module in modules:
         logger.info("  - %s: %s", module.name, module.entry_point)
 
-    # Route to appropriate mode
-    mode = args.mode
-    if mode in ('cli', 'interactive'):
-        await run_cli(args, logger_system)
-    else:
-        await run_gui(args, logger_system)
+    await run_gui(args, logger_system)
 
     logger.info("=" * 60)
     logger.info("Logger - Master System Stopped")

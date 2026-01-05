@@ -1,7 +1,1 @@
-from .headless_controller import HeadlessController
-from .interactive_shell import InteractiveShell
-
-__all__ = [
-    'HeadlessController',
-    'InteractiveShell',
-]
+# CLI module - placeholder for future CLI utilities
