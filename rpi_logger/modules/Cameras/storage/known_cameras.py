@@ -230,6 +230,54 @@ class KnownCamerasCache:
         return result
 
     # ------------------------------------------------------------------
+    # Model association (for fast startup)
+
+    async def get_model_key(self, camera_key: str) -> Optional[str]:
+        """Get the cached model key for a camera stable_id.
+
+        This enables fast startup by skipping hardware probing when we can
+        trust that the same camera is still connected at the same port.
+        """
+        await self.load()
+        entry = self._entries.get(camera_key)
+        if not entry:
+            return None
+        return entry.get("model_key")
+
+    async def get_fingerprint(self, camera_key: str) -> Optional[str]:
+        """Get the cached capability fingerprint for a camera."""
+        await self.load()
+        entry = self._entries.get(camera_key)
+        if not entry:
+            return None
+        return entry.get("fingerprint")
+
+    async def set_model_association(
+        self, camera_key: str, model_key: str, fingerprint: str
+    ) -> None:
+        """Store the association between a stable_id and a camera model.
+
+        This enables fast startup for known cameras by recording which model
+        was last seen at a given USB bus-port path (stable_id).
+
+        Args:
+            camera_key: The camera's stable identifier (e.g., "usb:usb1-1-2")
+            model_key: The key in camera_models.json (e.g., "arducam_usb_camera")
+            fingerprint: Hash of capabilities for verification
+        """
+        await self.load()
+        async with self._lock:
+            if camera_key not in self._entries:
+                self._entries[camera_key] = {"updated_at": time.time()}
+            self._entries[camera_key]["model_key"] = model_key
+            self._entries[camera_key]["fingerprint"] = fingerprint
+            self._entries[camera_key]["updated_at"] = time.time()
+            await self._write_file(self._entries)
+            self._logger.debug(
+                "Stored model association for %s: model=%s", camera_key, model_key
+            )
+
+    # ------------------------------------------------------------------
     # IO helpers
 
     async def _read_file(self) -> Dict[str, dict]:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fnmatch
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -304,56 +305,99 @@ class CamerasRuntime(ModuleRuntime):
                 self.logger.debug("sounddevice not available - webcam audio disabled")
 
         try:
-            # Check model database for cached capabilities
+            # Extract model name and camera key for lookups
             model_name = extract_model_name(self._descriptor)
-            known_model = self.model_db.lookup(model_name, camera_type) if model_name else None
+            camera_key = self._camera_id.key  # e.g., "usb:usb1-1-2"
 
-            # Always probe to verify capabilities (Phase 7: detect hardware swaps)
-            probed_caps = await self._probe_camera(camera_type, stable_id, dev_path)
+            # Check for fast path: trusted cache for this stable_id
+            cached_model_key = await self.cache.get_model_key(camera_key)
+            use_fast_path = False
+            known_model = None
 
-            if known_model and probed_caps:
-                # Compare fingerprints to detect hardware changes
-                cached_caps = copy_capabilities(known_model.capabilities)
-                cached_validator = CapabilityValidator(cached_caps)
-                probed_validator = CapabilityValidator(probed_caps)
+            if cached_model_key and model_name:
+                # Verify the cached model still matches the connected camera
+                known_model = self.model_db.get(cached_model_key)
+                if known_model:
+                    # Check if current model name matches cached model's patterns
+                    for pattern in known_model.match_patterns:
+                        if fnmatch.fnmatch(model_name, pattern):
+                            # Model matches - check if cache is trustworthy
+                            if self.model_db.can_trust_cache(cached_model_key):
+                                use_fast_path = True
+                            break
 
-                if cached_validator.fingerprint() == probed_validator.fingerprint():
-                    # Fingerprint matches - use cached (may have more complete data)
-                    self._capabilities = cached_caps
-                    self._known_model = known_model
-                    self.logger.info(
-                        "Verified capabilities for '%s' (model: %s)",
-                        model_name, known_model.key
-                    )
-                else:
-                    # Fingerprint mismatch - different hardware, use probed
-                    self.logger.warning(
-                        "Capability mismatch for '%s' - camera hardware may have changed. "
-                        "Using probed capabilities.",
-                        model_name
-                    )
-                    self._capabilities = probed_caps
-                    self._known_model = self.model_db.add_model(
-                        model_name, camera_type, probed_caps, force_update=True
-                    )
-            elif probed_caps:
-                # New camera - use probed capabilities
-                self._capabilities = probed_caps
-                if model_name:
-                    self._known_model = self.model_db.add_model(model_name, camera_type, probed_caps)
-                    self.logger.info("Cached new camera model: %s", model_name)
-            elif known_model:
-                # Probe failed but we have cached - use cached as fallback
+            if use_fast_path:
+                # FAST PATH: Skip probing, use cached capabilities
                 self._capabilities = copy_capabilities(known_model.capabilities)
                 self._known_model = known_model
-                self.logger.warning(
-                    "Probe failed, using cached capabilities for '%s'",
-                    model_name
+                self.logger.info(
+                    "FAST PATH: Using cached capabilities for '%s' "
+                    "(model: %s, stable_id: %s)",
+                    model_name, known_model.key, stable_id
                 )
             else:
-                # No capabilities available
-                self.logger.warning("No capabilities available for camera")
-                self._capabilities = None
+                # SLOW PATH: Must probe the camera
+                self.logger.info(
+                    "SLOW PATH: Probing camera '%s' (stable_id: %s, cached_key: %s)",
+                    model_name, stable_id, cached_model_key
+                )
+
+                # Lookup model by name (may be different from cached)
+                known_model = self.model_db.lookup(model_name, camera_type) if model_name else None
+
+                # Probe camera capabilities
+                probed_caps = await self._probe_camera(camera_type, stable_id, dev_path)
+
+                if known_model and probed_caps:
+                    # Compare fingerprints to detect hardware changes
+                    cached_caps = copy_capabilities(known_model.capabilities)
+                    cached_validator = CapabilityValidator(cached_caps)
+                    probed_validator = CapabilityValidator(probed_caps)
+
+                    if cached_validator.fingerprint() == probed_validator.fingerprint():
+                        # Fingerprint matches - use cached (may have more complete data)
+                        self._capabilities = cached_caps
+                        self._known_model = known_model
+                        self.logger.info(
+                            "Verified capabilities for '%s' (model: %s)",
+                            model_name, known_model.key
+                        )
+                    else:
+                        # Fingerprint mismatch - different hardware, use probed
+                        self.logger.warning(
+                            "Capability mismatch for '%s' - camera hardware may have changed. "
+                            "Using probed capabilities.",
+                            model_name
+                        )
+                        self._capabilities = probed_caps
+                        self._known_model = self.model_db.add_model(
+                            model_name, camera_type, probed_caps, force_update=True
+                        )
+                elif probed_caps:
+                    # New camera - use probed capabilities
+                    self._capabilities = probed_caps
+                    if model_name:
+                        self._known_model = self.model_db.add_model(model_name, camera_type, probed_caps)
+                        self.logger.info("Cached new camera model: %s", model_name)
+                elif known_model:
+                    # Probe failed but we have cached - use cached as fallback
+                    self._capabilities = copy_capabilities(known_model.capabilities)
+                    self._known_model = known_model
+                    self.logger.warning(
+                        "Probe failed, using cached capabilities for '%s'",
+                        model_name
+                    )
+                else:
+                    # No capabilities available
+                    self.logger.warning("No capabilities available for camera")
+                    self._capabilities = None
+
+                # Store model association for future fast paths
+                if self._known_model and self._capabilities:
+                    fingerprint = CapabilityValidator(self._capabilities).fingerprint()
+                    await self.cache.set_model_association(
+                        camera_key, self._known_model.key, fingerprint
+                    )
 
             # Create validator for capability enforcement
             if self._capabilities:
@@ -381,6 +425,9 @@ class CamerasRuntime(ModuleRuntime):
                     sensor_info=self._known_model.sensor_info if self._known_model else None,
                     display_name=self._known_model.name if self._known_model else self._camera_name,
                 )
+
+            # Notify view about audio sibling (shows/hides audio recording checkbox)
+            self.view.set_has_audio_sibling(self._audio_info is not None)
 
             # Update window title
             if self.ctx.view and display_name:

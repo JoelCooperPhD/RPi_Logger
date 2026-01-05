@@ -274,6 +274,33 @@ class CameraModelDatabase:
         self.load()
         return list(self._models.values())
 
+    def can_trust_cache(self, model_key: str) -> bool:
+        """Check if a model's cached capabilities are complete enough to skip probing.
+
+        This is used for fast startup - if we have good cached capabilities for a
+        known camera model, we can skip the expensive hardware probing step.
+
+        Args:
+            model_key: The key in the model database (e.g., "arducam_usb_camera")
+
+        Returns:
+            True if the cached capabilities are trustworthy, False otherwise.
+        """
+        self.load()
+        model = self._models.get(model_key)
+        if not model:
+            return False
+
+        caps = model.capabilities
+        if not caps:
+            return False
+
+        # Require at least one validated mode
+        if not caps.modes:
+            return False
+
+        return True
+
     # -------------------------------------------------------------------------
     # Key normalization
 
