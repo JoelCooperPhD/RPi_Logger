@@ -12,9 +12,12 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, TYPE_CHECKING
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
+
+if TYPE_CHECKING:
+    from rpi_logger.modules.base.camera_validator import CapabilityValidator
 from rpi_logger.modules.base.camera_types import (
     CameraId,
     CameraRuntimeState,
@@ -197,37 +200,61 @@ class KnownCamerasCache:
     # ------------------------------------------------------------------
     # Per-camera settings
 
-    async def get_settings(self, camera_key: str) -> Optional[Dict[str, Any]]:
+    async def get_settings(
+        self,
+        camera_key: str,
+        *,
+        validator: Optional["CapabilityValidator"] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Get stored settings for a camera.
 
         If no settings exist but legacy selected_configs do, migrates them
         to the new settings format automatically.
+
+        Args:
+            camera_key: The camera identifier key.
+            validator: Optional CapabilityValidator to validate settings against
+                      camera capabilities before returning.
+
+        Returns:
+            Settings dict, optionally validated against capabilities.
         """
         await self.load()
         entry = self._entries.get(camera_key)
         if not entry:
             return None
 
+        settings: Optional[Dict[str, Any]] = None
+
         # Return existing settings if present
         if "settings" in entry:
-            return entry.get("settings")
+            settings = entry.get("settings")
+        else:
+            # Migrate from legacy selected_configs if present
+            state = entry.get("state")
+            if state and isinstance(state, dict):
+                selected_configs = state.get("selected_configs")
+                if selected_configs:
+                    migrated = self._migrate_selected_configs(selected_configs)
+                    if migrated:
+                        self._logger.info(
+                            "Migrated selected_configs to settings for %s", camera_key
+                        )
+                        # Store migrated settings (don't await inside get, schedule write)
+                        entry["settings"] = migrated
+                        asyncio.create_task(self._save_migration(camera_key, migrated))
+                        settings = migrated
 
-        # Migrate from legacy selected_configs if present
-        state = entry.get("state")
-        if state and isinstance(state, dict):
-            selected_configs = state.get("selected_configs")
-            if selected_configs:
-                migrated = self._migrate_selected_configs(selected_configs)
-                if migrated:
-                    self._logger.info(
-                        "Migrated selected_configs to settings for %s", camera_key
-                    )
-                    # Store migrated settings (don't await inside get, schedule write)
-                    entry["settings"] = migrated
-                    asyncio.create_task(self._save_migration(camera_key, migrated))
-                    return migrated
+        # Validate settings against capabilities if validator provided
+        if settings and validator:
+            validated = validator.validate_settings(settings)
+            if validated != settings:
+                self._logger.debug(
+                    "Validated settings for %s: %s -> %s", camera_key, settings, validated
+                )
+            return validated
 
-        return None
+        return settings
 
     def _migrate_selected_configs(self, selected_configs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Convert legacy selected_configs format to settings format."""
@@ -312,9 +339,33 @@ class KnownCamerasCache:
 
         return False
 
-    async def set_settings(self, camera_key: str, settings: Dict[str, Any]) -> None:
-        """Store settings for a camera."""
+    async def set_settings(
+        self,
+        camera_key: str,
+        settings: Dict[str, Any],
+        *,
+        validator: Optional["CapabilityValidator"] = None,
+    ) -> None:
+        """Store settings for a camera.
+
+        Args:
+            camera_key: The camera identifier key.
+            settings: Settings dict to store.
+            validator: Optional CapabilityValidator to validate settings against
+                      camera capabilities before storing.
+        """
         await self.load()
+
+        # Validate settings against capabilities if validator provided
+        if validator:
+            validated = validator.validate_settings(settings)
+            if validated != settings:
+                self._logger.debug(
+                    "Validated settings before save for %s: %s -> %s",
+                    camera_key, settings, validated
+                )
+            settings = validated
+
         async with self._lock:
             if camera_key not in self._entries:
                 self._entries[camera_key] = {"updated_at": time.time()}

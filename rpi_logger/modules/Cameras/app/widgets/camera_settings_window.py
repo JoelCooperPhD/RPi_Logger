@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
+from rpi_logger.modules.base.camera_validator import CapabilityValidator
 
 try:  # pragma: no cover - GUI availability varies
     import tkinter as tk  # type: ignore
@@ -118,8 +119,9 @@ class CameraSettingsWindow:
         self._latest: Dict[str, Dict[str, str]] = {}
         self._options: Dict[str, Dict[str, List[str]]] = {}
 
-        # Capabilities per camera
+        # Capabilities and validators per camera
         self._capabilities: Dict[str, "CameraCapabilities"] = {}
+        self._validators: Dict[str, CapabilityValidator] = {}
         self._camera_info: Dict[str, Dict[str, Any]] = {}  # model, backend, mode_count, sensor_info
 
         # UI widgets (created lazily)
@@ -218,6 +220,10 @@ class CameraSettingsWindow:
         controls_changed = old_controls != new_controls
 
         self._capabilities[camera_id] = capabilities
+
+        # Create validator for this camera's capabilities
+        if capabilities:
+            self._validators[camera_id] = CapabilityValidator(capabilities)
 
         # Format backend nicely: "usb" -> "USB", "picam" -> "Pi Camera"
         backend_display = backend or "Unknown"
@@ -989,8 +995,21 @@ class CameraSettingsWindow:
         }
 
     def _clamp_settings_to_options(self, camera_id: str) -> None:
-        """Ensure stored settings are within available options."""
+        """Ensure stored settings are within available options.
+
+        Uses CapabilityValidator for proper validation if available,
+        otherwise falls back to options-based clamping.
+        """
         latest = self._latest.setdefault(camera_id, dict(DEFAULT_SETTINGS))
+
+        # Use validator if available for proper capability-based validation
+        validator = self._validators.get(camera_id)
+        if validator:
+            validated = validator.validate_settings(latest)
+            latest.update(validated)
+            return
+
+        # Fallback: use available options for clamping
         opts = self._options.get(camera_id, {})
 
         preview_res = opts.get("preview_resolutions", [])

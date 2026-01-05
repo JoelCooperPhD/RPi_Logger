@@ -10,6 +10,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
+from rpi_logger.modules.base.camera_validator import CapabilityValidator
 from rpi_logger.modules.Cameras.app.widgets.camera_settings_window import (
     CameraSettingsWindow,
     DEFAULT_SETTINGS,
@@ -357,27 +358,20 @@ class CameraView:
         sensor_info: Optional[Dict[str, Any]] = None,
         display_name: Optional[str] = None,
     ) -> None:
-        """Update camera capabilities and refresh settings options."""
+        """Update camera capabilities and refresh settings options.
+
+        Uses CapabilityValidator to ensure UI only shows valid options.
+        """
         if not self._camera_id or not capabilities:
             return
 
-        # Build resolution/FPS options from capabilities
-        modes = getattr(capabilities, "modes", []) or []
-        resolutions = set()
-        fps_values = set()
+        # Create validator to extract valid options from capabilities
+        validator = CapabilityValidator(capabilities)
 
-        for mode in modes:
-            w = getattr(mode, "width", None)
-            h = getattr(mode, "height", None)
-            fps = getattr(mode, "fps", None)
-            if w and h:
-                resolutions.add(f"{w}x{h}")
-            if fps:
-                fps_values.add(str(int(fps)))
-
-        preview_res = sorted(resolutions, key=lambda r: -int(r.split("x")[0]))
+        # Get resolution and FPS options from validator
+        preview_res = validator.available_resolutions()
         record_res = preview_res.copy()
-        fps_list = sorted(fps_values, key=lambda f: int(f))
+        fps_list = validator.all_fps_values()
 
         self._camera_options = {
             "preview_resolutions": preview_res,

@@ -529,20 +529,33 @@ def _safe_capability_source(raw: Any) -> CapabilitySource:
 
 
 def _align_selected_modes(capabilities: CameraCapabilities, selected: SelectedConfigs) -> None:
-    """Ensure selected modes reference objects contained in capabilities."""
+    """Ensure selected modes reference objects contained in capabilities.
 
+    If a selected mode doesn't match any capability, falls back to the
+    default mode or first available mode from capabilities. Never adds
+    invalid modes to the capabilities list.
+    """
     preview_match = capabilities.find_matching(selected.preview.mode)
     if preview_match:
         selected.preview.mode = preview_match
     else:
-        capabilities.modes.append(selected.preview.mode)
+        # Fall back to default or first available mode
+        fallback = capabilities.default_preview_mode or (
+            capabilities.modes[0] if capabilities.modes else None
+        )
+        if fallback:
+            selected.preview.mode = fallback
 
     record_match = capabilities.find_matching(selected.record.mode)
     if record_match:
         selected.record.mode = record_match
     else:
-        capabilities.modes.append(selected.record.mode)
-    capabilities.dedupe()
+        # Fall back to default or first available mode
+        fallback = capabilities.default_record_mode or (
+            capabilities.modes[0] if capabilities.modes else None
+        )
+        if fallback:
+            selected.record.mode = fallback
 
 
 __all__ = [

@@ -31,6 +31,7 @@ from rpi_logger.modules.Cameras.camera_models import (
     copy_capabilities,
 )
 from rpi_logger.modules.Cameras.config import CamerasConfig
+from rpi_logger.modules.base.camera_validator import CapabilityValidator
 from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
 from rpi_logger.modules.Cameras.storage.session_paths import resolve_session_paths
 from rpi_logger.modules.Cameras.app.view import CameraView
@@ -67,6 +68,7 @@ class CamerasRuntime(ModuleRuntime):
         self._camera_id: Optional[CameraId] = None
         self._descriptor: Optional[CameraDescriptor] = None
         self._capabilities: Optional[CameraCapabilities] = None
+        self._validator: Optional[CapabilityValidator] = None  # For settings validation
         self._capture: Optional[CaptureHandle] = None
         self._encoder: Optional[Encoder] = None
         self._is_assigned: bool = False
@@ -275,22 +277,60 @@ class CamerasRuntime(ModuleRuntime):
             model_name = extract_model_name(self._descriptor)
             known_model = self.model_db.lookup(model_name, camera_type) if model_name else None
 
-            if known_model:
-                # Use cached capabilities - skip probing
+            # Always probe to verify capabilities (Phase 7: detect hardware swaps)
+            probed_caps = await self._probe_camera(camera_type, stable_id, dev_path)
+
+            if known_model and probed_caps:
+                # Compare fingerprints to detect hardware changes
+                cached_caps = copy_capabilities(known_model.capabilities)
+                cached_validator = CapabilityValidator(cached_caps)
+                probed_validator = CapabilityValidator(probed_caps)
+
+                if cached_validator.fingerprint() == probed_validator.fingerprint():
+                    # Fingerprint matches - use cached (may have more complete data)
+                    self._capabilities = cached_caps
+                    self._known_model = known_model
+                    self.logger.info(
+                        "Verified capabilities for '%s' (model: %s)",
+                        model_name, known_model.key
+                    )
+                else:
+                    # Fingerprint mismatch - different hardware, use probed
+                    self.logger.warning(
+                        "Capability mismatch for '%s' - camera hardware may have changed. "
+                        "Using probed capabilities.",
+                        model_name
+                    )
+                    self._capabilities = probed_caps
+                    self._known_model = self.model_db.add_model(
+                        model_name, camera_type, probed_caps, force_update=True
+                    )
+            elif probed_caps:
+                # New camera - use probed capabilities
+                self._capabilities = probed_caps
+                if model_name:
+                    self._known_model = self.model_db.add_model(model_name, camera_type, probed_caps)
+                    self.logger.info("Cached new camera model: %s", model_name)
+            elif known_model:
+                # Probe failed but we have cached - use cached as fallback
                 self._capabilities = copy_capabilities(known_model.capabilities)
                 self._known_model = known_model
-                self.logger.info(
-                    "Using cached capabilities for '%s' (model: %s)",
-                    model_name, known_model.key
+                self.logger.warning(
+                    "Probe failed, using cached capabilities for '%s'",
+                    model_name
                 )
             else:
-                # Probe camera and cache for future
-                self._capabilities = await self._probe_camera(camera_type, stable_id, dev_path)
-                if self._capabilities and model_name:
-                    self._known_model = self.model_db.add_model(model_name, camera_type, self._capabilities)
-                    self.logger.info("Cached new camera model: %s", model_name)
+                # No capabilities available
+                self.logger.warning("No capabilities available for camera")
+                self._capabilities = None
 
-            # Determine capture settings from capabilities or cache
+            # Create validator for capability enforcement
+            if self._capabilities:
+                self._validator = CapabilityValidator(self._capabilities)
+            else:
+                self._validator = None
+
+            # Determine capture settings from capabilities (validated)
             self._resolution, self._fps = await self._get_capture_settings()
 
             # Initialize capture
@@ -350,44 +390,71 @@ class CamerasRuntime(ModuleRuntime):
             return None
 
     async def _get_capture_settings(self) -> tuple[tuple[int, int], float]:
-        """Determine resolution and FPS from capabilities or cache."""
-        # Try cached settings first
+        """Determine resolution and FPS from capabilities or cache.
+
+        Settings are validated against capabilities using the validator.
+        Invalid cached settings are corrected to valid capability modes.
+        """
+        # If no validator (no capabilities), use safe fallback
+        if not self._validator:
+            self.logger.info("No capabilities - using default settings: 1280x720 @ 30 fps")
+            return (1280, 720), 30.0
+
+        # Try cached settings, validated through validator
         if self._camera_id:
             cached = await self.cache.get_settings(self._camera_id.key)
             if cached:
-                res_str = cached.get("record_resolution")
-                fps_str = cached.get("record_fps")
-                if res_str and "x" in res_str:
+                # Validate cached settings against capabilities
+                validated = self._validator.validate_settings(cached)
+                res_str = validated.get("record_resolution")
+                fps_str = validated.get("record_fps")
+
+                if res_str and "x" in res_str and fps_str:
                     try:
                         w, h = map(int, res_str.split("x"))
                         resolution = (w, h)
-                        fps = float(fps_str) if fps_str else 30.0
-                        self.logger.info("Using cached settings: %dx%d @ %.1f fps",
-                                        w, h, fps)
+                        fps = float(fps_str)
+
+                        # Log if settings were corrected
+                        orig_res = cached.get("record_resolution", "")
+                        orig_fps = cached.get("record_fps", "")
+                        if orig_res != res_str or orig_fps != fps_str:
+                            self.logger.info(
+                                "Cached settings corrected: %s@%s -> %dx%d @ %.1f fps",
+                                orig_res, orig_fps, w, h, fps
+                            )
+                        else:
+                            self.logger.info("Using cached settings: %dx%d @ %.1f fps", w, h, fps)
                         return resolution, fps
                     except Exception:
                         pass
 
-        # Fall back to capabilities
-        if self._capabilities and self._capabilities.modes:
-            # Pick highest resolution mode
-            best = max(self._capabilities.modes, key=lambda m: m.width * m.height)
-            resolution = (best.width, best.height)
+        # Fall back to capability defaults
+        if self._capabilities:
+            default_mode = self._capabilities.default_record_mode
+            if default_mode:
+                self.logger.info(
+                    "Using capability default: %dx%d @ %.1f fps",
+                    default_mode.width, default_mode.height, default_mode.fps
+                )
+                return default_mode.size, default_mode.fps
 
-            # Pick highest FPS for that resolution
-            matching = [m for m in self._capabilities.modes
-                       if (m.width, m.height) == resolution]
-            if matching:
-                fps = max(m.fps for m in matching)
-            else:
-                fps = best.fps
+            # No default - pick highest resolution, highest fps
+            if self._capabilities.modes:
+                best = max(self._capabilities.modes, key=lambda m: m.width * m.height)
+                resolution = (best.width, best.height)
 
-            self.logger.info("Using probed settings: %dx%d @ %.1f fps",
-                            resolution[0], resolution[1], fps)
-            return resolution, fps
+                # Pick highest FPS for that resolution
+                matching = [m for m in self._capabilities.modes
+                           if (m.width, m.height) == resolution]
+                fps = max(m.fps for m in matching) if matching else best.fps
 
-        # Default fallback
-        self.logger.info("Using default settings: 1280x720 @ 30 fps")
+                self.logger.info("Using best available: %dx%d @ %.1f fps",
+                                resolution[0], resolution[1], fps)
+                return resolution, fps
+
+        # Absolute fallback (shouldn't reach here if validator exists)
+        self.logger.warning("No valid modes found - using fallback: 1280x720 @ 30 fps")
         return (1280, 720), 30.0
 
     async def _init_capture(
@@ -495,13 +562,24 @@ class CamerasRuntime(ModuleRuntime):
     # ------------------------------------------------------------------ Settings Handlers
 
     def _on_apply_config(self, camera_id: str, settings: Dict[str, str]) -> None:
-        """Handle resolution/FPS config change from settings window."""
+        """Handle resolution/FPS config change from settings window.
+
+        Settings are validated against capabilities before being applied.
+        """
         self.logger.debug("_on_apply_config called: camera_id=%s, self._camera_id=%s",
                          camera_id, self._camera_id.key if self._camera_id else None)
         if camera_id != (self._camera_id.key if self._camera_id else None):
             self.logger.warning("Config apply for wrong camera: %s (expected %s)",
                               camera_id, self._camera_id.key if self._camera_id else None)
             return
+
+        # Validate settings against capabilities
+        if self._validator:
+            validated_settings = self._validator.validate_settings(settings)
+            if validated_settings != settings:
+                self.logger.info("Settings adjusted for capability compliance: %s -> %s",
+                               settings, validated_settings)
+            settings = validated_settings
 
         self.logger.debug("Applying config: %s", settings)
 
@@ -545,7 +623,7 @@ class CamerasRuntime(ModuleRuntime):
 
         self._overlay_enabled = settings.get("overlay", "true").lower() == "true"
 
-        # Save to cache
+        # Save validated settings to cache
         asyncio.create_task(self._save_settings_to_cache(settings))
 
         # Reinitialize capture only if record settings changed (resolution/fps affect capture)
@@ -597,10 +675,23 @@ class CamerasRuntime(ModuleRuntime):
 
 
     def _on_control_change(self, camera_id: str, control_name: str, value: Any) -> None:
-        """Handle camera control change (brightness, contrast, etc.)."""
+        """Handle camera control change (brightness, contrast, etc.).
+
+        Control values are validated/clamped against capability ranges.
+        """
         if camera_id != (self._camera_id.key if self._camera_id else None):
             self.logger.warning("Control change for wrong camera: %s", camera_id)
             return
+
+        # Validate and clamp control value against capabilities
+        if self._validator:
+            result = self._validator.validate_control(control_name, value)
+            if not result.valid:
+                self.logger.info(
+                    "Control %s value %s corrected to %s: %s",
+                    control_name, value, result.corrected_value, result.reason
+                )
+            value = result.corrected_value
 
         self.logger.debug("Control change: %s = %s", control_name, value)
 
@@ -608,7 +699,7 @@ class CamerasRuntime(ModuleRuntime):
             self.logger.warning("Cannot apply control - no capture active")
             return
 
-        # Apply control to capture backend
+        # Apply validated control to capture backend
         try:
             if hasattr(self._capture, "set_control"):
                 self._capture.set_control(control_name, value)
@@ -627,7 +718,7 @@ class CamerasRuntime(ModuleRuntime):
         asyncio.create_task(self._do_reprobe())
 
     async def _do_reprobe(self) -> None:
-        """Perform camera reprobe."""
+        """Perform camera reprobe and update validator."""
         if not self._camera_id:
             return
 
@@ -638,6 +729,9 @@ class CamerasRuntime(ModuleRuntime):
         try:
             self._capabilities = await self._probe_camera(camera_type, stable_id, dev_path)
             if self._capabilities:
+                # Recreate validator with new capabilities
+                self._validator = CapabilityValidator(self._capabilities)
+
                 self.view.set_camera_info(self._camera_name or self._camera_id.key, self._capabilities)
                 self.view.set_camera_id(self._camera_id.key)
                 self.view.update_camera_capabilities(
@@ -647,6 +741,7 @@ class CamerasRuntime(ModuleRuntime):
                     sensor_info=self._known_model.sensor_info if self._known_model else None,
                     display_name=self._known_model.name if self._known_model else self._camera_name,
                 )
+                self.logger.info("Reprobe complete - validator updated")
             else:
                 self.logger.warning("Reprobe failed - no capabilities returned")
         except Exception as e:
