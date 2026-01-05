@@ -95,11 +95,7 @@ class KnownCamerasCache:
     # Per-camera settings
 
     async def get_settings(self, camera_key: str) -> Optional[Dict[str, Any]]:
-        """Get stored settings for a camera.
-
-        If no settings exist but legacy selected_configs do, migrates them
-        to the new settings format automatically.
-        """
+        """Get settings for camera, auto-migrating legacy selected_configs if needed."""
         await self.load()
         entry = self._entries.get(camera_key)
         if not entry:
@@ -169,18 +165,7 @@ class KnownCamerasCache:
                 await self._write_file(self._entries)
 
     def _cleanup_legacy_entries(self, entries: Dict[str, dict]) -> tuple[Dict[str, dict], list[str]]:
-        """Remove entries with legacy/unstable camera IDs.
-
-        Legacy entries include:
-        - usb:/dev/video* - Uses unstable device path instead of USB bus path
-        - picam:<sensor_model> - Uses sensor model instead of sensor index
-
-        These entries were created by older code and will never match current
-        camera assignments, so they just waste space.
-
-        Returns:
-            Tuple of (cleaned_entries, removed_keys)
-        """
+        """Remove entries with unstable IDs (usb:/dev/video*, picam:<sensor_model>)."""
         cleaned: Dict[str, dict] = {}
         removed: list[str] = []
 
@@ -233,11 +218,7 @@ class KnownCamerasCache:
     # Model association (for fast startup)
 
     async def get_model_key(self, camera_key: str) -> Optional[str]:
-        """Get the cached model key for a camera stable_id.
-
-        This enables fast startup by skipping hardware probing when we can
-        trust that the same camera is still connected at the same port.
-        """
+        """Get cached model key for fast startup (skip probing if same camera)."""
         await self.load()
         entry = self._entries.get(camera_key)
         if not entry:
@@ -255,16 +236,7 @@ class KnownCamerasCache:
     async def set_model_association(
         self, camera_key: str, model_key: str, fingerprint: str
     ) -> None:
-        """Store the association between a stable_id and a camera model.
-
-        This enables fast startup for known cameras by recording which model
-        was last seen at a given USB bus-port path (stable_id).
-
-        Args:
-            camera_key: The camera's stable identifier (e.g., "usb:usb1-1-2")
-            model_key: The key in camera_models.json (e.g., "arducam_usb_camera")
-            fingerprint: Hash of capabilities for verification
-        """
+        """Store stable_id→model mapping for fast startup."""
         await self.load()
         async with self._lock:
             if camera_key not in self._entries:

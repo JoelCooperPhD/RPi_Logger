@@ -115,24 +115,9 @@ class CamerasConfig:
         *,
         logger: LoggerLike = None,
     ) -> "CamerasConfig":
-        """Build config from ScopedPreferences (unified API).
-
-        This is the primary entry point following the unified config pattern.
-        It wraps the preferences in a dict-like interface and delegates to
-        the existing load_config() function.
-
-        Args:
-            prefs: Scoped preferences for this module.
-            args: Optional argparse namespace for CLI overrides.
-            logger: Optional logger for debug messages.
-
-        Returns:
-            CamerasConfig instance.
-        """
-        # Build a snapshot dict from ScopedPreferences
+        """Build config from ScopedPreferences (unified API)."""
         merged: Dict[str, Any] = {}
         if prefs:
-            # Get all keys from the preferences
             snapshot = prefs.snapshot() if hasattr(prefs, 'snapshot') else {}
             merged.update(snapshot)
 
@@ -148,76 +133,7 @@ class CamerasConfig:
                     if val is not None:
                         merged[config_key] = val
 
-        # Use the existing load_config internals but with merged dict
-        log = ensure_structured_logger(logger, fallback_name=__name__)
-
-        preview = PreviewSettings(
-            resolution=_coerce(merged, ("preview.resolution", "preview_resolution", "stub_prefs.preview_resolution"),
-                              _to_resolution, DEFAULT_PREVIEW_RESOLUTION, log),
-            fps_cap=_coerce(merged, ("preview.fps_cap", "preview_fps", "stub_prefs.preview_fps"),
-                           _to_optional_float, DEFAULT_PREVIEW_FPS, log),
-            pixel_format=_coerce(merged, ("preview.format", "preview_format", "stub_prefs.preview_format"),
-                                _to_str, DEFAULT_PREVIEW_FORMAT),
-            overlay=_coerce(merged, ("preview.overlay", "overlay_enabled", "stub_prefs.overlay_enabled"),
-                           _to_bool, DEFAULT_PREVIEW_OVERLAY),
-            auto_start=_coerce(merged, ("ui.auto_start_preview", "auto_start_preview"),
-                              _to_bool, DEFAULT_UI_AUTO_START_PREVIEW),
-        )
-
-        record = RecordSettings(
-            resolution=_coerce(merged, ("record.resolution", "record_resolution", "stub_prefs.record_resolution"),
-                              _to_resolution, DEFAULT_RECORD_RESOLUTION, log),
-            fps_cap=_coerce(merged, ("record.fps_cap", "record_fps", "stub_prefs.record_fps"),
-                           _to_optional_float, DEFAULT_RECORD_FPS, log),
-            pixel_format=_coerce(merged, ("record.format", "record_format", "stub_prefs.record_format"),
-                                _to_str, DEFAULT_RECORD_FORMAT),
-            overlay=_coerce(merged, ("record.overlay",), _to_bool, DEFAULT_RECORD_OVERLAY),
-        )
-
-        guard = GuardSettings(
-            disk_free_gb_min=_coerce(merged, ("guard.disk_free_gb_min",), _to_float, DEFAULT_GUARD_DISK_FREE_GB),
-            check_interval_ms=_coerce(merged, ("guard.check_interval_ms",), _to_int, DEFAULT_GUARD_CHECK_INTERVAL_MS),
-        )
-
-        retention = RetentionSettings(
-            max_sessions=_coerce(merged, ("retention.max_sessions",), _to_int, DEFAULT_RETENTION_MAX_SESSIONS),
-            prune_on_start=_coerce(merged, ("retention.prune_on_start",), _to_bool, DEFAULT_RETENTION_PRUNE_ON_START),
-        )
-
-        storage = StorageSettings(
-            base_path=_coerce(merged, ("storage.base_path", "output_dir"), _to_path, DEFAULT_STORAGE_BASE_PATH),
-            per_camera_subdir=_coerce(merged, ("storage.per_camera_subdir",), _to_bool, DEFAULT_STORAGE_PER_CAMERA_SUBDIR),
-        )
-
-        telemetry = TelemetrySettings(
-            emit_interval_ms=_coerce(merged, ("telemetry.emit_interval_ms",), _to_int, DEFAULT_TELEMETRY_EMIT_INTERVAL_MS),
-            include_metrics=_coerce(merged, ("telemetry.include_metrics",), _to_bool, DEFAULT_TELEMETRY_INCLUDE_METRICS),
-        )
-
-        ui = UISettings(
-            auto_start_preview=preview.auto_start,
-        )
-
-        backend = BackendSettings(
-            picam_controls=_to_controls(merged.get("backend.picam_controls"), {}),
-        )
-
-        logging_settings = LoggingSettings(
-            level=_coerce(merged, ("logging.level", "log_level"), _to_str, DEFAULT_LOG_LEVEL),
-            file=_coerce(merged, ("logging.file", "log_file"), _to_path, DEFAULT_LOG_FILE),
-        )
-
-        return cls(
-            preview=preview,
-            record=record,
-            guard=guard,
-            retention=retention,
-            storage=storage,
-            telemetry=telemetry,
-            ui=ui,
-            backend=backend,
-            logging=logging_settings,
-        )
+        return _build_from_merged(merged, logger)
 
     def to_dict(self) -> Dict[str, Any]:
         """Export config values as a flat dictionary."""
@@ -269,13 +185,21 @@ def load_config(
     logger: LoggerLike = None,
 ) -> CamerasConfig:
     """Build a typed config from ModulePreferences + optional overrides."""
-
-    log = ensure_structured_logger(logger, fallback_name=__name__)
     merged = preferences.snapshot()
     if overrides:
         for key, value in overrides.items():
             if value is not None:
                 merged[key] = value
+    return _build_from_merged(merged, logger)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+
+
+def _build_from_merged(merged: Dict[str, Any], logger: LoggerLike = None) -> CamerasConfig:
+    """Build CamerasConfig from merged dict (shared by from_preferences and load_config)."""
+    log = ensure_structured_logger(logger, fallback_name=__name__)
 
     preview = PreviewSettings(
         resolution=_coerce(merged, ("preview.resolution", "preview_resolution", "stub_prefs.preview_resolution"),
@@ -344,10 +268,6 @@ def load_config(
         backend=backend,
         logging=logging_settings,
     )
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
 
 
 def _first_present(data: Dict[str, Any], keys: Tuple[str, ...]) -> Any:

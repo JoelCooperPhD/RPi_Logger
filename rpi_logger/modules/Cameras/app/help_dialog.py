@@ -14,220 +14,73 @@ CAMERAS_HELP_TEXT = """
 ═══════════════════════════════════════════════════════════════════
 
 OVERVIEW
-
-The Cameras module captures synchronized video from Raspberry Pi
-camera modules (IMX296, etc.) and USB cameras. Each camera runs
-in its own module instance with configurable resolution and frame
-rate.
-
-Cameras are discovered by the main logger and appear in the
-Devices panel. Click Connect to launch a camera window.
-
+Records synchronized video from RPi CSI cameras (IMX296, etc.) and USB cameras.
+Each camera runs in its own instance with configurable resolution and frame rate.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. GETTING STARTED
+1. QUICK START
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-   1. Connect your camera (CSI ribbon cable or USB)
-   2. Enable "Cameras" in the Modules menu
-   3. The camera appears in the Devices panel when detected
-   4. Click Connect to launch this camera's window
-   5. Adjust settings if needed via the Controls menu
-   6. Start a session to begin recording
-
+   1. Connect camera (CSI/USB)
+   2. Enable in Modules menu
+   3. Click Connect in Devices panel
+   4. Adjust settings (Controls > Settings)
+   5. Start session to record
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-2. USER INTERFACE
+2. INTERFACE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Preview Display
-   Shows a live feed from this camera instance:
-   • Preview runs at reduced resolution for performance
-   • Each camera has its own dedicated window
-
-Settings Window
-   Access via Controls > Show Settings Window:
-   • Preview Resolution: Display size (320x240 to 640x480)
-   • Preview FPS: Live view frame rate (1-15)
-   • Record Resolution: Capture size (up to sensor max)
-   • Record FPS: Recording frame rate (1-60+)
-
-IO Metrics Bar
-   Shows real-time performance data:
-   • Cam: Active camera ID
-   • In: Input frame rate (from sensor)
-   • Rec: Recording output rate
-   • Tgt: Target recording FPS
-   • Prv: Preview output rate
-   • Q: Queue depths (preview/record)
-   • Wait: Frame wait time (ms)
+Preview: Live feed at reduced resolution
+Settings: Preview/Record resolution & FPS (Controls menu)
+Metrics: Real-time Cap In/Tgt, Rec Out/Tgt, Disp/Tgt
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 3. OUTPUT FILES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-File Naming Convention
-   {prefix}_{camera_id}.avi           - Video file
-   {prefix}_{camera_id}_timing.csv    - Frame timing
-   {prefix}_{camera_id}_metadata.csv  - Recording metadata
-
-   Example: trial_001_usb_0_001.avi
-
-Location
-   {session_dir}/Cameras/{camera_id}/
-
-Video File Format
-   Container:    AVI
-   Codec:        MJPEG (Motion JPEG)
-   Pixel Format: YUV420P
-   Resolution:   Configurable (default 1280x720)
-   Frame Rate:   Configurable (default 30 fps)
-
-   Timestamp overlay shows: YYYY-MM-DDTHH:MM:SS.mmm #frame
+Files: {prefix}_{camera_id}.avi, *_timing.csv, *_metadata.csv
+Location: {session_dir}/Cameras/{camera_id}/
+Format: AVI/MJPEG/YUV420P, default 1280x720@30fps
+Overlay: YYYY-MM-DDTHH:MM:SS.mmm #frame
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-4. TIMING CSV FIELD REFERENCE
+4. TIMING CSV
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-The timing CSV contains per-frame timing for precise synchronization.
-
-CSV Columns:
-   trial             - Trial number (integer, may be empty)
-   device_time_unix  - Device absolute time (Unix seconds, if available)
-   frame_index       - 1-based frame number in video file
-   capture_time_unix - Wall clock when captured (Unix seconds)
-   encode_time_mono  - Monotonic time when encoded (9 decimals)
-   sensor_timestamp_ns - Hardware sensor timestamp (nanoseconds)
-   video_pts         - Presentation timestamp in video stream
-
-Example Row:
-   1,,1,1733649120.123456,123.456789012,1733649120123456789,1
-
-Notes:
-   • sensor_timestamp_ns: Only for CSI cameras (Picamera2)
-     USB cameras show empty/None for this field
-   • device_time_unix: May be empty if device does not provide an absolute clock
-   • video_pts: Frame index used as PTS value
-   • CSV row count = number of frames in video file
+Columns: trial, device_time_unix, frame_index, capture_time_unix,
+         encode_time_mono, sensor_timestamp_ns, video_pts
+Note: sensor_timestamp_ns only for CSI cameras (empty for USB)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-5. TIMING & SYNCHRONIZATION
+5. SYNCHRONIZATION & METADATA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Timestamp Precision:
-   capture_time_unix   - Microsecond precision (6 decimals)
-   encode_time_mono    - Nanosecond precision (9 decimals)
-   sensor_timestamp_ns - Nanosecond precision (CSI only)
-
-Frame Timing Accuracy:
-   • USB cameras: Actual FPS may differ from requested
-     The encoder uses actual camera FPS, not requested FPS
-     This ensures video playback matches real-world timing
-   • CSI cameras (Picamera2): Hardware-enforced FPS
-
-Synchronization:
-   • Use encode_time_mono for cross-module sync
-   • Frame index in CSV matches video frame position
-   • Periodic flush every 600 frames for data safety
-
-Calculating Video Position:
-   To find frame at time T:
-   1. Search timing CSV for nearest capture_time_unix
-   2. Use frame_index to seek in video file
-
+Sync: Use encode_time_mono for cross-module sync
+Metadata CSV: camera_id, backend, start/end_time_unix, target_fps,
+              resolution, video_path, timing_path
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-6. METADATA CSV REFERENCE
+6. CAMERA TYPES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-The metadata CSV records session-level information.
-
-CSV Columns:
-   camera_id         - Camera identifier (e.g., "usb_0_001")
-   backend           - Camera type ("usb" or "picam")
-   start_time_unix   - Session start (Unix seconds)
-   end_time_unix     - Session end (Unix seconds)
-   target_fps        - FPS used for encoding
-   resolution_width  - Video frame width (pixels)
-   resolution_height - Video frame height (pixels)
-   video_path        - Path to video file
-   timing_path       - Path to timing CSV
-
+CSI (IMX296/219/477): Hardware timestamps, global/rolling shutter
+USB (UVC): No hardware timestamps, variable FPS
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-7. CAMERA TYPES
+7. CONFIGURATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Raspberry Pi Camera Modules (CSI)
-   • IMX296: Global shutter - no motion blur, ideal for
-     fast-moving subjects and precise timing studies
-   • IMX219/IMX477: Rolling shutter - general purpose
-   • Provides hardware sensor timestamps (sensor_timestamp_ns)
-
-USB Cameras
-   • UVC-compatible webcams
-   • No hardware timestamps (use encode_time_mono instead)
-   • Actual FPS may vary from requested
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-8. CONFIGURATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Default Settings:
-   Capture Resolution:  1280x720
-   Capture FPS:         30.0
-   Record FPS:          30.0
-   Preview Size:        320x180
-   Preview FPS:         10.0
-   JPEG Quality:        80
-
-Preview Settings (for live display)
-   • Resolution: Lower = smoother preview (320x240 recommended)
-   • FPS: 5-10 is usually sufficient for monitoring
-
-Record Settings (for saved video)
-   • Resolution: Use native sensor resolution for best quality
-   • FPS: Match your experiment requirements (30 or 60 typical)
+Defaults: Capture 1280x720@30fps, Preview 320x180@10fps, JPEG Q=80
+Preview: Lower res = smoother (320x240@5-10fps recommended)
+Record: Use native sensor res for quality (30-60fps typical)
 
 
 ═══════════════════════════════════════════════════════════════════
                         TROUBLESHOOTING
 ═══════════════════════════════════════════════════════════════════
-
-Camera not appearing in Devices panel:
-   1. Check ribbon cable connection (CSI cameras)
-   2. Verify USB connection (USB cameras)
-   3. Enable "Cameras" in the Modules menu
-   4. Run 'libcamera-hello' or 'v4l2-ctl --list-devices'
-   5. Check camera is enabled in raspi-config
-
-Preview is laggy:
-   1. Lower preview resolution (320x240)
-   2. Reduce preview FPS (5 fps)
-   3. Check CPU usage on the system
-   4. Close other applications
-
-Recording drops frames:
-   1. Lower record FPS or resolution
-   2. Use a faster SD card or SSD
-   3. Check available disk space
-   4. Monitor the Q (queue) metrics
-
-Black or corrupted video:
-   1. Check camera ribbon cable for damage
-   2. Verify camera module is seated properly
-   3. Test with 'libcamera-still -o test.jpg'
-   4. Check permissions on video devices
-
-Empty sensor_timestamp_ns in CSV:
-   This is normal for USB cameras - they don't provide
-   hardware timestamps. Use encode_time_mono instead.
-
-
+Camera not detected: Check cable/USB, enable in Modules menu,
+  verify with 'libcamera-hello' or 'v4l2-ctl --list-devices'
+Laggy preview: Lower preview res (320x240@5fps), check CPU
+Dropped frames: Lower FPS/res, use faster storage, check disk space
+Corrupted video: Check cable/seating, test with 'libcamera-still'
+Empty sensor_timestamp_ns: Normal for USB (use encode_time_mono)
 """
 
 

@@ -38,18 +38,7 @@ DEFAULT_MODELS_PATH = Path(__file__).parent / "camera_models.json"
 
 
 def extract_model_name(desc: "CameraDescriptor") -> str:
-    """
-    Extract the camera model name from a descriptor.
-
-    For USB cameras: Uses friendly_name, strips "USB:" prefix and [port] suffix
-    For Picam: Uses hw_model directly (sensor name like "imx296")
-
-    Args:
-        desc: Camera descriptor containing identification info
-
-    Returns:
-        Clean model name for database lookup, or empty string if undetermined.
-    """
+    """Extract camera model: friendly_name (USB) or hw_model (Picam), stripped of prefixes/suffixes."""
     backend = desc.camera_id.backend
 
     if backend == "picam":
@@ -72,11 +61,7 @@ def extract_model_name(desc: "CameraDescriptor") -> str:
 
 
 def copy_capabilities(caps: CameraCapabilities) -> CameraCapabilities:
-    """
-    Create a deep copy of capabilities.
-
-    This ensures we never mutate shared capability objects from the database.
-    """
+    """Deep copy capabilities to avoid mutating shared database objects."""
     return CameraCapabilities(
         modes=list(caps.modes),  # CapabilityMode is frozen, shallow copy is fine
         default_preview_mode=caps.default_preview_mode,
@@ -104,12 +89,7 @@ class CameraModel:
 
 
 class CameraModelDatabase:
-    """
-    Database of known camera models and their capabilities.
-
-    This is a shipped asset that grows as the developer tests cameras.
-    Unknown cameras fall back to runtime probing.
-    """
+    """Database of known camera models, auto-saved as tested. Unknown cameras probe at runtime."""
 
     def __init__(
         self,
@@ -118,14 +98,6 @@ class CameraModelDatabase:
         auto_save: bool = True,
         logger: LoggerLike = None,
     ) -> None:
-        """
-        Initialize the camera model database.
-
-        Args:
-            models_path: Path to camera_models.json. Defaults to module directory.
-            auto_save: If True, automatically save when new models are added.
-            logger: Optional logger instance.
-        """
         self._path = Path(models_path) if models_path else DEFAULT_MODELS_PATH
         self._auto_save = auto_save
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
@@ -165,16 +137,7 @@ class CameraModelDatabase:
             self._logger.error("Failed to save camera_models.json: %s", e)
 
     def lookup(self, raw_name: str, backend: str) -> Optional[CameraModel]:
-        """
-        Look up a camera model by its raw name.
-
-        Args:
-            raw_name: The raw camera name from sysfs or Picamera2.
-            backend: "usb" or "picam".
-
-        Returns:
-            CameraModel if found, None otherwise.
-        """
+        """Look up camera model by raw name from sysfs/Picamera2."""
         self.load()
 
         for model in self._models.values():
@@ -204,21 +167,7 @@ class CameraModelDatabase:
         notes: Optional[str] = None,
         force_update: bool = False,
     ) -> CameraModel:
-        """
-        Add a new camera model to the database, or update if force_update=True.
-
-        Called when a new camera is probed for the first time, or when reprobing.
-
-        Args:
-            raw_name: The raw camera name.
-            backend: "usb" or "picam".
-            capabilities: Probed capabilities.
-            notes: Optional developer notes.
-            force_update: If True, update existing model with new capabilities.
-
-        Returns:
-            The newly created or updated CameraModel.
-        """
+        """Add/update camera model in database. Auto-saves if enabled."""
         self.load()
 
         key = self._normalize_key(raw_name, backend)
@@ -275,17 +224,7 @@ class CameraModelDatabase:
         return list(self._models.values())
 
     def can_trust_cache(self, model_key: str) -> bool:
-        """Check if a model's cached capabilities are complete enough to skip probing.
-
-        This is used for fast startup - if we have good cached capabilities for a
-        known camera model, we can skip the expensive hardware probing step.
-
-        Args:
-            model_key: The key in the model database (e.g., "arducam_usb_camera")
-
-        Returns:
-            True if the cached capabilities are trustworthy, False otherwise.
-        """
+        """Check if cached capabilities are complete enough to skip probing."""
         self.load()
         model = self._models.get(model_key)
         if not model:
@@ -306,14 +245,7 @@ class CameraModelDatabase:
 
     @staticmethod
     def _normalize_key(raw_name: str, backend: str) -> str:
-        """
-        Normalize a camera name to a stable key.
-
-        Examples:
-            "Arducam USB Camera: Arducam USB" → "arducam_usb_camera"
-            "UVC Camera (046d:0819)" → "uvc_046d_0819"
-            "imx296" → "imx296"
-        """
+        """Normalize camera name to stable key (e.g., VID:PID or cleaned name)."""
         key = raw_name.lower()
 
         # Extract VID:PID if present (most stable identifier)
