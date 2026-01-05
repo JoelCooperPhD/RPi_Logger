@@ -1,8 +1,4 @@
-"""Capability normalization helpers for camera modules.
-
-Provides functions to normalize, build, and select camera capabilities.
-Works with both USB and CSI cameras.
-"""
+"""Capability normalization and selection helpers for camera modules."""
 
 from __future__ import annotations
 
@@ -62,38 +58,22 @@ def build_capabilities(
 
 def select_default_preview(capabilities: CameraCapabilities) -> Optional[CapabilityMode]:
     """Pick a sensible default preview mode capped at 640x480, honoring aspect ratio."""
-
     cap_w, cap_h = 640, 480
     target_ar = _aspect_ratio(capabilities.default_record_mode or (capabilities.modes[0] if capabilities.modes else None))
-
     under_cap = [m for m in capabilities.modes if m.width <= cap_w and m.height <= cap_h and m.fps >= 15.0]
     if under_cap:
-        # Closest aspect ratio to native, then largest area under cap, then fps.
-        return sorted(
-            under_cap,
-            key=lambda m: (_aspect_delta(m, target_ar), -(m.width * m.height), -m.fps),
-        )[0]
-
-    # If nothing under the cap, pick closest aspect ratio, smallest area to stay lightweight.
+        return sorted(under_cap, key=lambda m: (_aspect_delta(m, target_ar), -(m.width * m.height), -m.fps))[0]
     if capabilities.modes:
-        return sorted(
-            capabilities.modes,
-            key=lambda m: (_aspect_delta(m, target_ar), m.width * m.height, m.fps),
-        )[0]
+        return sorted(capabilities.modes, key=lambda m: (_aspect_delta(m, target_ar), m.width * m.height, m.fps))[0]
     return None
 
 
 def select_default_record(capabilities: CameraCapabilities) -> Optional[CapabilityMode]:
     """Pick a sensible default record mode: highest 16:9 up to 30 fps."""
-
-    candidates = [mode for mode in capabilities.modes if _is_16_9(mode.size)]
-    if not candidates:
-        candidates = capabilities.modes
+    candidates = [m for m in capabilities.modes if _is_16_9(m.size)] or capabilities.modes
     if not candidates:
         return None
-    # Sort by area then fps descending, but cap at 30fps preference
-    candidates = sorted(candidates, key=lambda m: (m.width * m.height, min(m.fps, 30)), reverse=True)
-    return candidates[0]
+    return sorted(candidates, key=lambda m: (m.width * m.height, min(m.fps, 30)), reverse=True)[0]
 
 
 # ---------------------------------------------------------------------------
@@ -138,9 +118,7 @@ def _aspect_ratio(mode: Optional[CapabilityMode]) -> float:
 
 
 def _aspect_delta(mode: CapabilityMode, target_ar: float) -> float:
-    if target_ar <= 0.0:
-        return 0.0
-    return abs(_aspect_ratio(mode) - target_ar)
+    return 0.0 if target_ar <= 0.0 else abs(_aspect_ratio(mode) - target_ar)
 
 
 __all__ = [

@@ -18,41 +18,7 @@ class SyncMetadataWriter:
         session_timestamp: str,
         modules_data: Dict[str, Dict[str, Any]]
     ) -> Optional[Path]:
-        """
-        Write unified synchronization metadata file for a trial.
-
-        Args:
-            session_dir: Session directory path
-            trial_number: Trial number
-            session_timestamp: Session timestamp string (from dirname)
-            modules_data: Dict mapping module name to metadata dict
-
-        Returns:
-            Path to created sync file, or None on error
-
-        Example modules_data:
-        {
-            "AudioRecorder_0": {
-                "device_id": 0,
-                "device_name": "USB Audio",
-                "sample_rate": 48000,
-                "chunk_size": 1024,
-                "start_time_unix": 1729789123.456789,
-                "start_time_monotonic": 12345.678,
-                "audio_file": "path/to/audio.wav",
-                "timing_csv": "path/to/audio_timing.csv"
-            },
-            "Camera_0": {
-                "camera_id": 0,
-                "fps": 30.0,
-                "resolution": [1920, 1080],
-                "start_time_unix": 1729789123.457,
-                "start_time_monotonic": 12345.679,
-                "video_file": "path/to/video.mp4",
-                "timing_csv": "path/to/camera_timing.csv"
-            }
-        }
-        """
+        """Write unified sync metadata file for trial. Returns path or None on error."""
         if not modules_data:
             logger.warning("No modules data to write to sync file")
             return None
@@ -95,15 +61,7 @@ class SyncMetadataWriter:
 
     @staticmethod
     async def read_sync_file(sync_path: Path) -> Optional[Dict[str, Any]]:
-        """
-        Read synchronization metadata from file.
-
-        Args:
-            sync_path: Path to sync JSON file
-
-        Returns:
-            Sync metadata dict, or None on error
-        """
+        """Read sync metadata from file. Returns dict or None on error."""
         def read_json_sync():
             with open(sync_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
@@ -119,14 +77,5 @@ class SyncMetadataWriter:
         audio_start_unix: float,
         video_start_unix: float
     ) -> float:
-        """
-        Calculate audio offset relative to video for muxing.
-
-        Args:
-            audio_start_unix: Audio recording start time (Unix timestamp)
-            video_start_unix: Video recording start time (Unix timestamp)
-
-        Returns:
-            Offset in seconds (positive if audio started after video)
-        """
+        """Calculate audio offset in seconds (positive if audio started after video)."""
         return audio_start_unix - video_start_unix

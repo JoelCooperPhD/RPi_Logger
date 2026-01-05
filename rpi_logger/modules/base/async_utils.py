@@ -34,25 +34,19 @@ async def gather_with_logging(
     return_exceptions: bool = True
 ) -> List[Any]:
     log = logger_instance or logger
-
     if not tasks:
         log.debug("%s: No tasks to gather", operation_name)
         return []
-
     log.debug("%s: Gathering %d tasks", operation_name, len(tasks))
     results = await asyncio.gather(*tasks, return_exceptions=return_exceptions)
-
-    error_count = 0
+    error_count = sum(1 for r in results if isinstance(r, Exception))
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             log.error("%s: Task %d failed: %s", operation_name, i, result)
-            error_count += 1
-
-    if error_count > 0:
+    if error_count:
         log.warning("%s: Completed with %d/%d errors", operation_name, error_count, len(tasks))
     else:
         log.debug("%s: All tasks completed successfully", operation_name)
-
     return results
 
 
@@ -63,14 +57,12 @@ async def gather_with_timeout(
     logger_instance: Optional[logging.Logger] = None
 ) -> List[Any]:
     log = logger_instance or logger
-
     try:
         log.debug("%s: Starting with %.1fs timeout", operation_name, timeout)
-        results = await asyncio.wait_for(
+        return await asyncio.wait_for(
             gather_with_logging(tasks, operation_name, logger_instance),
             timeout=timeout
         )
-        return results
     except asyncio.TimeoutError:
         log.error("%s: Timeout after %.1fs, cancelling tasks", operation_name, timeout)
         for task in tasks:
@@ -88,7 +80,6 @@ async def run_with_retries(
 ) -> Any:
     log = logger_instance or logger
     last_exception = None
-
     for attempt in range(max_retries):
         try:
             log.debug("%s: Attempt %d/%d", operation_name, attempt + 1, max_retries)
@@ -104,7 +95,6 @@ async def run_with_retries(
                 await asyncio.sleep(delay)
             else:
                 log.error("%s: All %d attempts failed", operation_name, max_retries)
-
     raise last_exception
 
 
@@ -115,18 +105,14 @@ async def cancel_task_safely(
     logger_instance: Optional[logging.Logger] = None
 ) -> bool:
     log = logger_instance or logger
-
     if task is None:
         log.debug("%s: No task to cancel", task_name)
         return True
-
     if task.done():
         log.debug("%s: Already done", task_name)
         return True
-
     log.debug("%s: Cancelling...", task_name)
     task.cancel()
-
     try:
         await asyncio.wait_for(task, timeout=timeout)
         log.debug("%s: Cancelled successfully", task_name)

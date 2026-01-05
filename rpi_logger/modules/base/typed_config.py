@@ -1,10 +1,4 @@
-"""Typed configuration protocol for module config dataclasses.
-
-This module provides:
-- ModuleConfig: Protocol that all module config dataclasses should implement
-- load_typed_config: Helper to load a typed config from ScopedPreferences
-- Common type coercion helpers for from_preferences() implementations
-"""
+"""Typed configuration protocol for module configs with type coercion helpers."""
 
 from __future__ import annotations
 
@@ -92,13 +86,11 @@ def load_typed_config(
 
 
 def get_pref_str(prefs: ScopedPreferences, key: str, default: str) -> str:
-    """Get a string value from preferences."""
     val = prefs.get(key)
     return str(val) if val is not None else default
 
 
 def get_pref_int(prefs: ScopedPreferences, key: str, default: int) -> int:
-    """Get an integer value from preferences."""
     val = prefs.get(key)
     if val is None:
         return default
@@ -109,7 +101,6 @@ def get_pref_int(prefs: ScopedPreferences, key: str, default: int) -> int:
 
 
 def get_pref_float(prefs: ScopedPreferences, key: str, default: float) -> float:
-    """Get a float value from preferences."""
     val = prefs.get(key)
     if val is None:
         return default
@@ -120,7 +111,6 @@ def get_pref_float(prefs: ScopedPreferences, key: str, default: float) -> float:
 
 
 def get_pref_bool(prefs: ScopedPreferences, key: str, default: bool) -> bool:
-    """Get a boolean value from preferences."""
     val = prefs.get(key)
     if val is None:
         return default
@@ -130,14 +120,11 @@ def get_pref_bool(prefs: ScopedPreferences, key: str, default: bool) -> bool:
 
 
 def get_pref_path(prefs: ScopedPreferences, key: str, default: Path) -> Path:
-    """Get a Path value from preferences."""
     val = prefs.get(key)
     if val is None:
         return default
     text = str(val).strip()
-    if not text:
-        return default
-    return Path(text)
+    return Path(text) if text else default
 
 
 __all__ = [
