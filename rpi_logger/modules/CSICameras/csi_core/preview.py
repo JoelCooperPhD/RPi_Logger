@@ -1,8 +1,4 @@
-"""
-Preview frame processing for CSI cameras.
-
-Handles preview frame conversion from YUV420 lores stream to BGR.
-"""
+"""Preview frame processing - YUV420 to BGR conversion."""
 from __future__ import annotations
 
 import cv2
@@ -12,28 +8,10 @@ from rpi_logger.modules.CSICameras.csi_core.backends.picam_color import get_pica
 
 
 def yuv420_to_bgr(frame: np.ndarray) -> np.ndarray:
-    """
-    Convert YUV420 lores frame to BGR, respecting IMX296 color bug.
+    """Convert YUV420 to BGR, accounting for IMX296 color bug.
 
-    The Picamera2 lores stream outputs YUV420 format. This function converts
-    it to BGR for display and shared memory transfer.
-
-    IMPORTANT: The IMX296 kernel bug affects the ISP's understanding of the
-    Bayer pattern. This propagates to YUV encoding - the U/V chrominance
-    channels are computed with swapped R/B. Therefore:
-
-    - If get_picam_color_format() == "bgr" (bug active):
-      The YUV420 chrominance is also swapped, so COLOR_YUV2BGR_I420
-      will produce correct BGR output (two wrongs make a right).
-
-    - If get_picam_color_format() == "rgb" (bug fixed):
-      Use COLOR_YUV2RGB_I420, then convert to BGR for consistency.
-
-    Args:
-        frame: YUV420 frame from Picamera2 lores stream
-
-    Returns:
-        BGR numpy array suitable for display or shared memory
+    Bug active (bgr): YUV chroma swapped, COLOR_YUV2BGR_I420 correct.
+    Bug fixed (rgb): Normal YUV, convert RGB->BGR.
     """
     if get_picam_color_format() == "bgr":
         # Bug active: YUV has swapped chroma, BGR conversion is correct

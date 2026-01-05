@@ -1,8 +1,4 @@
-"""Single-camera view for CSICameras module.
-
-Each CSICameras instance displays exactly one camera. This view provides
-the preview canvas, status display, metrics, and settings configuration.
-"""
+"""Single-camera view with preview, metrics, and settings."""
 
 from __future__ import annotations
 
@@ -25,7 +21,7 @@ except ImportError:
 
 
 def _format_fps(value: Any) -> str:
-    """Format a FPS value for display."""
+    """Format FPS for display."""
     if value is None:
         return "  --"
     try:
@@ -35,7 +31,7 @@ def _format_fps(value: Any) -> str:
 
 
 def _fps_color(actual: Any, target: Any) -> Optional[str]:
-    """Get color based on how close actual FPS is to target."""
+    """Get color based on FPS proximity to target."""
     if not HAS_THEME or Colors is None:
         return None
     try:
@@ -53,7 +49,7 @@ def _fps_color(actual: Any, target: Any) -> Optional[str]:
 
 
 class CSICameraView:
-    """Single-camera view with preview canvas, status, metrics, and settings."""
+    """Single-camera view with preview, metrics, and settings."""
 
     def __init__(self, stub_view: Any = None, *, logger: LoggerLike = None) -> None:
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
@@ -91,7 +87,7 @@ class CSICameraView:
         self._camera_options: Dict[str, List[str]] = {}
 
     def attach(self) -> None:
-        """Mount the camera view inside the stub view frame."""
+        """Mount view inside stub frame."""
         if not self._stub_view:
             self._logger.info("CSI Camera view running headless (no stub view)")
             return
@@ -127,13 +123,13 @@ class CSICameraView:
         control_change: Optional[Callable[[str, str, Any], None]] = None,
         reprobe: Optional[Callable[[str], None]] = None,
     ) -> None:
-        """Bind handler callbacks for settings changes."""
+        """Bind handler callbacks."""
         self._config_handler = apply_config
         self._control_change_handler = control_change
         self._reprobe_handler = reprobe
 
     def _build_layout(self, parent, tk) -> None:
-        """Build single camera view layout."""
+        """Build camera view layout."""
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(0, weight=1)
 
@@ -152,7 +148,7 @@ class CSICameraView:
 
 
     def _install_metrics_display(self, tk, ttk) -> None:
-        """Install the capture stats display into the IO stub content area."""
+        """Install capture stats display."""
         builder = getattr(self._stub_view, "build_io_stub_content", None)
         if not callable(builder):
             return
@@ -208,7 +204,7 @@ class CSICameraView:
             self._logger.debug("IO stub content build failed", exc_info=True)
 
     def _install_settings_window(self, tk) -> None:
-        """Create the settings window (shown via menu)."""
+        """Create settings window."""
         if self._settings_toggle_var is None:
             self._settings_toggle_var = tk.BooleanVar(master=self._root, value=False)
 
@@ -223,7 +219,7 @@ class CSICameraView:
             self._settings_window.bind_toggle_var(self._settings_toggle_var)
 
     def _install_settings_menu(self, tk) -> None:
-        """Add camera items to File and View menus."""
+        """Add camera menu items."""
         if self._settings_menu:
             return
 
@@ -258,7 +254,7 @@ class CSICameraView:
             finalize_file()
 
     def _toggle_settings_window(self) -> None:
-        """Toggle visibility of the settings window."""
+        """Toggle settings window."""
         if not self._settings_window or not self._settings_toggle_var:
             return
 
@@ -273,21 +269,21 @@ class CSICameraView:
             self._settings_window.hide()
 
     def _on_canvas_configure(self, event) -> None:
-        """Handle canvas resize events."""
+        """Handle canvas resize."""
         self._canvas_width = event.width
         self._canvas_height = event.height
         # Reset canvas image to force reposition on next frame
         self._canvas_image_id = None
 
     def get_canvas_size(self) -> tuple:
-        """Return current canvas dimensions for preview scaling."""
+        """Return canvas dimensions."""
         if self._canvas_width > 1 and self._canvas_height > 1:
             return (self._canvas_width, self._canvas_height)
         # Fallback to default preview size
         return (640, 480)
 
     def _on_apply_config(self, camera_id: str, settings: Dict[str, str]) -> None:
-        """Handle config apply from settings window."""
+        """Handle settings apply."""
         self._logger.debug("_on_apply_config called: camera_id=%s, settings=%s", camera_id, settings)
         if not camera_id:
             return
@@ -304,7 +300,7 @@ class CSICameraView:
             self._logger.warning("No config handler registered")
 
     def _on_control_change(self, camera_id: str, control_name: str, value: Any) -> None:
-        """Handle camera control change from settings window."""
+        """Handle control change."""
         if not self._control_change_handler:
             self._logger.debug("No control change handler registered")
             return
@@ -314,7 +310,7 @@ class CSICameraView:
             self._logger.debug("Control change handler failed", exc_info=True)
 
     def _on_reprobe(self, camera_id: Optional[str] = None) -> None:
-        """Handle reprobe request."""
+        """Handle reprobe."""
         target = camera_id or self._camera_id
         if not target:
             return
@@ -325,10 +321,8 @@ class CSICameraView:
             except Exception:
                 self._logger.debug("Reprobe handler failed", exc_info=True)
 
-    # ------------------------------------------------------------------ Public API
-
     def set_camera_info(self, name: str, capabilities: Any = None) -> None:
-        """Set camera info after assignment."""
+        """Set camera info."""
         self._camera_name = name
 
         # Update settings window with capabilities
@@ -341,7 +335,7 @@ class CSICameraView:
             )
 
     def set_camera_id(self, camera_id: str) -> None:
-        """Set the camera ID for this view."""
+        """Set camera ID."""
         self._camera_id = camera_id
 
         if self._settings_window:
@@ -357,10 +351,7 @@ class CSICameraView:
         sensor_info: Optional[Dict[str, Any]] = None,
         display_name: Optional[str] = None,
     ) -> None:
-        """Update camera capabilities and refresh settings options.
-
-        Uses CapabilityValidator to ensure UI only shows valid options.
-        """
+        """Update capabilities and refresh settings (validated)."""
         if not self._camera_id or not capabilities:
             return
 
@@ -398,7 +389,7 @@ class CSICameraView:
 
 
     def push_frame(self, ppm_data: Optional[bytes]) -> None:
-        """Display a preview frame (PPM bytes, pre-scaled in capture task)."""
+        """Display preview frame (pre-scaled PPM)."""
         if not self._has_ui or not self._canvas:
             return
 
@@ -410,11 +401,7 @@ class CSICameraView:
         self._schedule_ui(update)
 
     def _render_frame(self, ppm_data: Optional[bytes]) -> None:
-        """Render PPM bytes to canvas (must be called from UI thread).
-
-        The image is pre-scaled and serialized as PPM by the capture task.
-        Only fast PPM decoding happens on the Tk thread.
-        """
+        """Render PPM to canvas (UI thread only)."""
         try:
             import tkinter as tk
 
@@ -444,7 +431,7 @@ class CSICameraView:
                 self._logger.debug("Frame render error: %s", e)
 
     def update_metrics(self, metrics: Dict[str, Any]) -> None:
-        """Update metrics display with FPS values."""
+        """Update FPS metrics display."""
         if not self._has_ui:
             return
 
@@ -489,7 +476,7 @@ class CSICameraView:
         self._schedule_ui(update)
 
     def _schedule_ui(self, func: Callable[[], None]) -> None:
-        """Schedule function to run on UI thread."""
+        """Schedule on UI thread."""
         if self._root is None:
             func()
             return

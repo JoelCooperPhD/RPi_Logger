@@ -1,8 +1,4 @@
-"""CSI camera core functionality.
-
-This package provides the capture abstraction and backends for
-Raspberry Pi CSI cameras using Picamera2.
-"""
+"""CSI camera core - capture abstraction and Picamera2 backends."""
 
 # Re-export shared types from base
 from rpi_logger.modules.base.camera_types import (

@@ -1,4 +1,4 @@
-"""Session path helpers for per-camera recordings."""
+"""Session path resolution for per-camera recordings."""
 
 from __future__ import annotations
 
@@ -12,8 +12,7 @@ from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module
 
 @dataclass(slots=True)
 class SessionPaths:
-    """Resolved paths for a single camera's recording session."""
-
+    """Resolved paths for camera recording session."""
     session_root: Path
     camera_dir: Path
     video_path: Path
@@ -21,12 +20,7 @@ class SessionPaths:
 
 
 def _sanitize_for_filesystem(name: str, max_length: int = 50) -> str:
-    """Sanitize a name for safe use in file/directory names.
-
-    - Replaces spaces and problematic characters with underscores
-    - Removes characters that are invalid in filenames
-    - Truncates to max_length
-    """
+    """Sanitize name for filesystem use."""
     # Replace spaces and common separators with underscores
     sanitized = re.sub(r'[\s\-/\\:]+', '_', name)
     # Remove any remaining problematic characters (keep alphanumeric, underscore, dot)
@@ -40,11 +34,7 @@ def _sanitize_for_filesystem(name: str, max_length: int = 50) -> str:
 
 
 def _build_camera_label(camera_id: CameraId) -> str:
-    """Build a human-readable label for camera directory/file naming.
-
-    Uses friendly_name if available, with a short stable_id suffix for uniqueness.
-    Falls back to stable_id if no friendly_name is set.
-    """
+    """Build label from friendly_name + short stable_id, or stable_id alone."""
     if camera_id.friendly_name:
         # Use friendly name as primary, add short stable_id suffix for uniqueness
         base_name = _sanitize_for_filesystem(camera_id.friendly_name)
@@ -64,7 +54,7 @@ def resolve_session_paths(
     trial_number: int = 1,
     per_camera_subdir: bool = True,
 ) -> SessionPaths:
-    """Build a deterministic directory + filename layout and ensure it exists."""
+    """Build session paths and ensure directories exist."""
 
     session_root = Path(session_dir)
     module_dir = ensure_module_data_dir(session_root, module_name)

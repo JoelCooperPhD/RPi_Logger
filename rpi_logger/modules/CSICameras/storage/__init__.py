@@ -1,4 +1,4 @@
-"""Storage helpers for CSICameras module."""
+"""Storage helpers for CSICameras."""
 
 from .session_paths import SessionPaths, resolve_session_paths
 

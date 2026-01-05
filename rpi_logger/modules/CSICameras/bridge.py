@@ -1,9 +1,6 @@
-"""Single-camera runtime for CSICameras module.
+"""Single-camera runtime for CSI cameras.
 
-Each CSICameras instance handles exactly ONE CSI/Raspberry Pi camera.
-Device assignment comes from the main logger via assign_device command.
-
-This follows the same pattern as DRT, VOG, and EyeTracker modules.
+Handles one camera per instance. Device assignment via assign_device command.
 """
 
 from __future__ import annotations
@@ -48,11 +45,9 @@ logger = get_module_logger(__name__)
 
 
 class CSICamerasRuntime(ModuleRuntime):
-    """Single-camera runtime for CSI/Raspberry Pi cameras.
+    """Single-camera runtime for CSI cameras.
 
-    Follows the same pattern as DRT, VOG, and EyeTracker modules.
-    Device discovery happens in the main logger; this runtime receives
-    a single assign_device command with camera details.
+    Receives assign_device command from main logger after discovery.
     """
 
     def __init__(self, ctx: RuntimeContext) -> None:
@@ -112,10 +107,8 @@ class CSICamerasRuntime(ModuleRuntime):
         # View
         self.view = CSICameraView(ctx.view, logger=self.logger)
 
-    # ------------------------------------------------------------------ Lifecycle
-
     async def start(self) -> None:
-        """Start runtime - wait for camera assignment."""
+        """Start runtime, wait for camera assignment."""
         self.logger.info("=" * 60)
         self.logger.info("CSI CAMERAS RUNTIME STARTING (single-camera architecture)")
         self.logger.info("=" * 60)
@@ -139,7 +132,7 @@ class CSICamerasRuntime(ModuleRuntime):
         StatusMessage.send("ready")
 
     async def shutdown(self) -> None:
-        """Shutdown runtime - stop recording and release camera."""
+        """Stop recording and release camera."""
         self.logger.info("Shutting down CSI Cameras runtime")
 
         if self._is_recording:
@@ -150,9 +143,6 @@ class CSICamerasRuntime(ModuleRuntime):
 
     async def cleanup(self) -> None:
         """Final cleanup."""
-        self.logger.debug("CSI Cameras runtime cleanup complete")
-
-    # ------------------------------------------------------------------ Commands
 
     async def handle_command(self, command: Dict[str, Any]) -> bool:
         """Handle commands from main logger."""
@@ -221,7 +211,7 @@ class CSICamerasRuntime(ModuleRuntime):
         return False
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
-        """Handle user actions from UI."""
+        """Handle UI actions."""
         return await self.handle_command({"command": action, **kwargs})
 
     async def healthcheck(self) -> Dict[str, Any]:
@@ -233,13 +223,11 @@ class CSICamerasRuntime(ModuleRuntime):
         }
 
     async def on_session_dir_available(self, path: Path) -> None:
-        """Called when session directory becomes available."""
+        """Set session directory."""
         self._session_dir = path
 
-    # ------------------------------------------------------------------ Camera Assignment
-
     async def _assign_camera(self, command: Dict[str, Any]) -> bool:
-        """Handle camera assignment from main logger."""
+        """Handle camera assignment."""
         if self._is_assigned:
             self.logger.warning("Camera already assigned - rejecting new assignment")
             device_id = command.get("device_id")
@@ -425,7 +413,7 @@ class CSICamerasRuntime(ModuleRuntime):
             return False
 
     async def _probe_camera(self, stable_id: str) -> Optional[CameraCapabilities]:
-        """Probe CSI camera capabilities using Picamera2."""
+        """Probe camera capabilities."""
         self.logger.info("Probing CSI camera capabilities...")
         try:
             return await picam_backend.probe(stable_id, logger=self.logger)
@@ -434,11 +422,7 @@ class CSICamerasRuntime(ModuleRuntime):
             return None
 
     async def _get_capture_settings(self) -> tuple[tuple[int, int], float]:
-        """Determine resolution and FPS from capabilities or cache.
-
-        Settings are validated against capabilities using the validator.
-        Invalid cached settings are corrected to valid capability modes.
-        """
+        """Get resolution/FPS from capabilities or cache, validated."""
         # If no validator (no capabilities), use safe fallback
         if not self._validator:
             self.logger.info("No capabilities - using default settings: 1280x720 @ 30 fps")
@@ -502,7 +486,7 @@ class CSICamerasRuntime(ModuleRuntime):
         return (1280, 720), 30.0
 
     async def _init_capture(self, stable_id: str) -> None:
-        """Initialize CSI camera capture with lores stream for preview."""
+        """Initialize capture with lores preview stream."""
         self.logger.info("Initializing CSI capture: %dx%d @ %.1f fps",
                         self._resolution[0], self._resolution[1], self._fps)
 
@@ -519,7 +503,7 @@ class CSICamerasRuntime(ModuleRuntime):
         self.logger.info("CSI capture initialized successfully")
 
     async def _release_camera(self) -> None:
-        """Release camera and cleanup."""
+        """Release camera."""
         self.logger.info("Releasing CSI camera")
 
         if self._capture_task:
@@ -534,10 +518,8 @@ class CSICamerasRuntime(ModuleRuntime):
 
         self._is_assigned = False
 
-    # ------------------------------------------------------------------ Recording
-
     async def _start_recording(self) -> None:
-        """Start video recording."""
+        """Start recording."""
         if self._is_recording:
             self.logger.debug("Already recording")
             return
@@ -577,7 +559,7 @@ class CSICamerasRuntime(ModuleRuntime):
         })
 
     async def _stop_recording(self) -> None:
-        """Stop video recording."""
+        """Stop recording."""
         if not self._is_recording:
             return
 
@@ -601,13 +583,8 @@ class CSICamerasRuntime(ModuleRuntime):
             "camera_id": self._camera_id.key if self._camera_id else None,
         })
 
-    # ------------------------------------------------------------------ Settings Handlers
-
     def _on_apply_config(self, camera_id: str, settings: Dict[str, str]) -> None:
-        """Handle resolution/FPS config change from settings window.
-
-        Settings are validated against capabilities before being applied.
-        """
+        """Handle settings change (validated against capabilities)."""
         if camera_id != (self._camera_id.key if self._camera_id else None):
             return
 
@@ -664,7 +641,7 @@ class CSICamerasRuntime(ModuleRuntime):
             asyncio.create_task(self._reinit_capture())
 
     async def _save_settings_to_cache(self, settings: Dict[str, str]) -> None:
-        """Save settings to cache."""
+        """Save to cache."""
         if not self._camera_id:
             return
         try:
@@ -673,7 +650,7 @@ class CSICamerasRuntime(ModuleRuntime):
             self.logger.warning("Failed to save settings: %s", e)
 
     async def _reinit_capture(self) -> None:
-        """Reinitialize capture with current settings."""
+        """Reinit capture with new settings."""
         if not self._camera_id:
             return
 
@@ -696,10 +673,7 @@ class CSICamerasRuntime(ModuleRuntime):
         )
 
     def _on_control_change(self, camera_id: str, control_name: str, value: Any) -> None:
-        """Handle camera control change.
-
-        Control values are validated/clamped against capability ranges.
-        """
+        """Handle control change (validated/clamped)."""
         if camera_id != (self._camera_id.key if self._camera_id else None):
             return
 
@@ -729,13 +703,13 @@ class CSICamerasRuntime(ModuleRuntime):
             self.logger.warning("Failed to set control %s: %s", control_name, e)
 
     def _on_reprobe(self, camera_id: str) -> None:
-        """Handle reprobe request."""
+        """Handle reprobe."""
         if camera_id != (self._camera_id.key if self._camera_id else None):
             return
         asyncio.create_task(self._do_reprobe())
 
     async def _do_reprobe(self) -> None:
-        """Perform camera reprobe and update validator."""
+        """Reprobe and update validator."""
         if not self._camera_id:
             return
 
@@ -759,10 +733,8 @@ class CSICamerasRuntime(ModuleRuntime):
         except Exception as e:
             self.logger.error("Reprobe failed: %s", e)
 
-    # ------------------------------------------------------------------ Capture Loop
-
     async def _capture_loop(self) -> None:
-        """Main capture and preview loop."""
+        """Capture and preview loop."""
         import time
 
         if not self._capture:
@@ -837,7 +809,7 @@ class CSICamerasRuntime(ModuleRuntime):
             self.logger.error("Capture loop error: %s", e, exc_info=True)
 
     def _make_preview_frame(self, frame: CaptureFrame) -> Optional[bytes]:
-        """Create preview frame from capture frame."""
+        """Create preview from capture frame."""
         import cv2
         import io
         from PIL import Image
@@ -871,5 +843,5 @@ class CSICamerasRuntime(ModuleRuntime):
 
 
 def factory(ctx: RuntimeContext) -> CSICamerasRuntime:
-    """Factory function for CSICameras module."""
+    """Factory for CSICameras."""
     return CSICamerasRuntime(ctx)

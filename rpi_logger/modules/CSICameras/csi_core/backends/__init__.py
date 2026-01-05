@@ -1,7 +1,4 @@
-"""CSI camera backends package.
-
-Provides Picamera2-based probing and capture for Raspberry Pi cameras.
-"""
+"""CSI camera backends - Picamera2 probing and capture."""
 
 from rpi_logger.modules.CSICameras.csi_core.backends import picam_backend
 from rpi_logger.modules.CSICameras.csi_core.backends.picam_color import (

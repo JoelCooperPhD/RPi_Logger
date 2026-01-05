@@ -1,4 +1,4 @@
-"""Picamera2 backend wrapper for CSI cameras."""
+"""Picamera2 backend for CSI cameras."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ class PicamFrame:
 
 
 class PicamHandle:
-    """Async iterator over Picamera2 frames."""
+    """Async Picamera2 frame iterator."""
 
     def __init__(self, picam: "Picamera2", mode: CapabilityMode, *, logger: LoggerLike = None) -> None:
         self._cam = picam
@@ -144,7 +144,7 @@ class PicamHandle:
         self._shutdown_executor()
 
     def _producer_loop(self) -> None:
-        """Continuously capture frames and hand off to the asyncio loop."""
+        """Capture frames and hand to asyncio loop."""
 
         while self._running:
             frame, metadata, capture_wait_ms = self._capture_frame()
@@ -165,7 +165,7 @@ class PicamHandle:
                 pass
 
     def _offer_frame(self, frame, metadata, wait_ms: float, sentinel: bool = False) -> None:
-        """Enqueue frame for the async consumer, dropping the oldest if full."""
+        """Enqueue frame, drop oldest if full."""
 
         queue = self._queue
         if not queue:
@@ -216,7 +216,7 @@ class PicamHandle:
             self._executor = None
 
     def set_control(self, name: str, value: Any) -> bool:
-        """Set a camera control value. Returns True on success."""
+        """Set control value."""
         if not self._cam:
             self._logger.warning("Cannot set control %s: camera not open", name)
             return False
@@ -240,12 +240,10 @@ class PicamHandle:
             return False
 
 
-# ---------------------------------------------------------------------------
-# Control probing functions
-
+# Control probing
 
 def _probe_controls_picam(cam: "Picamera2", log) -> Dict[str, ControlInfo]:
-    """Extract controls from Picamera2.camera_controls."""
+    """Extract controls from camera_controls."""
     controls: Dict[str, ControlInfo] = {}
 
     try:
@@ -414,8 +412,7 @@ async def open_device(sensor_id: str, mode: CapabilityMode, *, logger: LoggerLik
 
 
 def supports_shared_streams(capabilities: CameraCapabilities, preview_mode: CapabilityMode, record_mode: CapabilityMode) -> bool:
-    """Placeholder heuristic: assume shared streams when resolutions match."""
-
+    """Check if modes can share streams (same size/format)."""
     return preview_mode.size == record_mode.size and preview_mode.pixel_format == record_mode.pixel_format
 
 

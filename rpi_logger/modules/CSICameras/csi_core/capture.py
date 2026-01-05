@@ -1,8 +1,4 @@
-"""
-CSI camera capture implementation using Picamera2.
-
-This module provides PicamCapture for Raspberry Pi CSI cameras.
-"""
+"""CSI camera capture using Picamera2."""
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +21,7 @@ except Exception:  # pragma: no cover - picamera2 may be absent on non-Pi platfo
 
 
 class PicamCapture(CaptureHandle):
-    """Picamera2-based capture for Raspberry Pi cameras."""
+    """Picamera2 capture for Raspberry Pi CSI cameras."""
 
     def __init__(
         self,
@@ -49,7 +45,7 @@ class PicamCapture(CaptureHandle):
 
     @property
     def actual_fps(self) -> float:
-        """Return the actual FPS - for Picam this equals requested since it's hardware-enforced."""
+        """Actual FPS (hardware-enforced)."""
         return self._fps
 
     async def start(self) -> None:
@@ -171,7 +167,7 @@ class PicamCapture(CaptureHandle):
         return None
 
     def set_control(self, name: str, value: Any) -> bool:
-        """Set a Picamera2 control value."""
+        """Set control value."""
         if not self._cam:
             logger.warning("Cannot set control %s: camera not open", name)
             return False
