@@ -1,12 +1,4 @@
-"""Neon EyeTracker view factory for VMC integration.
-
-Implements the EyeTracker GUI following DRT/VOG patterns with:
-- StubCodexView for VMC compatibility
-- LegacyTkViewBridge for Tkinter integration
-- Real-time video preview with gaze overlay
-- Stream viewers for eyes, IMU, events, and audio
-- Device status and recording state display
-"""
+"""Neon EyeTracker VMC view: StubCodexView + Tkinter bridge, stream viewers, gaze overlay."""
 
 from __future__ import annotations
 
@@ -57,28 +49,20 @@ MetricsProvider = Callable[[], dict]
 
 
 def _format_fps(value: Any) -> str:
-    """Format a FPS value for display."""
-    if value is None:
-        return "  --"
+    """Format FPS for display."""
     try:
-        return f"{float(value):5.1f}"
+        return f"{float(value):5.1f}" if value is not None else "  --"
     except (ValueError, TypeError):
         return "  --"
 
-
 def _fps_color(actual: Any, target: Any) -> Optional[str]:
-    """Get color based on how close actual FPS is to target."""
+    """Color FPS based on % of target (green>=95%, orange>=80%, red<80%)."""
     if not HAS_THEME or Colors is None:
         return None
     try:
-        if actual is not None and target is not None and float(target) > 0:
+        if actual and target and float(target) > 0:
             pct = (float(actual) / float(target)) * 100
-            if pct >= 95:
-                return Colors.SUCCESS   # Green - good
-            elif pct >= 80:
-                return Colors.WARNING   # Orange - warning
-            else:
-                return Colors.ERROR     # Red - bad
+            return Colors.SUCCESS if pct >= 95 else Colors.WARNING if pct >= 80 else Colors.ERROR
     except (ValueError, TypeError):
         pass
     return Colors.FG_PRIMARY
@@ -122,14 +106,7 @@ class _LoopAsyncBridge:
 
 
 class NeonEyeTrackerTkinterGUI:
-    """Tkinter GUI for Neon EyeTracker with real-time video preview.
-
-    Key features:
-    - Real-time video preview with gaze overlay
-    - Stream viewers for eyes, IMU, events, and audio
-    - Device status display (connected/disconnected)
-    - Recording state indicator
-    """
+    """Tkinter GUI: video preview with gaze, stream viewers (eyes/IMU/events/audio), status display."""
 
     def __init__(
         self,
@@ -262,17 +239,7 @@ class NeonEyeTrackerTkinterGUI:
             self.logger.error("Failed to build GUI: %s", e, exc_info=True)
 
     def _update_video_eyes_layout(self, eyes_visible: bool) -> None:
-        """Update the video/eyes layout based on eyes visibility.
-
-        When eyes are visible: video gets 4/5 weight, eyes get 1/5 weight
-        When eyes are hidden: video gets all the space
-
-        Uses uniform column groups to ensure consistent ratios regardless of
-        window size (grid weights only distribute extra space, not total space).
-
-        Args:
-            eyes_visible: Whether the eyes viewer should be visible
-        """
+        """Update layout: video 4/5 + eyes 1/5 if visible, else video 100%."""
         if not self._video_eyes_frame:
             return
 
@@ -784,32 +751,13 @@ class NeonEyeTrackerView:
         except tk.TclError:
             return
 
-    # ------------------------------------------------------------------
-    # Runtime-to-view notifications (no-ops, device status UI removed)
-
-    def on_device_connected(self, device_name: str) -> None:
-        """Handle device connection (no-op)."""
-        pass
-
-    def on_device_disconnected(self) -> None:
-        """Handle device disconnection (no-op)."""
-        pass
-
-    def set_device_status(self, text: str, *, connected: bool) -> None:
-        """Update device status display (no-op)."""
-        pass
-
-    def set_device_info(self, device_name: str) -> None:
-        """Update device name display (no-op)."""
-        pass
-
-    def set_recording_state(self, active: bool) -> None:
-        """Update recording state display (no-op)."""
-        pass
-
-    def update_recording_state(self) -> None:
-        """Sync recording state from model (no-op)."""
-        pass
+    # No-op methods for compatibility (device status UI removed)
+    def on_device_connected(self, device_name: str) -> None: pass
+    def on_device_disconnected(self) -> None: pass
+    def set_device_status(self, text: str, *, connected: bool) -> None: pass
+    def set_device_info(self, device_name: str) -> None: pass
+    def set_recording_state(self, active: bool) -> None: pass
+    def update_recording_state(self) -> None: pass
 
     # ------------------------------------------------------------------
     # Window control
@@ -898,6 +846,4 @@ class NeonEyeTrackerView:
             return
         await self.action_callback(action, **kwargs)
 
-    def _on_model_change(self, prop: str, value) -> None:
-        """Handle model property changes (no-op, device status UI removed)."""
-        pass
+    def _on_model_change(self, prop: str, value) -> None: pass  # No-op

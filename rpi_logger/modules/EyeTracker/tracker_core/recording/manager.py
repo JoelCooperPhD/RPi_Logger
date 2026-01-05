@@ -1,13 +1,4 @@
-"""EyeTracker Recording Manager - Clean 6-file output matching hardware streams.
-
-Output files per recording:
-- WORLD_*.mp4: Scene camera video with gaze overlay
-- EYES_*.mp4: Eye camera video (384x192)
-- AUDIO.wav: Microphone audio
-- GAZE.csv: Gaze stream data (30 columns)
-- IMU.csv: IMU stream data (13 columns)
-- EVENTS.csv: Eye events (blinks, fixations, saccades)
-"""
+"""EyeTracker Recording: 6 files (WORLD.mp4, EYES.mp4, AUDIO.wav, GAZE.csv, IMU.csv, EVENTS.csv)."""
 
 from __future__ import annotations
 
@@ -800,24 +791,19 @@ class RecordingManager(RecordingManagerBase):
         ]
         return self._csv_line(fields)
 
-    def _extract_xyz(self, source: Any) -> list[str]:
-        """Extract x, y, z components from a source object."""
+    def _extract_components(self, source: Any, *keys: str) -> list[str]:
+        """Extract components from object or dict."""
         if source is None:
-            return ["", "", ""]
-        x = getattr(source, "x", None) if hasattr(source, "x") else source.get("x") if isinstance(source, dict) else None
-        y = getattr(source, "y", None) if hasattr(source, "y") else source.get("y") if isinstance(source, dict) else None
-        z = getattr(source, "z", None) if hasattr(source, "z") else source.get("z") if isinstance(source, dict) else None
-        return [self._fmt(x), self._fmt(y), self._fmt(z)]
+            return [""] * len(keys)
+        def get_val(k):
+            return getattr(source, k, None) if hasattr(source, k) else source.get(k) if isinstance(source, dict) else None
+        return [self._fmt(get_val(k)) for k in keys]
+
+    def _extract_xyz(self, source: Any) -> list[str]:
+        return self._extract_components(source, "x", "y", "z")
 
     def _extract_quat(self, source: Any) -> list[str]:
-        """Extract w, x, y, z quaternion components."""
-        if source is None:
-            return ["", "", "", ""]
-        w = getattr(source, "w", None) if hasattr(source, "w") else source.get("w") if isinstance(source, dict) else None
-        x = getattr(source, "x", None) if hasattr(source, "x") else source.get("x") if isinstance(source, dict) else None
-        y = getattr(source, "y", None) if hasattr(source, "y") else source.get("y") if isinstance(source, dict) else None
-        z = getattr(source, "z", None) if hasattr(source, "z") else source.get("z") if isinstance(source, dict) else None
-        return [self._fmt(w), self._fmt(x), self._fmt(y), self._fmt(z)]
+        return self._extract_components(source, "w", "x", "y", "z")
 
     @staticmethod
     def _fmt(value: Any) -> str:

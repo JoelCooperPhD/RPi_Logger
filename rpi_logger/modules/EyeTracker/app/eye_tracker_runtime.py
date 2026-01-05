@@ -1,4 +1,4 @@
-"""Neon EyeTracker runtime that adapts tracker_core onto the stub (codex) VMC stack."""
+"""Neon EyeTracker VMC runtime adapter."""
 
 from __future__ import annotations
 
@@ -50,12 +50,7 @@ MODULE_SUBDIR = "EyeTracker-Neon"
 
 
 class EyeTrackerRuntime(ModuleRuntime):
-    """VMC-compatible runtime for Neon EyeTracker module.
-
-    This runtime manages device connection, streaming, and recording for
-    Pupil Labs Neon eye trackers. Device discovery is handled by the main
-    logger; this runtime receives device assignments via commands.
-    """
+    """VMC runtime for Neon: manages connection, streaming, recording (device assigned via commands)."""
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
@@ -408,18 +403,7 @@ class EyeTrackerRuntime(ModuleRuntime):
     # Device assignment (from main UI)
 
     async def _assign_device(self, command: Dict[str, Any], *, command_id: str | None = None) -> bool:
-        """Handle device assignment from main UI.
-
-        The main UI discovers eye trackers via mDNS and sends us the
-        network address to connect to directly (no discovery needed).
-
-        Args:
-            command: Command payload with network_address and network_port
-            command_id: Correlation ID for acknowledgment tracking
-
-        Returns:
-            True if device was successfully assigned
-        """
+        """Assign device from main UI (mDNS discovery handled externally)."""
         device_id = command.get("device_id", "")
         network_address = command.get("network_address", "")
         network_port = command.get("network_port", 8080)
@@ -501,11 +485,7 @@ class EyeTrackerRuntime(ModuleRuntime):
         return True
 
     async def _connect_to_assigned_device(self) -> bool:
-        """Connect to the assigned device using stored network address.
-
-        Uses rollback pattern: if connection fails at any point, all state
-        changes are reverted to maintain consistency.
-        """
+        """Connect to assigned device (rollback on failure)."""
         if not self._assigned_network_address or not self._device_manager:
             return False
 

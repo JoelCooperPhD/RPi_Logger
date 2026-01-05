@@ -1,6 +1,4 @@
-"""
-Eye Tracker Module Quick Start Guide dialog.
-"""
+"""Eye Tracker Quick Start Guide dialog."""
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext

@@ -98,40 +98,18 @@ class ApertureRecord:
 
 
 class PerclosBuffer:
-    """Ring buffer for eyelid aperture samples to compute true PERCLOS.
+    """Ring buffer for eyelid aperture samples to compute PERCLOS (P80).
 
-    PERCLOS (Percentage of Eye Closure) is defined as the percentage of time
-    that the eyes are more than 80% closed over a measurement period.
-
-    Reference: NHTSA-approved thresholds:
-    - < 7.5% = Alert
-    - 7.5-15% = Questionable/Drowsy
-    - > 15% = Dangerous
-
-    Uses P80 definition: eye is "closed" when eyelid aperture < 20% (80%+ closed).
+    P80: eyes >80% closed (aperture <20%). NHTSA: <7.5%=alert, 7.5-15%=drowsy, >15%=dangerous.
     """
-
-    # Eye is considered "closed" when aperture is below this threshold
-    # P80 definition: <20% open means >80% closed
-    CLOSURE_THRESHOLD = 0.20
+    CLOSURE_THRESHOLD = 0.20  # P80: <20% open = >80% closed
 
     def __init__(self, window_sec: float = 30.0, max_samples: int = 3000):
-        """Initialize PERCLOS buffer.
-
-        Args:
-            window_sec: Time window for PERCLOS calculation (default 30s)
-            max_samples: Maximum samples to retain (default 3000 = 100Hz * 30s)
-        """
         self._window_sec = window_sec
         self._samples: deque[ApertureRecord] = deque(maxlen=max_samples)
         self._last_prune = time.time()
 
     def add_gaze_sample(self, gaze_data: Any) -> None:
-        """Add a gaze sample containing eyelid aperture data.
-
-        Args:
-            gaze_data: Gaze sample from Pupil Labs API with eyelid_aperture_left/right
-        """
         try:
             aperture_left = getattr(gaze_data, "eyelid_aperture_left", None)
             aperture_right = getattr(gaze_data, "eyelid_aperture_right", None)
@@ -166,11 +144,7 @@ class PerclosBuffer:
             self._samples.popleft()
 
     def get_perclos(self) -> float:
-        """Calculate PERCLOS (percentage of time eyes >80% closed).
-
-        Returns:
-            PERCLOS value between 0.0 and 1.0, or -1.0 if insufficient data
-        """
+        """Calculate PERCLOS (0.0-1.0 or -1.0 if insufficient data)."""
         if len(self._samples) < 10:  # Need minimum samples
             return -1.0
 
@@ -216,24 +190,13 @@ class EventRecord:
 
 @dataclass
 class EventBuffer:
-    """Ring buffer storing recent events for visualization.
-
-    Maintains a time-windowed collection of events and provides
-    derived metrics for visualizations.
-    """
+    """Time-windowed ring buffer for event visualization metrics."""
     max_age_sec: float = 60.0
     _events: deque = field(default_factory=lambda: deque(maxlen=2000))
     _last_prune: float = field(default_factory=time.time)
 
     def add(self, event_data: Any) -> None:
-        """Add an event from the Pupil Labs API to the buffer.
-
-        Note: We use time.time() at receipt rather than the event's timestamp
-        to ensure time windowing works correctly (same pattern as IMU viewer).
-
-        Pupil Labs FixationEventData has start_time_ns and end_time_ns but no
-        duration attribute - we must calculate it ourselves.
-        """
+        """Add event, calculating duration from start_time_ns/end_time_ns."""
         try:
             now = time.time()
             event_type = int(getattr(event_data, "event_type", -1))
@@ -331,11 +294,7 @@ class EventBuffer:
         return sum(b.duration for b in blinks)
 
     def get_fixation_saccade_ratio(self, seconds: float = 60.0) -> tuple[float, float]:
-        """Get fixation vs saccade time ratio as (fix_fraction, sacc_fraction).
-
-        Uses completed fixation/saccade events if available (they have duration).
-        Falls back to onset event counts if no completed events are available.
-        """
+        """Fixation/saccade time ratio (uses durations, falls back to onset counts)."""
         # Try completed events first (they have duration data)
         fixations = self.get_events_by_type(EVENT_TYPE_FIXATION, seconds)
         saccades = self.get_events_by_type(EVENT_TYPE_SACCADE, seconds)
@@ -641,17 +600,7 @@ class PerclosIndicator(MiniViz):
 # =============================================================================
 
 class EventsViewer(BaseStreamViewer):
-    """Eye events viewer with mini-visualizations and counter display.
-
-    Shows real-time visualizations for human factors research:
-    - Event timeline (temporal patterns)
-    - Saccade velocity gauge (fatigue detection)
-    - Scan pattern rose (attention distribution)
-    - Fixation/saccade ratio (task type)
-    - PERCLOS indicator (true P80 drowsiness metric from eyelid aperture)
-
-    Plus compact counters showing running totals.
-    """
+    """Eye events viewer: timeline, rate gauges, PERCLOS P80, event counters."""
 
     # Event type definitions matching Pupil Labs API (full labels for display)
     EVENT_TYPES = [
@@ -662,20 +611,7 @@ class EventsViewer(BaseStreamViewer):
         ("Sacc Onsets", "saccade_onset"),
     ]
 
-    def __init__(
-        self,
-        parent: "tk.Frame",
-        logger: logging.Logger,
-        *,
-        row: int = 0,
-    ) -> None:
-        """Initialize the events viewer.
-
-        Args:
-            parent: Parent tkinter frame
-            logger: Logger instance
-            row: Grid row position
-        """
+    def __init__(self, parent: "tk.Frame", logger: logging.Logger, *, row: int = 0) -> None:
         super().__init__(parent, "events", logger, row=row)
 
         # Event buffer for visualizations
@@ -750,12 +686,6 @@ class EventsViewer(BaseStreamViewer):
         return self._frame
 
     def update(self, event_data: Any, gaze_data: Any = None) -> None:
-        """Update the visualizations and counters with new event and gaze data.
-
-        Args:
-            event_data: Eye event from Pupil Labs API, or None if no event available
-            gaze_data: Gaze sample with eyelid aperture for PERCLOS, or None
-        """
         if not self._enabled:
             return
 
@@ -810,41 +740,16 @@ class EventsViewer(BaseStreamViewer):
             )
 
     def _get_event_type(self, event_data: Any) -> str:
-        """Determine the type of eye event.
-
-        Pupil Labs event types are encoded as integers:
-        - event_type=0: Saccade (completed)
-        - event_type=1: Fixation (completed)
-        - event_type=2: Saccade onset
-        - event_type=3: Fixation onset
-        - event_type=4: Blink
-
-        Args:
-            event_data: Eye event object
-
-        Returns:
-            Event type key: 'blink', 'fixation', 'fixation_onset',
-                           'saccade', 'saccade_onset', or 'unknown'
-        """
-        # Check numeric event_type attribute (Pupil Labs API)
+        """Map event_type integer (0-4) to string key, fallback to class name."""
         event_type_val = getattr(event_data, "event_type", None)
         if event_type_val is not None:
             try:
-                event_type_int = int(event_type_val)
-                if event_type_int == EVENT_TYPE_SACCADE:
-                    return "saccade"
-                elif event_type_int == EVENT_TYPE_FIXATION:
-                    return "fixation"
-                elif event_type_int == EVENT_TYPE_SACCADE_ONSET:
-                    return "saccade_onset"
-                elif event_type_int == EVENT_TYPE_FIXATION_ONSET:
-                    return "fixation_onset"
-                elif event_type_int == EVENT_TYPE_BLINK:
-                    return "blink"
+                type_map = {0: "saccade", 1: "fixation", 2: "saccade_onset",
+                           3: "fixation_onset", 4: "blink"}
+                return type_map.get(int(event_type_val), "unknown")
             except (ValueError, TypeError):
                 pass
-
-        # Fallback: check class name
+        # Fallback: class name
         class_name = type(event_data).__name__.lower()
         if "blink" in class_name:
             return "blink"
@@ -852,7 +757,6 @@ class EventsViewer(BaseStreamViewer):
             return "fixation_onset"
         if "fixation" in class_name:
             return "fixation"
-
         return "unknown"
 
     def reset(self) -> None:
