@@ -151,6 +151,11 @@ class CommandMessage:
         camera_hw_model: str = None,
         camera_location: str = None,
         display_name: str = None,
+        # Camera audio sibling fields (for webcams with built-in microphones)
+        camera_audio_index: int = None,
+        camera_audio_channels: int = None,
+        camera_audio_sample_rate: float = None,
+        camera_audio_alsa_card: int = None,
         # Correlation ID for acknowledgment tracking
         command_id: str = None,
     ) -> str:
@@ -177,6 +182,10 @@ class CommandMessage:
             camera_hw_model: Hardware model
             camera_location: USB port or CSI connector
             display_name: Display name for the device
+            camera_audio_index: sounddevice index for webcam's built-in microphone
+            camera_audio_channels: Number of input channels for webcam mic
+            camera_audio_sample_rate: Sample rate for webcam mic
+            camera_audio_alsa_card: ALSA card number for webcam mic
             command_id: Optional correlation ID for tracking acknowledgment
         """
         kwargs = {
@@ -214,6 +223,15 @@ class CommandMessage:
             kwargs["camera_location"] = camera_location
         if display_name:
             kwargs["display_name"] = display_name
+        # Camera audio sibling fields
+        if camera_audio_index is not None:
+            kwargs["camera_audio_index"] = camera_audio_index
+        if camera_audio_channels is not None:
+            kwargs["camera_audio_channels"] = camera_audio_channels
+        if camera_audio_sample_rate is not None:
+            kwargs["camera_audio_sample_rate"] = camera_audio_sample_rate
+        if camera_audio_alsa_card is not None:
+            kwargs["camera_audio_alsa_card"] = camera_audio_alsa_card
         return CommandMessage.create("assign_device", command_id=command_id, **kwargs)
 
     @staticmethod

@@ -1,0 +1,6 @@
+trial,module,device_id,label,record_time_unix,record_time_mono,shutter_open,shutter_closed,shutter_total,lens,battery_percent
+1,VOG,wVOG_dev_ttyusb0,,1704456789.123456,100.123456789,1500,1500,3000,X,92
+2,VOG,wVOG_dev_ttyusb0,,1704456792.234567,103.234567890,1450,1550,3000,A,91
+3,VOG,wVOG_dev_ttyusb0,,1704456795.345678,106.345678901,1520,1480,3000,B,91
+4,VOG,wVOG_dev_ttyusb0,,1704456798.456789,109.456789012,1480,1520,3000,X,90
+5,VOG,wVOG_dev_ttyusb0,,1704456801.567890,112.567890123,1510,1490,3000,X,90

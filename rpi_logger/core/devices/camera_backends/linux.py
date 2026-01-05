@@ -5,6 +5,8 @@ Discovers USB cameras on Linux using /dev/video* nodes and sysfs enumeration.
 This provides detailed device information including real device names from
 the kernel driver and stable USB bus/port identifiers.
 
+Also probes for audio siblings (built-in microphones) on the same USB device.
+
 Copyright (C) 2024-2025 Red Scientific
 
 Licensed under the Apache License, Version 2.0
@@ -16,7 +18,8 @@ from typing import Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
 
-from .base import DiscoveredUSBCamera
+from .base import AudioSiblingInfo, DiscoveredUSBCamera
+from ..physical_id import USBPhysicalIdResolver
 
 logger = get_module_logger("LinuxCameraBackend")
 
@@ -27,6 +30,14 @@ try:
 except ImportError:
     CV2_AVAILABLE = False
     logger.warning("cv2 not available - camera discovery disabled")
+
+# Try to import sounddevice for audio sibling detection
+try:
+    import sounddevice as sd
+    SOUNDDEVICE_AVAILABLE = True
+except ImportError:
+    SOUNDDEVICE_AVAILABLE = False
+    logger.debug("sounddevice not available - audio sibling detection disabled")
 
 
 class LinuxCameraBackend:
@@ -69,6 +80,23 @@ class LinuxCameraBackend:
             friendly = self._format_friendly_name(base_name, device_root.name)
             stable_id = self._stable_usb_id(device_root)
 
+            # Probe for audio sibling (built-in microphone)
+            audio_sibling = None
+            if SOUNDDEVICE_AVAILABLE:
+                sibling_info = USBPhysicalIdResolver.find_audio_sibling_for_video(dev_path)
+                if sibling_info:
+                    audio_sibling = AudioSiblingInfo(
+                        sounddevice_index=sibling_info["sounddevice_index"],
+                        alsa_card=sibling_info.get("alsa_card"),
+                        channels=sibling_info.get("channels", 2),
+                        sample_rate=sibling_info.get("sample_rate", 48000.0),
+                        name=sibling_info.get("name", ""),
+                    )
+                    logger.info(
+                        f"Found audio sibling for {base_name}: {audio_sibling.name} "
+                        f"(index={audio_sibling.sounddevice_index})"
+                    )
+
             cameras.append(DiscoveredUSBCamera(
                 device_id=f"usb:{stable_id}",
                 stable_id=stable_id,
@@ -76,6 +104,8 @@ class LinuxCameraBackend:
                 friendly_name=friendly,
                 hw_model=base_name,
                 location_hint=str(device_root),
+                usb_bus_path=stable_id,
+                audio_sibling=audio_sibling,
             ))
 
         logger.debug(f"Discovered {len(cameras)} USB cameras on Linux")

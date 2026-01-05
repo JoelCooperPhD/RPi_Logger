@@ -8,10 +8,13 @@ are then handled uniformly by DeviceLifecycleManager.
 This allows gradual migration without rewriting all scanners at once.
 """
 
-from typing import Callable, Awaitable, Any
+from typing import Callable, Awaitable, Any, Optional, TYPE_CHECKING
 
 from rpi_logger.core.logging_utils import get_module_logger
 from .device_registry import DeviceType, DeviceFamily, InterfaceType, get_spec
+
+if TYPE_CHECKING:
+    from .master_registry import MasterDeviceRegistry
 from .events import (
     DeviceEvent,
     DeviceDiscoveredEvent,
@@ -53,14 +56,21 @@ class ScannerEventAdapter:
         ...
     """
 
-    def __init__(self, event_handler: EventHandler):
+    def __init__(
+        self,
+        event_handler: EventHandler,
+        master_registry: Optional["MasterDeviceRegistry"] = None,
+    ):
         """
         Initialize the adapter.
 
         Args:
             event_handler: Async function to receive DeviceEvents
+            master_registry: Optional MasterDeviceRegistry for tracking physical
+                device capabilities (e.g., webcam audio siblings)
         """
         self._handler = event_handler
+        self._master_registry = master_registry
 
     async def _emit(self, event: DeviceEvent) -> None:
         """Emit an event to the handler."""
@@ -250,10 +260,33 @@ class ScannerEventAdapter:
             - dev_path: str | None
             - hw_model: str | None
             - location_hint: str | None
+            - usb_bus_path: str | None
+            - audio_sibling: AudioSiblingInfo | None
         """
         spec = get_spec(DeviceType.USB_CAMERA)
         if not spec:
             return
+
+        # Register in MasterDeviceRegistry if available
+        usb_bus_path = getattr(camera, 'usb_bus_path', None)
+        audio_sibling = getattr(camera, 'audio_sibling', None)
+
+        if self._master_registry and usb_bus_path:
+            self._register_webcam_in_master_registry(
+                camera, usb_bus_path, audio_sibling
+            )
+
+        # Include audio sibling info in event if present
+        audio_sibling_index = None
+        audio_sibling_channels = None
+        audio_sibling_sample_rate = None
+        audio_sibling_alsa_card = None
+
+        if audio_sibling:
+            audio_sibling_index = audio_sibling.sounddevice_index
+            audio_sibling_channels = getattr(audio_sibling, 'channels', 2)
+            audio_sibling_sample_rate = getattr(audio_sibling, 'sample_rate', 48000.0)
+            audio_sibling_alsa_card = getattr(audio_sibling, 'alsa_card', None)
 
         event = discovered_camera_device(
             device_id=camera.device_id,
@@ -265,8 +298,55 @@ class ScannerEventAdapter:
             dev_path=getattr(camera, 'dev_path', None),
             hw_model=getattr(camera, 'hw_model', None),
             location_hint=getattr(camera, 'location_hint', None),
+            audio_sibling_index=audio_sibling_index,
+            audio_sibling_channels=audio_sibling_channels,
+            audio_sibling_sample_rate=audio_sibling_sample_rate,
+            audio_sibling_alsa_card=audio_sibling_alsa_card,
         )
         await self._emit(event)
+
+    def _register_webcam_in_master_registry(
+        self,
+        camera: Any,
+        usb_bus_path: str,
+        audio_sibling: Any,
+    ) -> None:
+        """Register a webcam and its audio sibling in the MasterDeviceRegistry."""
+        from .master_device import (
+            DeviceCapability,
+            VideoUSBCapability,
+            AudioInputCapability,
+            PhysicalInterface,
+        )
+
+        # Register video capability
+        self._master_registry.register_capability(
+            physical_id=usb_bus_path,
+            capability=DeviceCapability.VIDEO_USB,
+            info=VideoUSBCapability(
+                dev_path=getattr(camera, 'dev_path', None),
+                stable_id=getattr(camera, 'stable_id', usb_bus_path),
+            ),
+            display_name=camera.friendly_name,
+            physical_interface=PhysicalInterface.USB,
+        )
+
+        # If webcam has built-in microphone, register audio capability
+        if audio_sibling:
+            self._master_registry.register_capability(
+                physical_id=usb_bus_path,
+                capability=DeviceCapability.AUDIO_INPUT,
+                info=AudioInputCapability(
+                    sounddevice_index=audio_sibling.sounddevice_index,
+                    channels=getattr(audio_sibling, 'channels', 2),
+                    sample_rate=getattr(audio_sibling, 'sample_rate', 48000.0),
+                    alsa_card=getattr(audio_sibling, 'alsa_card', None),
+                ),
+            )
+            logger.info(
+                f"Registered webcam {camera.friendly_name} with audio sibling "
+                f"(index={audio_sibling.sounddevice_index})"
+            )
 
     async def on_usb_camera_lost(self, device_id: str) -> None:
         """Adapt USB camera lost callback."""

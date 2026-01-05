@@ -7,7 +7,10 @@ Follows the same pattern as USBScanner and NetworkScanner for consistency.
 
 import asyncio
 from dataclasses import dataclass
-from typing import Callable, Optional, Dict, Set, Awaitable
+from typing import Callable, Optional, Dict, Set, Awaitable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .master_registry import MasterDeviceRegistry
 
 from rpi_logger.core.logging_utils import get_module_logger
 
@@ -36,6 +39,9 @@ class DiscoveredAudioDevice:
 AudioDeviceFoundCallback = Callable[[DiscoveredAudioDevice], Awaitable[None]]
 AudioDeviceLostCallback = Callable[[str], Awaitable[None]]  # device_id
 
+# Filter callback type - returns True if audio index should be excluded
+AudioIndexFilterCallback = Callable[[int], bool]
+
 
 class AudioScanner:
     """
@@ -62,11 +68,13 @@ class AudioScanner:
         sample_rate: int = DEFAULT_SAMPLE_RATE,
         on_device_found: Optional[AudioDeviceFoundCallback] = None,
         on_device_lost: Optional[AudioDeviceLostCallback] = None,
+        exclude_filter: Optional[AudioIndexFilterCallback] = None,
     ):
         self._scan_interval = scan_interval
         self._sample_rate = sample_rate
         self._on_device_found = on_device_found
         self._on_device_lost = on_device_lost
+        self._exclude_filter = exclude_filter
 
         self._known_devices: Dict[str, DiscoveredAudioDevice] = {}
         self._known_indices: Set[int] = set()
@@ -180,6 +188,11 @@ class AudioScanner:
                 if "usb" not in name.lower():
                     continue
 
+                # Check if this device should be excluded (e.g., webcam mic)
+                if self._exclude_filter and self._exclude_filter(index):
+                    logger.debug(f"Excluding audio device {index} ({name}) - filtered")
+                    continue
+
                 current_indices.add(index)
 
                 # Skip if already known
@@ -238,3 +251,27 @@ class AudioScanner:
         """Get a device by its sounddevice index."""
         device_id = f"audio_{index}"
         return self._known_devices.get(device_id)
+
+    def set_exclude_filter(self, filter_fn: Optional[AudioIndexFilterCallback]) -> None:
+        """Set or update the exclusion filter.
+
+        This allows dynamically filtering out certain audio devices,
+        such as webcam microphones which are managed by the camera module.
+
+        Args:
+            filter_fn: Callback that returns True if an index should be excluded.
+                       Pass None to disable filtering.
+        """
+        self._exclude_filter = filter_fn
+
+    def set_registry_filter(self, registry: "MasterDeviceRegistry") -> None:
+        """Set up filtering using a MasterDeviceRegistry.
+
+        Automatically excludes audio devices that are webcam microphones,
+        based on the registry's knowledge of which devices are webcams.
+
+        Args:
+            registry: The MasterDeviceRegistry to check for webcam mics.
+        """
+        self._exclude_filter = registry.is_audio_index_webcam_mic
+        logger.debug("Audio scanner now filtering webcam mics via registry")

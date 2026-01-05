@@ -40,6 +40,7 @@ from .selection import DeviceSelectionModel, ConnectionKey
 from .lifecycle import DeviceLifecycleManager, DeviceInfo
 from .scanner_adapter import ScannerEventAdapter
 from .device_registry import DeviceFamily, InterfaceType
+from .master_registry import MasterDeviceRegistry
 
 # Import scanners
 from .usb_scanner import USBScanner
@@ -99,6 +100,7 @@ class DeviceSystem:
         self._catalog = DeviceCatalog
         self._selection = DeviceSelectionModel()
         self._lifecycle = DeviceLifecycleManager(self._selection, self._catalog)
+        self._master_registry = MasterDeviceRegistry()
 
         # UI controller (optional, lazily imported)
         self._ui_controller: Any = None
@@ -110,8 +112,11 @@ class DeviceSystem:
                 self._catalog,
             )
 
-        # Scanner adapter
-        self._adapter = ScannerEventAdapter(self._lifecycle.handle_event)
+        # Scanner adapter (with master registry for webcam audio tracking)
+        self._adapter = ScannerEventAdapter(
+            self._lifecycle.handle_event,
+            master_registry=self._master_registry,
+        )
 
         # Create scanners
         self._usb_scanner = USBScanner(
@@ -142,6 +147,7 @@ class DeviceSystem:
             self._audio_scanner = AudioScanner(
                 on_device_found=self._adapter.on_audio_device_found,
                 on_device_lost=self._adapter.on_audio_device_lost,
+                exclude_filter=self._master_registry.is_audio_index_webcam_mic,
             )
 
         self._internal_scanner = InternalDeviceScanner(
@@ -270,6 +276,15 @@ class DeviceSystem:
     def usb_scanner(self) -> USBScanner:
         """Get the USB scanner."""
         return self._usb_scanner
+
+    @property
+    def master_registry(self) -> MasterDeviceRegistry:
+        """Get the master device registry.
+
+        The registry tracks physical devices and their capabilities,
+        enabling features like webcam audio sibling detection.
+        """
+        return self._master_registry
 
     # =========================================================================
     # Application Callbacks
@@ -614,20 +629,23 @@ class DeviceSystem:
         # Start USB scanner
         await self._usb_scanner.start()
 
-        # Start audio scanner
-        if self._audio_scanner:
-            await self._audio_scanner.start()
-
-        # Start internal device scanner
-        await self._internal_scanner.start()
-
-        # Start USB camera scanner
+        # Start USB camera scanner BEFORE audio scanner
+        # This ensures webcam mics are registered in MasterDeviceRegistry
+        # before AudioScanner tries to discover them
         if self._usb_camera_scanner:
             await self._usb_camera_scanner.start()
 
         # Start CSI camera scanner
         if self._csi_scanner:
             await self._csi_scanner.start()
+
+        # Start audio scanner AFTER camera scanners
+        # (webcam mics are filtered out via MasterDeviceRegistry)
+        if self._audio_scanner:
+            await self._audio_scanner.start()
+
+        # Start internal device scanner
+        await self._internal_scanner.start()
 
         # Start UART scanner
         await self._uart_scanner.start()

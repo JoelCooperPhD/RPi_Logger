@@ -1,0 +1,4 @@
+trial,module,device_id,label,record_time_unix,record_time_mono,timestamp,timestamp_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,quat_w,quat_x,quat_y,quat_z,temperature
+1,EyeTracker,eye_tracker,,1704456789.123456,100.123456789,1704456789.120,1704456789120000000,0.01,-0.02,0.005,0.1,-0.05,-9.78,0.998,0.01,-0.02,0.03,24.5
+1,EyeTracker,eye_tracker,,1704456789.128456,100.128456789,1704456789.125,1704456789125000000,0.02,-0.01,0.003,0.08,-0.04,-9.79,0.998,0.01,-0.02,0.03,24.6
+1,EyeTracker,eye_tracker,,1704456789.133456,100.133456789,1704456789.130,1704456789130000000,0.015,-0.015,0.004,0.09,-0.06,-9.80,0.998,0.01,-0.02,0.03,24.5

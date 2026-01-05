@@ -9,8 +9,23 @@ Copyright (C) 2024-2025 Red Scientific
 Licensed under the Apache License, Version 2.0
 """
 
-from dataclasses import dataclass
-from typing import Optional, Protocol
+from dataclasses import dataclass, field
+from typing import Any, Optional, Protocol
+
+
+@dataclass
+class AudioSiblingInfo:
+    """Information about an audio device that is part of the same physical device.
+
+    When a USB webcam has a built-in microphone, both the video and audio
+    interfaces share the same USB bus path. This class holds the audio
+    interface details discovered alongside the video interface.
+    """
+    sounddevice_index: int
+    alsa_card: Optional[int] = None
+    channels: int = 2
+    sample_rate: float = 48000.0
+    name: str = ""
 
 
 @dataclass
@@ -27,6 +42,10 @@ class DiscoveredUSBCamera:
         friendly_name: Human-readable name for display (e.g., "FaceTime HD Camera")
         hw_model: Hardware model identifier if known
         location_hint: Physical location hint (USB port path on Linux)
+        usb_bus_path: USB bus path for this device (e.g., "1-2"), used to link
+            video and audio interfaces on the same physical device
+        audio_sibling: If this webcam has a built-in microphone, contains the
+            audio device details. None if no audio sibling was found.
     """
 
     device_id: str
@@ -35,6 +54,8 @@ class DiscoveredUSBCamera:
     friendly_name: str
     hw_model: Optional[str]
     location_hint: Optional[str]
+    usb_bus_path: Optional[str] = None
+    audio_sibling: Optional[AudioSiblingInfo] = None
 
 
 class CameraBackend(Protocol):
@@ -60,6 +81,7 @@ class CameraBackend(Protocol):
 
 
 __all__ = [
+    "AudioSiblingInfo",
     "DiscoveredUSBCamera",
     "CameraBackend",
 ]

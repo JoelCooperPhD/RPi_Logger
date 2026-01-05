@@ -35,6 +35,11 @@ from rpi_logger.modules.base.camera_validator import CapabilityValidator
 from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
 from rpi_logger.modules.Cameras.storage.session_paths import resolve_session_paths
 from rpi_logger.modules.Cameras.app.view import CameraView
+from rpi_logger.modules.Cameras.webcam_audio import (
+    WebcamAudioRecorder,
+    WebcamAudioInfo,
+    SOUNDDEVICE_AVAILABLE,
+)
 
 try:
     from vmc.runtime import ModuleRuntime, RuntimeContext
@@ -92,6 +97,11 @@ class CamerasRuntime(ModuleRuntime):
 
         # Background tasks
         self._capture_task: Optional[asyncio.Task] = None
+
+        # Webcam audio sibling (built-in microphone)
+        self._audio_info: Optional[WebcamAudioInfo] = None
+        self._audio_recorder: Optional[WebcamAudioRecorder] = None
+        self._record_audio: bool = True  # User preference: record audio with video
 
         # Storage
         self.cache = KnownCamerasCache(
@@ -271,6 +281,27 @@ class CamerasRuntime(ModuleRuntime):
             hw_model=command.get("camera_hw_model"),
             location_hint=command.get("camera_location"),
         )
+
+        # Check for built-in microphone (audio sibling)
+        self._audio_info = WebcamAudioInfo.from_command(command)
+        if self._audio_info:
+            self.logger.info(
+                "Camera has built-in microphone: sounddevice index=%d, rate=%.0f Hz",
+                self._audio_info.sounddevice_index,
+                self._audio_info.sample_rate,
+            )
+            # Create audio recorder if sounddevice is available
+            if SOUNDDEVICE_AVAILABLE:
+                try:
+                    self._audio_recorder = WebcamAudioRecorder(
+                        self._audio_info, self.logger
+                    )
+                    self._audio_recorder.start_stream()
+                except Exception as e:
+                    self.logger.warning("Failed to initialize webcam audio: %s", e)
+                    self._audio_recorder = None
+            else:
+                self.logger.debug("sounddevice not available - webcam audio disabled")
 
         try:
             # Check model database for cached capabilities
@@ -488,6 +519,17 @@ class CamerasRuntime(ModuleRuntime):
             await self._capture.stop()
             self._capture = None
 
+        # Stop audio recorder if present
+        if self._audio_recorder:
+            try:
+                if self._audio_recorder.is_recording:
+                    self._audio_recorder.stop_recording()
+                self._audio_recorder.stop_stream()
+            except Exception as e:
+                self.logger.debug("Error stopping audio recorder: %s", e)
+            self._audio_recorder = None
+            self._audio_info = None
+
         self._is_assigned = False
 
     # ------------------------------------------------------------------ Recording
@@ -527,12 +569,29 @@ class CamerasRuntime(ModuleRuntime):
 
         await asyncio.to_thread(self._encoder.start)
 
+        # Start audio recording if webcam has built-in mic and audio is enabled
+        audio_path = None
+        if self._audio_recorder and self._record_audio:
+            try:
+                self._audio_recorder.start_recording(
+                    self._session_dir,
+                    self._camera_id.key,
+                    self._trial_number,
+                )
+                audio_path = self._audio_recorder._wave_path
+                self.logger.info("Webcam audio recording started")
+            except Exception as e:
+                self.logger.warning("Failed to start webcam audio recording: %s", e)
+
         self._is_recording = True
         self.logger.info("Recording started: %s", paths.video_path)
-        StatusMessage.send("recording_started", {
+        status_data = {
             "video_path": str(paths.video_path),
             "camera_id": self._camera_id.key,
-        })
+        }
+        if audio_path:
+            status_data["audio_path"] = str(audio_path)
+        StatusMessage.send("recording_started", status_data)
 
     async def _stop_recording(self) -> None:
         """Stop video recording."""
@@ -540,6 +599,16 @@ class CamerasRuntime(ModuleRuntime):
             return
 
         self._is_recording = False
+
+        # Stop audio recording first
+        audio_path = None
+        if self._audio_recorder and self._audio_recorder.is_recording:
+            try:
+                audio_path = self._audio_recorder.stop_recording()
+                if audio_path:
+                    self.logger.info("Webcam audio recording stopped: %s", audio_path.name)
+            except Exception as e:
+                self.logger.warning("Error stopping webcam audio: %s", e)
 
         if self._encoder:
             frames_dropped = self._encoder.frames_dropped
@@ -622,6 +691,12 @@ class CamerasRuntime(ModuleRuntime):
                 self.logger.warning("Invalid preview FPS: %s", preview_fps_str)
 
         self._overlay_enabled = settings.get("overlay", "true").lower() == "true"
+
+        # Parse audio recording preference (for webcams with built-in mics)
+        record_audio = settings.get("record_audio", "true").lower() == "true"
+        if record_audio != self._record_audio:
+            self._record_audio = record_audio
+            self.logger.info("Webcam audio recording %s", "enabled" if record_audio else "disabled")
 
         # Save validated settings to cache
         asyncio.create_task(self._save_settings_to_cache(settings))

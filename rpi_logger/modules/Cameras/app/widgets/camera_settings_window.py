@@ -44,6 +44,7 @@ DEFAULT_SETTINGS = {
     "record_resolution": "",
     "record_fps": "15",
     "overlay": "true",
+    "record_audio": "true",  # Record webcam mic audio when available
 }
 
 # Image adjustment controls (Card 2)
@@ -129,10 +130,16 @@ class CameraSettingsWindow:
         self._preview_fps_var: Optional[tk.StringVar] = None
         self._record_res_var: Optional[tk.StringVar] = None
         self._record_fps_var: Optional[tk.StringVar] = None
+        self._record_audio_var: Optional[tk.BooleanVar] = None
         self._preview_res_combo = None
         self._preview_fps_combo = None
         self._record_res_combo = None
         self._record_fps_combo = None
+        self._record_audio_cb = None
+        self._record_audio_frame = None  # Container for audio checkbox
+
+        # Per-camera audio sibling availability
+        self._has_audio_sibling: Dict[str, bool] = {}
 
         # Control widgets - keyed by control name
         self._control_widgets: Dict[str, Dict[str, Any]] = {}  # {name: {var, widget, reset_btn, ...}}
@@ -164,6 +171,15 @@ class CameraSettingsWindow:
         self._latest.setdefault(camera_id, dict(DEFAULT_SETTINGS))
         if self._active_camera == camera_id:
             self._refresh_resolution_ui()
+
+    def set_camera_has_audio_sibling(self, camera_id: str, has_audio: bool) -> None:
+        """Set whether a camera has a built-in microphone.
+
+        This controls visibility of the "Record Audio" checkbox.
+        """
+        self._has_audio_sibling[camera_id] = has_audio
+        if self._active_camera == camera_id:
+            self._update_audio_checkbox_visibility()
 
     def set_camera_settings(self, camera_id: str, settings: Dict[str, str]) -> None:
         merged = dict(DEFAULT_SETTINGS)
@@ -418,9 +434,23 @@ class CameraSettingsWindow:
             row=1, column=3, sticky="w", padx=(4, 0), pady=2
         )
 
+        # Audio recording checkbox (only visible when camera has built-in mic)
+        self._record_audio_frame = tk.Frame(card, bg=bg)
+        self._record_audio_frame.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        self._record_audio_var = tk.BooleanVar(value=True)
+        self._record_audio_cb = ttk.Checkbutton(
+            self._record_audio_frame,
+            text="Record audio (built-in mic)",
+            variable=self._record_audio_var,
+            command=self._on_audio_setting_changed,
+        )
+        self._record_audio_cb.pack(side=tk.LEFT)
+        # Initially hidden until we know if camera has audio
+        self._record_audio_frame.grid_remove()
+
         # Apply button row
         btn_frame = tk.Frame(card, bg=bg)
-        btn_frame.grid(row=2, column=0, columnspan=4, sticky="e", pady=(6, 0))
+        btn_frame.grid(row=3, column=0, columnspan=4, sticky="e", pady=(6, 0))
 
         if HAS_THEME and RoundedButton is not None and Colors is not None:
             apply_btn = RoundedButton(
@@ -849,6 +879,36 @@ class CameraSettingsWindow:
             except Exception:
                 self._logger.debug("Reprobe callback failed", exc_info=True)
 
+    def _on_audio_setting_changed(self) -> None:
+        """Handle audio recording checkbox change."""
+        if not self._active_camera or not self._record_audio_var:
+            return
+        value = self._record_audio_var.get()
+        self._latest.setdefault(self._active_camera, dict(DEFAULT_SETTINGS))
+        self._latest[self._active_camera]["record_audio"] = "true" if value else "false"
+        self._logger.debug("Audio recording setting changed: %s", value)
+
+        # Notify via resolution callback (settings changed)
+        if self._on_apply_resolution:
+            try:
+                settings = self._get_resolution_settings()
+                self._on_apply_resolution(self._active_camera, settings)
+            except Exception:
+                self._logger.debug("Audio setting apply callback failed", exc_info=True)
+
+    def _update_audio_checkbox_visibility(self) -> None:
+        """Show/hide audio checkbox based on whether camera has audio sibling."""
+        if not self._record_audio_frame:
+            return
+        try:
+            has_audio = self._has_audio_sibling.get(self._active_camera or "", False)
+            if has_audio:
+                self._record_audio_frame.grid()  # Show
+            else:
+                self._record_audio_frame.grid_remove()  # Hide
+        except Exception:
+            self._logger.debug("Unable to update audio checkbox visibility", exc_info=True)
+
     def _handle_close(self) -> None:
         # Cancel any pending debounce timer to prevent callback on destroyed window
         if self._debounce_id:
@@ -868,6 +928,7 @@ class CameraSettingsWindow:
         if not self._window:
             return
         self._refresh_resolution_ui()
+        self._update_audio_checkbox_visibility()
         self._rebuild_controls_section()
         self._refresh_info_section()
 
@@ -900,12 +961,18 @@ class CameraSettingsWindow:
                 self._preview_fps_var.set(settings.get("preview_fps", "5"))
                 self._record_res_var.set(settings.get("record_resolution", ""))
                 self._record_fps_var.set(settings.get("record_fps", "15"))
+                # Set audio recording checkbox
+                if self._record_audio_var:
+                    record_audio = settings.get("record_audio", "true").lower() == "true"
+                    self._record_audio_var.set(record_audio)
             else:
                 # Clear values
                 self._preview_res_var.set("")
                 self._preview_fps_var.set("5")
                 self._record_res_var.set("")
                 self._record_fps_var.set("15")
+                if self._record_audio_var:
+                    self._record_audio_var.set(True)
         finally:
             self._suppress_change = False
 
@@ -992,6 +1059,7 @@ class CameraSettingsWindow:
             "record_resolution": (self._record_res_var.get() or "").strip() if self._record_res_var else "",
             "record_fps": (self._record_fps_var.get() or "").strip() if self._record_fps_var else "15",
             "overlay": "true",
+            "record_audio": "true" if (self._record_audio_var and self._record_audio_var.get()) else "false",
         }
 
     def _clamp_settings_to_options(self, camera_id: str) -> None:

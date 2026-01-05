@@ -231,10 +231,50 @@ def discovered_camera_device(
     dev_path: str | None = None,
     hw_model: str | None = None,
     location_hint: str | None = None,
+    # Audio sibling fields (for webcams with built-in microphones)
+    audio_sibling_index: int | None = None,
+    audio_sibling_channels: int | None = None,
+    audio_sibling_sample_rate: float | None = None,
+    audio_sibling_alsa_card: int | None = None,
 ) -> DeviceDiscoveredEvent:
-    """Create a discovery event for a camera device (USB or CSI)."""
+    """Create a discovery event for a camera device (USB or CSI).
+
+    Args:
+        device_id: Unique identifier for the camera
+        device_type: The device type enum value
+        interface: USB or CSI interface
+        module_id: Module identifier for auto-connect
+        friendly_name: Human-readable camera name
+        stable_id: USB bus path or picam number
+        dev_path: /dev/video* path for USB cameras
+        hw_model: Hardware model identifier
+        location_hint: Physical location (USB port, CSI connector)
+        audio_sibling_index: sounddevice index for built-in mic (if present)
+        audio_sibling_channels: Number of input channels for built-in mic
+        audio_sibling_sample_rate: Sample rate for built-in mic
+        audio_sibling_alsa_card: ALSA card number for built-in mic
+
+    Returns:
+        DeviceDiscoveredEvent for the camera
+    """
     # Determine family based on interface type
     family = DeviceFamily.CAMERA_USB if interface == InterfaceType.USB else DeviceFamily.CAMERA_CSI
+    metadata = {
+        "is_camera": True,
+        "camera_type": "usb" if interface == InterfaceType.USB else "picam",
+        "camera_stable_id": stable_id,
+        "camera_dev_path": dev_path,
+        "camera_hw_model": hw_model,
+        "camera_location": location_hint,
+    }
+
+    # Add audio sibling info if present
+    if audio_sibling_index is not None:
+        metadata["camera_audio_index"] = audio_sibling_index
+        metadata["camera_audio_channels"] = audio_sibling_channels
+        metadata["camera_audio_sample_rate"] = audio_sibling_sample_rate
+        metadata["camera_audio_alsa_card"] = audio_sibling_alsa_card
+
     return DeviceDiscoveredEvent(
         device_id=device_id,
         device_type=device_type,
@@ -244,14 +284,7 @@ def discovered_camera_device(
         port=None,
         baudrate=0,
         module_id=module_id,
-        metadata={
-            "is_camera": True,
-            "camera_type": "usb" if interface == InterfaceType.USB else "picam",
-            "camera_stable_id": stable_id,
-            "camera_dev_path": dev_path,
-            "camera_hw_model": hw_model,
-            "camera_location": location_hint,
-        },
+        metadata=metadata,
     )
 
 

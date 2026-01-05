@@ -908,6 +908,11 @@ class LoggerSystem:
                 camera_dev_path=device.get_meta("camera_dev_path"),
                 camera_hw_model=device.get_meta("camera_hw_model"),
                 camera_location=device.get_meta("camera_location"),
+                # Audio sibling info for webcams with built-in microphones
+                camera_audio_index=device.get_meta("camera_audio_index"),
+                camera_audio_channels=device.get_meta("camera_audio_channels"),
+                camera_audio_sample_rate=device.get_meta("camera_audio_sample_rate"),
+                camera_audio_alsa_card=device.get_meta("camera_audio_alsa_card"),
                 display_name=device.display_name,
                 command_id=command_id,  # Inject correlation ID
             )
