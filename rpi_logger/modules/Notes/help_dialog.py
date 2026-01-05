@@ -4,57 +4,23 @@ from tkinter import ttk, scrolledtext
 from rpi_logger.core.ui.theme.styles import Theme
 
 
-NOTES_HELP_TEXT = """
-═══════════════════════════════════════════════════════════════════
-                   NOTES MODULE QUICK START GUIDE
-═══════════════════════════════════════════════════════════════════
+NOTES_HELP_TEXT = """NOTES MODULE - QUICK START
 
-OVERVIEW
-Add timestamped annotations during sessions. Notes are synchronized with
-other data streams and saved to CSV for analysis.
+USAGE: Enable Notes > Start session > Type note > Press Enter/click Post
 
-GETTING STARTED
-1. Enable Notes from the Modules menu
-2. Start a session from main logger
-3. Type note and press Enter or click "Post"
+UI COLORS: Blue=timestamp, Green=elapsed, Purple=modules
 
-USER INTERFACE
-History Panel: Shows timestamp, elapsed time, module tags, content
-  • Blue: ISO date/time
-  • Green: Elapsed session time
-  • Purple: Active recording modules
+OUTPUT: {session_dir}/Notes/{prefix}_notes.csv
+COLUMNS: trial, module, device_id, label, record_time_unix (6dp),
+         record_time_mono (9dp), device_time_unix, content
 
-New Note Field: Enter to submit, Shift+Enter for newline
+CONFIG: History Limit (default 200), Auto-Start option
 
-OUTPUT FILES
-Format: {prefix}_notes.csv
-Example: 20251208_143022_NTS_trial001_notes.csv
-Location: {session_dir}/Notes/
-
-CSV COLUMNS (8 fields)
-trial, module, device_id, label, record_time_unix, record_time_mono,
-device_time_unix, content
-
-TIMING & SYNCHRONIZATION
-record_time_unix: Microsecond precision (6 decimals)
-record_time_mono: Nanosecond precision (9 decimals)
-Use these to correlate with video frames, audio, DRT, eye tracking, GPS
-
-CONFIGURATION
-History Limit: Max notes displayed (default: 200)
-Auto-Start: Begin recording with session start
-
-BEST PRACTICES
-• Mark condition/trial start/end
-• Record participant comments verbatim
-• Note equipment issues or interruptions
-• Use consistent terminology
+TIPS: Mark trial boundaries, note equipment issues, use consistent terms
 
 TROUBLESHOOTING
-Notes not saving: Start session from main logger first
-History not updating: Check note field not empty, scroll to bottom
-Session required: Use "Start Session" button before recording
-Lost notes: Check session directory CSV (saved immediately)
+- Notes not saving: Start session first
+- Lost notes: Check session CSV (saved immediately)
 """
 
 
@@ -66,7 +32,7 @@ class NotesHelpDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
         Theme.configure_toplevel(self.dialog)
-        self.dialog.geometry("700x600")
+        self.dialog.geometry("550x350")
 
         main_frame = ttk.Frame(self.dialog, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -88,6 +54,6 @@ class NotesHelpDialog:
                    text="Close", command=self.dialog.destroy).pack()
 
         self.dialog.protocol("WM_DELETE_WINDOW", self.dialog.destroy)
-        x = parent.winfo_x() + (parent.winfo_width() // 2) - 350
-        y = parent.winfo_y() + (parent.winfo_height() // 2) - 300
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - 275
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 175
         self.dialog.geometry(f"+{x}+{y}")

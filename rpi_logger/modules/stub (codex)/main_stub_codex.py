@@ -29,8 +29,6 @@ def parse_args(argv: Optional[list[str]] = None):
     add_common_cli_arguments(
         parser,
         default_output=DEFAULT_OUTPUT_SUBDIR,
-        allowed_modes=["gui", "headless"],
-        default_mode="gui",
         include_session_prefix=True,
         default_session_prefix="stub_codex",
         include_console_control=True,

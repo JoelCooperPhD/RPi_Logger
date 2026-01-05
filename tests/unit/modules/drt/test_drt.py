@@ -57,7 +57,6 @@ class TestDRTConfig:
         assert config.session_prefix == "drt"
         assert config.log_level == "info"
         assert config.console_output is False
-        assert config.default_mode == "gui"
         assert config.device_vid == 0x239A
         assert config.device_pid == 0x801E
         assert config.baudrate == 9600

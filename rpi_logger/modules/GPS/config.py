@@ -30,9 +30,6 @@ class GPSConfig:
     log_level: str = "info"
     console_output: bool = False
 
-    # Mode settings
-    default_mode: str = "gui"
-
     # Map settings
     offline_db: str = "offline_tiles.db"
     center_lat: float = 40.7608
@@ -68,8 +65,6 @@ class GPSConfig:
             session_prefix=get_pref_str(prefs, "session_prefix", defaults.session_prefix),
             log_level=get_pref_str(prefs, "log_level", defaults.log_level),
             console_output=get_pref_bool(prefs, "console_output", defaults.console_output),
-            # Mode settings
-            default_mode=get_pref_str(prefs, "default_mode", defaults.default_mode),
             # Map settings
             offline_db=get_pref_str(prefs, "offline_db", defaults.offline_db),
             center_lat=get_pref_float(prefs, "center_lat", defaults.center_lat),
@@ -103,7 +98,6 @@ class GPSConfig:
             "session_prefix": "session_prefix",
             "log_level": "log_level",
             "console_output": "console_output",
-            "mode": "default_mode",
             "offline_db": "offline_db",
             "center_lat": "center_lat",
             "center_lon": "center_lon",

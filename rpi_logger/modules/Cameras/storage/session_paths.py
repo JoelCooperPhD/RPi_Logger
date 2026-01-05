@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from rpi_logger.modules.Cameras.camera_core import CameraId
+from rpi_logger.modules.base.camera_types import CameraId
 from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module_filename_prefix
 
 

@@ -1,8 +1,8 @@
 """
 API Server - aiohttp-based REST server for Logger System.
 
-This server runs alongside the GUI or in headless mode, providing
-HTTP endpoints for programmatic control of the application.
+This server runs alongside the GUI, providing HTTP endpoints for
+programmatic control of the application.
 """
 
 import asyncio

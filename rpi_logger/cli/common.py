@@ -7,7 +7,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any, Optional, Tuple
 
 from rpi_logger.core.logging_config import configure_logging
 from rpi_logger.core.paths import USER_MODULE_LOGS_DIR
@@ -27,8 +27,6 @@ def add_common_cli_arguments(
     parser: argparse.ArgumentParser,
     *,
     default_output: Path | str,
-    allowed_modes: Optional[Sequence[str]] = None,
-    default_mode: Optional[str] = None,
     include_config: bool = False,
     include_session_prefix: bool = True,
     default_session_prefix: str = "session",
@@ -66,15 +64,6 @@ def add_common_cli_arguments(
             type=Path,
             default=None,
             help="Optional configuration file that overrides CLI arguments",
-        )
-
-    if allowed_modes:
-        choices = list(dict.fromkeys(allowed_modes))
-        parser.add_argument(
-            "--mode",
-            choices=choices,
-            default=default_mode or (choices[0] if choices else None),
-            help="Execution mode",
         )
 
     if include_session_prefix:
@@ -475,7 +464,6 @@ def log_module_startup(
     logger.info("=" * 80)
     logger.info("Session: %s", session_name)
     logger.info("Log file: %s", log_file)
-    logger.info("Mode: %s", args.mode)
 
     for key, value in extra_info.items():
         display_key = key.replace('_', ' ').title()

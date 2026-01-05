@@ -29,9 +29,6 @@ class DRTConfig:
     log_level: str = "info"
     console_output: bool = False
 
-    # Mode settings
-    default_mode: str = "gui"
-
     # Device settings
     device_vid: int = 0x239A
     device_pid: int = 0x801E
@@ -66,8 +63,6 @@ class DRTConfig:
             session_prefix=get_pref_str(prefs, "session_prefix", defaults.session_prefix),
             log_level=get_pref_str(prefs, "log_level", defaults.log_level),
             console_output=get_pref_bool(prefs, "console_output", defaults.console_output),
-            # Mode settings
-            default_mode=get_pref_str(prefs, "default_mode", defaults.default_mode),
             # Device settings
             device_vid=get_pref_int(prefs, "device_vid", defaults.device_vid),
             device_pid=get_pref_int(prefs, "device_pid", defaults.device_pid),
@@ -99,7 +94,6 @@ class DRTConfig:
             "session_prefix": "session_prefix",
             "log_level": "log_level",
             "console_output": "console_output",
-            "mode": "default_mode",
             "device_vid": "device_vid",
             "device_pid": "device_pid",
             "baudrate": "baudrate",

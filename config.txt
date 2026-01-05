@@ -32,12 +32,6 @@ last_session_dir = /home/joel
 # AUTO-START ON BOOT (Systemd Service)
 ################################################################################
 
-# Mode to use when starting automatically on boot
-# Options: gui, interactive
-# - gui: Tkinter GUI interface (default)
-# - interactive: Command-line shell for remote SSH control
-auto_start_mode = interactive
-
 # To enable/disable auto-start on boot:
 #   Enable:  sudo systemctl enable rpi-logger
 #   Disable: sudo systemctl disable rpi-logger

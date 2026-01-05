@@ -152,62 +152,42 @@ class CSICamerasRuntime(ModuleRuntime):
         if action == "assign_device":
             self.logger.info("Processing assign_device command")
             return await self._assign_camera(command)
-
         if action == "unassign_device":
             await self._release_camera()
             return True
-
         if action == "unassign_all_devices":
-            # Single-camera module: release current camera if any
             command_id = command.get("command_id")
             self.logger.info("Unassigning camera before shutdown (command_id=%s)", command_id)
-
-            port_released = False
-            if self._capture:
+            port_released = bool(self._capture)
+            if port_released:
                 await self._release_camera()
-                port_released = True
-
-            # Send ACK to confirm camera release
-            StatusMessage.send(
-                StatusType.DEVICE_UNASSIGNED,
-                {
-                    "device_id": self._camera_id.stable_id if self._camera_id else "",
-                    "port_released": port_released,
-                },
-                command_id=command_id,
-            )
+            StatusMessage.send(StatusType.DEVICE_UNASSIGNED, {
+                "device_id": self._camera_id.stable_id if self._camera_id else "",
+                "port_released": port_released,
+            }, command_id=command_id)
             return True
-
         if action in {"start_recording", "record"}:
-            session_dir = command.get("session_dir")
-            if session_dir:
-                self._session_dir = Path(session_dir)
-            trial_number = command.get("trial_number")
-            if trial_number is not None:
-                self._trial_number = int(trial_number)
+            if sd := command.get("session_dir"):
+                self._session_dir = Path(sd)
+            if (tn := command.get("trial_number")) is not None:
+                self._trial_number = int(tn)
             self._trial_label = str(command.get("trial_label", ""))
             await self._start_recording()
             return True
-
         if action in {"stop_recording", "pause", "pause_recording"}:
             await self._stop_recording()
             return True
-
         if action == "resume_recording":
             await self._start_recording()
             return True
-
         if action == "start_session":
-            session_dir = command.get("session_dir")
-            if session_dir:
-                self._session_dir = Path(session_dir)
+            if sd := command.get("session_dir"):
+                self._session_dir = Path(sd)
             return True
-
         if action == "stop_session":
             if self._is_recording:
                 await self._stop_recording()
             return True
-
         return False
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
@@ -588,56 +568,42 @@ class CSICamerasRuntime(ModuleRuntime):
         if camera_id != (self._camera_id.key if self._camera_id else None):
             return
 
-        # Validate settings against capabilities
         if self._validator:
-            validated_settings = self._validator.validate_settings(settings)
-            if validated_settings != settings:
-                self.logger.info("Settings adjusted for capability compliance: %s -> %s",
-                               settings, validated_settings)
-            settings = validated_settings
+            validated = self._validator.validate_settings(settings)
+            if validated != settings:
+                self.logger.info("Settings adjusted for capability compliance: %s -> %s", settings, validated)
+            settings = validated
 
-        res_str = settings.get("record_resolution", "")
-        fps_str = settings.get("record_fps", "")
+        def parse_res(key: str) -> Optional[tuple[int, int]]:
+            if (s := settings.get(key, "")) and "x" in s:
+                try:
+                    return tuple(map(int, s.split("x")))
+                except ValueError:
+                    pass
+            return None
 
-        if res_str and "x" in res_str:
-            try:
-                w, h = map(int, res_str.split("x"))
-                self._resolution = (w, h)
-                self.logger.debug("Record resolution updated to %dx%d", w, h)
-            except ValueError:
-                pass
-
-        if fps_str:
+        if res := parse_res("record_resolution"):
+            self._resolution = res
+            self.logger.debug("Record resolution updated to %dx%d", *res)
+        if fps_str := settings.get("record_fps"):
             try:
                 self._fps = float(fps_str)
                 self.logger.debug("Record FPS updated to %.1f", self._fps)
             except ValueError:
                 pass
-
-        preview_res_str = settings.get("preview_resolution", "")
-        preview_fps_str = settings.get("preview_fps", "")
-
-        if preview_res_str and "x" in preview_res_str:
+        if prev_res := parse_res("preview_resolution"):
+            self._preview_resolution = prev_res
+            self.logger.debug("Preview resolution updated to %dx%d", *prev_res)
+        if prev_fps := settings.get("preview_fps"):
             try:
-                w, h = map(int, preview_res_str.split("x"))
-                self._preview_resolution = (w, h)
-                self.logger.debug("Preview resolution updated to %dx%d", w, h)
-            except ValueError:
-                pass
-
-        if preview_fps_str:
-            try:
-                self._preview_fps = float(preview_fps_str)
+                self._preview_fps = float(prev_fps)
                 self.logger.debug("Preview FPS updated to %.1f", self._preview_fps)
             except ValueError:
                 pass
 
         self._overlay_enabled = settings.get("overlay", "true").lower() == "true"
-
-        # Save validated settings to cache
         asyncio.create_task(self._save_settings_to_cache(settings))
-
-        if self._is_assigned and self._capture and (res_str or fps_str):
+        if self._is_assigned and self._capture and (settings.get("record_resolution") or settings.get("record_fps")):
             asyncio.create_task(self._reinit_capture())
 
     async def _save_settings_to_cache(self, settings: Dict[str, str]) -> None:

@@ -28,9 +28,6 @@ class VOGConfig:
     log_level: str = "info"
     console_output: bool = False
 
-    # Mode settings
-    default_mode: str = "gui"
-
     # UI visibility (master logger integration)
     preview_resolution: str = "auto"
     view_show_io_panel: bool = True
@@ -56,8 +53,6 @@ class VOGConfig:
             session_prefix=get_pref_str(prefs, "session_prefix", defaults.session_prefix),
             log_level=get_pref_str(prefs, "log_level", defaults.log_level),
             console_output=get_pref_bool(prefs, "console_output", defaults.console_output),
-            # Mode settings
-            default_mode=get_pref_str(prefs, "default_mode", defaults.default_mode),
             # UI visibility
             preview_resolution=get_pref_str(prefs, "preview_resolution", defaults.preview_resolution),
             view_show_io_panel=get_pref_bool(prefs, "view.show_io_panel", defaults.view_show_io_panel),
@@ -83,7 +78,6 @@ class VOGConfig:
             "session_prefix": "session_prefix",
             "log_level": "log_level",
             "console_output": "console_output",
-            "mode": "default_mode",
         }
 
         for arg_name, config_key in arg_mappings.items():

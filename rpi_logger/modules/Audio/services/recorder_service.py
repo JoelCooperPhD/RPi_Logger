@@ -1,5 +1,4 @@
 """Recorder service."""
-
 from __future__ import annotations
 
 import asyncio
@@ -12,13 +11,8 @@ from .device_recorder import AudioDeviceRecorder, RecordingHandle
 
 class RecorderService:
     """Manage audio device recorder."""
-    def __init__(
-        self,
-        logger: logging.Logger,
-        sample_rate: int,
-        start_timeout: float,
-        stop_timeout: float,
-    ) -> None:
+    def __init__(self, logger: logging.Logger, sample_rate: int,
+                 start_timeout: float, stop_timeout: float) -> None:
         self.logger = logger.getChild("RecorderService")
         self._default_sample_rate = max(1, int(sample_rate))
         self.start_timeout = start_timeout
@@ -29,16 +23,11 @@ class RecorderService:
         effective_rate = self._resolve_sample_rate(device)
         if self.recorder and self.recorder.sample_rate != effective_rate:
             await self.disable_device()
-
         if self.recorder is None:
             self.recorder = AudioDeviceRecorder(device, effective_rate, meter, self.logger)
-
         self.logger.debug("Enabling recorder for device %d (%s)", device.device_id, device.name)
         try:
-            await asyncio.wait_for(
-                asyncio.to_thread(self.recorder.start_stream),
-                timeout=self.start_timeout,
-            )
+            await asyncio.wait_for(asyncio.to_thread(self.recorder.start_stream), timeout=self.start_timeout)
             return True
         except asyncio.TimeoutError:
             self.logger.error("Timeout starting device %d", device.device_id)
@@ -48,16 +37,12 @@ class RecorderService:
         return False
 
     async def disable_device(self) -> None:
-        recorder = self.recorder
-        if not recorder:
+        if not (recorder := self.recorder):
             return
         self.recorder = None
         self.logger.debug("Disabling recorder for device %d", recorder.device.device_id)
         try:
-            await asyncio.wait_for(
-                asyncio.to_thread(recorder.stop_stream),
-                timeout=self.stop_timeout,
-            )
+            await asyncio.wait_for(asyncio.to_thread(recorder.stop_stream), timeout=self.stop_timeout)
         except Exception as exc:
             self.logger.debug("Device stop raised: %s", exc)
 
@@ -65,7 +50,6 @@ class RecorderService:
         if not self.recorder:
             self.logger.warning("No recorder available for recording")
             return False
-
         try:
             self.logger.debug("Starting recording for device %d (trial %d)", self.recorder.device.device_id, trial_number)
             await asyncio.to_thread(self.recorder.begin_recording, session_dir, trial_number)
@@ -77,7 +61,6 @@ class RecorderService:
     async def finish_recording(self) -> RecordingHandle | None:
         if not self.recorder:
             return None
-
         try:
             handle = await asyncio.to_thread(self.recorder.finish_recording)
             if handle:
@@ -98,11 +81,8 @@ class RecorderService:
 
     def _resolve_sample_rate(self, device: AudioDeviceInfo) -> int:
         try:
-            candidate = device.sample_rate
-            if candidate:
-                rate = int(float(candidate))
-                if rate > 0:
-                    return rate
+            if (rate := int(float(device.sample_rate or 0))) > 0:
+                return rate
         except (TypeError, ValueError):
             pass
         return self._default_sample_rate

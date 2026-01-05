@@ -89,7 +89,6 @@ class CSICameraView:
     def attach(self) -> None:
         """Mount view inside stub frame."""
         if not self._stub_view:
-            self._logger.info("CSI Camera view running headless (no stub view)")
             return
 
         try:
@@ -435,41 +434,24 @@ class CSICameraView:
         if not self._has_ui:
             return
 
-        # Capture metrics: fps_capture vs target_fps
-        cap_actual = metrics.get("fps_capture")
-        cap_target = metrics.get("target_fps")
-        cap_str = f"{_format_fps(cap_actual)} / {_format_fps(cap_target)}"
-        cap_color = _fps_color(cap_actual, cap_target)
-
-        # Record metrics: fps_encode vs target_record_fps
-        rec_actual = metrics.get("fps_encode")
-        rec_target = metrics.get("target_record_fps")
-        rec_str = f"{_format_fps(rec_actual)} / {_format_fps(rec_target)}"
-        rec_color = _fps_color(rec_actual, rec_target)
-
-        # Display metrics: fps_preview vs target_preview_fps
-        disp_actual = metrics.get("fps_preview")
-        disp_target = metrics.get("target_preview_fps")
-        disp_str = f"{_format_fps(disp_actual)} / {_format_fps(disp_target)}"
-        disp_color = _fps_color(disp_actual, disp_target)
+        # Build metric data: (field_key, actual_key, target_key)
+        metric_defs = [
+            ("cap_tgt", "fps_capture", "target_fps"),
+            ("rec_tgt", "fps_encode", "target_record_fps"),
+            ("disp_tgt", "fps_preview", "target_preview_fps"),
+        ]
+        updates = []
+        for key, actual_k, target_k in metric_defs:
+            actual, target = metrics.get(actual_k), metrics.get(target_k)
+            updates.append((key, f"{_format_fps(actual)} / {_format_fps(target)}", _fps_color(actual, target)))
 
         def update():
             try:
-                # Update values
-                if "cap_tgt" in self._metrics_fields:
-                    self._metrics_fields["cap_tgt"].set(cap_str)
-                if "rec_tgt" in self._metrics_fields:
-                    self._metrics_fields["rec_tgt"].set(rec_str)
-                if "disp_tgt" in self._metrics_fields:
-                    self._metrics_fields["disp_tgt"].set(disp_str)
-
-                # Update colors
-                if "cap_tgt" in self._metrics_labels and cap_color:
-                    self._metrics_labels["cap_tgt"].configure(fg=cap_color)
-                if "rec_tgt" in self._metrics_labels and rec_color:
-                    self._metrics_labels["rec_tgt"].configure(fg=rec_color)
-                if "disp_tgt" in self._metrics_labels and disp_color:
-                    self._metrics_labels["disp_tgt"].configure(fg=disp_color)
+                for key, text, color in updates:
+                    if key in self._metrics_fields:
+                        self._metrics_fields[key].set(text)
+                    if key in self._metrics_labels and color:
+                        self._metrics_labels[key].configure(fg=color)
             except Exception:
                 pass
 

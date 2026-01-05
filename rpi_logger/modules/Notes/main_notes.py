@@ -55,8 +55,6 @@ def parse_args(argv: Optional[list[str]] = None):
     add_common_cli_arguments(
         parser,
         default_output=get_config_path(config, "output_dir", Path("notes")),
-        allowed_modes=["gui", "headless"],
-        default_mode="headless" if get_config_str(config, "mode", defaults["mode"]).strip().lower() in {"headless", "cli"} else "gui",
         include_session_prefix=True,
         default_session_prefix=get_config_str(config, "session_prefix", defaults["session_prefix"]),
         include_console_control=True,

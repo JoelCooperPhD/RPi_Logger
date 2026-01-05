@@ -48,12 +48,8 @@ if "vmc" not in sys.modules:
 # Imports from the Notes module
 # ---------------------------------------------------------------------------
 
-from rpi_logger.modules.Notes.notes_runtime import (
-    NoteRecord,
-    NotesArchive,
-)
-from rpi_logger.modules.Notes.config import NotesConfig
-from rpi_logger.modules.Notes.preferences import NotesPreferences
+from rpi_logger.modules.Notes.notes_runtime import NoteRecord, NotesArchive
+from rpi_logger.modules.Notes.config import NotesConfig, NotesPreferences
 
 
 # ---------------------------------------------------------------------------
@@ -732,7 +728,6 @@ class TestNotesConfigDefaults:
         assert config.visible is True
         assert config.history_limit == 200
         assert config.auto_start is False
-        assert config.mode == "gui"
         assert config.session_prefix == "notes"
         assert config.log_level == "info"
 
@@ -752,7 +747,6 @@ class TestNotesConfigFromPreferences:
             "enabled": True,
             "notes.history_limit": 100,
             "notes.auto_start": True,
-            "mode": "headless",
         }.get(key, default)
 
         config = NotesConfig.from_preferences(mock_preferences)
@@ -760,7 +754,6 @@ class TestNotesConfigFromPreferences:
         assert config.display_name == "Custom Notes"
         assert config.history_limit == 100
         assert config.auto_start is True
-        assert config.mode == "headless"
 
     def test_config_from_preferences_empty(self, mock_preferences: MagicMock):
         """Test loading config when preferences are empty."""
@@ -783,7 +776,6 @@ class TestNotesConfigArgsOverride:
         args = MagicMock()
         args.history_limit = 50
         args.auto_start = True
-        args.mode = "headless"
         args.output_dir = None  # Not overridden
         args.session_prefix = None
         args.log_level = None
@@ -793,7 +785,6 @@ class TestNotesConfigArgsOverride:
 
         assert new_config.history_limit == 50
         assert new_config.auto_start is True
-        assert new_config.mode == "headless"
         # Non-overridden values should remain
         assert new_config.output_dir == Path("notes")
 

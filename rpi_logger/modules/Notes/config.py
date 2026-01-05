@@ -14,6 +14,40 @@ from rpi_logger.modules.base.typed_config import (
 
 
 @dataclass(slots=True)
+class NotesPreferences:
+    """Preferences wrapper for Notes module."""
+
+    prefs: Optional[ScopedPreferences]
+
+    def history_limit(self, fallback: int) -> int:
+        if not self.prefs:
+            return fallback
+        try:
+            return int(self.prefs.get("history_limit", fallback))
+        except (TypeError, ValueError):
+            return fallback
+
+    def auto_start(self, fallback: bool) -> bool:
+        if not self.prefs:
+            return fallback
+        stored = self.prefs.get("auto_start")
+        return fallback if stored is None else str(stored).strip().lower() in {"true", "1", "yes", "on"}
+
+    def _write(self, data: dict) -> None:
+        if self.prefs:
+            self.prefs.write_sync(data)
+
+    def set_history_limit(self, value: int) -> None:
+        self._write({"history_limit": value})
+
+    def set_auto_start(self, value: bool) -> None:
+        self._write({"auto_start": value})
+
+    def set_last_note_path(self, path: str) -> None:
+        self._write({"last_archive_path": path})
+
+
+@dataclass(slots=True)
 class NotesConfig:
     """Typed configuration for Notes module."""
     display_name: str = "Notes"
@@ -24,7 +58,6 @@ class NotesConfig:
     session_prefix: str = "notes"
     log_level: str = "info"
     console_output: bool = False
-    mode: str = "gui"
     history_limit: int = 200
     auto_start: bool = False
     last_archive_path: Optional[str] = None
@@ -48,7 +81,6 @@ class NotesConfig:
             session_prefix=get_pref_str(prefs, "session_prefix", d.session_prefix),
             log_level=get_pref_str(prefs, "log_level", d.log_level),
             console_output=get_pref_bool(prefs, "console_output", d.console_output),
-            mode=get_pref_str(prefs, "mode", d.mode),
             history_limit=get_pref_int(prefs, "notes.history_limit", d.history_limit),
             auto_start=get_pref_bool(prefs, "notes.auto_start", d.auto_start),
             last_archive_path=get_pref_str(prefs, "notes.last_archive_path", "") or None,
@@ -64,7 +96,7 @@ class NotesConfig:
     def _apply_args_override(self, args: Any) -> "NotesConfig":
         """Apply CLI argument overrides to config values."""
         values = asdict(self)
-        for key in ("output_dir", "session_prefix", "log_level", "console_output", "mode", "history_limit", "auto_start"):
+        for key in ("output_dir", "session_prefix", "log_level", "console_output", "history_limit", "auto_start"):
             if hasattr(args, key) and (val := getattr(args, key)) is not None:
                 values[key] = val
         return NotesConfig(**values)
@@ -74,4 +106,4 @@ class NotesConfig:
         return asdict(self)
 
 
-__all__ = ["NotesConfig"]
+__all__ = ["NotesConfig", "NotesPreferences"]

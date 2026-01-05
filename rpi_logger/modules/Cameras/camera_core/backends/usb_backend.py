@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode, CameraCapabilities, ControlInfo, ControlType
+from rpi_logger.modules.base.camera_types import CapabilityMode, CameraCapabilities, ControlInfo, ControlType
 from rpi_logger.modules.Cameras.camera_core.capabilities import build_capabilities
 from rpi_logger.modules.Cameras.utils import set_usb_control_v4l2, to_snake_case, open_videocapture
 

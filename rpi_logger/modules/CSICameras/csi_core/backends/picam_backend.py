@@ -245,7 +245,6 @@ class PicamHandle:
 def _probe_controls_picam(cam: "Picamera2", log) -> Dict[str, ControlInfo]:
     """Extract controls from camera_controls."""
     controls: Dict[str, ControlInfo] = {}
-
     try:
         cam_controls = getattr(cam, "camera_controls", None) or {}
     except Exception as e:
@@ -254,61 +253,36 @@ def _probe_controls_picam(cam: "Picamera2", log) -> Dict[str, ControlInfo]:
 
     for name, info in cam_controls.items():
         try:
-            # info is typically (min, max, default) tuple
-            min_val: Any = None
-            max_val: Any = None
-            default_val: Any = None
-
             if isinstance(info, tuple):
-                if len(info) >= 1:
-                    min_val = info[0]
-                if len(info) >= 2:
-                    max_val = info[1]
-                if len(info) >= 3:
-                    default_val = info[2]
+                min_val = info[0] if len(info) >= 1 else None
+                max_val = info[1] if len(info) >= 2 else None
+                default_val = info[2] if len(info) >= 3 else None
             else:
-                default_val = info
+                min_val, max_val, default_val = None, None, info
 
-            # Determine control type
+            # Determine control type and options
             if name in PICAM_ENUMS:
-                control_type = ControlType.ENUM
-                options = PICAM_ENUMS[name]
+                control_type, options = ControlType.ENUM, PICAM_ENUMS[name]
             elif name.endswith("Limits"):
-                # e.g., FrameDurationLimits, ExposureTimeLimits
-                control_type = ControlType.TUPLE
-                options = None
+                control_type, options = ControlType.TUPLE, None
             elif isinstance(default_val, bool):
-                control_type = ControlType.BOOLEAN
-                options = None
-            elif isinstance(default_val, float) and not isinstance(default_val, bool):
-                control_type = ControlType.FLOAT
-                options = None
+                control_type, options = ControlType.BOOLEAN, None
+            elif isinstance(default_val, float):
+                control_type, options = ControlType.FLOAT, None
             elif isinstance(default_val, int):
-                control_type = ControlType.INTEGER
-                options = None
+                control_type, options = ControlType.INTEGER, None
             else:
-                control_type = ControlType.UNKNOWN
-                options = None
+                control_type, options = ControlType.UNKNOWN, None
 
             controls[name] = ControlInfo(
-                name=name,
-                control_type=control_type,
-                current_value=default_val,  # Use default as "current" at probe time
-                min_value=min_val,
-                max_value=max_val,
-                default_value=default_val,
-                options=options,
-                read_only=False,
-                backend_id=name,  # Picam uses string keys
+                name=name, control_type=control_type, current_value=default_val,
+                min_value=min_val, max_value=max_val, default_value=default_val,
+                options=options, read_only=False, backend_id=name,
             )
-            log.debug(
-                "Picam control %s: type=%s min=%s max=%s default=%s",
-                name, control_type.value, min_val, max_val, default_val,
-            )
+            log.debug("Picam control %s: type=%s min=%s max=%s default=%s",
+                      name, control_type.value, min_val, max_val, default_val)
         except Exception as e:
             log.debug("Failed to parse control %s: %s", name, e)
-            continue
-
     return controls
 
 
@@ -328,62 +302,37 @@ def _probe_sync(sensor_id: str, log) -> Optional[CameraCapabilities]:
         return None
 
     modes: List[Dict[str, Any]] = []
-    controls: Dict[str, ControlInfo] = {}
     global_limits: Dict[str, Any] = {}
 
     try:
-        # Extract sensor modes with additional metadata
         for cfg in cam.sensor_modes or []:
             size = cfg.get("size") or (cfg.get("width"), cfg.get("height"))
             fps = cfg.get("fps", cfg.get("framerate", 30))
-
-            # Extract per-mode metadata
             mode_controls: Dict[str, Any] = {}
 
-            # Exposure limits
-            if "exposure_limits" in cfg:
-                exp_limits = cfg["exposure_limits"]
-                mode_controls["ExposureLimits"] = exp_limits
-                # Merge into global limits (take widest range)
-                if exp_limits[0] is not None:
-                    if "exposure_min" not in global_limits or exp_limits[0] < global_limits["exposure_min"]:
-                        global_limits["exposure_min"] = exp_limits[0]
-                if exp_limits[1] is not None:
-                    if "exposure_max" not in global_limits or exp_limits[1] > global_limits.get("exposure_max", 0):
-                        global_limits["exposure_max"] = exp_limits[1]
+            if exp := cfg.get("exposure_limits"):
+                mode_controls["ExposureLimits"] = exp
+                if exp[0] is not None and ("exposure_min" not in global_limits or exp[0] < global_limits["exposure_min"]):
+                    global_limits["exposure_min"] = exp[0]
+                if exp[1] is not None and ("exposure_max" not in global_limits or exp[1] > global_limits.get("exposure_max", 0)):
+                    global_limits["exposure_max"] = exp[1]
 
-            # Crop limits
-            if "crop_limits" in cfg:
-                mode_controls["CropLimits"] = cfg["crop_limits"]
-
-            # Bit depth
-            if "bit_depth" in cfg:
-                mode_controls["BitDepth"] = cfg["bit_depth"]
-
-            # Native format
+            for key, ctrl_key in [("crop_limits", "CropLimits"), ("bit_depth", "BitDepth")]:
+                if key in cfg:
+                    mode_controls[ctrl_key] = cfg[key]
             if "format" in cfg:
                 mode_controls["NativeFormat"] = str(cfg["format"])
 
-            modes.append({
-                "size": size,
-                "fps": fps,
-                "pixel_format": "RGB",
-                "controls": mode_controls,
-            })
-            log.debug(
-                "Picam mode %s @ %.1f fps, exposure_limits=%s, crop_limits=%s",
-                size, fps, cfg.get("exposure_limits"), cfg.get("crop_limits"),
-            )
+            modes.append({"size": size, "fps": fps, "pixel_format": "RGB", "controls": mode_controls})
+            log.debug("Picam mode %s @ %.1f fps, exposure_limits=%s, crop_limits=%s",
+                      size, fps, cfg.get("exposure_limits"), cfg.get("crop_limits"))
 
-        # Probe camera-level controls
         controls = _probe_controls_picam(cam, log)
         if controls:
             log.info("Probed %d controls from Picamera2 for sensor %s", len(controls), sensor_id)
-
     finally:
         cam.close()
 
-    # Build capabilities and attach controls/limits
     caps = build_capabilities(modes)
     caps.controls = controls
     caps.limits = global_limits

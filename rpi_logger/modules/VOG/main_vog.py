@@ -89,8 +89,6 @@ def parse_args(argv: Optional[list[str]] = None):
     add_common_cli_arguments(
         parser,
         default_output=Path(config.get("output_dir", defaults["output_dir"])),
-        allowed_modes=["gui", "headless"],
-        default_mode=str(config.get("default_mode", defaults["default_mode"])).lower(),
         include_session_prefix=True,
         default_session_prefix=str(config.get("session_prefix", defaults["session_prefix"])),
         include_console_control=True,

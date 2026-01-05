@@ -114,23 +114,16 @@ class StubCodexSupervisor:
 
         self.model.apply_initial_window_geometry()
 
-        if getattr(args, "mode", "gui") == "gui":
-            try:
-                view_kwargs = dict(self._view_kwargs)
-                view_kwargs.setdefault("logger", self.logger.getChild("View"))
-                self.view = self._view_factory(
-                    args,
-                    self.model,
-                    action_callback=self.controller.handle_user_action,
-                    display_name=self.display_name,
-                    **view_kwargs,
-                )
-                self.logger.info("%s supervisor initialized in GUI mode", self.display_name)
-            except Exception as exc:
-                self.logger.warning("GUI unavailable (%s), falling back to headless mode", exc)
-                self.view = None
-        else:
-            self.logger.info("%s supervisor initialized in headless mode", self.display_name)
+        view_kwargs = dict(self._view_kwargs)
+        view_kwargs.setdefault("logger", self.logger.getChild("View"))
+        self.view = self._view_factory(
+            args,
+            self.model,
+            action_callback=self.controller.handle_user_action,
+            display_name=self.display_name,
+            **view_kwargs,
+        )
+        self.logger.info("%s supervisor initialized in GUI mode", self.display_name)
 
         elapsed = (time.perf_counter() - start) * 1000.0
         self.logger.info("%s supervisor constructed in %.2f ms", self.display_name, elapsed)

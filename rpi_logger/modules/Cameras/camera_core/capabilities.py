@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode, CameraCapabilities, CapabilitySource
+from rpi_logger.modules.base.camera_types import CapabilityMode, CameraCapabilities, CapabilitySource
 from rpi_logger.modules.Cameras.utils import parse_resolution
 
 MIN_SAFE_FPS = 5.0

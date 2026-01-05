@@ -314,7 +314,7 @@ class TestCameraId:
 
     def test_camera_id_creation(self):
         """Test CameraId creation and key generation."""
-        from rpi_logger.modules.Cameras.camera_core.state import CameraId
+        from rpi_logger.modules.Cameras.camera_core import CameraId
 
         cam_id = CameraId(
             backend="usb",
@@ -331,7 +331,7 @@ class TestCameraId:
 
     def test_camera_id_frozen(self):
         """Test that CameraId is immutable (frozen)."""
-        from rpi_logger.modules.Cameras.camera_core.state import CameraId
+        from rpi_logger.modules.Cameras.camera_core import CameraId
 
         cam_id = CameraId(backend="usb", stable_id="test")
 
@@ -340,7 +340,7 @@ class TestCameraId:
 
     def test_camera_id_optional_fields(self):
         """Test CameraId with optional fields as None."""
-        from rpi_logger.modules.Cameras.camera_core.state import CameraId
+        from rpi_logger.modules.Cameras.camera_core import CameraId
 
         cam_id = CameraId(backend="picam", stable_id="csi_0")
 
@@ -354,7 +354,7 @@ class TestCapabilityMode:
 
     def test_capability_mode_creation(self):
         """Test CapabilityMode creation."""
-        from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode
+        from rpi_logger.modules.Cameras.camera_core import CapabilityMode
 
         mode = CapabilityMode(
             size=(1920, 1080),
@@ -370,7 +370,7 @@ class TestCapabilityMode:
 
     def test_capability_mode_signature(self):
         """Test CapabilityMode signature generation."""
-        from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode
+        from rpi_logger.modules.Cameras.camera_core import CapabilityMode
 
         mode = CapabilityMode(size=(1280, 720), fps=30.0, pixel_format="YUYV")
 
@@ -379,7 +379,7 @@ class TestCapabilityMode:
 
     def test_capability_mode_signature_uniqueness(self):
         """Test that different modes have different signatures."""
-        from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode
+        from rpi_logger.modules.Cameras.camera_core import CapabilityMode
 
         mode1 = CapabilityMode(size=(1920, 1080), fps=30.0, pixel_format="MJPEG")
         mode2 = CapabilityMode(size=(1280, 720), fps=30.0, pixel_format="MJPEG")
@@ -395,7 +395,7 @@ class TestCameraCapabilities:
 
     def test_camera_capabilities_creation(self):
         """Test CameraCapabilities creation with modes."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             CameraCapabilities,
             CapabilityMode,
             CapabilitySource,
@@ -416,7 +416,7 @@ class TestCameraCapabilities:
 
     def test_camera_capabilities_dedupe(self):
         """Test CameraCapabilities duplicate mode removal."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             CameraCapabilities,
             CapabilityMode,
         )
@@ -435,7 +435,7 @@ class TestCameraCapabilities:
 
     def test_camera_capabilities_find_matching(self):
         """Test CameraCapabilities mode lookup."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             CameraCapabilities,
             CapabilityMode,
         )
@@ -464,7 +464,7 @@ class TestRuntimeStatus:
 
     def test_runtime_status_values(self):
         """Test RuntimeStatus enum values."""
-        from rpi_logger.modules.Cameras.camera_core.state import RuntimeStatus
+        from rpi_logger.modules.Cameras.camera_core import RuntimeStatus
 
         assert RuntimeStatus.DISCOVERED.value == "discovered"
         assert RuntimeStatus.SELECTED.value == "selected"
@@ -478,7 +478,7 @@ class TestControlInfo:
 
     def test_control_info_integer(self):
         """Test ControlInfo for integer control."""
-        from rpi_logger.modules.Cameras.camera_core.state import ControlInfo, ControlType
+        from rpi_logger.modules.Cameras.camera_core import ControlInfo, ControlType
 
         ctrl = ControlInfo(
             name="Brightness",
@@ -498,7 +498,7 @@ class TestControlInfo:
 
     def test_control_info_boolean(self):
         """Test ControlInfo for boolean control."""
-        from rpi_logger.modules.Cameras.camera_core.state import ControlInfo, ControlType
+        from rpi_logger.modules.Cameras.camera_core import ControlInfo, ControlType
 
         ctrl = ControlInfo(
             name="AutoFocus",
@@ -511,7 +511,7 @@ class TestControlInfo:
 
     def test_control_info_enum(self):
         """Test ControlInfo for enum control."""
-        from rpi_logger.modules.Cameras.camera_core.state import ControlInfo, ControlType
+        from rpi_logger.modules.Cameras.camera_core import ControlInfo, ControlType
 
         ctrl = ControlInfo(
             name="AutoExposure",
@@ -535,7 +535,7 @@ class TestStateSerialization:
 
     def test_serialize_camera_id(self):
         """Test CameraId serialization."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             CameraId,
             serialize_camera_id,
             deserialize_camera_id,
@@ -557,7 +557,7 @@ class TestStateSerialization:
 
     def test_deserialize_camera_id(self):
         """Test CameraId deserialization."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             CameraId,
             deserialize_camera_id,
         )
@@ -577,7 +577,7 @@ class TestStateSerialization:
 
     def test_deserialize_camera_id_invalid(self):
         """Test CameraId deserialization with invalid data."""
-        from rpi_logger.modules.Cameras.camera_core.state import deserialize_camera_id
+        from rpi_logger.modules.Cameras.camera_core import deserialize_camera_id
 
         assert deserialize_camera_id(None) is None
         assert deserialize_camera_id({}) is None
@@ -586,7 +586,7 @@ class TestStateSerialization:
 
     def test_serialize_capabilities(self):
         """Test CameraCapabilities serialization."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             CameraCapabilities,
             CapabilityMode,
             CapabilitySource,
@@ -610,7 +610,7 @@ class TestStateSerialization:
 
     def test_deserialize_capabilities(self):
         """Test CameraCapabilities deserialization."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             deserialize_capabilities,
             CapabilitySource,
         )
@@ -633,7 +633,7 @@ class TestStateSerialization:
 
     def test_serialize_control_info(self):
         """Test ControlInfo serialization."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             ControlInfo,
             ControlType,
             serialize_control,
@@ -659,7 +659,7 @@ class TestStateSerialization:
 
     def test_deserialize_control_info(self):
         """Test ControlInfo deserialization."""
-        from rpi_logger.modules.Cameras.camera_core.state import (
+        from rpi_logger.modules.Cameras.camera_core import (
             deserialize_control,
             ControlType,
         )
@@ -868,7 +868,7 @@ class TestEncoder:
     def test_encoder_initialization(self, tmp_path, mock_cv2):
         """Test Encoder initialization."""
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
-            from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
+            from rpi_logger.modules.Cameras.camera_core import Encoder
 
             video_path = str(tmp_path / "test_video.avi")
             csv_path = str(tmp_path / "test_timing.csv")
@@ -894,7 +894,7 @@ class TestEncoder:
     def test_encoder_start_opencv(self, tmp_path, mock_cv2):
         """Test Encoder start with OpenCV backend."""
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
-            from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
+            from rpi_logger.modules.Cameras.camera_core import Encoder
 
             video_path = str(tmp_path / "test_video.avi")
 
@@ -916,7 +916,7 @@ class TestEncoder:
     def test_encoder_frame_count(self, tmp_path, mock_cv2):
         """Test encoder frame counting."""
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
-            from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
+            from rpi_logger.modules.Cameras.camera_core import Encoder
 
             video_path = str(tmp_path / "test_video.avi")
 
@@ -947,7 +947,7 @@ class TestEncoder:
     def test_encoder_csv_creation(self, tmp_path, mock_cv2):
         """Test that encoder creates CSV timing file."""
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
-            from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
+            from rpi_logger.modules.Cameras.camera_core import Encoder
 
             video_path = str(tmp_path / "test_video.avi")
             csv_path = str(tmp_path / "test_timing.csv")
@@ -978,7 +978,7 @@ class TestEncoder:
     def test_encoder_duration_property(self, tmp_path, mock_cv2):
         """Test encoder duration_sec property."""
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
-            from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
+            from rpi_logger.modules.Cameras.camera_core import Encoder
 
             video_path = str(tmp_path / "test_video.avi")
 
@@ -1048,7 +1048,7 @@ class TestUSBHandle:
         """Test USBHandle creation."""
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
             from rpi_logger.modules.Cameras.camera_core.backends.usb_backend import USBHandle
-            from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode
+            from rpi_logger.modules.Cameras.camera_core import CapabilityMode
 
             mode = CapabilityMode(size=(1280, 720), fps=30.0, pixel_format="MJPEG")
 
@@ -1062,7 +1062,7 @@ class TestUSBHandle:
         """Test USBHandle is_alive check."""
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
             from rpi_logger.modules.Cameras.camera_core.backends.usb_backend import USBHandle
-            from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode
+            from rpi_logger.modules.Cameras.camera_core import CapabilityMode
 
             mode = CapabilityMode(size=(1280, 720), fps=30.0, pixel_format="MJPEG")
             handle = USBHandle("/dev/video0", mode)
@@ -1074,7 +1074,7 @@ class TestUSBHandle:
         """Test USBHandle set_control method."""
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
             from rpi_logger.modules.Cameras.camera_core.backends.usb_backend import USBHandle
-            from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode
+            from rpi_logger.modules.Cameras.camera_core import CapabilityMode
 
             mode = CapabilityMode(size=(1280, 720), fps=30.0, pixel_format="MJPEG")
             handle = USBHandle("/dev/video0", mode)
@@ -1184,7 +1184,7 @@ class TestErrorHandling:
         mock_cv2.VideoWriter.return_value = mock_writer
 
         with patch.dict(sys.modules, {"cv2": mock_cv2}):
-            from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
+            from rpi_logger.modules.Cameras.camera_core import Encoder
 
             encoder = Encoder(
                 video_path=str(tmp_path / "test.avi"),
@@ -1244,7 +1244,7 @@ class TestCameraWorkflow:
         """Test complete workflow from discovery to recording."""
         async def run_test():
             with patch.dict(sys.modules, {"cv2": mock_cv2}):
-                from rpi_logger.modules.Cameras.camera_core.state import (
+                from rpi_logger.modules.Cameras.camera_core import (
                     CameraId,
                     CameraDescriptor,
                     CameraCapabilities,
@@ -1253,7 +1253,7 @@ class TestCameraWorkflow:
                     RuntimeStatus,
                 )
                 from rpi_logger.modules.Cameras.camera_core.capture import USBCapture
-                from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
+                from rpi_logger.modules.Cameras.camera_core import Encoder
 
                 # Step 1: Create camera ID
                 cam_id = CameraId(

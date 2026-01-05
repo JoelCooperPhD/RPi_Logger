@@ -212,13 +212,6 @@ AUDIO_SETTINGS_SCHEMA = SettingsSchema(
     description="Audio recording module settings",
     fields=[
         SettingField(
-            name="mode",
-            type=SettingType.ENUM,
-            default="gui",
-            description="Interaction mode",
-            enum_values=["gui", "headless"],
-        ),
-        SettingField(
             name="output_dir",
             type=SettingType.PATH,
             default=Path("audio"),

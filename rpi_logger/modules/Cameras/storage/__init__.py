@@ -1,8 +1,7 @@
 """Storage helpers for Cameras module."""
 
 from .session_paths import SessionPaths, resolve_session_paths
-from .disk_guard import DiskGuard, DiskStatus
-from .known_cameras import KnownCamerasCache
+from rpi_logger.modules.base.camera_storage import DiskGuard, DiskStatus, KnownCamerasCache
 
 __all__ = [
     "SessionPaths",

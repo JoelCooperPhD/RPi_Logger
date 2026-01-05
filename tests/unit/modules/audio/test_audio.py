@@ -27,8 +27,6 @@ import pytest
 # Import the modules under test
 from rpi_logger.modules.Audio.config.settings import (
     AudioSettings,
-    INTERACTION_MODES,
-    _normalize_mode,
     read_config_file,
     build_arg_parser,
 )
@@ -111,7 +109,6 @@ def config_file(tmp_path: Path) -> Path:
     config_path = tmp_path / "config.txt"
     config_path.write_text("""
 # Audio module configuration
-mode = gui
 output_dir = /tmp/audio_output
 session_prefix = test_session
 sample_rate = 44100
@@ -140,7 +137,6 @@ class TestAudioSettings:
         """Test that AudioSettings has correct default values."""
         settings = AudioSettings()
 
-        assert settings.mode == "gui"
         assert settings.output_dir == Path("audio")
         assert settings.session_prefix == "audio"
         assert settings.log_level == "debug"
@@ -156,7 +152,6 @@ class TestAudioSettings:
     def test_from_args_with_defaults(self):
         """Test creating settings from args with default values."""
         args = MagicMock()
-        args.mode = "gui"
         args.output_dir = Path("/tmp/test")
         args.session_prefix = "test_prefix"
         args.log_level = "info"
@@ -171,7 +166,6 @@ class TestAudioSettings:
 
         settings = AudioSettings.from_args(args)
 
-        assert settings.mode == "gui"
         assert settings.output_dir == Path("/tmp/test")
         assert settings.session_prefix == "test_prefix"
         assert settings.sample_rate == 44100
@@ -184,25 +178,12 @@ class TestAudioSettings:
         settings = AudioSettings.from_args(args)
 
         # Should use defaults
-        assert settings.mode == "gui"
         assert settings.sample_rate == 48_000
         assert settings.console_output is False
-
-    def test_from_args_normalizes_mode(self):
-        """Test that mode is normalized correctly."""
-        args = MagicMock()
-        args.mode = "CLI"  # Should be normalized to "headless"
-        args.output_dir = None
-        args.session_prefix = None
-
-        settings = AudioSettings.from_args(args)
-
-        assert settings.mode == "headless"
 
     def test_from_args_output_dir_string_conversion(self):
         """Test that output_dir string is converted to Path."""
         args = MagicMock()
-        args.mode = "gui"
         args.output_dir = "/tmp/string_path"
         args.session_prefix = None
 
@@ -211,28 +192,6 @@ class TestAudioSettings:
         assert isinstance(settings.output_dir, Path)
         assert settings.output_dir == Path("/tmp/string_path")
 
-    @pytest.mark.parametrize("mode_input,expected", [
-        ("gui", "gui"),
-        ("GUI", "gui"),
-        ("headless", "headless"),
-        ("HEADLESS", "headless"),
-        ("cli", "headless"),  # cli maps to headless
-        ("CLI", "headless"),
-        ("invalid", "gui"),  # invalid defaults to gui
-        ("", "gui"),
-        (None, "gui"),
-    ])
-    def test_normalize_mode(self, mode_input, expected):
-        """Test mode normalization with various inputs."""
-        assert _normalize_mode(mode_input) == expected
-
-    def test_interaction_modes_constant(self):
-        """Test INTERACTION_MODES contains expected values."""
-        assert "gui" in INTERACTION_MODES
-        assert "headless" in INTERACTION_MODES
-        assert len(INTERACTION_MODES) == 2
-
-
 class TestConfigFile:
     """Tests for config file reading."""
 
@@ -240,7 +199,6 @@ class TestConfigFile:
         """Test reading a valid config file."""
         config = read_config_file(config_file)
 
-        assert config["mode"] == "gui"
         assert config["sample_rate"] == 44100
         assert config["console_output"] is True
         assert config["meter_refresh_interval"] == 0.1
@@ -328,14 +286,12 @@ class TestBuildArgParser:
         # Parse with no arguments
         args = parser.parse_args([])
 
-        assert hasattr(args, "mode")
         assert hasattr(args, "output_dir")
         assert hasattr(args, "sample_rate")
 
     def test_build_arg_parser_with_config_defaults(self):
         """Test building argument parser with config overrides."""
         config = {
-            "mode": "headless",
             "sample_rate": 44100,
             "output_dir": "/custom/path",
         }
@@ -1267,7 +1223,6 @@ class TestAudioModuleIntegration:
     def test_settings_creation_flow(self):
         """Test settings flow from args."""
         args = MagicMock()
-        args.mode = "headless"
         args.output_dir = Path("/tmp/test")
         args.session_prefix = "test"
         args.sample_rate = 44100
@@ -1277,7 +1232,6 @@ class TestAudioModuleIntegration:
         settings = AudioSettings.from_args(args)
 
         assert settings.sample_rate == 44100
-        assert settings.mode == "headless"
 
     def test_state_observer_chain(
         self, audio_state: AudioState, mock_device_info: AudioDeviceInfo

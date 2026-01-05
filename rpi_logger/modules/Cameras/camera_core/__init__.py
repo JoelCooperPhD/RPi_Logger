@@ -4,7 +4,8 @@ Camera core - USB camera capture, encoding, and state management.
 This package contains the core USB camera functionality that runs directly
 in the module process (no subprocess).
 """
-from rpi_logger.modules.Cameras.camera_core.state import (
+# Import shared types from base module
+from rpi_logger.modules.base.camera_types import (
     CameraId,
     CameraDescriptor,
     CameraCapabilities,
@@ -17,6 +18,8 @@ from rpi_logger.modules.Cameras.camera_core.state import (
     ModeRequest,
     ModeSelection,
     SelectedConfigs,
+    CaptureHandle,
+    CaptureFrame,
     # Serialization
     serialize_camera_state,
     deserialize_camera_state,
@@ -24,14 +27,13 @@ from rpi_logger.modules.Cameras.camera_core.state import (
     deserialize_camera_id,
     serialize_capabilities,
     deserialize_capabilities,
+    serialize_control,
+    deserialize_control,
 )
-from rpi_logger.modules.Cameras.camera_core.capture import (
-    CaptureHandle,
-    CaptureFrame,
-    USBCapture,
-    open_capture,
-)
-from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
+# Import shared encoder from base module
+from rpi_logger.modules.base.camera_encoder import Encoder
+# Import USB-specific implementations
+from rpi_logger.modules.Cameras.camera_core.capture import USBCapture, open_capture
 from rpi_logger.modules.Cameras.camera_core.capabilities import build_capabilities
 
 __all__ = [
@@ -55,6 +57,8 @@ __all__ = [
     "deserialize_camera_id",
     "serialize_capabilities",
     "deserialize_capabilities",
+    "serialize_control",
+    "deserialize_control",
     # Capture
     "CaptureHandle",
     "CaptureFrame",

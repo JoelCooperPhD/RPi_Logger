@@ -7,7 +7,7 @@ Enables automated testing and verification through the existing logging system.
 Usage:
     python -m rpi_logger --api --api-port 8080
 
-The API can run alongside the GUI or in headless mode.
+The API runs alongside the GUI, providing HTTP endpoints for programmatic control.
 """
 
 from .server import APIServer

@@ -30,22 +30,18 @@ class AudioView:
         model: AudioState,
         submit_async: SubmitCoroutine,
         logger: logging.Logger,
-        mode: str = "gui",
     ) -> None:
         self._vmc_view = vmc_view
         self._model = model
         self._submit_callback = submit_async
         self.logger = logger.getChild("View")
-        self.mode = mode
         self._snapshot: AudioSnapshot | None = None
-        self.enabled = bool(vmc_view and tk and ttk and mode == "gui")
+        self.enabled = bool(vmc_view and tk and ttk)
         self._meter_panel: MeterPanel | None = None
         self._device_label: ttk.Label | None = None
 
         if not self.enabled:
-            if mode != "gui":
-                self.logger.info("CLI mode selected; GUI disabled")
-            elif not (tk and ttk):
+            if not (tk and ttk):
                 self.logger.info("Tk unavailable; running without GUI")
             else:
                 self.logger.debug("GUI container not available; view disabled")

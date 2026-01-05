@@ -83,10 +83,7 @@ class ModuleProcess:
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
-            mode = await self._determine_start_mode()
-
             base_args = [
-                "--mode", mode,
                 "--output-dir", str(self.output_dir),
                 "--session-prefix", self.session_prefix,
                 "--log-level", self.log_level,
@@ -94,7 +91,7 @@ class ModuleProcess:
                 "--enable-commands",
             ]
 
-            if self.window_geometry and mode == "gui":
+            if self.window_geometry:
                 # Pass raw Tk geometry - no denormalization needed
                 geometry_str = gui_utils.format_geometry_string(
                     self.window_geometry.width,
@@ -182,25 +179,6 @@ class ModuleProcess:
             return str(venv_python)
 
         return None
-
-    async def _determine_start_mode(self) -> str:
-        """Determine which --mode argument to pass when launching the module.
-
-        Currently only the DRT module overrides the default GUI mode, so we keep
-        the logic scoped to DRT to avoid impacting other modules.
-        """
-        if self.module_info.name != "DRT":
-            return "gui"
-
-        config = await self.load_module_config()
-        if not config:
-            return "gui"
-
-        mode = config.get('default_mode', '').strip().lower()
-        if not mode:
-            return "gui"
-
-        return mode
 
     def _find_uv(self) -> Optional[str]:
         import shutil

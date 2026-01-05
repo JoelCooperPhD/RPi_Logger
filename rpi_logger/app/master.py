@@ -55,13 +55,6 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--mode",
-        choices=['gui'],
-        default='gui',
-        help="Execution mode: gui (Tkinter UI)"
-    )
-
-    parser.add_argument(
         "--log-level",
         choices=['debug', 'info', 'warning', 'error', 'critical'],
         default=default_log_level,
@@ -228,7 +221,6 @@ async def main(argv: Optional[list[str]] = None) -> None:
     logger.info("=" * 60)
     logger.info("Logger - Master System Starting")
     logger.info("=" * 60)
-    logger.info("Mode: %s", args.mode)
     if args.api:
         logger.info("REST API: http://%s:%d", args.api_host, args.api_port)
     logger.info("Data directory: %s", args.data_dir)

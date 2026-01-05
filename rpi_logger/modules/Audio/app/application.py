@@ -89,7 +89,6 @@ class AudioApp:
             self.state,
             submit_async=self._submit_async,
             logger=self.logger,
-            mode=settings.mode,
         )
 
         self.command_router = CommandRouter(self.logger, self)

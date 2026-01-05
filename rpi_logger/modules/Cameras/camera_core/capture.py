@@ -3,48 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
 from typing import Any, AsyncIterator, Optional, Tuple
-
-import numpy as np
 
 from rpi_logger.modules.Cameras.config import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
 from rpi_logger.modules.Cameras.utils import set_usb_control_v4l2, open_videocapture
+from rpi_logger.modules.base.camera_types import CaptureFrame, CaptureHandle
 from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
-
-
-@dataclass(slots=True)
-class CaptureFrame:
-    """Frame data from camera backend."""
-    data: np.ndarray
-    timestamp: float  # monotonic seconds
-    frame_number: int
-    monotonic_ns: int
-    sensor_timestamp_ns: Optional[int]
-    wall_time: float
-    color_format: str = "bgr"
-    lores_data: Optional[np.ndarray] = None  # Interface compatibility
-    lores_format: str = ""
-
-
-class CaptureHandle:
-    """Abstract base for camera capture."""
-
-    async def start(self) -> None:
-        raise NotImplementedError
-
-    async def frames(self) -> AsyncIterator[CaptureFrame]:
-        raise NotImplementedError
-        yield  # type: ignore
-
-    async def stop(self) -> None:
-        raise NotImplementedError
-
-    def set_control(self, name: str, value: Any) -> bool:
-        """Set a camera control value. Returns True on success."""
-        return False
 
 
 class USBCapture(CaptureHandle):
@@ -269,4 +235,4 @@ async def open_capture(
     return capture, capabilities
 
 
-__all__ = ["CaptureFrame", "CaptureHandle", "USBCapture", "open_capture"]
+__all__ = ["USBCapture", "open_capture"]

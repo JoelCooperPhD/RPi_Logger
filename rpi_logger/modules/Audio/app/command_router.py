@@ -21,13 +21,9 @@ class CommandRouter:
         action = (command.get("command") or "").lower()
         self.logger.debug("Handling command: %s", action)
         if action == "start_recording":
-            trial = int(command.get("trial_number", self.app.pending_trial_number))
-            await self.app.start_recording(trial)
+            await self.app.start_recording(int(command.get("trial_number", self.app.pending_trial_number)))
             return True
-        if action == "stop_recording":
-            await self.app.stop_recording()
-            return True
-        if action == "pause":
+        if action in ("stop_recording", "pause"):
             await self.app.stop_recording()
             return True
         if action == "get_status":

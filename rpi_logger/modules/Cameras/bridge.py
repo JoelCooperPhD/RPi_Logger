@@ -20,7 +20,7 @@ from rpi_logger.modules.Cameras.camera_core import (
     Encoder,
 )
 from rpi_logger.modules.Cameras.camera_core.backends import usb_backend
-from rpi_logger.modules.Cameras.camera_models import (
+from rpi_logger.modules.base.camera_models import (
     CameraModelDatabase,
     extract_model_name,
     copy_capabilities,
