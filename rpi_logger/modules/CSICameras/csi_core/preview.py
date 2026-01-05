@@ -1,14 +1,14 @@
 """
-Preview frame processing.
+Preview frame processing for CSI cameras.
 
-Handles preview frame conversion, downscaling, and optional JPEG compression.
+Handles preview frame conversion from YUV420 lores stream to BGR.
 """
 from __future__ import annotations
 
 import cv2
 import numpy as np
 
-from rpi_logger.modules.Cameras.camera_core.backends.picam_color import get_picam_color_format
+from rpi_logger.modules.CSICameras.csi_core.backends.picam_color import get_picam_color_format
 
 
 def yuv420_to_bgr(frame: np.ndarray) -> np.ndarray:

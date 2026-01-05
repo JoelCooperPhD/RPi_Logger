@@ -1,7 +1,7 @@
-"""Single-camera runtime for Cameras module.
+"""Single-camera runtime for CSICameras module.
 
-Each Cameras instance handles exactly ONE camera. Device assignment
-comes from the main logger via assign_device command.
+Each CSICameras instance handles exactly ONE CSI/Raspberry Pi camera.
+Device assignment comes from the main logger via assign_device command.
 
 This follows the same pattern as DRT, VOG, and EyeTracker modules.
 """
@@ -15,25 +15,26 @@ from typing import Any, Dict, Optional
 
 from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.Cameras.camera_core import (
+from rpi_logger.modules.CSICameras.csi_core import (
     CameraId,
     CameraDescriptor,
     CameraCapabilities,
     CaptureHandle,
     CaptureFrame,
-    USBCapture,
+    PicamCapture,
     Encoder,
+    yuv420_to_bgr,
 )
-from rpi_logger.modules.Cameras.camera_core.backends import usb_backend
-from rpi_logger.modules.Cameras.camera_models import (
+from rpi_logger.modules.CSICameras.csi_core.backends import picam_backend
+from rpi_logger.modules.base.camera_models import (
     CameraModelDatabase,
     extract_model_name,
     copy_capabilities,
 )
-from rpi_logger.modules.Cameras.config import CamerasConfig
-from rpi_logger.modules.Cameras.storage import DiskGuard, KnownCamerasCache
-from rpi_logger.modules.Cameras.storage.session_paths import resolve_session_paths
-from rpi_logger.modules.Cameras.app.view import CameraView
+from rpi_logger.modules.CSICameras.config import CSICamerasConfig
+from rpi_logger.modules.base.camera_storage import DiskGuard, KnownCamerasCache
+from rpi_logger.modules.CSICameras.storage.session_paths import resolve_session_paths
+from rpi_logger.modules.CSICameras.app.view import CSICameraView
 
 try:
     from vmc.runtime import ModuleRuntime, RuntimeContext
@@ -44,8 +45,8 @@ except Exception:
 logger = get_module_logger(__name__)
 
 
-class CamerasRuntime(ModuleRuntime):
-    """Single-camera runtime - one camera per module instance.
+class CSICamerasRuntime(ModuleRuntime):
+    """Single-camera runtime for CSI/Raspberry Pi cameras.
 
     Follows the same pattern as DRT, VOG, and EyeTracker modules.
     Device discovery happens in the main logger; this runtime receives
@@ -54,13 +55,13 @@ class CamerasRuntime(ModuleRuntime):
 
     def __init__(self, ctx: RuntimeContext) -> None:
         self.ctx = ctx
-        self.logger = ctx.logger.getChild("Cameras") if hasattr(ctx, "logger") else logger
+        self.logger = ctx.logger.getChild("CSICameras") if hasattr(ctx, "logger") else logger
         self.module_dir = ctx.module_dir
 
         # Build typed config via preferences_scope
         scope_fn = getattr(ctx.model, "preferences_scope", None)
-        prefs = scope_fn("cameras") if callable(scope_fn) else None
-        self.typed_config = CamerasConfig.from_preferences(prefs, ctx.args, logger=self.logger) if prefs else CamerasConfig.from_preferences(None, ctx.args, logger=self.logger)
+        prefs = scope_fn("csicameras") if callable(scope_fn) else None
+        self.typed_config = CSICamerasConfig.from_preferences(prefs, ctx.args, logger=self.logger) if prefs else CSICamerasConfig.from_preferences(None, ctx.args, logger=self.logger)
         self.config = self.typed_config
 
         # Single camera state
@@ -106,23 +107,23 @@ class CamerasRuntime(ModuleRuntime):
         )
 
         # View
-        self.view = CameraView(ctx.view, logger=self.logger)
+        self.view = CSICameraView(ctx.view, logger=self.logger)
 
     # ------------------------------------------------------------------ Lifecycle
 
     async def start(self) -> None:
         """Start runtime - wait for camera assignment."""
         self.logger.info("=" * 60)
-        self.logger.info("CAMERAS RUNTIME STARTING (single-camera architecture)")
+        self.logger.info("CSI CAMERAS RUNTIME STARTING (single-camera architecture)")
         self.logger.info("=" * 60)
 
         await self.cache.load()
 
         if self.ctx.view:
             with contextlib.suppress(Exception):
-                self.ctx.view.set_preview_title("Camera")
+                self.ctx.view.set_preview_title("CSI Camera")
             if hasattr(self.ctx.view, 'set_data_subdir'):
-                self.ctx.view.set_data_subdir("Cameras")
+                self.ctx.view.set_data_subdir("CSICameras")
 
         self.view.attach()
         self.view.bind_handlers(
@@ -131,12 +132,12 @@ class CamerasRuntime(ModuleRuntime):
             reprobe=self._on_reprobe,
         )
 
-        self.logger.info("Cameras runtime ready - waiting for device assignment")
+        self.logger.info("CSI Cameras runtime ready - waiting for device assignment")
         StatusMessage.send("ready")
 
     async def shutdown(self) -> None:
         """Shutdown runtime - stop recording and release camera."""
-        self.logger.info("Shutting down Cameras runtime")
+        self.logger.info("Shutting down CSI Cameras runtime")
 
         if self._is_recording:
             await self._stop_recording()
@@ -146,7 +147,7 @@ class CamerasRuntime(ModuleRuntime):
 
     async def cleanup(self) -> None:
         """Final cleanup."""
-        self.logger.debug("Cameras runtime cleanup complete")
+        self.logger.debug("CSI Cameras runtime cleanup complete")
 
     # ------------------------------------------------------------------ Commands
 
@@ -235,13 +236,9 @@ class CamerasRuntime(ModuleRuntime):
     # ------------------------------------------------------------------ Camera Assignment
 
     async def _assign_camera(self, command: Dict[str, Any]) -> bool:
-        """Handle camera assignment from main logger.
-
-        This is called ONCE per instance with the camera to use.
-        """
+        """Handle camera assignment from main logger."""
         if self._is_assigned:
             self.logger.warning("Camera already assigned - rejecting new assignment")
-            # Still acknowledge since this camera is working
             device_id = command.get("device_id")
             command_id = command.get("command_id")
             StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
@@ -249,17 +246,25 @@ class CamerasRuntime(ModuleRuntime):
 
         command_id = command.get("command_id")
         device_id = command.get("device_id")
-        camera_type = command.get("camera_type")  # "usb" or "picam"
+        camera_type = command.get("camera_type")  # Should be "picam" for CSI cameras
         stable_id = command.get("camera_stable_id")
         dev_path = command.get("camera_dev_path")
         display_name = command.get("display_name", "")
 
-        self.logger.info("Assigning camera: %s (type=%s, stable_id=%s)",
-                        device_id, camera_type, stable_id)
+        # Verify this is a CSI camera
+        if camera_type != "picam":
+            self.logger.error("CSICameras only handles picam cameras, got: %s", camera_type)
+            StatusMessage.send("device_error", {
+                "device_id": device_id,
+                "error": f"CSICameras only handles picam cameras, not {camera_type}"
+            }, command_id=command_id)
+            return False
+
+        self.logger.info("Assigning CSI camera: %s (stable_id=%s)", device_id, stable_id)
 
         # Build camera ID and descriptor
         self._camera_id = CameraId(
-            backend=camera_type,
+            backend="picam",
             stable_id=stable_id,
             friendly_name=display_name,
             dev_path=dev_path,
@@ -273,10 +278,9 @@ class CamerasRuntime(ModuleRuntime):
         try:
             # Check model database for cached capabilities
             model_name = extract_model_name(self._descriptor)
-            known_model = self.model_db.lookup(model_name, camera_type) if model_name else None
+            known_model = self.model_db.lookup(model_name, "picam") if model_name else None
 
             if known_model:
-                # Use cached capabilities - skip probing
                 self._capabilities = copy_capabilities(known_model.capabilities)
                 self._known_model = known_model
                 self.logger.info(
@@ -284,17 +288,16 @@ class CamerasRuntime(ModuleRuntime):
                     model_name, known_model.key
                 )
             else:
-                # Probe camera and cache for future
-                self._capabilities = await self._probe_camera(camera_type, stable_id, dev_path)
+                self._capabilities = await self._probe_camera(stable_id)
                 if self._capabilities and model_name:
-                    self._known_model = self.model_db.add_model(model_name, camera_type, self._capabilities)
+                    self._known_model = self.model_db.add_model(model_name, "picam", self._capabilities)
                     self.logger.info("Cached new camera model: %s", model_name)
 
             # Determine capture settings from capabilities or cache
             self._resolution, self._fps = await self._get_capture_settings()
 
-            # Initialize capture
-            await self._init_capture(camera_type, stable_id, dev_path)
+            # Initialize capture (CSI only - with lores stream)
+            await self._init_capture(stable_id)
 
             self._is_assigned = True
             self._camera_name = display_name or device_id
@@ -306,7 +309,7 @@ class CamerasRuntime(ModuleRuntime):
                 self.view.update_camera_capabilities(
                     self._capabilities,
                     hw_model=self._descriptor.hw_model if self._descriptor else None,
-                    backend=camera_type,
+                    backend="picam",
                     sensor_info=self._known_model.sensor_info if self._known_model else None,
                     display_name=self._known_model.name if self._known_model else self._camera_name,
                 )
@@ -319,34 +322,29 @@ class CamerasRuntime(ModuleRuntime):
             # Start capture/preview loop
             self._capture_task = asyncio.create_task(
                 self._capture_loop(),
-                name="camera_capture_loop"
+                name="csi_camera_capture_loop"
             )
 
             # Acknowledge assignment
             StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
-            self.logger.info("Camera assigned successfully: %s", self._camera_id.key)
+            self.logger.info("CSI Camera assigned successfully: %s", self._camera_id.key)
             return True
 
         except Exception as e:
-            self.logger.error("Failed to assign camera: %s", e, exc_info=True)
+            self.logger.error("Failed to assign CSI camera: %s", e, exc_info=True)
             StatusMessage.send("device_error", {
                 "device_id": device_id,
                 "error": str(e)
             }, command_id=command_id)
             return False
 
-    async def _probe_camera(
-        self,
-        camera_type: str,
-        stable_id: str,
-        dev_path: str
-    ) -> Optional[CameraCapabilities]:
-        """Probe USB camera capabilities."""
-        self.logger.info("Probing USB camera capabilities...")
+    async def _probe_camera(self, stable_id: str) -> Optional[CameraCapabilities]:
+        """Probe CSI camera capabilities using Picamera2."""
+        self.logger.info("Probing CSI camera capabilities...")
         try:
-            return await usb_backend.probe(dev_path, logger=self.logger)
+            return await picam_backend.probe(stable_id, logger=self.logger)
         except Exception as e:
-            self.logger.warning("Failed to probe camera: %s", e)
+            self.logger.warning("Failed to probe CSI camera: %s", e)
             return None
 
     async def _get_capture_settings(self) -> tuple[tuple[int, int], float]:
@@ -362,61 +360,50 @@ class CamerasRuntime(ModuleRuntime):
                         w, h = map(int, res_str.split("x"))
                         resolution = (w, h)
                         fps = float(fps_str) if fps_str else 30.0
-                        self.logger.info("Using cached settings: %dx%d @ %.1f fps",
-                                        w, h, fps)
+                        self.logger.info("Using cached settings: %dx%d @ %.1f fps", w, h, fps)
                         return resolution, fps
                     except Exception:
                         pass
 
         # Fall back to capabilities
         if self._capabilities and self._capabilities.modes:
-            # Pick highest resolution mode
             best = max(self._capabilities.modes, key=lambda m: m.width * m.height)
             resolution = (best.width, best.height)
-
-            # Pick highest FPS for that resolution
-            matching = [m for m in self._capabilities.modes
-                       if (m.width, m.height) == resolution]
-            if matching:
-                fps = max(m.fps for m in matching)
-            else:
-                fps = best.fps
-
-            self.logger.info("Using probed settings: %dx%d @ %.1f fps",
-                            resolution[0], resolution[1], fps)
+            matching = [m for m in self._capabilities.modes if (m.width, m.height) == resolution]
+            fps = max(m.fps for m in matching) if matching else best.fps
+            self.logger.info("Using probed settings: %dx%d @ %.1f fps", resolution[0], resolution[1], fps)
             return resolution, fps
 
-        # Default fallback
         self.logger.info("Using default settings: 1280x720 @ 30 fps")
         return (1280, 720), 30.0
 
-    async def _init_capture(
-        self,
-        camera_type: str,
-        stable_id: str,
-        dev_path: str,
-    ) -> None:
-        """Initialize USB camera capture."""
-        self.logger.info("Initializing USB capture @ %dx%d %.1f fps",
+    async def _init_capture(self, stable_id: str) -> None:
+        """Initialize CSI camera capture with lores stream for preview."""
+        self.logger.info("Initializing CSI capture: %dx%d @ %.1f fps",
                         self._resolution[0], self._resolution[1], self._fps)
 
-        self._capture = USBCapture(dev_path, self._resolution, self._fps)
+        # CSI cameras use lores stream for efficient preview
+        lores_size = (320, 240)
+        self._capture = PicamCapture(
+            stable_id,
+            self._resolution,
+            self._fps,
+            lores_size=lores_size
+        )
 
         await self._capture.start()
-        self.logger.info("Capture initialized successfully")
+        self.logger.info("CSI capture initialized successfully")
 
     async def _release_camera(self) -> None:
         """Release camera and cleanup."""
-        self.logger.info("Releasing camera")
+        self.logger.info("Releasing CSI camera")
 
-        # Cancel capture task
         if self._capture_task:
             self._capture_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._capture_task
             self._capture_task = None
 
-        # Stop capture
         if self._capture:
             await self._capture.stop()
             self._capture = None
@@ -435,20 +422,17 @@ class CamerasRuntime(ModuleRuntime):
             self.logger.warning("Cannot start recording: camera not ready or no session")
             return
 
-        # Check disk space
         disk_ok = await asyncio.to_thread(self.disk_guard.check, self._session_dir)
         if not disk_ok:
             self.logger.error("Insufficient disk space - cannot start recording")
             return
 
-        # Resolve output paths
         paths = resolve_session_paths(
             session_dir=self._session_dir,
             camera_id=self._camera_id,
             trial_number=self._trial_number,
         )
 
-        # Initialize encoder
         self._encoder = Encoder(
             video_path=str(paths.video_path),
             resolution=self._resolution,
@@ -456,6 +440,7 @@ class CamerasRuntime(ModuleRuntime):
             overlay_enabled=self._overlay_enabled,
             csv_path=str(paths.timing_path),
             trial_number=self._trial_number,
+            module_name="CSICameras",
         )
 
         await asyncio.to_thread(self._encoder.start)
@@ -482,7 +467,7 @@ class CamerasRuntime(ModuleRuntime):
             self._encoder = None
             if frames_dropped > 0:
                 self.logger.warning(
-                    "Recording stopped: %d frames, %.1fs (%d frames dropped due to backpressure)",
+                    "Recording stopped: %d frames, %.1fs (%d frames dropped)",
                     frame_count, duration, frames_dropped
                 )
             else:
@@ -496,16 +481,9 @@ class CamerasRuntime(ModuleRuntime):
 
     def _on_apply_config(self, camera_id: str, settings: Dict[str, str]) -> None:
         """Handle resolution/FPS config change from settings window."""
-        self.logger.debug("_on_apply_config called: camera_id=%s, self._camera_id=%s",
-                         camera_id, self._camera_id.key if self._camera_id else None)
         if camera_id != (self._camera_id.key if self._camera_id else None):
-            self.logger.warning("Config apply for wrong camera: %s (expected %s)",
-                              camera_id, self._camera_id.key if self._camera_id else None)
             return
 
-        self.logger.debug("Applying config: %s", settings)
-
-        # Parse record resolution and FPS (affects capture/recording)
         res_str = settings.get("record_resolution", "")
         fps_str = settings.get("record_fps", "")
 
@@ -513,18 +491,15 @@ class CamerasRuntime(ModuleRuntime):
             try:
                 w, h = map(int, res_str.split("x"))
                 self._resolution = (w, h)
-                self.logger.debug("Record resolution updated to %dx%d", w, h)
             except ValueError:
-                self.logger.warning("Invalid record resolution: %s", res_str)
+                pass
 
         if fps_str:
             try:
                 self._fps = float(fps_str)
-                self.logger.debug("Record FPS updated to %.1f", self._fps)
             except ValueError:
-                self.logger.warning("Invalid record FPS: %s", fps_str)
+                pass
 
-        # Parse preview settings (affects display only)
         preview_res_str = settings.get("preview_resolution", "")
         preview_fps_str = settings.get("preview_fps", "")
 
@@ -532,98 +507,72 @@ class CamerasRuntime(ModuleRuntime):
             try:
                 w, h = map(int, preview_res_str.split("x"))
                 self._preview_resolution = (w, h)
-                self.logger.debug("Preview resolution updated to %dx%d", w, h)
             except ValueError:
-                self.logger.warning("Invalid preview resolution: %s", preview_res_str)
+                pass
 
         if preview_fps_str:
             try:
                 self._preview_fps = float(preview_fps_str)
-                self.logger.debug("Preview FPS updated to %.1f", self._preview_fps)
             except ValueError:
-                self.logger.warning("Invalid preview FPS: %s", preview_fps_str)
+                pass
 
         self._overlay_enabled = settings.get("overlay", "true").lower() == "true"
 
-        # Save to cache
         asyncio.create_task(self._save_settings_to_cache(settings))
 
-        # Reinitialize capture only if record settings changed (resolution/fps affect capture)
-        # Preview settings don't require reinit - they're applied on-the-fly
         if self._is_assigned and self._capture and (res_str or fps_str):
             asyncio.create_task(self._reinit_capture())
 
     async def _save_settings_to_cache(self, settings: Dict[str, str]) -> None:
-        """Save settings to known cameras cache."""
+        """Save settings to cache."""
         if not self._camera_id:
             return
         try:
             await self.cache.set_settings(self._camera_id.key, settings)
-            self.logger.debug("Settings saved to cache: %s", self._camera_id.key)
         except Exception as e:
             self.logger.warning("Failed to save settings: %s", e)
 
     async def _reinit_capture(self) -> None:
         """Reinitialize capture with current settings."""
-        if not self._camera_id or not self._descriptor:
+        if not self._camera_id:
             return
 
-        self.logger.debug("Reinitializing capture: %dx%d @ %.1f fps",
-                         self._resolution[0], self._resolution[1], self._fps)
-
-        # Stop current capture task
         if self._capture_task:
             self._capture_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._capture_task
             self._capture_task = None
 
-        # Stop and restart capture
         if self._capture:
             await self._capture.stop()
             self._capture = None
 
-        camera_type = self._camera_id.backend
         stable_id = self._camera_id.stable_id
-        dev_path = self._camera_id.dev_path
+        await self._init_capture(stable_id)
 
-        await self._init_capture(camera_type, stable_id, dev_path)
-
-        # Restart capture loop
         self._capture_task = asyncio.create_task(
             self._capture_loop(),
-            name="camera_capture_loop"
+            name="csi_camera_capture_loop"
         )
 
-
     def _on_control_change(self, camera_id: str, control_name: str, value: Any) -> None:
-        """Handle camera control change (brightness, contrast, etc.)."""
+        """Handle camera control change."""
         if camera_id != (self._camera_id.key if self._camera_id else None):
-            self.logger.warning("Control change for wrong camera: %s", camera_id)
             return
-
-        self.logger.debug("Control change: %s = %s", control_name, value)
 
         if not self._capture:
-            self.logger.warning("Cannot apply control - no capture active")
             return
 
-        # Apply control to capture backend
         try:
             if hasattr(self._capture, "set_control"):
                 self._capture.set_control(control_name, value)
-            else:
-                self.logger.debug("Capture backend doesn't support set_control")
         except Exception as e:
             self.logger.warning("Failed to set control %s: %s", control_name, e)
 
     def _on_reprobe(self, camera_id: str) -> None:
-        """Handle reprobe request from settings window."""
+        """Handle reprobe request."""
         if camera_id != (self._camera_id.key if self._camera_id else None):
-            self.logger.warning("Reprobe for wrong camera: %s", camera_id)
             return
-
-        self.logger.debug("Reprobing camera capabilities")
         asyncio.create_task(self._do_reprobe())
 
     async def _do_reprobe(self) -> None:
@@ -631,24 +580,20 @@ class CamerasRuntime(ModuleRuntime):
         if not self._camera_id:
             return
 
-        camera_type = self._camera_id.backend
         stable_id = self._camera_id.stable_id
-        dev_path = self._camera_id.dev_path
 
         try:
-            self._capabilities = await self._probe_camera(camera_type, stable_id, dev_path)
+            self._capabilities = await self._probe_camera(stable_id)
             if self._capabilities:
                 self.view.set_camera_info(self._camera_name or self._camera_id.key, self._capabilities)
                 self.view.set_camera_id(self._camera_id.key)
                 self.view.update_camera_capabilities(
                     self._capabilities,
                     hw_model=self._descriptor.hw_model if self._descriptor else None,
-                    backend=camera_type,
+                    backend="picam",
                     sensor_info=self._known_model.sensor_info if self._known_model else None,
                     display_name=self._known_model.name if self._known_model else self._camera_name,
                 )
-            else:
-                self.logger.warning("Reprobe failed - no capabilities returned")
         except Exception as e:
             self.logger.error("Reprobe failed: %s", e)
 
@@ -662,14 +607,10 @@ class CamerasRuntime(ModuleRuntime):
             return
 
         frame_count = 0
-        preview_count = 0
         encode_count = 0
 
-        # Calculate preview interval based on capture FPS and desired preview FPS
-        # e.g., if capture is 30fps and preview is 5fps, show every 6th frame
         preview_interval = max(1, int(self._fps / self._preview_fps)) if self._preview_fps > 0 else 2
 
-        # FPS tracking state
         fps_window_start = time.monotonic()
         fps_window_frames = 0
         fps_preview_frames = 0
@@ -678,15 +619,12 @@ class CamerasRuntime(ModuleRuntime):
         fps_preview = 0.0
         fps_encode = 0.0
 
-        self.logger.debug("Starting capture loop")
-
         try:
             async for frame in self._capture.frames():
                 frame_count += 1
                 fps_window_frames += 1
                 now = time.monotonic()
 
-                # Recording: submit frame to encode worker
                 if self._is_recording and self._encoder:
                     queued = self._encoder.write_frame(
                         frame.data,
@@ -697,17 +635,13 @@ class CamerasRuntime(ModuleRuntime):
                     if queued:
                         encode_count += 1
                         fps_encode_frames += 1
-                    # Note: backpressure (queue full) is handled by encoder worker
 
-                # Preview: display frame (throttled)
                 if frame_count % preview_interval == 0:
                     preview_frame = self._make_preview_frame(frame)
                     if preview_frame is not None:
                         self.view.push_frame(preview_frame)
-                        preview_count += 1
                         fps_preview_frames += 1
 
-                # Calculate FPS every second
                 elapsed = now - fps_window_start
                 if elapsed >= 1.0:
                     fps_capture = fps_window_frames / elapsed
@@ -718,13 +652,11 @@ class CamerasRuntime(ModuleRuntime):
                     fps_preview_frames = 0
                     fps_encode_frames = 0
 
-                # Update metrics periodically
                 if frame_count % 30 == 0:
                     metrics = {
                         "frames_captured": frame_count,
                         "frames_recorded": encode_count,
                         "is_recording": self._is_recording,
-                        # FPS metrics for MetricsDisplay
                         "fps_capture": fps_capture,
                         "fps_encode": fps_encode if self._is_recording else None,
                         "fps_preview": fps_preview,
@@ -732,7 +664,6 @@ class CamerasRuntime(ModuleRuntime):
                         "target_record_fps": self._fps if self._is_recording else None,
                         "target_preview_fps": self._fps / preview_interval,
                     }
-                    # Include encoder worker stats when recording
                     if self._is_recording and self._encoder:
                         metrics["frames_dropped"] = self._encoder.frames_dropped
                         metrics["encode_queue_depth"] = self._encoder.queue_depth
@@ -744,25 +675,20 @@ class CamerasRuntime(ModuleRuntime):
             self.logger.error("Capture loop error: %s", e, exc_info=True)
 
     def _make_preview_frame(self, frame: CaptureFrame) -> Optional[bytes]:
-        """Create preview frame from capture frame.
-
-        Returns PPM bytes ready for tk.PhotoImage(data=...), with:
-        - RGB color space (converted from BGR)
-        - Scaled to fit canvas dimensions while maintaining aspect ratio
-        - Serialized as PPM for fast PhotoImage creation on Tk thread
-        """
+        """Create preview frame from capture frame."""
         import cv2
         import io
         from PIL import Image
 
         try:
-            bgr = frame.data
-            h, w = bgr.shape[:2]
+            if frame.lores_data is not None and frame.lores_format == "yuv420":
+                bgr = yuv420_to_bgr(frame.lores_data)
+            else:
+                bgr = frame.data
 
-            # Get target size from view's canvas, fallback to configured resolution
+            h, w = bgr.shape[:2]
             target_w, target_h = self.view.get_canvas_size()
 
-            # Scale to fit canvas while maintaining aspect ratio
             if w != target_w or h != target_h:
                 scale = min(target_w / w, target_h / h)
                 new_w = int(w * scale)
@@ -770,10 +696,8 @@ class CamerasRuntime(ModuleRuntime):
                 if new_w > 0 and new_h > 0:
                     bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-            # Convert BGR to RGB for PIL
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-            # Convert to PPM bytes for fast PhotoImage creation
             img = Image.fromarray(rgb)
             ppm_buffer = io.BytesIO()
             img.save(ppm_buffer, format="PPM")
@@ -784,6 +708,6 @@ class CamerasRuntime(ModuleRuntime):
             return None
 
 
-def factory(ctx: RuntimeContext) -> CamerasRuntime:
-    """Factory function for Cameras module."""
-    return CamerasRuntime(ctx)
+def factory(ctx: RuntimeContext) -> CSICamerasRuntime:
+    """Factory function for CSICameras module."""
+    return CSICamerasRuntime(ctx)

@@ -1,4 +1,4 @@
-"""Picamera2 backend wrapper."""
+"""Picamera2 backend wrapper for CSI cameras."""
 
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ except Exception:  # pragma: no cover - picamera2 may be missing on some platfor
     Picamera2 = None  # type: ignore
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
-from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode, CameraCapabilities, ControlInfo, ControlType
-from rpi_logger.modules.Cameras.camera_core.capabilities import build_capabilities
+from rpi_logger.modules.base.camera_types import CapabilityMode, CameraCapabilities, ControlInfo, ControlType
+from rpi_logger.modules.base.camera_capabilities import build_capabilities
 
 
 # Known Picamera2 enum controls and their options
@@ -431,4 +431,4 @@ def _extract_sensor_timestamp(metadata: dict) -> Optional[int]:
     return None
 
 
-__all__ = ["PicamHandle", "PicamFrame", "probe", "open_device", "supports_shared_streams"]
+__all__ = ["PicamHandle", "PicamFrame", "probe", "open_device", "supports_shared_streams", "PICAM_ENUMS"]

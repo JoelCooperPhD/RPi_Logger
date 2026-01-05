@@ -1,7 +1,7 @@
 """
-Camera core - capture, encoding, and state management.
+Camera core - USB camera capture, encoding, and state management.
 
-This package contains the core camera functionality that runs directly
+This package contains the core USB camera functionality that runs directly
 in the module process (no subprocess).
 """
 from rpi_logger.modules.Cameras.camera_core.state import (
@@ -28,12 +28,10 @@ from rpi_logger.modules.Cameras.camera_core.state import (
 from rpi_logger.modules.Cameras.camera_core.capture import (
     CaptureHandle,
     CaptureFrame,
-    PicamCapture,
     USBCapture,
     open_capture,
 )
 from rpi_logger.modules.Cameras.camera_core.encoder import Encoder
-from rpi_logger.modules.Cameras.camera_core.preview import yuv420_to_bgr
 from rpi_logger.modules.Cameras.camera_core.capabilities import build_capabilities
 
 __all__ = [
@@ -60,13 +58,10 @@ __all__ = [
     # Capture
     "CaptureHandle",
     "CaptureFrame",
-    "PicamCapture",
     "USBCapture",
     "open_capture",
     # Encoding
     "Encoder",
-    # Preview
-    "yuv420_to_bgr",
     # Capabilities
     "build_capabilities",
 ]
