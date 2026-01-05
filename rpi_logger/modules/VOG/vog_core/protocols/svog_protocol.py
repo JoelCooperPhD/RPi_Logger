@@ -57,7 +57,6 @@ class SVOGProtocol(BaseVOGProtocol):
         'factory_reset': '>do_factoryReset|<<',
     }
 
-    # Response keywords and their types
     # Response format: keyword|value
     RESPONSE_TYPES = {
         # Device info
@@ -118,72 +117,33 @@ class SVOGProtocol(BaseVOGProtocol):
         return self.CSV_HEADER_STRING
 
     def format_command(self, command: str, value: Optional[str] = None) -> bytes:
-        """Format a command for sVOG transmission.
-
-        Args:
-            command: Command key from COMMANDS
-            value: Optional value for set commands
-
-        Returns:
-            Encoded bytes with newline terminator
-        """
+        """Format sVOG command with optional value substitution."""
         if command not in self.COMMANDS:
             self.logger.warning("Unknown sVOG command: %s", command)
             return b''
-
         cmd_string = self.COMMANDS[command]
-
-        # Substitute value if needed
         if value is not None and '{val}' in cmd_string:
             cmd_string = cmd_string.format(val=value)
-
         return f"{cmd_string}\n".encode('utf-8')
 
     def parse_response(self, response: str) -> Optional[VOGResponse]:
-        """Parse sVOG response.
-
-        sVOG responses can be:
-        - Pipe-delimited: keyword|value (e.g., stm|1, data|1,3000,1500)
-        - Simple: keyword (e.g., expStart, Click)
-
-        Args:
-            response: Raw response string
-
-        Returns:
-            VOGResponse or None
-        """
+        """Parse sVOG response (pipe-delimited keyword|value or simple keyword)."""
         response = response.strip()
-
         if not response:
             return None
 
-        # Check for simple responses first (no pipe)
+        # Simple responses (no pipe)
         if response in self.SIMPLE_RESPONSES:
-            response_type = self.SIMPLE_RESPONSES[response]
-            data = {}
+            data = {'state': 'click', 'button_event': True} if response == 'Click' else {}
+            return VOGResponse(self.SIMPLE_RESPONSES[response], response, '', response, data)
 
-            if response == 'Click':
-                data['state'] = 'click'
-                data['button_event'] = True
-
-            return VOGResponse(
-                response_type=response_type,
-                keyword=response,
-                value='',
-                raw=response,
-                data=data,
-            )
-
-        # Parse pipe-delimited responses
+        # Pipe-delimited responses
         if '|' not in response:
             self.logger.debug("Unrecognized sVOG response (no pipe): %s", response)
             return None
 
         parts = response.split('|', 1)
-        keyword = parts[0]
-        value = parts[1] if len(parts) > 1 else ''
-
-        # Find matching response type
+        keyword, value = parts[0], parts[1] if len(parts) > 1 else ''
         response_type = self.RESPONSE_TYPES.get(keyword, ResponseType.UNKNOWN)
 
         if response_type == ResponseType.UNKNOWN:
@@ -191,40 +151,19 @@ class SVOGProtocol(BaseVOGProtocol):
             return None
 
         data = {}
-
         if response_type == ResponseType.STIMULUS:
-            # stm|1 or stm|0 for lens state
-            # btn|1 or btn|0 for button state
             try:
                 data['state'] = int(value)
             except ValueError:
                 data['state'] = value
-
             if keyword == 'btn':
                 data['button_event'] = True
                 data['button_state'] = data['state']
 
-        return VOGResponse(
-            response_type=response_type,
-            keyword=keyword,
-            value=value,
-            raw=response,
-            data=data,
-        )
+        return VOGResponse(response_type, keyword, value, response, data)
 
     def parse_data_response(self, value: str, device_id: str) -> Optional[VOGDataPacket]:
-        """Parse sVOG data response.
-
-        Data format: TRIAL_NUMBER,TIME_OPEN_ELAPSED,TIME_CLOSE_ELAPSED
-        Example: 5,3000,1500
-
-        Args:
-            value: Data value string (after 'data|')
-            device_id: Device identifier
-
-        Returns:
-            VOGDataPacket or None
-        """
+        """Parse sVOG data (format: trial,open,closed)."""
         try:
             parts = value.split(',')
             if len(parts) >= 3:
@@ -233,61 +172,36 @@ class SVOGProtocol(BaseVOGProtocol):
                     trial_number=int(parts[0].strip()) if parts[0].strip() else 0,
                     shutter_open=int(parts[1].strip()) if parts[1].strip() else 0,
                     shutter_closed=int(parts[2].strip()) if parts[2].strip() else 0,
-                    lens='X',  # sVOG has single lens
-                )
+                    lens='X')
         except (ValueError, IndexError) as e:
             self.logger.warning("Could not parse sVOG data: %s - %s", value, e)
-
         return None
 
     def get_command_keys(self) -> Dict[str, str]:
         """Return command mapping."""
         return self.COMMANDS.copy()
 
-    # ------------------------------------------------------------------
-    # Polymorphic methods
-    # ------------------------------------------------------------------
-
     def get_config_commands(self) -> list:
-        """Return list of commands to retrieve sVOG configuration."""
-        return [
-            'get_device_ver',
-            'get_config_name',
-            'get_max_open',
-            'get_max_close',
-            'get_debounce',
-            'get_click_mode',
-            'get_button_control',
-        ]
+        """Commands to retrieve sVOG config."""
+        return ['get_device_ver', 'get_config_name', 'get_max_open', 'get_max_close',
+                'get_debounce', 'get_click_mode', 'get_button_control']
 
     def format_set_config(self, param: str, value: str) -> tuple:
-        """Format a config set operation for sVOG.
-
-        sVOG uses separate commands like 'set_max_open' with value as argument.
-        """
+        """Format config set (sVOG uses separate commands like 'set_max_open')."""
         command = f'set_{param}'
-        if command not in self.COMMANDS:
-            return (None, None)  # Unknown parameter
-        return (command, value)
+        return (command, value) if command in self.COMMANDS else (None, None)
 
     def update_config_from_response(self, response, config: dict) -> None:
         """Update config from sVOG response (one value at a time)."""
         config[response.keyword] = response.value
 
     def get_extended_packet_data(self, packet) -> dict:
-        """sVOG has no extended packet data."""
+        """sVOG has no extended data."""
         return {}
 
-    def format_csv_row(
-        self,
-        packet,
-        label: str,
-        record_time_unix: float,
-        record_time_mono: float,
-    ) -> str:
-        """Format sVOG packet as CSV row."""
-        return (
-            f"{packet.trial_number},VOG,{packet.device_id},{label},"
-            f"{record_time_unix:.6f},{record_time_mono:.9f},"
-            f"{packet.shutter_open},{packet.shutter_closed}"
-        )
+    def format_csv_row(self, packet, label: str, record_time_unix: float,
+                      record_time_mono: float) -> str:
+        """Format sVOG CSV row."""
+        return (f"{packet.trial_number},VOG,{packet.device_id},{label},"
+                f"{record_time_unix:.6f},{record_time_mono:.9f},"
+                f"{packet.shutter_open},{packet.shutter_closed}")

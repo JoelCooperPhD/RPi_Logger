@@ -1,8 +1,4 @@
-"""wVOG protocol implementation for wireless VOG devices.
-
-Protocol verified against actual hardware on 2025-12-02.
-Firmware reference: RS_Logger/RSLogger/Firmware/wVOG_FW/wVOG/controller.py
-"""
+"""wVOG protocol (wireless VOG). Verified against hardware 2025-12-02."""
 
 from typing import Dict, Optional
 from rpi_logger.core.logging_utils import get_module_logger
@@ -16,23 +12,8 @@ from .base_protocol import (
 
 
 class WVOGProtocol(BaseVOGProtocol):
-    """Protocol implementation for wVOG (wireless) devices.
+    """wVOG (wireless) protocol. MicroPython Pyboard, cmd>val format, dual lens, battery, RTC, 57600 baud."""
 
-    wVOG uses a MicroPython Pyboard controller with the following protocol:
-    - Command format: cmd or cmd>val (no delimiters)
-    - Response format: keyword>value
-    - Dual lens control (A, B, or X=both)
-    - Battery monitoring
-    - RTC support
-
-    USB Connection:
-    - VID: 0xf057, PID: 0x08AE
-    - Baud: 57600
-    - Device shows as "MicroPython Pyboard Virtual Comm Port in FS Mode"
-    """
-
-    # wVOG Commands (MicroPython protocol)
-    # Verified from hardware testing 2025-12-02
     COMMANDS = {
         # Experiment control
         'exp_start': 'exp>1',
@@ -63,7 +44,6 @@ class WVOGProtocol(BaseVOGProtocol):
         'set_rtc': 'rtc>{value}',  # Format: Y,M,D,dow,H,M,S,ss
     }
 
-    # Response keywords and their types
     # Response format: keyword>value
     RESPONSE_TYPES = {
         'cfg': ResponseType.CONFIG,
@@ -79,7 +59,6 @@ class WVOGProtocol(BaseVOGProtocol):
         'end': ResponseType.DATA,  # End marker before data
     }
 
-    # Configuration keys in cfg response
     # Format: cfg>key:val,key:val,...
     CONFIG_KEYS = {
         'clr': 'clear_opacity',      # Clear/open opacity (0-100)
@@ -114,153 +93,86 @@ class WVOGProtocol(BaseVOGProtocol):
         return self.CSV_HEADER_STRING
 
     def format_command(self, command: str, value: Optional[str] = None) -> bytes:
-        """Format a command for wVOG transmission.
-
-        Args:
-            command: Command key from COMMANDS
-            value: Optional value for set commands
-
-        Returns:
-            Encoded bytes with newline terminator
-        """
+        """Format wVOG command with optional value substitution."""
         if command not in self.COMMANDS:
             self.logger.warning("Unknown wVOG command: %s", command)
             return b''
-
         cmd_string = self.COMMANDS[command]
-
-        # Substitute value if needed
         if value is not None:
             if '{key}' in cmd_string and '{value}' in cmd_string:
-                # set_config format: set>{key},{value}
-                # value should be in format "key,val"
                 cmd_string = cmd_string.replace('{key},{value}', value)
             elif '{value}' in cmd_string:
                 cmd_string = cmd_string.format(value=value)
-
         return f"{cmd_string}\n".encode('utf-8')
 
     def parse_response(self, response: str) -> Optional[VOGResponse]:
-        """Parse wVOG response.
-
-        wVOG responses are in format: keyword>value or just keyword
-
-        Args:
-            response: Raw response string
-
-        Returns:
-            VOGResponse or None
-        """
+        """Parse wVOG response (keyword>value or keyword)."""
         response = response.strip()
-
         if not response:
             return None
 
         # Parse keyword>value format
         if '>' in response:
             parts = response.split('>', 1)
-            keyword = parts[0]
-            value = parts[1] if len(parts) > 1 else ''
+            keyword, value = parts[0], parts[1] if len(parts) > 1 else ''
         else:
-            keyword = response
-            value = ''
+            keyword, value = response, ''
 
-        # Find matching response type
         response_type = self.RESPONSE_TYPES.get(keyword, ResponseType.UNKNOWN)
-
         if response_type == ResponseType.UNKNOWN:
             self.logger.debug("Unrecognized wVOG response: %s", response)
             return None
 
         data = {}
-
         if response_type == ResponseType.STIMULUS:
             try:
                 data['state'] = int(value)
             except ValueError:
                 data['state'] = value
-            # Track which lens for a/b/x responses
             if keyword in ('a', 'b', 'x'):
                 data['lens'] = keyword.upper()
-
         elif response_type == ResponseType.BATTERY:
             try:
                 data['percent'] = int(value)
             except ValueError:
                 data['percent'] = 0
-
         elif response_type == ResponseType.CONFIG:
-            # Parse config string: key:val,key:val,...
             data['config'] = self._parse_config_string(value)
-
         elif response_type == ResponseType.RTC:
-            # Parse RTC: Y,M,D,dow,H,M,S,ss
             data['rtc'] = self._parse_rtc_string(value)
 
-        return VOGResponse(
-            response_type=response_type,
-            keyword=keyword,
-            value=value,
-            raw=response,
-            data=data,
-        )
+        return VOGResponse(response_type, keyword, value, response, data)
 
     def _parse_config_string(self, value: str) -> Dict[str, str]:
-        """Parse wVOG config string.
-
-        Format: key:val,key:val,...
-        Example: clr:100,cls:1500,dbc:20,srt:1,opn:1500,dta:0,drk:0,typ:cycle
-        """
+        """Parse config string (format: key:val,key:val,...)."""
         config = {}
         if not value:
             return config
-
-        pairs = value.split(',')
-        for pair in pairs:
+        for pair in value.split(','):
             if ':' in pair:
                 k, v = pair.split(':', 1)
-                # Map short key to long name if known
                 long_name = self.CONFIG_KEYS.get(k, k)
                 config[long_name] = v
-                config[k] = v  # Also store short key
-
+                config[k] = v
         return config
 
     def _parse_rtc_string(self, value: str) -> Dict[str, int]:
-        """Parse wVOG RTC string.
-
-        Format: Y,M,D,dow,H,M,S,ss
-        Example: 2025,12,2,1,14,30,0,0
-        """
+        """Parse RTC string (format: Y,M,D,dow,H,M,S,ss)."""
         rtc = {}
         if not value:
             return rtc
-
         parts = value.split(',')
         keys = ['year', 'month', 'day', 'dow', 'hour', 'minute', 'second', 'subsecond']
-
         for i, key in enumerate(keys):
             if i < len(parts):
                 try:
                     rtc[key] = int(parts[i])
                 except ValueError:
                     rtc[key] = 0
-
         return rtc
 
     def parse_data_response(self, value: str, device_id: str) -> Optional[VOGDataPacket]:
-        """Parse wVOG data response.
-
-        Data format: trial_num,shutter_open,shutter_closed,total_ms,lens,battery_pct,device_unix_time
-        Example: 1,1999,1500,3499,X,85,1733150423
-
-        Args:
-            value: Data value string
-            device_id: Device identifier
-
-        Returns:
-            VOGDataPacket or None
-        """
+        """Parse wVOG data (format: trial,open,closed,total,lens,battery,unix_time)."""
         try:
             parts = value.split(',')
             if len(parts) >= 7:
@@ -272,66 +184,42 @@ class WVOGProtocol(BaseVOGProtocol):
                     shutter_total=int(parts[3]) if parts[3] else 0,
                     lens=parts[4] if parts[4] else 'X',
                     battery_percent=int(parts[5]) if parts[5] else 0,
-                    device_unix_time=int(parts[6]) if parts[6] else 0,
-                )
+                    device_unix_time=int(parts[6]) if parts[6] else 0)
             elif len(parts) >= 3:
-                # Minimal data format
                 return VOGDataPacket(
                     device_id=device_id,
                     trial_number=int(parts[0]) if parts[0] else 0,
                     shutter_open=int(parts[1]) if parts[1] else 0,
-                    shutter_closed=int(parts[2]) if parts[2] else 0,
-                )
+                    shutter_closed=int(parts[2]) if parts[2] else 0)
         except (ValueError, IndexError) as e:
             self.logger.warning("Could not parse wVOG data: %s - %s", value, e)
-
         return None
 
     def get_command_keys(self) -> Dict[str, str]:
         """Return command mapping."""
         return self.COMMANDS.copy()
 
-    # ------------------------------------------------------------------
-    # Polymorphic methods
-    # ------------------------------------------------------------------
-
     def get_config_commands(self) -> list:
-        """Return list of commands to retrieve wVOG configuration."""
-        # wVOG returns all config in one command
+        """Commands to retrieve wVOG config (single command returns all)."""
         return ['get_config']
 
     def format_set_config(self, param: str, value: str) -> tuple:
-        """Format a config set operation for wVOG.
-
-        wVOG uses 'set_config' command with 'param,value' as argument.
-        """
+        """Format config set (wVOG uses 'set_config' with 'param,value')."""
         return ('set_config', f'{param},{value}')
 
     def update_config_from_response(self, response, config: dict) -> None:
         """Update config from wVOG response (all values at once)."""
-        new_config = response.data.get('config', {})
-        config.update(new_config)
+        config.update(response.data.get('config', {}))
 
     def get_extended_packet_data(self, packet) -> dict:
-        """Return wVOG extended packet data."""
-        return {
-            'shutter_total': packet.shutter_total,
-            'lens': packet.lens,
-            'battery_percent': packet.battery_percent,
-            'device_unix_time': packet.device_unix_time,
-        }
+        """wVOG extended packet data."""
+        return {'shutter_total': packet.shutter_total, 'lens': packet.lens,
+                'battery_percent': packet.battery_percent, 'device_unix_time': packet.device_unix_time}
 
-    def format_csv_row(
-        self,
-        packet,
-        label: str,
-        record_time_unix: float,
-        record_time_mono: float,
-    ) -> str:
-        """Format wVOG packet as CSV row (extended format)."""
-        return (
-            f"{packet.trial_number},VOG,{packet.device_id},{label},"
-            f"{record_time_unix:.6f},{record_time_mono:.9f},"
-            f"{packet.shutter_open},{packet.shutter_closed},"
-            f"{packet.shutter_total},{packet.lens},{packet.battery_percent}"
-        )
+    def format_csv_row(self, packet, label: str, record_time_unix: float,
+                      record_time_mono: float) -> str:
+        """Format wVOG CSV row (extended format)."""
+        return (f"{packet.trial_number},VOG,{packet.device_id},{label},"
+                f"{record_time_unix:.6f},{record_time_mono:.9f},"
+                f"{packet.shutter_open},{packet.shutter_closed},"
+                f"{packet.shutter_total},{packet.lens},{packet.battery_percent}")

@@ -1,8 +1,4 @@
-"""VOG Device Types.
-
-Defines device type enums and conversion utilities.
-Device discovery is handled by the main logger - this module receives device assignments.
-"""
+"""VOG device type enums."""
 
 from enum import Enum
 from typing import Optional
