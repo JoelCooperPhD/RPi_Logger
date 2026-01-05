@@ -1,4 +1,4 @@
-"""Command + user action routing for the audio module."""
+"""Command routing."""
 
 from __future__ import annotations
 
@@ -12,8 +12,7 @@ if TYPE_CHECKING:  # pragma: no cover - avoids circular import at runtime
 
 
 class CommandRouter:
-    """Route commands/user actions to the appropriate handler."""
-
+    """Route commands/actions to handlers."""
     def __init__(self, logger: logging.Logger, app: "AudioApp") -> None:
         self.logger = logger.getChild("CommandRouter")
         self.app = app

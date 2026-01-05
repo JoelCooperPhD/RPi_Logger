@@ -1,4 +1,4 @@
-"""Recording/session orchestration helpers for the audio module."""
+"""Recording/session orchestration."""
 
 from __future__ import annotations
 
@@ -16,8 +16,7 @@ from .module_bridge import ModuleBridge
 
 
 class RecordingManager:
-    """Coordinate session creation and recorder lifecycle."""
-
+    """Coordinate session/recorder lifecycle."""
     def __init__(
         self,
         state: AudioState,
@@ -45,7 +44,6 @@ class RecordingManager:
         return session_dir
 
     async def start(self, trial_number: int) -> bool:
-        """Start recording on the assigned device."""
         self.logger.debug("Recording start requested for trial %d", trial_number)
 
         if self.state.recording or self._start_lock.locked():

@@ -1,8 +1,4 @@
-"""Refactored audio application composed of small managers.
-
-Device discovery is centralized in the main logger. This module waits for
-device assignments via assign_device commands from the main logger.
-"""
+"""Audio application coordinator."""
 
 from __future__ import annotations
 
@@ -28,8 +24,7 @@ from .recording_manager import RecordingManager
 
 
 class AudioApp:
-    """High-level coordinator for the audio module."""
-
+    """Audio module coordinator."""
     def __init__(
         self,
         context: RuntimeContext,
@@ -50,7 +45,6 @@ class AudioApp:
         self.state = AudioState()
         self.task_manager = BackgroundTaskManager("AudioTasks", self.logger)
         self.shutdown_guard = ShutdownGuard(self.logger, timeout=settings.shutdown_timeout)
-        # Device discovery is now centralized in the main logger
         self.recorder_service = RecorderService(
             self.logger,
             settings.sample_rate,
@@ -99,18 +93,13 @@ class AudioApp:
         )
 
         self.command_router = CommandRouter(self.logger, self)
-
-        # Restore state from config (marks devices for auto-selection when assigned)
         self._restore_state_from_config()
 
     def _restore_state_from_config(self) -> None:
-        """Restore audio state from the module's config file."""
         try:
             prefs = getattr(self.module_model, "preferences", None)
             if prefs is None:
                 return
-
-            # Use the audio-scoped preferences
             audio_prefs = prefs.scope("audio")
             state_data = audio_prefs.snapshot()
             if state_data:
@@ -120,56 +109,34 @@ class AudioApp:
             self.logger.warning("Failed to restore audio state: %s", e)
 
     async def _save_state_to_config(self) -> None:
-        """Save audio state to the module's config file."""
         try:
             prefs = getattr(self.module_model, "preferences", None)
             if prefs is None:
                 return
-
-            # Get persistable state from AudioState
             state_data = self.state.get_persistable_state()
             if not state_data:
                 return
-
-            # Prefix all keys with "audio."
             prefixed = {f"audio.{k}": v for k, v in state_data.items()}
             await prefs.write_async(prefixed)
             self.logger.debug("Saved audio state to config: %s", state_data)
         except Exception as e:
             self.logger.warning("Failed to save audio state: %s", e)
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-
     async def start(self) -> None:
-        """Start the audio module - wait for device assignments from main logger.
-
-        Device discovery is centralized in the main logger. This module will
-        receive device assignments via assign_device commands.
-        """
-        self.logger.info("Audio module started (waiting for device assignments from main logger)")
-
-        # Start meter refresh if view is enabled
+        self.logger.info("Audio module started (waiting for device assignments)")
         if self.view.enabled:
             self.task_manager.create(self._meter_refresh_loop(), name="meter_refresh")
             self.logger.debug("Meter refresh loop scheduled (view enabled)")
 
     async def shutdown(self) -> None:
-        self.logger.debug("Shutdown requested")
         await self.shutdown_guard.start()
         await self.stop_recording()
-
-        # Save state before cleanup
         await self._save_state_to_config()
-
         self._stop_event.set()
         await self.task_manager.shutdown()
         await self.recorder_service.stop_all()
         await self.shutdown_guard.cancel()
-        self.logger.info("Audio app shutdown complete")
-
-    # ------------------------------------------------------------------
-    # Command/user handling
+        self.logger.info("Audio shutdown complete")
 
     async def handle_command(self, command: dict[str, Any]) -> bool:
         return await self.command_router.handle_command(command)
@@ -182,15 +149,10 @@ class AudioApp:
             return self.recorder_service.any_recording_active
         return not self._stop_event.is_set()
 
-    # ------------------------------------------------------------------
-    # Public helpers exposed to managers/commands
-
     async def enable_device(self, device: AudioDeviceInfo) -> bool:
-        """Enable an assigned device."""
         return await self.device_manager.enable_device(device)
 
     async def disable_device(self) -> bool:
-        """Disable the current device."""
         return await self.device_manager.disable_device()
 
     async def start_recording(self, trial_number: int | None = None) -> bool:
@@ -210,9 +172,6 @@ class AudioApp:
 
     async def ensure_session_dir(self) -> Path:
         return await self.recording_manager.ensure_session_dir(self.state.session_dir)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
 
     def _submit_async(self, coro: Awaitable[None], name: str) -> asyncio.Task:
         return self.task_manager.create(coro, name=name)

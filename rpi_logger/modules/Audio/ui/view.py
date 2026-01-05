@@ -1,4 +1,4 @@
-"""Tk view for the audio module built on the codex surface."""
+"""Audio Tk view."""
 
 from __future__ import annotations
 
@@ -23,8 +23,7 @@ SubmitCoroutine = Callable[[Awaitable[None], str], None]
 
 
 class AudioView:
-    """Adapter that renders audio controls inside the codex view."""
-
+    """Audio view adapter."""
     def __init__(
         self,
         vmc_view,
@@ -59,9 +58,6 @@ class AudioView:
         self._finalize_menus()
         self.logger.info("Audio view attached")
 
-    # ------------------------------------------------------------------
-    # Snapshot handling
-
     def _on_snapshot(self, snapshot: AudioSnapshot) -> None:
         self._snapshot = snapshot
         if self._device_label:
@@ -75,9 +71,6 @@ class AudioView:
             self._meter_panel.rebuild(snapshot)
             self._meter_panel.draw(snapshot, force=True)
 
-    # ------------------------------------------------------------------
-    # Public helpers used by controller
-
     def draw_level_meters(self, *, force: bool = False) -> None:
         if not self.enabled or not tk:
             return
@@ -90,9 +83,6 @@ class AudioView:
     def _submit(self, coro: Awaitable[None], name: str) -> None:
         if self._submit_callback:
             self._submit_callback(coro, name)
-
-    # ------------------------------------------------------------------
-    # UI construction
 
     def _build_content(self, parent: tk.Widget) -> None:
         assert ttk is not None
@@ -129,22 +119,15 @@ class AudioView:
                 self.logger.debug("Unable to rename stub frame", exc_info=True)
 
     def _finalize_menus(self) -> None:
-        """Finalize View and File menus with standard items."""
-        # Finalize View menu (Logger only - Audio doesn't use capture stats)
         finalize_view = getattr(self._vmc_view, "finalize_view_menu", None)
         if callable(finalize_view):
             finalize_view(include_capture_stats=False)
-
-        # Finalize File menu (adds Quit)
         finalize_file = getattr(self._vmc_view, "finalize_file_menu", None)
         if callable(finalize_file):
             finalize_file()
 
     def _build_device_label(self, snapshot: AudioSnapshot) -> str:
         selected = list(snapshot.selected_devices.values())
-        
-        # If devices are selected, the meter panel shows them with individual labels.
-        # We just show a summary count here.
         if selected:
             return ""
             

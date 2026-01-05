@@ -1,4 +1,4 @@
-"""Low-level audio recorder that streams samples from sounddevice to disk."""
+"""Audio device recorder."""
 
 from __future__ import annotations
 
@@ -45,8 +45,7 @@ class AudioChunk:
 
 
 class AudioDeviceRecorder:
-    """Owns the sounddevice stream + sample buffering for one device."""
-
+    """Manages sounddevice stream and sample buffering."""
     def __init__(
         self,
         device: AudioDeviceInfo,
@@ -70,9 +69,6 @@ class AudioDeviceRecorder:
         self._total_frames = 0
         self._meter_errors = 0
 
-    # ------------------------------------------------------------------
-    # Stream lifecycle
-
     def start_stream(self) -> None:
         if self.stream is not None:
             return
@@ -81,11 +77,7 @@ class AudioDeviceRecorder:
             self._handle_callback(indata, frames, time_info, status)
 
         channels = max(1, min(self.device.channels or 1, AUDIO_CHANNELS_MONO))
-        self.logger.debug(
-            "Opening input stream for device %d (%s)",
-            self.device.device_id,
-            self.device.name,
-        )
+        self.logger.debug("Opening input stream for device %d (%s)", self.device.device_id, self.device.name)
         try:
             stream = sd.InputStream(
                 device=self.device.device_id,
@@ -101,12 +93,7 @@ class AudioDeviceRecorder:
             except Exception:
                 actual_rate = None
             if actual_rate and actual_rate != self.sample_rate:
-                self.logger.info(
-                    "Device %d sample rate adjusted from %d to %d",
-                    self.device.device_id,
-                    self.sample_rate,
-                    actual_rate,
-                )
+                self.logger.info("Device %d rate adjusted %d -> %d", self.device.device_id, self.sample_rate, actual_rate)
                 self.sample_rate = actual_rate
             self.stream = stream
             self.logger.info("Input stream started (%d Hz)", self.sample_rate)
@@ -127,9 +114,6 @@ class AudioDeviceRecorder:
         except Exception as exc:
             self.logger.debug("Stream close error: %s", exc)
         self.logger.info("Input stream stopped")
-
-    # ------------------------------------------------------------------
-    # Recording helpers
 
     def begin_recording(self, session_dir: Path, trial_number: int) -> None:
         if self.recording:
@@ -178,15 +162,8 @@ class AudioDeviceRecorder:
         self._active_handle = None
         self._dropped_blocks = 0
         if handle:
-            self.logger.info(
-                "Recording finished (%s) with timing metadata in %s",
-                handle.file_path.name,
-                handle.timing_csv_path.name,
-            )
+            self.logger.info("Recording finished (%s) with timing in %s", handle.file_path.name, handle.timing_csv_path.name)
         return handle
-
-    # ------------------------------------------------------------------
-    # Audio callback
 
     def _handle_callback(self, indata, frames: int, time_info, status: sd.CallbackFlags) -> None:
         mono = indata[:, 0] if indata.ndim > 1 else indata
@@ -225,10 +202,7 @@ class AudioDeviceRecorder:
             except queue.Full:
                 self._dropped_blocks += 1
                 if self._dropped_blocks % 25 == 0:
-                    self.logger.warning(
-                        "Dropped %d audio blocks due to slow writer",
-                        self._dropped_blocks,
-                    )
+                    self.logger.warning("Dropped %d audio blocks (slow writer)", self._dropped_blocks)
 
         if status:
             status_str = str(status)

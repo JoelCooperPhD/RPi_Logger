@@ -1,4 +1,4 @@
-"""Service that manages a single AudioDeviceRecorder instance."""
+"""Recorder service."""
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ from .device_recorder import AudioDeviceRecorder, RecordingHandle
 
 
 class RecorderService:
-    """Manage a single AudioDeviceRecorder instance."""
-
+    """Manage audio device recorder."""
     def __init__(
         self,
         logger: logging.Logger,
@@ -27,10 +26,7 @@ class RecorderService:
         self.recorder: AudioDeviceRecorder | None = None
 
     async def enable_device(self, device: AudioDeviceInfo, meter: LevelMeter) -> bool:
-        """Enable recording for the single device."""
         effective_rate = self._resolve_sample_rate(device)
-
-        # If there's an existing recorder with different rate, disable first
         if self.recorder and self.recorder.sample_rate != effective_rate:
             await self.disable_device()
 
@@ -52,7 +48,6 @@ class RecorderService:
         return False
 
     async def disable_device(self) -> None:
-        """Disable the current device recorder."""
         recorder = self.recorder
         if not recorder:
             return
@@ -66,22 +61,13 @@ class RecorderService:
         except Exception as exc:
             self.logger.debug("Device stop raised: %s", exc)
 
-    async def begin_recording(
-        self,
-        session_dir: Path,
-        trial_number: int,
-    ) -> bool:
-        """Begin recording on the current device."""
+    async def begin_recording(self, session_dir: Path, trial_number: int) -> bool:
         if not self.recorder:
             self.logger.warning("No recorder available for recording")
             return False
 
         try:
-            self.logger.debug(
-                "Starting recording thread for device %d (trial %d)",
-                self.recorder.device.device_id,
-                trial_number,
-            )
+            self.logger.debug("Starting recording for device %d (trial %d)", self.recorder.device.device_id, trial_number)
             await asyncio.to_thread(self.recorder.begin_recording, session_dir, trial_number)
             return True
         except Exception as exc:
@@ -89,7 +75,6 @@ class RecorderService:
             return False
 
     async def finish_recording(self) -> RecordingHandle | None:
-        """Finish recording and return the handle."""
         if not self.recorder:
             return None
 
@@ -103,7 +88,6 @@ class RecorderService:
             return None
 
     async def stop_all(self) -> None:
-        """Stop the recorder if active."""
         if self.recorder:
             self.logger.info("Stopping recorder")
             await self.disable_device()
@@ -111,9 +95,6 @@ class RecorderService:
     @property
     def any_recording_active(self) -> bool:
         return self.recorder is not None and self.recorder.recording
-
-    # ------------------------------------------------------------------
-    # Internal helpers
 
     def _resolve_sample_rate(self, device: AudioDeviceInfo) -> int:
         try:

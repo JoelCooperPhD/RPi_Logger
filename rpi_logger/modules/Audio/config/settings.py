@@ -1,4 +1,4 @@
-"""Configuration loading + normalization helpers for the audio module."""
+"""Audio configuration."""
 
 from __future__ import annotations
 
@@ -15,8 +15,7 @@ INTERACTION_MODES: tuple[str, str] = ("gui", "headless")
 
 @dataclass(slots=True)
 class AudioSettings:
-    """Normalized configuration derived from CLI args and config file."""
-
+    """Audio configuration settings."""
     mode: str = "gui"
     output_dir: Path = Path("audio")
     session_prefix: str = "audio"
@@ -32,11 +31,6 @@ class AudioSettings:
 
     @classmethod
     def from_args(cls, args: Any) -> "AudioSettings":
-        """Create a settings instance from an argparse namespace."""
-
-        def _to_bool(value: Any) -> bool:
-            return bool(value)
-
         defaults = cls()
 
         output_dir = getattr(args, "output_dir", None)
@@ -53,25 +47,17 @@ class AudioSettings:
             session_prefix=str(session_prefix),
             log_level=str(getattr(args, "log_level", defaults.log_level)),
             log_file=getattr(args, "log_file", None),
-            enable_commands=_to_bool(getattr(args, "enable_commands", defaults.enable_commands)),
+            enable_commands=bool(getattr(args, "enable_commands", defaults.enable_commands)),
             sample_rate=int(getattr(args, "sample_rate", defaults.sample_rate)),
-            console_output=_to_bool(getattr(args, "console_output", defaults.console_output)),
-            meter_refresh_interval=float(
-                getattr(args, "meter_refresh_interval", defaults.meter_refresh_interval)
-            ),
-            recorder_start_timeout=float(
-                getattr(args, "recorder_start_timeout", defaults.recorder_start_timeout)
-            ),
-            recorder_stop_timeout=float(
-                getattr(args, "recorder_stop_timeout", defaults.recorder_stop_timeout)
-            ),
+            console_output=bool(getattr(args, "console_output", defaults.console_output)),
+            meter_refresh_interval=float(getattr(args, "meter_refresh_interval", defaults.meter_refresh_interval)),
+            recorder_start_timeout=float(getattr(args, "recorder_start_timeout", defaults.recorder_start_timeout)),
+            recorder_stop_timeout=float(getattr(args, "recorder_stop_timeout", defaults.recorder_stop_timeout)),
             shutdown_timeout=float(getattr(args, "shutdown_timeout", defaults.shutdown_timeout)),
         )
 
     @classmethod
     def from_preferences(cls, prefs: ScopedPreferences, args: Any) -> "AudioSettings":
-        """Construct settings by overlaying CLI args on persisted preferences."""
-
         base = cls.from_args(args)
         merged = asdict(base)
 
@@ -94,8 +80,6 @@ class AudioSettings:
         return settings
 
 def read_config_file(path: Path) -> dict[str, object]:
-    """Load key/value pairs from ``config.txt`` style files."""
-
     config: dict[str, object] = {}
     if not path.exists():
         return config
@@ -140,14 +124,10 @@ def _config_value(config: Mapping[str, object], key: str, fallback: Any) -> Any:
 
 
 def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
-    """Create the CLI parser with defaults sourced from the config file."""
-
     defaults = AudioSettings()
     parser = argparse.ArgumentParser(description="Audio module")
 
     default_mode = _normalize_mode(_config_value(config, "mode", defaults.mode))
-
-    # Use common CLI arguments for standard options
     add_common_cli_arguments(
         parser,
         default_output=_config_value(config, "output_dir", defaults.output_dir),
@@ -157,12 +137,10 @@ def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
         default_session_prefix=_config_value(config, "session_prefix", defaults.session_prefix),
         include_console_control=True,
         default_console_output=bool(_config_value(config, "console_output", defaults.console_output)),
-        include_auto_recording=False,  # Audio doesn't use auto-recording
+        include_auto_recording=False,
         include_parent_control=True,
         include_window_geometry=True,
     )
-
-    # Audio-specific arguments
     parser.add_argument(
         "--sample-rate",
         type=int,
@@ -173,13 +151,7 @@ def build_arg_parser(config: Mapping[str, object]) -> argparse.ArgumentParser:
     return parser
 
 
-def parse_cli_args(
-    argv: list[str] | None = None,
-    *,
-    config_path: Path,
-) -> argparse.Namespace:
-    """Parse CLI arguments using configuration defaults."""
-
+def parse_cli_args(argv: list[str] | None = None, *, config_path: Path) -> argparse.Namespace:
     config = read_config_file(config_path)
     parser = build_arg_parser(config)
     return parser.parse_args(argv)
@@ -187,9 +159,6 @@ def parse_cli_args(
 
 def _normalize_mode(value: Any) -> str:
     text = str(value or "").strip().lower()
-    # Map "cli" → "headless" for backwards compatibility
     if text == "cli":
         return "headless"
-    if text in INTERACTION_MODES:
-        return text
-    return INTERACTION_MODES[0]
+    return text if text in INTERACTION_MODES else INTERACTION_MODES[0]

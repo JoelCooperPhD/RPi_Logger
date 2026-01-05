@@ -1,4 +1,4 @@
-"""Session directory helpers for the audio module."""
+"""Session directory management."""
 
 from __future__ import annotations
 
@@ -9,8 +9,7 @@ from pathlib import Path
 
 
 class SessionService:
-    """Manage creation of experiment session directories."""
-
+    """Manage session directories."""
     def __init__(self, base_output_dir: Path, session_prefix: str, logger: logging.Logger) -> None:
         self.base_output_dir = base_output_dir
         self.session_prefix = session_prefix

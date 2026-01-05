@@ -1,4 +1,4 @@
-"""Level meter rendering helpers for the audio Tk view."""
+"""Audio level meter panel."""
 
 from __future__ import annotations
 
@@ -16,20 +16,14 @@ except Exception:  # pragma: no cover
 
 from ..domain import DB_MAX, DB_MIN, DB_RED, DB_YELLOW, AudioSnapshot
 
-
-# Meter-specific colors derived from theme
 class MeterColors:
-    """Audio meter colors using theme palette with dark background variants."""
-
-    # Background zones (dark tinted variants for meter zones)
+    """Meter colors from theme palette."""
     BG_GREEN = "#1a3a1a"
     BG_GREEN_BORDER = "#2a4a2a"
     BG_YELLOW = "#3a3a1a"
     BG_YELLOW_BORDER = "#4a4a2a"
     BG_RED = "#3a1a1a"
     BG_RED_BORDER = "#4a2a2a"
-
-    # Signal level colors from theme (set after Colors import)
     LEVEL_GREEN: str
     LEVEL_YELLOW: str
     LEVEL_RED: str
@@ -37,14 +31,12 @@ class MeterColors:
 
 
 def _init_meter_colors() -> None:
-    """Initialize meter colors from theme (called after import)."""
     if Colors is not None:
         MeterColors.LEVEL_GREEN = Colors.SUCCESS
         MeterColors.LEVEL_YELLOW = Colors.WARNING
         MeterColors.LEVEL_RED = Colors.ERROR
         MeterColors.PEAK_LINE = Colors.FG_PRIMARY
     else:
-        # Fallback if Colors unavailable (headless)
         MeterColors.LEVEL_GREEN = "#2ecc71"
         MeterColors.LEVEL_YELLOW = "#f39c12"
         MeterColors.LEVEL_RED = "#e74c3c"
@@ -94,13 +86,9 @@ class MeterPanel:
 
         for row_index, device_id in enumerate(desired_order):
             self._container.rowconfigure(row_index, weight=1)
-
-            # Frame for each device (label + meter)
             device_frame = ttk.Frame(self._container)
             device_frame.grid(row=row_index, column=0, sticky="ew", pady=(0, 6))
             device_frame.columnconfigure(0, weight=1)
-
-            # Meter Canvas
             canvas = tk.Canvas(
                 device_frame,
                 width=260,

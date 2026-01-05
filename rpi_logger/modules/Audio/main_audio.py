@@ -1,4 +1,4 @@
-"""Audio module entry point leveraging the codex stack."""
+"""Audio module entry point."""
 
 from __future__ import annotations
 
@@ -53,15 +53,11 @@ _VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
 
 
 def _resolve_log_level(value: str | None) -> tuple[str, bool]:
-    """Normalize user-supplied log levels before configuring logging."""
-
     normalized = (value or "").strip().lower()
     if not normalized:
         return _DEFAULT_LOG_LEVEL, False
     normalized = _LEVEL_ALIASES.get(normalized, normalized)
-    if normalized in _VALID_LOG_LEVELS:
-        return normalized, False
-    return _DEFAULT_LOG_LEVEL, True
+    return (normalized, False) if normalized in _VALID_LOG_LEVELS else (_DEFAULT_LOG_LEVEL, True)
 
 def parse_args(argv: list[str] | None = None):
     return parse_cli_args(argv, config_path=CONFIG_PATH)
@@ -82,24 +78,12 @@ async def main(argv: list[str] | None = None) -> None:
         log_file=getattr(args, "log_file", None),
     )
     if requested_level and invalid_level:
-        logger.warning(
-            "Unknown log level '%s'; defaulting to %s",
-            requested_level,
-            effective_level,
-        )
-    logger.debug(
-        "Audio entry configured (console=%s, log_file=%s)",
-        getattr(args, "console_output", True),
-        getattr(args, "log_file", None),
-    )
+        logger.warning("Unknown log level '%s'; defaulting to %s", requested_level, effective_level)
 
     if not args.enable_commands:
         logger.error("Audio module must be launched by the logger controller.")
         return
-
-    module_dir = MODULE_DIR
-
-    config_context = resolve_module_config_path(module_dir, MODULE_ID)
+    config_context = resolve_module_config_path(MODULE_DIR, MODULE_ID)
     setattr(args, "config_path", config_context.writable_path)
 
     def show_audio_help(parent):
@@ -107,14 +91,9 @@ async def main(argv: list[str] | None = None) -> None:
         AudioHelpDialog(parent)
 
     supervisor = StubCodexSupervisor(
-        args,
-        module_dir,
-        logger,
-        runtime_factory=build_runtime,
-        display_name=DISPLAY_NAME,
-        module_id=MODULE_ID,
-        config_path=config_context.writable_path,
-        help_callback=show_audio_help,
+        args, MODULE_DIR, logger, runtime_factory=build_runtime,
+        display_name=DISPLAY_NAME, module_id=MODULE_ID,
+        config_path=config_context.writable_path, help_callback=show_audio_help,
     )
 
     loop = asyncio.get_running_loop()

@@ -1,4 +1,4 @@
-"""Bridge helpers that sync derived state with the shared model."""
+"""State sync bridge."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from typing import Any, Callable
 
 
 class ModuleBridge:
-    """Synchronize derived state with the codex shared model."""
-
+    """Sync state with shared model."""
     def __init__(
         self,
         module_model,
