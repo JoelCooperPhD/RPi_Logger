@@ -40,12 +40,20 @@
             ],
             "fps": 15.0,
             "pixel_format": "MJPEG"
+          },
+          {
+            "size": [
+              1920,
+              1080
+            ],
+            "fps": 15.0,
+            "pixel_format": "MJPEG"
           }
         ],
         "default_record": {
           "size": [
-            1280,
-            720
+            1920,
+            1080
           ],
           "fps": 15.0,
           "pixel_format": "MJPEG"
@@ -202,19 +210,7 @@
           }
         }
       },
-      "tested": "2025-12-10",
-      "sensor_info": {
-        "shutter_type": "Rolling Shutter",
-        "max_resolution": "1280x720 (720p)",
-        "max_fps": "15 fps",
-        "autofocus": false,
-        "auto_exposure": true,
-        "auto_white_balance": true,
-        "limitations": "Despite advertising 1080p, this camera only works reliably up to 720p. Frame rate is limited to 15fps. Rolling shutter may cause distortion when recording fast-moving objects.",
-        "best_for": "General scene recording, fixed camera positions, interviews, workspace monitoring",
-        "not_recommended_for": "High-speed motion capture, recording fast hand movements or rapid head turns where rolling shutter artifacts would affect data quality",
-        "notes": "Budget USB camera suitable for basic video documentation. For research requiring precise timing or high frame rates, consider a global shutter camera like the IMX296."
-      }
+      "tested": "2026-01-05"
     },
     "facetime_hd_camera_usb": {
       "name": "FaceTime HD Camera(USB)",

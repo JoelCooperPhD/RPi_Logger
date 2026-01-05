@@ -1,9 +1,4 @@
-"""
-Shared constants used across multiple modules.
-
-This module contains constants that are common to multiple modules
-to avoid duplication and ensure consistency.
-"""
+"""Shared constants for audio-video operations across modules."""
 
 # Audio-Video synchronization and muxing
 AV_MUXING_TIMEOUT_SECONDS = 60           # Timeout for ffmpeg muxing operations

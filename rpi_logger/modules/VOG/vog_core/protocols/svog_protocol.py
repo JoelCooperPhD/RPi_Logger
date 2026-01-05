@@ -1,11 +1,4 @@
-"""sVOG protocol implementation for wired VOG devices.
-
-Protocol verified against RS_Logger firmware:
-- RS_Logger/RSLogger/Firmware/sVOG_FW/embedded
-- RS_Logger/RSLogger/hardware_io/sVOG_HI/sVOG_HIController.py
-
-Firmware Version: 2.2 (10/12/2021)
-"""
+"""sVOG protocol (wired VOG). Verified against RS_Logger firmware v2.2 (10/12/2021)."""
 
 from typing import Dict, Optional
 from rpi_logger.core.logging_utils import get_module_logger
@@ -19,17 +12,8 @@ from .base_protocol import (
 
 
 class SVOGProtocol(BaseVOGProtocol):
-    """Protocol implementation for sVOG (wired) devices.
+    """sVOG (wired) protocol. Arduino, >cmd|val<< format, single lens, 115200 baud."""
 
-    sVOG uses an Arduino-based controller with the following protocol:
-    - Command format: >cmd|val<<
-    - Response format: keyword|value
-    - Single lens control only
-    - No battery monitoring
-    - Baud rate: 115200
-    """
-
-    # sVOG Commands (Arduino protocol)
     # Format: >COMMAND|VALUE<<\n
     COMMANDS = {
         # Experiment control

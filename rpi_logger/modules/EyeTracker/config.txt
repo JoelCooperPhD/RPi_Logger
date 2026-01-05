@@ -89,7 +89,7 @@ discovery_retry = 3.0     # Seconds between retries
 ################################################################################
 # MASTER LOGGER INTEGRATION
 ################################################################################
-enabled = false
+enabled = true
 preview_resolution = auto
 gui_io_stub_visible = false
 view.show_io_panel = true

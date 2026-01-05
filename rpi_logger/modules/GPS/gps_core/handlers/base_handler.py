@@ -1,12 +1,7 @@
-"""Base GPS Handler
+"""Base GPS Handler with self-healing circuit breaker.
 
-Abstract base class defining the interface for all GPS device handlers.
-Each GPS device gets its own handler instance managing parsing, logging,
-and data callbacks.
-
-Implements self-healing circuit breaker via ReconnectingMixin - instead of
-permanently exiting after N consecutive errors, the handler will attempt
-reconnection with exponential backoff.
+Abstract interface for GPS device handlers managing parsing, logging, and callbacks.
+Uses ReconnectingMixin for automatic reconnection with exponential backoff.
 """
 
 from __future__ import annotations

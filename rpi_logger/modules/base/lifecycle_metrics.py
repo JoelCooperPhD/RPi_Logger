@@ -44,37 +44,26 @@ class LifecycleTimer:
         self.logger.info("=" * 60)
         self.logger.info("LIFECYCLE SUMMARY: %s", self.module_name)
         self.logger.info("=" * 60)
-
         phase_names = list(self.phases.keys())
-
         for i, phase in enumerate(phase_names):
             elapsed = (self.phases[phase] - self.start_time) * 1000
-
             if i > 0:
-                prev_phase = phase_names[i-1]
-                duration = (self.phases[phase] - self.phases[prev_phase]) * 1000
+                duration = (self.phases[phase] - self.phases[phase_names[i-1]]) * 1000
                 self.logger.info("  %s: +%.1fms (Δ%.1fms)", phase, elapsed, duration)
             else:
                 self.logger.info("  %s: +%.1fms", phase, elapsed)
-
-        total_elapsed = self.get_elapsed_ms()
         self.logger.info("-" * 60)
-        self.logger.info("  TOTAL: %.1fms", total_elapsed)
+        self.logger.info("  TOTAL: %.1fms", self.get_elapsed_ms())
         self.logger.info("=" * 60)
 
     def get_metrics_dict(self) -> Dict[str, float]:
         metrics = {}
         phase_names = list(self.phases.keys())
-
         for i, phase in enumerate(phase_names):
             elapsed = (self.phases[phase] - self.start_time) * 1000
             metrics[f"{phase}_elapsed_ms"] = round(elapsed, 1)
-
             if i > 0:
-                prev_phase = phase_names[i-1]
-                duration = (self.phases[phase] - self.phases[prev_phase]) * 1000
-                metrics[f"{prev_phase}_to_{phase}_duration_ms"] = round(duration, 1)
-
+                duration = (self.phases[phase] - self.phases[phase_names[i-1]]) * 1000
+                metrics[f"{phase_names[i-1]}_to_{phase}_duration_ms"] = round(duration, 1)
         metrics["total_elapsed_ms"] = round(self.get_elapsed_ms(), 1)
-
         return metrics

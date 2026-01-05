@@ -21,12 +21,7 @@ class SessionPaths:
 
 
 def _sanitize_for_filesystem(name: str, max_length: int = 50) -> str:
-    """Sanitize a name for safe use in file/directory names.
-
-    - Replaces spaces and problematic characters with underscores
-    - Removes characters that are invalid in filenames
-    - Truncates to max_length
-    """
+    """Sanitize name for filesystem: replace spaces/special chars, truncate."""
     # Replace spaces and common separators with underscores
     sanitized = re.sub(r'[\s\-/\\:]+', '_', name)
     # Remove any remaining problematic characters (keep alphanumeric, underscore, dot)
@@ -40,11 +35,7 @@ def _sanitize_for_filesystem(name: str, max_length: int = 50) -> str:
 
 
 def _build_camera_label(camera_id: CameraId) -> str:
-    """Build a human-readable label for camera directory/file naming.
-
-    Uses friendly_name if available, with a short stable_id suffix for uniqueness.
-    Falls back to stable_id if no friendly_name is set.
-    """
+    """Build camera label for filenames: friendly_name + short stable_id suffix."""
     if camera_id.friendly_name:
         # Use friendly name as primary, add short stable_id suffix for uniqueness
         base_name = _sanitize_for_filesystem(camera_id.friendly_name)

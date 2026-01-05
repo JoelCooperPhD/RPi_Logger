@@ -349,6 +349,14 @@ class CameraView:
             self._settings_window.update_camera_defaults(camera_id)
             self._settings_window.set_active_camera(camera_id)
 
+    def set_has_audio_sibling(self, has_audio: bool) -> None:
+        """Set whether this camera has a built-in microphone.
+
+        This controls visibility of the audio recording checkbox in settings.
+        """
+        if self._settings_window and self._camera_id:
+            self._settings_window.set_camera_has_audio_sibling(self._camera_id, has_audio)
+
     def update_camera_capabilities(
         self,
         capabilities: Any,

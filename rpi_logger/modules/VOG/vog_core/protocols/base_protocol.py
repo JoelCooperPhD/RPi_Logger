@@ -7,45 +7,25 @@ from enum import Enum
 
 
 class ResponseType(Enum):
-    """Types of responses from VOG devices."""
-    VERSION = 'version'
-    CONFIG = 'config'
-    STIMULUS = 'stimulus'
-    DATA = 'data'
-    BATTERY = 'battery'
-    RTC = 'rtc'
-    EXPERIMENT = 'experiment'
-    TRIAL = 'trial'
-    UNKNOWN = 'unknown'
+    """VOG device response types."""
+    VERSION, CONFIG, STIMULUS, DATA, BATTERY, RTC, EXPERIMENT, TRIAL, UNKNOWN = \
+        'version', 'config', 'stimulus', 'data', 'battery', 'rtc', 'experiment', 'trial', 'unknown'
 
 
 @dataclass
 class VOGDataPacket:
-    """Universal data packet from VOG device.
-
-    Contains all fields that may be present from either sVOG or wVOG devices.
-    Device-specific fields will be 0 or default if not applicable.
-    """
+    """Universal data packet from VOG device (sVOG/wVOG). Device-specific fields default to 0."""
     device_id: str
     trial_number: int
-    shutter_open: int        # ms shutter was open/clear
-    shutter_closed: int      # ms shutter was closed/opaque
-    shutter_total: int = 0   # Total ms (wVOG only)
-    lens: str = 'X'          # Which lens: 'A', 'B', or 'X' (both) - wVOG only
-    battery_percent: int = 0  # Battery SOC - wVOG only
-    device_unix_time: int = 0  # Device's RTC timestamp - wVOG only
+    shutter_open: int        # ms open/clear
+    shutter_closed: int      # ms closed/opaque
+    shutter_total: int = 0   # Total ms (wVOG)
+    lens: str = 'X'          # 'A', 'B', or 'X' (wVOG)
+    battery_percent: int = 0  # Battery SOC (wVOG)
+    device_unix_time: int = 0  # RTC timestamp (wVOG)
 
     def to_csv_row(self, label: str, unix_time: int, ms_since_record: int) -> str:
-        """Format as CSV row for logging.
-
-        Args:
-            label: Trial label
-            unix_time: Host system unix timestamp
-            ms_since_record: Milliseconds since recording started
-
-        Returns:
-            CSV formatted string (no newline)
-        """
+        """Format as CSV row (device_id, label, unix_time, ms_since_record, trial, open, closed)."""
         return (f"{self.device_id}, {label}, {unix_time}, {ms_since_record}, "
                 f"{self.trial_number}, {self.shutter_open}, {self.shutter_closed}")
 
@@ -61,151 +41,65 @@ class VOGResponse:
 
 
 class BaseVOGProtocol(ABC):
-    """Abstract base class for VOG device protocols.
-
-    Subclasses implement device-specific command formatting and response parsing
-    while presenting a unified interface to the handler.
-    """
+    """Base class for VOG protocols. Subclasses implement device-specific formatting/parsing."""
 
     @property
     @abstractmethod
     def device_type(self) -> str:
-        """Return device type identifier ('svog' or 'wvog')."""
-        pass
+        """Device type identifier ('svog' or 'wvog')."""
 
     @property
     @abstractmethod
     def supports_dual_lens(self) -> bool:
-        """Return True if device supports dual lens control (A/B/X)."""
-        pass
+        """True if device supports dual lens control (A/B/X)."""
 
     @property
     @abstractmethod
     def supports_battery(self) -> bool:
-        """Return True if device reports battery status."""
-        pass
+        """True if device reports battery status."""
 
     @property
     @abstractmethod
     def csv_header(self) -> str:
-        """Return the CSV header for this device type."""
-        pass
+        """CSV header for this device type."""
 
     @abstractmethod
     def format_command(self, command: str, value: Optional[str] = None) -> bytes:
-        """Format a command for transmission to device.
-
-        Args:
-            command: Command key (e.g., 'exp_start', 'get_config')
-            value: Optional value for set commands
-
-        Returns:
-            Encoded bytes ready to send to device
-        """
-        pass
+        """Format command for device transmission. Returns encoded bytes."""
 
     @abstractmethod
     def parse_response(self, response: str) -> Optional[VOGResponse]:
-        """Parse device response into structured format.
-
-        Args:
-            response: Raw response string from device
-
-        Returns:
-            VOGResponse object or None if response is not recognized
-        """
-        pass
+        """Parse device response. Returns VOGResponse or None."""
 
     @abstractmethod
     def parse_data_response(self, value: str, device_id: str) -> Optional[VOGDataPacket]:
-        """Parse a data response into a VOGDataPacket.
-
-        Args:
-            value: The value portion of the data response
-            device_id: Device identifier for the packet
-
-        Returns:
-            VOGDataPacket or None if parsing fails
-        """
-        pass
+        """Parse data response into VOGDataPacket or None."""
 
     @abstractmethod
     def get_command_keys(self) -> Dict[str, str]:
-        """Return mapping of command keys to raw command strings."""
-        pass
+        """Mapping of command keys to raw command strings."""
 
     def has_command(self, command: str) -> bool:
-        """Check if a command is supported by this protocol."""
+        """Check if command is supported."""
         return command in self.get_command_keys()
-
-    # ------------------------------------------------------------------
-    # Polymorphic methods to eliminate device_type branching
-    # ------------------------------------------------------------------
 
     @abstractmethod
     def get_config_commands(self) -> list:
-        """Return list of commands to retrieve device configuration.
-
-        For sVOG: Returns list of individual get commands.
-        For wVOG: Returns single 'get_config' command.
-        """
-        pass
+        """Commands to retrieve config (sVOG: list of gets, wVOG: single get_config)."""
 
     @abstractmethod
     def format_set_config(self, param: str, value: str) -> Tuple[str, Optional[str]]:
-        """Format a config set operation for this protocol.
-
-        Args:
-            param: Parameter name (e.g., 'max_open', 'debounce')
-            value: Value to set
-
-        Returns:
-            Tuple of (command_key, command_value) for send_command()
-        """
-        pass
+        """Format config set operation as (command_key, command_value) for send_command()."""
 
     @abstractmethod
     def update_config_from_response(self, response: VOGResponse, config: Dict[str, Any]) -> None:
-        """Update config dict from a parsed response.
-
-        For sVOG: Sets config[keyword] = value
-        For wVOG: Updates config with all values from response
-
-        Args:
-            response: Parsed VOGResponse with CONFIG type
-            config: Config dict to update in place
-        """
-        pass
+        """Update config dict from response (sVOG: one value, wVOG: all values)."""
 
     @abstractmethod
     def get_extended_packet_data(self, packet: VOGDataPacket) -> Dict[str, Any]:
-        """Get device-specific extended data fields from a packet.
-
-        Args:
-            packet: Data packet from device
-
-        Returns:
-            Dict of additional fields (empty for sVOG, battery/lens/etc for wVOG)
-        """
-        pass
+        """Device-specific extended data (empty for sVOG, battery/lens/etc for wVOG)."""
 
     @abstractmethod
-    def format_csv_row(
-        self,
-        packet: VOGDataPacket,
-        label: str,
-        record_time_unix: float,
-        record_time_mono: float,
-    ) -> str:
-        """Format packet as CSV row for this device type.
-
-        Args:
-            packet: Data packet from device
-            label: Trial label
-            record_time_unix: Unix timestamp when data was recorded (UTC)
-            record_time_mono: Monotonic time for precise interval measurement
-
-        Returns:
-            CSV formatted string (no newline)
-        """
-        pass
+    def format_csv_row(self, packet: VOGDataPacket, label: str,
+                      record_time_unix: float, record_time_mono: float) -> str:
+        """Format packet as CSV row (no newline)."""

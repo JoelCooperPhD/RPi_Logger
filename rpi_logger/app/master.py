@@ -21,6 +21,7 @@ from rpi_logger.core.paths import CONFIG_PATH, MASTER_LOG_FILE, ensure_directori
 from rpi_logger.core.config_manager import get_config_manager
 from rpi_logger.core.logging_config import configure_logging
 from rpi_logger.core.logging_utils import get_module_logger
+from rpi_logger.core.api import APIServer, APIController
 
 
 logger = get_module_logger(__name__)
@@ -83,6 +84,27 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Log to file only"
     )
 
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        default=False,
+        help="Enable REST API server for programmatic control"
+    )
+
+    parser.add_argument(
+        "--api-port",
+        type=int,
+        default=8080,
+        help="Port for REST API server (default: 8080)"
+    )
+
+    parser.add_argument(
+        "--api-host",
+        type=str,
+        default="127.0.0.1",
+        help="Host for REST API server (default: 127.0.0.1)"
+    )
+
     args = parser.parse_args(argv)
     return args
 
@@ -95,6 +117,33 @@ async def _cleanup_logger_system(logger_system: LoggerSystem) -> None:
     await logger_system.save_running_modules_state()
     await logger_system.cleanup()
     await logger_system.update_running_modules_state_after_cleanup()
+
+
+async def _setup_api_server(
+    args: argparse.Namespace,
+    logger_system: LoggerSystem,
+    shutdown_coordinator,
+) -> Optional[APIServer]:
+    """Setup and start the API server if enabled."""
+    if not args.api:
+        return None
+
+    controller = APIController(logger_system)
+    server = APIServer(
+        controller=controller,
+        host=args.api_host,
+        port=args.api_port,
+        localhost_only=(args.api_host == "127.0.0.1"),
+    )
+
+    await server.start()
+
+    async def cleanup_api():
+        await server.stop()
+
+    shutdown_coordinator.register_cleanup(cleanup_api)
+
+    return server
 
 
 async def run_gui(args, logger_system: LoggerSystem) -> None:
@@ -116,6 +165,9 @@ async def run_gui(args, logger_system: LoggerSystem) -> None:
         lambda: _cleanup_logger_system(logger_system)
     )
     shutdown_coordinator.register_cleanup(cleanup_ui)
+
+    # Start API server if enabled (cleanup registered inside _setup_api_server)
+    await _setup_api_server(args, logger_system, shutdown_coordinator)
 
     loop = asyncio.get_running_loop()
 
@@ -157,6 +209,9 @@ async def run_cli(args, logger_system: LoggerSystem) -> None:
         lambda: _cleanup_logger_system(logger_system)
     )
 
+    # Start API server if enabled (cleanup registered inside _setup_api_server)
+    await _setup_api_server(args, logger_system, shutdown_coordinator)
+
     loop = asyncio.get_running_loop()
 
     def signal_handler():
@@ -194,6 +249,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
     - GUI: Tkinter-based graphical interface (default)
     - CLI/Interactive: Command-line shell for remote control
 
+    Optional REST API (--api flag) can run alongside either mode,
+    providing HTTP endpoints for programmatic control.
+
     Shutdown Sequence:
     1. User triggers shutdown via signal (Ctrl+C), UI action, or exception
     2. ShutdownCoordinator.initiate_shutdown() is called with source identifier
@@ -219,6 +277,8 @@ async def main(argv: Optional[list[str]] = None) -> None:
     logger.info("Logger - Master System Starting")
     logger.info("=" * 60)
     logger.info("Mode: %s", args.mode)
+    if args.api:
+        logger.info("REST API: http://%s:%d", args.api_host, args.api_port)
     logger.info("Data directory: %s", args.data_dir)
     logger.info("Log file: %s", MASTER_LOG_FILE)
     logger.info("Session will be created when user starts recording")

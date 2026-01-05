@@ -187,6 +187,8 @@
       "updated_at": 1764191361.2333767
     },
     "usb:1-3.2": {
+      "fingerprint": "7073339684691622125",
+      "model_key": "hd_pro_webcam_c920",
       "settings": {
         "overlay": "true",
         "preview_fps": "5",
@@ -194,7 +196,7 @@
         "record_fps": "15",
         "record_resolution": ""
       },
-      "updated_at": 1765338642.5758362
+      "updated_at": 1767650095.3629606
     },
     "usb:usb1-1-1": {
       "settings": {
@@ -421,6 +423,8 @@
       "updated_at": 1764085320.65983
     },
     "usb:usb3-3-1": {
+      "fingerprint": "-8587721541981307267",
+      "model_key": "arducam_usb_camera",
       "settings": {
         "overlay": "true",
         "preview_fps": "5",
@@ -428,7 +432,7 @@
         "record_fps": "10",
         "record_resolution": "640x480"
       },
-      "updated_at": 1765300772.0425537
+      "updated_at": 1767650063.3905468
     }
   },
   "schema": 2

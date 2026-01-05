@@ -1,4 +1,4 @@
-"""Typed configuration helpers for CSICameras."""
+"""Typed configuration for CSICameras."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ DEFAULT_LOG_FILE = Path("./logs/csicameras.log")
 
 
 def parse_resolution(raw: Any, default: Resolution) -> Resolution:
-    """Parse resolution from various formats."""
+    """Parse resolution from list/tuple/string (e.g., '1920x1080')."""
     if raw is None:
         return default
     if isinstance(raw, (list, tuple)) and len(raw) == 2:
@@ -129,7 +129,7 @@ class CSICamerasConfig:
         *,
         logger: LoggerLike = None,
     ) -> "CSICamerasConfig":
-        """Build config from ScopedPreferences (unified API)."""
+        """Build from preferences with CLI overrides."""
         merged: Dict[str, Any] = {}
         if prefs:
             snapshot = prefs.snapshot() if hasattr(prefs, 'snapshot') else {}
@@ -218,7 +218,7 @@ class CSICamerasConfig:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Export config values as a flat dictionary."""
+        """Export as flat dict."""
         return {
             # Preview settings
             "preview.resolution": f"{self.preview.resolution[0]}x{self.preview.resolution[1]}",
@@ -256,12 +256,10 @@ class CSICamerasConfig:
         }
 
 
-# ---------------------------------------------------------------------------
 # Internal helpers
 
-
 def _first_present(data: Dict[str, Any], keys: Tuple[str, ...]) -> Any:
-    """Return the first present value from data for the given keys."""
+    """Return first present value for any of keys."""
     for key in keys:
         if key in data:
             return data.get(key)
@@ -269,16 +267,12 @@ def _first_present(data: Dict[str, Any], keys: Tuple[str, ...]) -> Any:
 
 
 def _to_bool(raw: Any, default: bool, logger=None) -> bool:
-    """Coerce a raw value to bool."""
     if raw is None:
         return default
-    if isinstance(raw, bool):
-        return raw
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    return raw if isinstance(raw, bool) else str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _to_str(raw: Any, default: str, logger=None) -> str:
-    """Coerce a raw value to str."""
     if raw is None:
         return default
     text = str(raw).strip()
@@ -286,7 +280,6 @@ def _to_str(raw: Any, default: str, logger=None) -> str:
 
 
 def _to_int(raw: Any, default: int, logger=None) -> int:
-    """Coerce a raw value to int."""
     if raw is None or raw == "":
         return default
     try:
@@ -296,7 +289,6 @@ def _to_int(raw: Any, default: int, logger=None) -> int:
 
 
 def _to_float(raw: Any, default: float, logger=None) -> float:
-    """Coerce a raw value to float."""
     if raw is None or raw == "":
         return default
     try:
@@ -306,7 +298,6 @@ def _to_float(raw: Any, default: float, logger=None) -> float:
 
 
 def _to_optional_float(raw: Any, default: Optional[float], logger=None) -> Optional[float]:
-    """Coerce a raw value to optional float (empty string -> None)."""
     if raw is None:
         return default
     if raw == "" or raw is False:
@@ -320,25 +311,19 @@ def _to_optional_float(raw: Any, default: Optional[float], logger=None) -> Optio
 
 
 def _to_resolution(raw: Any, default: Resolution, logger=None) -> Resolution:
-    """Coerce a raw value to Resolution tuple."""
     if raw is None:
         return default
     result = parse_resolution(raw, default)
-    if result == default and raw is not None and raw != "":
-        if logger:
-            logger.debug("Failed to parse resolution from %r, using default %s", raw, default)
+    if result == default and raw is not None and raw != "" and logger:
+        logger.debug("Failed to parse resolution from %r, using default %s", raw, default)
     return result
 
 
 def _to_path(raw: Any, default: Path, logger=None) -> Path:
-    """Coerce a raw value to Path."""
-    if raw is None or raw == "":
-        return Path(default)
-    return Path(str(raw))
+    return Path(default) if raw is None or raw == "" else Path(str(raw))
 
 
 def _to_controls(raw: Any, default: Dict[str, Any] = None, logger=None) -> Dict[str, Any]:
-    """Coerce a raw value to controls dict (JSON string or dict)."""
     if raw is None or raw == "":
         return {}
     if isinstance(raw, dict):
@@ -360,7 +345,7 @@ def _coerce(
     default,
     logger=None,
 ):
-    """Unified coercion: look up value by keys, then apply type coercer."""
+    """Look up value by keys, apply coercer."""
     raw = _first_present(data, keys)
     return coercer(raw, default, logger)
 

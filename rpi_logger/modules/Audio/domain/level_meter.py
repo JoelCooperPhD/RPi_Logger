@@ -1,4 +1,4 @@
-"""Audio level metering helpers for the module view."""
+"""Audio level metering."""
 
 from __future__ import annotations
 
@@ -14,8 +14,7 @@ from .constants import DB_MAX, DB_MIN
 
 @dataclass(slots=True)
 class LevelMeter:
-    """Track RMS/peak levels for a single audio stream."""
-
+    """Track RMS/peak levels for audio stream."""
     peak_hold_time: float = 2.0
     _rms_db: float = field(init=False, default=DB_MIN)
     _peak_db: float = field(init=False, default=DB_MIN)

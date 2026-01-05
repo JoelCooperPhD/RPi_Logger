@@ -1,11 +1,6 @@
 """Eye events stream viewer with mini-visualizations and counter display.
 
-Provides real-time visualization of eye tracking events for human factors research:
-- Event timeline (temporal patterns) - 30s window
-- Saccade velocity gauge (fatigue detection) - 30s window
-- Saccade duration histogram (timing distribution) - 30s window
-- Fixation/saccade ratio (task type indicator) - 30s window
-- PERCLOS indicator (true P80 drowsiness metric) - 30s window
+Real-time visualization: timeline, gauges (blink/saccade rate & duration), PERCLOS P80.
 """
 
 from __future__ import annotations
@@ -501,200 +496,71 @@ class EventTimeline(MiniViz):
             )
 
 
-class BlinkRateGauge(MiniViz):
-    """Gauge showing blinks per minute with variability spread.
+class RateGauge(MiniViz):
+    """Unified gauge for rates/durations with min/max spread visualization."""
 
-    Shows current blink rate and the range of recent measurements.
-    No judgment on what's "normal" - just shows the data and spread.
-    """
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=80, height=30, title="Blink Rate", label="--")
-        self._max_rate = 40.0
-        # Store recent per-minute rates for spread calculation
-        self._recent_rates: deque[float] = deque(maxlen=6)  # ~6 samples over 60s
+    def __init__(self, parent: "tk.Frame", title: str, max_value: float,
+                 value_func, format_func, *, track_spread: bool = True) -> None:
+        super().__init__(parent, width=80, height=30, title=title, label="--")
+        self._max_value = max_value
+        self._value_func = value_func  # Function to get value from buffer
+        self._format_func = format_func  # Function to format label
+        self._track_spread = track_spread
+        self._recent_values: deque[float] = deque(maxlen=6) if track_spread else None
         self._last_sample_time = 0.0
 
-    def update(self, buffer: EventBuffer) -> None:
-        if not self._canvas:
-            return
-
-        self._canvas.delete("all")
-
-        # Get actual canvas dimensions
-        canvas_w = self._canvas.winfo_width()
-        canvas_h = self._canvas.winfo_height()
-        if canvas_w <= 1:
-            canvas_w = self._width
-        if canvas_h <= 1:
-            canvas_h = self._height
-
-        w = canvas_w - 4
-        h = canvas_h - 8
-
-        # Draw background
-        self._canvas.create_rectangle(2, 4, w + 2, h + 4,
-                                       fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
-
-        # Get current blink rate
-        blink_rate = buffer.get_blinks_per_minute(60.0)
-
-        if blink_rate == 0:
-            self.set_label("--")
-            return
-
-        # Sample rate periodically for spread calculation
-        now = time.time()
-        if now - self._last_sample_time >= 10.0:  # Sample every 10s
-            self._recent_rates.append(blink_rate)
-            self._last_sample_time = now
-
-        # Calculate spread if we have enough samples
-        if len(self._recent_rates) >= 2:
-            min_rate = min(self._recent_rates)
-            max_rate = max(self._recent_rates)
-
-            # Draw spread bar (min to max range)
-            min_x = 2 + min(1.0, min_rate / self._max_rate) * w
-            max_x = 2 + min(1.0, max_rate / self._max_rate) * w
-            if max_x > min_x:
-                self._canvas.create_rectangle(min_x, 6, max_x, h + 2,
-                                               fill=VizColors.GAUGE_RANGE, outline="")
-
-        # Draw current value indicator (always same neutral color)
-        rate_x = 2 + min(1.0, blink_rate / self._max_rate) * w
-        self._canvas.create_rectangle(rate_x - 2, 4, rate_x + 2, h + 4,
-                                       fill=VizColors.GAUGE_INDICATOR, outline="")
-
-        self.set_label(f"{blink_rate:.0f}/min")
-
-
-class BlinkDurationGauge(MiniViz):
-    """Gauge showing average blink duration with min/max spread.
-
-    Shows current average blink duration and the range of individual blinks.
-    No judgment on what's "normal" - just shows the data and spread.
-    """
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=80, height=30, title="Blink Dur", label="--")
-        self._max_dur = 600.0  # ms - scale max
+    def _get_canvas_dims(self) -> tuple[int, int]:
+        """Get canvas dimensions, falling back to defaults if not yet rendered."""
+        w = self._canvas.winfo_width() if self._canvas.winfo_width() > 1 else self._width
+        h = self._canvas.winfo_height() if self._canvas.winfo_height() > 1 else self._height
+        return w - 4, h - 8
 
     def update(self, buffer: EventBuffer) -> None:
         if not self._canvas:
             return
-
         self._canvas.delete("all")
+        w, h = self._get_canvas_dims()
 
-        # Get actual canvas dimensions
-        canvas_w = self._canvas.winfo_width()
-        canvas_h = self._canvas.winfo_height()
-        if canvas_w <= 1:
-            canvas_w = self._width
-        if canvas_h <= 1:
-            canvas_h = self._height
-
-        w = canvas_w - 4
-        h = canvas_h - 8
-
-        # Draw background
+        # Background
         self._canvas.create_rectangle(2, 4, w + 2, h + 4,
                                        fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
 
-        # Get blink durations from last 60 seconds
-        blinks = buffer.get_events_by_type(EVENT_TYPE_BLINK, 60.0)
-        durations_ms = [b.duration * 1000 for b in blinks if b.duration > 0]
-
-        if not durations_ms:
+        value = self._value_func(buffer)
+        if value == 0 or (isinstance(value, list) and not value):
             self.set_label("--")
             return
 
-        mean_dur = sum(durations_ms) / len(durations_ms)
-        min_dur = min(durations_ms)
-        max_dur = max(durations_ms)
+        # Handle both single values and lists (for min/max/mean)
+        if isinstance(value, list):
+            mean_val = sum(value) / len(value)
+            min_val, max_val = min(value), max(value)
+        else:
+            mean_val = value
+            min_val = max_val = None
 
-        # Draw spread bar (min to max range) if there's variation
-        if len(durations_ms) >= 2 and max_dur > min_dur:
-            min_x = 2 + min(1.0, min_dur / self._max_dur) * w
-            max_x = 2 + min(1.0, max_dur / self._max_dur) * w
+        # Sample for spread if enabled
+        if self._track_spread and self._recent_values is not None:
+            now = time.time()
+            if now - self._last_sample_time >= 10.0:
+                self._recent_values.append(mean_val)
+                self._last_sample_time = now
+            if len(self._recent_values) >= 2:
+                min_val = min(self._recent_values)
+                max_val = max(self._recent_values)
+
+        # Draw spread bar
+        if min_val is not None and max_val is not None and max_val > min_val:
+            min_x = 2 + min(1.0, min_val / self._max_value) * w
+            max_x = 2 + min(1.0, max_val / self._max_value) * w
             self._canvas.create_rectangle(min_x, 6, max_x, h + 2,
                                            fill=VizColors.GAUGE_RANGE, outline="")
 
-        # Draw mean indicator (always same neutral color)
-        dur_x = 2 + min(1.0, mean_dur / self._max_dur) * w
-        self._canvas.create_rectangle(dur_x - 2, 4, dur_x + 2, h + 4,
+        # Draw current indicator
+        val_x = 2 + min(1.0, mean_val / self._max_value) * w
+        self._canvas.create_rectangle(val_x - 2, 4, val_x + 2, h + 4,
                                        fill=VizColors.GAUGE_INDICATOR, outline="")
 
-        self.set_label(f"{mean_dur:.0f}ms")
-
-
-class SaccadeRateGauge(MiniViz):
-    """Gauge showing saccades per minute with variability spread.
-
-    Shows current saccade rate and the range of recent measurements.
-    No judgment on what's "normal" - just shows the data and spread.
-    """
-
-    def __init__(self, parent: "tk.Frame") -> None:
-        super().__init__(parent, width=80, height=30, title="Saccades", label="--")
-        self._max_rate = 300.0  # per minute - scale max
-        # Store recent per-minute rates for spread calculation
-        self._recent_rates: deque[float] = deque(maxlen=6)  # ~6 samples over 60s
-        self._last_sample_time = 0.0
-
-    def update(self, buffer: EventBuffer) -> None:
-        if not self._canvas:
-            return
-
-        self._canvas.delete("all")
-
-        # Get actual canvas dimensions
-        canvas_w = self._canvas.winfo_width()
-        canvas_h = self._canvas.winfo_height()
-        if canvas_w <= 1:
-            canvas_w = self._width
-        if canvas_h <= 1:
-            canvas_h = self._height
-
-        w = canvas_w - 4
-        h = canvas_h - 8
-
-        # Draw background
-        self._canvas.create_rectangle(2, 4, w + 2, h + 4,
-                                       fill=VizColors.GAUGE_BG, outline=VizColors.BORDER)
-
-        # Count saccade onsets in last 30 seconds, scale to per-minute
-        sacc_onsets = buffer.get_events_by_type(EVENT_TYPE_SACCADE_ONSET, 30.0)
-        saccade_rate = len(sacc_onsets) * 2.0  # Scale 30s to per-minute
-
-        if saccade_rate == 0:
-            self.set_label("--")
-            return
-
-        # Sample rate periodically for spread calculation
-        now = time.time()
-        if now - self._last_sample_time >= 10.0:  # Sample every 10s
-            self._recent_rates.append(saccade_rate)
-            self._last_sample_time = now
-
-        # Calculate spread if we have enough samples
-        if len(self._recent_rates) >= 2:
-            min_rate = min(self._recent_rates)
-            max_rate = max(self._recent_rates)
-
-            # Draw spread bar (min to max range)
-            min_x = 2 + min(1.0, min_rate / self._max_rate) * w
-            max_x = 2 + min(1.0, max_rate / self._max_rate) * w
-            if max_x > min_x:
-                self._canvas.create_rectangle(min_x, 6, max_x, h + 2,
-                                               fill=VizColors.GAUGE_RANGE, outline="")
-
-        # Draw current value indicator (always same neutral color)
-        rate_x = 2 + min(1.0, saccade_rate / self._max_rate) * w
-        self._canvas.create_rectangle(rate_x - 2, 4, rate_x + 2, h + 4,
-                                       fill=VizColors.GAUGE_INDICATOR, outline="")
-
-        self.set_label(f"{saccade_rate:.0f}/min")
+        self.set_label(self._format_func(mean_val))
 
 
 class PerclosIndicator(MiniViz):
@@ -845,14 +711,19 @@ class EventsViewer(BaseStreamViewer):
         viz_frame = ttk.Frame(self._frame)
         viz_frame.grid(row=0, column=0, sticky="ew", pady=(0, 4))
 
-        # Create all mini-visualizations
-        # Using blink and onset metrics which have reliable data from Pupil Labs
+        # Create mini-visualizations using unified RateGauge
         self._perclos_indicator = PerclosIndicator(viz_frame)
         self._visualizations = [
             EventTimeline(viz_frame),
-            BlinkRateGauge(viz_frame),
-            BlinkDurationGauge(viz_frame),
-            SaccadeRateGauge(viz_frame),
+            RateGauge(viz_frame, "Blink Rate", 40.0,
+                     lambda b: b.get_blinks_per_minute(60.0),
+                     lambda v: f"{v:.0f}/min"),
+            RateGauge(viz_frame, "Blink Dur", 600.0,
+                     lambda b: [e.duration * 1000 for e in b.get_events_by_type(EVENT_TYPE_BLINK, 60.0) if e.duration > 0],
+                     lambda v: f"{v:.0f}ms", track_spread=False),
+            RateGauge(viz_frame, "Saccades", 300.0,
+                     lambda b: len(b.get_events_by_type(EVENT_TYPE_SACCADE_ONSET, 30.0)) * 2.0,
+                     lambda v: f"{v:.0f}/min"),
             self._perclos_indicator,
         ]
 

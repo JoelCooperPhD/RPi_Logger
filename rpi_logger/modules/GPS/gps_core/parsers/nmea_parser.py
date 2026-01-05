@@ -15,7 +15,7 @@ from .nmea_types import GPSFixSnapshot
 
 
 def _parse_float(value: str | None) -> Optional[float]:
-    """Parse a string to float, returning None on failure."""
+    """Parse string to float, None on failure."""
     if not value:
         return None
     try:
@@ -25,7 +25,7 @@ def _parse_float(value: str | None) -> Optional[float]:
 
 
 def _parse_int(value: str | None) -> Optional[int]:
-    """Parse a string to int, returning None on failure."""
+    """Parse string to int, None on failure."""
     if not value:
         return None
     try:
@@ -109,27 +109,15 @@ def _combine_datetime(
 
 
 def validate_checksum(sentence: str) -> bool:
-    """Validate NMEA sentence checksum.
-
-    Args:
-        sentence: Complete NMEA sentence starting with '$'
-
-    Returns:
-        True if checksum is valid, False otherwise
-    """
+    """Validate NMEA checksum."""
     if not sentence.startswith("$") or "*" not in sentence:
         return False
-
     try:
-        # Extract payload between $ and *
         payload, checksum_str = sentence[1:].split("*", 1)
         expected = int(checksum_str[:2], 16)
-
-        # Calculate XOR checksum
         calculated = 0
         for char in payload:
             calculated ^= ord(char)
-
         return calculated == expected
     except (ValueError, IndexError):
         return False
@@ -138,14 +126,8 @@ def validate_checksum(sentence: str) -> bool:
 class NMEAParser:
     """Stateful NMEA sentence parser.
 
-    Parses NMEA sentences and accumulates data into a GPSFixSnapshot.
-    Maintains state for date tracking across sentences since not all
-    sentences include date information.
-
-    Example:
-        parser = NMEAParser()
-        parser.parse_sentence("$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A")
-        print(parser.fix.latitude)  # 48.1173
+    Accumulates data from multiple NMEA sentence types into a GPSFixSnapshot.
+    Maintains date state across sentences.
     """
 
     def __init__(
@@ -153,13 +135,7 @@ class NMEAParser:
         on_fix_update: Optional[Callable[[GPSFixSnapshot, Dict[str, Any]], None]] = None,
         validate_checksums: bool = True,
     ):
-        """Initialize the parser.
-
-        Args:
-            on_fix_update: Optional callback called after each successful parse
-                           with (fix_snapshot, update_dict) arguments
-            validate_checksums: Whether to validate NMEA checksums (default True)
-        """
+        """Initialize parser with optional callback and checksum validation."""
         self._fix = GPSFixSnapshot()
         self._last_known_date: Optional[dt.date] = None
         self._on_fix_update = on_fix_update
@@ -181,14 +157,7 @@ class NMEAParser:
         self._last_known_date = None
 
     def parse_sentence(self, sentence: str) -> Optional[Dict[str, Any]]:
-        """Parse an NMEA sentence and update the fix.
-
-        Args:
-            sentence: Complete NMEA sentence starting with '$'
-
-        Returns:
-            Dictionary of parsed values, or None if parsing failed
-        """
+        """Parse NMEA sentence and update fix. Returns parsed values or None."""
         if not sentence or not sentence.startswith("$"):
             return None
 
@@ -303,10 +272,7 @@ class NMEAParser:
     # ------------------------------------------------------------------
 
     def _parse_rmc(self, fields: list[str]) -> Optional[Dict[str, Any]]:
-        """Parse $GPRMC (Recommended Minimum) sentence.
-
-        Contains: time, status, position, speed, course, date, magnetic variation
-        """
+        """Parse $GPRMC: time, status, position, speed, course, date."""
         if len(fields) < 9:
             return None
 
@@ -336,10 +302,7 @@ class NMEAParser:
         }
 
     def _parse_gga(self, fields: list[str]) -> Optional[Dict[str, Any]]:
-        """Parse $GPGGA (Global Positioning System Fix Data) sentence.
-
-        Contains: time, position, fix quality, satellites, HDOP, altitude
-        """
+        """Parse $GPGGA: time, position, fix quality, satellites, HDOP, altitude."""
         if len(fields) < 9:
             return None
 
@@ -366,10 +329,7 @@ class NMEAParser:
         }
 
     def _parse_vtg(self, fields: list[str]) -> Optional[Dict[str, Any]]:
-        """Parse $GPVTG (Course Over Ground and Ground Speed) sentence.
-
-        Contains: course (true/magnetic), speed (knots/km/h)
-        """
+        """Parse $GPVTG: course and ground speed."""
         if len(fields) < 7:
             return None
 
@@ -384,10 +344,7 @@ class NMEAParser:
         }
 
     def _parse_gll(self, fields: list[str]) -> Optional[Dict[str, Any]]:
-        """Parse $GPGLL (Geographic Position - Latitude/Longitude) sentence.
-
-        Contains: position, time, status
-        """
+        """Parse $GPGLL: position, time, status."""
         if len(fields) < 5:
             return None
 
@@ -405,10 +362,7 @@ class NMEAParser:
         }
 
     def _parse_gsa(self, fields: list[str]) -> Optional[Dict[str, Any]]:
-        """Parse $GPGSA (GPS DOP and Active Satellites) sentence.
-
-        Contains: fix mode, satellite IDs, PDOP, HDOP, VDOP
-        """
+        """Parse $GPGSA: fix mode, PDOP, HDOP, VDOP."""
         if len(fields) < 17:
             return None
 
@@ -427,10 +381,7 @@ class NMEAParser:
         }
 
     def _parse_gsv(self, fields: list[str]) -> Optional[Dict[str, Any]]:
-        """Parse $GPGSV (GPS Satellites in View) sentence.
-
-        Contains: number of messages, message number, satellites in view, satellite info
-        """
+        """Parse $GPGSV: satellites in view."""
         if len(fields) < 3:
             return None
 

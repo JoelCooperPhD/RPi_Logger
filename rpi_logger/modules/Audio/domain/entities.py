@@ -1,4 +1,4 @@
-"""Core data structures for the audio domain layer."""
+"""Audio domain data structures."""
 
 from __future__ import annotations
 

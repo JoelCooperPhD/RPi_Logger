@@ -434,17 +434,12 @@ class DRTModuleRuntime(ModuleRuntime):
                 output_dir=self.module_data_dir,
                 transport=transport
             )
-        elif device_type == DRTDeviceType.WDRT_USB:
+        elif device_type in (DRTDeviceType.WDRT_USB, DRTDeviceType.WDRT_WIRELESS):
             return WDRTUSBHandler(
                 device_id=device_id,
                 output_dir=self.module_data_dir,
-                transport=transport
-            )
-        elif device_type == DRTDeviceType.WDRT_WIRELESS:
-            return WDRTWirelessHandler(
-                device_id=device_id,
-                output_dir=self.module_data_dir,
-                transport=transport
+                transport=transport,
+                device_type=device_type
             )
         else:
             self.logger.warning("Unknown device type: %s", device_type)
