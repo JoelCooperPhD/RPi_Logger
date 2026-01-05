@@ -44,7 +44,7 @@ from rpi_logger.cli.common import add_common_cli_arguments, add_config_to_args, 
 from rpi_logger.modules.Cameras.config import CamerasConfig  # noqa: E402
 from .bridge import factory  # noqa: E402
 
-DISPLAY_NAME = "Cameras"
+DISPLAY_NAME = "Cameras-USB"
 MODULE_ID = "cameras"
 
 logger = get_module_logger(__name__)

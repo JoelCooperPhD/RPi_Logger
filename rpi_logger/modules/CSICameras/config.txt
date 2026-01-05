@@ -1,7 +1,6 @@
 enabled = true
 view.show_io_panel = true
 view.show_logger = true
-display_name = Cameras-USB
+display_name = Cameras-CSI
 preview_resolution = auto
-device_connected = true
 window_geometry = 320x200
