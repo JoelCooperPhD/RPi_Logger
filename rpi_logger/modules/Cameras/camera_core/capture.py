@@ -1,9 +1,4 @@
-"""
-USB camera capture abstraction.
-
-Provides capture interface for USB cameras via OpenCV/V4L2.
-Runs directly in-process (no subprocess).
-"""
+"""USB camera capture via OpenCV/V4L2 (in-process)."""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +9,7 @@ from typing import Any, AsyncIterator, Optional, Tuple
 import numpy as np
 
 from rpi_logger.modules.Cameras.config import DEFAULT_CAPTURE_RESOLUTION, DEFAULT_CAPTURE_FPS
-from rpi_logger.modules.Cameras.camera_core.utils import to_snake_case
+from rpi_logger.modules.Cameras.utils import set_usb_control_v4l2, open_videocapture
 from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
@@ -22,7 +17,7 @@ logger = get_module_logger(__name__)
 
 @dataclass(slots=True)
 class CaptureFrame:
-    """Frame data from USB camera backend."""
+    """Frame data from camera backend."""
     data: np.ndarray
     timestamp: float  # monotonic seconds
     frame_number: int
@@ -30,8 +25,7 @@ class CaptureFrame:
     sensor_timestamp_ns: Optional[int]
     wall_time: float
     color_format: str = "bgr"
-    # Lores fields kept for interface compatibility (always None for USB)
-    lores_data: Optional[np.ndarray] = None
+    lores_data: Optional[np.ndarray] = None  # Interface compatibility
     lores_format: str = ""
 
 
@@ -71,20 +65,11 @@ class USBCapture(CaptureHandle):
         return self._actual_fps
 
     async def start(self) -> None:
-        import sys
-        import cv2
+        import sys, cv2
 
-        device_id = int(self._dev_path) if self._dev_path.isdigit() else self._dev_path
-        logger.info("Opening USB camera: %s", device_id)
-
-        # Prefer V4L2 on Linux
-        backend = getattr(cv2, "CAP_V4L2", None) if sys.platform == "linux" else None
-        if backend is not None:
-            self._cap = cv2.VideoCapture(device_id, backend)
-        else:
-            self._cap = cv2.VideoCapture(device_id)
-
-        if not self._cap or not self._cap.isOpened():
+        logger.info("Opening USB camera: %s", self._dev_path)
+        self._cap = open_videocapture(self._dev_path, logger=logger)
+        if not self._cap:
             raise RuntimeError(f"Failed to open USB camera: {self._dev_path}")
 
         # Configure MJPEG format and resolution
@@ -99,17 +84,12 @@ class USBCapture(CaptureHandle):
         self._cap.set(cv2.CAP_PROP_FPS, self._requested_fps)
 
         # Disable dynamic framerate (some cameras lower FPS in low light otherwise)
-        # This is controlled via v4l2-ctl as OpenCV doesn't expose this property
-        if sys.platform == "linux" and isinstance(device_id, str) and device_id.startswith("/dev/video"):
+        if sys.platform == "linux" and isinstance(self._dev_path, str) and self._dev_path.startswith("/dev/video"):
             import subprocess
             try:
-                subprocess.run(
-                    ["v4l2-ctl", "-d", device_id, "-c", "exposure_dynamic_framerate=0"],
-                    capture_output=True, timeout=2.0
-                )
-                logger.debug("Disabled exposure_dynamic_framerate for %s", device_id)
-            except Exception as e:
-                logger.debug("Could not set exposure_dynamic_framerate: %s", e)
+                subprocess.run(["v4l2-ctl", "-d", self._dev_path, "-c", "exposure_dynamic_framerate=0"], capture_output=True, timeout=2.0)
+            except Exception:
+                pass
 
         # Read a test frame to verify the camera works (with retry for cameras that need warmup)
         import time as _time
@@ -211,16 +191,12 @@ class USBCapture(CaptureHandle):
             self._cap = None
 
     def set_control(self, name: str, value: Any) -> bool:
-        """Set a USB camera control value via OpenCV or v4l2-ctl."""
-        import sys
-        import subprocess
+        """Set camera control via OpenCV or v4l2-ctl."""
+        import sys, subprocess, cv2
 
         if not self._cap or not self._cap.isOpened():
             logger.warning("Cannot set control %s: camera not open", name)
             return False
-
-        # Map of control names to OpenCV property IDs
-        import cv2
         CV_CONTROL_PROPS = {
             "Brightness": cv2.CAP_PROP_BRIGHTNESS,
             "Contrast": cv2.CAP_PROP_CONTRAST,
@@ -240,23 +216,19 @@ class USBCapture(CaptureHandle):
             "Tilt": cv2.CAP_PROP_TILT,
         }
 
-        # Controls that OpenCV reports success for but don't actually work
-        # on many V4L2 cameras - skip OpenCV and use v4l2-ctl directly
+        # Controls unreliable in OpenCV - use v4l2-ctl directly
         OPENCV_UNRELIABLE_CONTROLS = {"Gain", "AutoExposure", "Exposure"}
 
         cv_value = int(value) if isinstance(value, bool) else value
 
-        # Try OpenCV first (for controls that work reliably)
         prop_id = CV_CONTROL_PROPS.get(name)
         if prop_id is not None and name not in OPENCV_UNRELIABLE_CONTROLS:
             try:
                 old_value = self._cap.get(prop_id)
                 result = self._cap.set(prop_id, cv_value)
                 if result:
-                    # Verify the value actually changed
                     new_value = self._cap.get(prop_id)
-                    # Allow some tolerance for float comparisons
-                    if abs(new_value - cv_value) < 1.0:
+                    if abs(new_value - cv_value) < 1.0:  # Verify change
                         logger.debug("Set USB control %s = %s via OpenCV (verified)", name, value)
                         return True
                     else:
@@ -265,28 +237,8 @@ class USBCapture(CaptureHandle):
             except Exception as e:
                 logger.debug("OpenCV set error for %s: %s", name, e)
 
-        # Use v4l2-ctl on Linux (primary method for unreliable controls, fallback for others)
-        if sys.platform == "linux" and self._dev_path.startswith("/dev/video"):
-            # Convert PascalCase to snake_case for v4l2
-            v4l2_name = to_snake_case(name)
-            try:
-                result = subprocess.run(
-                    ["v4l2-ctl", "-d", self._dev_path, f"--set-ctrl={v4l2_name}={int(cv_value)}"],
-                    capture_output=True,
-                    text=True,
-                    timeout=2.0,
-                )
-                if result.returncode == 0:
-                    logger.debug("Set USB control %s = %s via v4l2-ctl", name, value)
-                    return True
-                else:
-                    logger.debug("v4l2-ctl set failed for %s: %s", name, result.stderr.strip())
-            except FileNotFoundError:
-                logger.debug("v4l2-ctl not found")
-            except subprocess.TimeoutExpired:
-                logger.debug("v4l2-ctl timed out setting %s", name)
-            except Exception as e:
-                logger.debug("v4l2-ctl error setting %s: %s", name, e)
+        if set_usb_control_v4l2(self._dev_path, name, cv_value, logger=logger):
+            return True
 
         logger.warning("Unable to set USB control %s", name)
         return False
@@ -298,18 +250,7 @@ async def open_capture(
     resolution: tuple[int, int] = DEFAULT_CAPTURE_RESOLUTION,
     fps: float = DEFAULT_CAPTURE_FPS,
 ) -> Tuple[CaptureHandle, dict]:
-    """
-    Open a USB camera and return (capture_handle, capabilities).
-
-    Args:
-        camera_type: "usb" (only USB cameras supported in this module)
-        camera_id: device path
-        resolution: capture resolution (width, height)
-        fps: target frame rate
-
-    Returns:
-        Tuple of (CaptureHandle, capabilities dict)
-    """
+    """Open USB camera and return (handle, capabilities dict)."""
     if camera_type != "usb":
         raise ValueError(f"Unsupported camera type: {camera_type}. This module only supports USB cameras.")
 

@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from rpi_logger.modules.Cameras.utils import parse_resolution
+
 SCHEMA_VERSION = 1
 
 
@@ -332,9 +334,8 @@ def serialize_mode(mode: Optional[CapabilityMode]) -> Optional[Dict[str, Any]]:
 def deserialize_mode(data: Any) -> Optional[CapabilityMode]:
     if not data or not isinstance(data, dict):
         return None
-    size_raw = data.get("size")
     try:
-        width, height = _parse_resolution(size_raw)
+        width, height = parse_resolution(data.get("size"))
         fps = float(data.get("fps"))
         pixel_format = str(data.get("pixel_format"))
     except Exception:
@@ -450,15 +451,6 @@ def _contains_mode(collection: Sequence[CapabilityMode], candidate: CapabilityMo
         if item.signature() == sig:
             return True
     return False
-
-
-def _parse_resolution(raw: Any) -> Tuple[int, int]:
-    if isinstance(raw, (list, tuple)) and len(raw) == 2:
-        return int(raw[0]), int(raw[1])
-    if isinstance(raw, str) and "x" in raw:
-        width, height = raw.lower().split("x", 1)
-        return int(width), int(height)
-    raise ValueError("Invalid resolution format")
 
 
 def _safe_status(raw: Any) -> RuntimeStatus:

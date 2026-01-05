@@ -1,4 +1,4 @@
-"""Unified camera settings window with resolution/FPS and interactive camera controls."""
+"""Camera settings window: resolution/FPS and live controls."""
 
 from __future__ import annotations
 
@@ -37,76 +37,37 @@ except ImportError:
 if TYPE_CHECKING:
     from rpi_logger.modules.Cameras.camera_core.state import CameraCapabilities, ControlInfo, ControlType
 
-# Re-export DEFAULT_SETTINGS for backwards compatibility
 DEFAULT_SETTINGS = {
-    "preview_resolution": "",
-    "preview_fps": "5",
-    "record_resolution": "",
-    "record_fps": "15",
-    "overlay": "true",
-    "record_audio": "true",  # Record webcam mic audio when available
+    "preview_resolution": "", "preview_fps": "5",
+    "record_resolution": "", "record_fps": "15",
+    "overlay": "true", "record_audio": "true",
 }
 
-# Image adjustment controls (Card 2)
-IMAGE_CONTROLS = [
-    "Brightness",
-    "Contrast",
-    "Saturation",
-    "Hue",
-]
-
-# Exposure/Focus controls (Card 3)
+IMAGE_CONTROLS = ["Brightness", "Contrast", "Saturation", "Hue"]
 EXPOSURE_FOCUS_CONTROLS = [
-    # Auto toggles first
-    "AutoExposure",
-    "AeExposureMode",  # Picam equivalent
-    # Exposure controls
-    "Exposure",
-    "ExposureTime",  # Picam
-    "Gain",
-    "AnalogueGain",  # Picam
-    # Focus toggles
-    "AutoFocus",
-    "FocusAutomaticContinuous",  # USB (e.g., Logitech C920)
-    "AfMode",  # Picam
-    # Focus controls
-    "Focus",
-    "FocusAbsolute",  # USB
-    # White balance
-    "AwbMode",
-    "WhiteBalanceBlueU",
-    "WhiteBalanceRedV",
+    "AutoExposure", "AeExposureMode", "Exposure", "ExposureTime", "Gain", "AnalogueGain",
+    "AutoFocus", "FocusAutomaticContinuous", "AfMode", "Focus", "FocusAbsolute",
+    "AwbMode", "WhiteBalanceBlueU", "WhiteBalanceRedV",
 ]
-
-# Combined list for backwards compatibility
 ESSENTIAL_CONTROLS = IMAGE_CONTROLS + EXPOSURE_FOCUS_CONTROLS
 
-# Control dependencies: child -> (parent, values_that_enable_child)
-# When parent's value is NOT in the enable set, the child control is disabled
+# Control dependencies: child -> (parent, enable_condition)
 CONTROL_DEPENDENCIES = {
-    # USB cameras: Gain/Exposure only work in Manual Mode (value starts with "1:")
     "Gain": ("AutoExposure", lambda v: str(v).startswith("1:") or v is True),
     "Exposure": ("AutoExposure", lambda v: str(v).startswith("1:") or v is True),
-    # USB cameras: Manual focus only works when autofocus is disabled
     "FocusAbsolute": ("FocusAutomaticContinuous", lambda v: not v),
-    # Picam: AnalogueGain/ExposureTime work when AeExposureMode is "Custom" or "Off"
     "AnalogueGain": ("AeExposureMode", lambda v: v in ("Custom", "Off")),
     "ExposureTime": ("AeExposureMode", lambda v: v in ("Custom", "Off")),
 }
 
 
 class CameraSettingsWindow:
-    """Pop-out window with resolution/FPS settings and interactive camera controls."""
+    """Pop-out window with resolution/FPS and camera controls."""
 
-    def __init__(
-        self,
-        root=None,
-        *,
-        logger: LoggerLike = None,
-        on_apply_resolution: Optional[Callable[[str, Dict[str, str]], None]] = None,
-        on_control_change: Optional[Callable[[str, str, Any], None]] = None,
-        on_reprobe: Optional[Callable[[str], None]] = None,
-    ) -> None:
+    def __init__(self, root=None, *, logger: LoggerLike = None,
+                 on_apply_resolution: Optional[Callable[[str, Dict[str, str]], None]] = None,
+                 on_control_change: Optional[Callable[[str, str, Any], None]] = None,
+                 on_reprobe: Optional[Callable[[str], None]] = None) -> None:
         self._root = root
         self._logger = ensure_structured_logger(logger, fallback_name=__name__)
         self._on_apply_resolution = on_apply_resolution
@@ -115,17 +76,11 @@ class CameraSettingsWindow:
         self._window: Optional[tk.Toplevel] = None
         self._toggle_var: Optional[tk.BooleanVar] = None
         self._active_camera: Optional[str] = None
-
-        # Resolution/FPS state per camera
         self._latest: Dict[str, Dict[str, str]] = {}
         self._options: Dict[str, Dict[str, List[str]]] = {}
-
-        # Capabilities and validators per camera
         self._capabilities: Dict[str, "CameraCapabilities"] = {}
         self._validators: Dict[str, CapabilityValidator] = {}
-        self._camera_info: Dict[str, Dict[str, Any]] = {}  # model, backend, mode_count, sensor_info
-
-        # UI widgets (created lazily)
+        self._camera_info: Dict[str, Dict[str, Any]] = {}
         self._preview_res_var: Optional[tk.StringVar] = None
         self._preview_fps_var: Optional[tk.StringVar] = None
         self._record_res_var: Optional[tk.StringVar] = None
@@ -136,28 +91,19 @@ class CameraSettingsWindow:
         self._record_res_combo = None
         self._record_fps_combo = None
         self._record_audio_cb = None
-        self._record_audio_frame = None  # Container for audio checkbox
-
-        # Per-camera audio sibling availability
+        self._record_audio_frame = None
         self._has_audio_sibling: Dict[str, bool] = {}
-
-        # Control widgets - keyed by control name
-        self._control_widgets: Dict[str, Dict[str, Any]] = {}  # {name: {var, widget, reset_btn, ...}}
+        self._control_widgets: Dict[str, Dict[str, Any]] = {}
         self._image_controls_card: Optional[tk.Widget] = None
         self._exposure_controls_card: Optional[tk.Widget] = None
         self._info_label: Optional[tk.Label] = None
         self._info_btn: Optional[tk.Widget] = None
         self._info_btn_enabled: bool = False
-
         self._suppress_change = False
         self._debounce_id: Optional[str] = None
 
     def bind_toggle_var(self, var: "tk.BooleanVar") -> None:
         self._toggle_var = var
-
-    # ------------------------------------------------------------------
-    # Public API - Camera management
-    # ------------------------------------------------------------------
 
     def set_active_camera(self, camera_id: Optional[str]) -> None:
         self._active_camera = camera_id
@@ -173,10 +119,7 @@ class CameraSettingsWindow:
             self._refresh_resolution_ui()
 
     def set_camera_has_audio_sibling(self, camera_id: str, has_audio: bool) -> None:
-        """Set whether a camera has a built-in microphone.
-
-        This controls visibility of the "Record Audio" checkbox.
-        """
+        """Set whether camera has built-in mic (controls audio checkbox visibility)."""
         self._has_audio_sibling[camera_id] = has_audio
         if self._active_camera == camera_id:
             self._update_audio_checkbox_visibility()
@@ -185,89 +128,48 @@ class CameraSettingsWindow:
         merged = dict(DEFAULT_SETTINGS)
         merged.update(settings or {})
         self._latest[camera_id] = merged
-        # Clamp to available options (ensures empty values get set to first available)
         self._clamp_settings_to_options(camera_id)
         if self._active_camera == camera_id:
             self._refresh_resolution_ui()
 
-    def update_camera_options(
-        self,
-        camera_id: str,
-        *,
-        preview_resolutions: Optional[List[str]] = None,
-        record_resolutions: Optional[List[str]] = None,
-        preview_fps_values: Optional[List[str]] = None,
-        record_fps_values: Optional[List[str]] = None,
-    ) -> None:
-        """Update available resolution/FPS options for a camera."""
-        self._logger.debug("update_camera_options: camera_id=%s, active=%s, resolutions=%s",
-                         camera_id, self._active_camera, preview_resolutions)
-        self._options.setdefault(camera_id, {})
+    def update_camera_options(self, camera_id: str, *,
+                              preview_resolutions: Optional[List[str]] = None,
+                              record_resolutions: Optional[List[str]] = None,
+                              preview_fps_values: Optional[List[str]] = None,
+                              record_fps_values: Optional[List[str]] = None) -> None:
+        """Update available resolution/FPS options."""
+        opts = self._options.setdefault(camera_id, {})
         if preview_resolutions is not None:
-            self._options[camera_id]["preview_resolutions"] = preview_resolutions
+            opts["preview_resolutions"] = preview_resolutions
         if record_resolutions is not None:
-            self._options[camera_id]["record_resolutions"] = record_resolutions
+            opts["record_resolutions"] = record_resolutions
         if preview_fps_values is not None:
-            self._options[camera_id]["preview_fps_values"] = preview_fps_values
+            opts["preview_fps_values"] = preview_fps_values
         if record_fps_values is not None:
-            self._options[camera_id]["record_fps_values"] = record_fps_values
-
-        # Always clamp settings when options are updated (not just when active)
+            opts["record_fps_values"] = record_fps_values
         self._clamp_settings_to_options(camera_id)
-
         if camera_id == self._active_camera:
             self._refresh_resolution_ui()
 
-    def update_camera_capabilities(
-        self,
-        camera_id: str,
-        capabilities: "CameraCapabilities",
-        *,
-        hw_model: Optional[str] = None,
-        backend: Optional[str] = None,
-        sensor_info: Optional[Dict[str, Any]] = None,
-        display_name: Optional[str] = None,
-    ) -> None:
-        """Update capabilities for a camera, enabling control widgets."""
-        # Check if controls actually changed before storing
+    def update_camera_capabilities(self, camera_id: str, capabilities: "CameraCapabilities", *,
+                                    hw_model: Optional[str] = None, backend: Optional[str] = None,
+                                    sensor_info: Optional[Dict[str, Any]] = None,
+                                    display_name: Optional[str] = None) -> None:
+        """Update capabilities, enabling control widgets."""
         old_caps = self._capabilities.get(camera_id)
-        old_controls = old_caps.controls if old_caps else None
-        new_controls = capabilities.controls if capabilities else None
-        controls_changed = old_controls != new_controls
-
+        controls_changed = (old_caps.controls if old_caps else None) != (capabilities.controls if capabilities else None)
         self._capabilities[camera_id] = capabilities
-
-        # Create validator for this camera's capabilities
         if capabilities:
             self._validators[camera_id] = CapabilityValidator(capabilities)
-
-        # Format backend nicely: "usb" -> "USB", "picam" -> "Pi Camera"
-        backend_display = backend or "Unknown"
-        if backend_display.lower() == "usb":
-            backend_display = "USB"
-        elif backend_display.lower() == "picam":
-            backend_display = "Pi Camera"
-
-        # Count unique resolutions for display
-        mode_count = 0
-        if capabilities and capabilities.modes:
-            unique_sizes = set()
-            for m in capabilities.modes:
-                if hasattr(m, "size"):
-                    unique_sizes.add(m.size)
-            mode_count = len(unique_sizes)
-
-        # Use display_name for model field (consistent across UI), fall back to hw_model
-        model_display = display_name or hw_model or "Unknown"
-
+        backend_display = {"usb": "USB", "picam": "Pi Camera"}.get((backend or "").lower(), backend or "Unknown")
+        mode_count = len({m.size for m in capabilities.modes if hasattr(m, "size")}) if capabilities and capabilities.modes else 0
         self._camera_info[camera_id] = {
-            "model": model_display,
+            "model": display_name or hw_model or "Unknown",
             "backend": backend_display,
-            "mode_count": str(mode_count) if mode_count else "0",
+            "mode_count": str(mode_count),
             "sensor_info": sensor_info,
         }
         if camera_id == self._active_camera:
-            # Only rebuild controls if they actually changed
             if controls_changed:
                 self._rebuild_controls_section()
             self._refresh_info_section()
@@ -276,10 +178,6 @@ class CameraSettingsWindow:
         if self._active_camera == camera_id:
             self._active_camera = None
         self._refresh_ui()
-
-    # ------------------------------------------------------------------
-    # Public API - Window management
-    # ------------------------------------------------------------------
 
     def show(self) -> None:
         if tk is None or self._root is None:

@@ -1,11 +1,4 @@
-"""
-Video encoder for the worker process.
-
-Supports PyAV (preferred) with OpenCV fallback.
-Handles overlay rendering and CSV timing logs.
-
-Uses a long-lived worker thread with bounded queue for backpressure.
-"""
+"""Video encoder with PyAV/OpenCV fallback, overlay, CSV timing, and worker thread."""
 from __future__ import annotations
 
 import csv
@@ -38,7 +31,7 @@ _DEFAULT_QUEUE_SIZE = 30
 
 @dataclass(slots=True)
 class _FrameItem:
-    """Frame data queued for encoding."""
+    """Queued frame data for encoding."""
     data: np.ndarray
     timestamp: float
     pts_time_ns: Optional[int]
@@ -46,11 +39,7 @@ class _FrameItem:
 
 
 class _EncodeWorker:
-    """Long-lived encoding thread with bounded queue.
-
-    Processes frames from a queue in a dedicated thread, providing
-    clean backpressure when encoding can't keep up with capture.
-    """
+    """Encoding thread with bounded queue for backpressure."""
 
     def __init__(
         self,
@@ -106,11 +95,7 @@ class _EncodeWorker:
         self._thread = None
 
     def submit(self, frame: np.ndarray, timestamp: float, pts_time_ns: Optional[int], color_format: str) -> bool:
-        """Submit a frame for encoding.
-
-        Returns True if frame was queued, False if queue is full (backpressure).
-        Non-blocking - returns immediately.
-        """
+        """Submit frame for encoding (non-blocking). Returns False if queue full."""
         if not self._running or self._error:
             return False
 
@@ -188,11 +173,7 @@ class _EncodeWorker:
 
 
 class Encoder:
-    """Video encoder with optional overlay and timing CSV.
-
-    Uses a dedicated worker thread with bounded queue for backpressure.
-    Frames are submitted via write_frame() and encoded asynchronously.
-    """
+    """Video encoder with worker thread, optional overlay and CSV timing."""
 
     def __init__(
         self,
@@ -331,11 +312,7 @@ class Encoder:
         pts_time_ns: Optional[int] = None,
         color_format: str = "bgr",
     ) -> bool:
-        """Submit a frame for encoding (non-blocking).
-
-        Returns True if frame was queued, False if queue is full (backpressure).
-        The actual encoding happens asynchronously in the worker thread.
-        """
+        """Submit frame (non-blocking). Returns False if queue full."""
         if not self._worker:
             return False
         return self._worker.submit(frame, timestamp, pts_time_ns, color_format)
@@ -348,11 +325,7 @@ class Encoder:
         pts_time_ns: Optional[int] = None,
         color_format: str = "bgr",
     ) -> bool:
-        """Encode a single frame (blocking, called by worker thread).
-
-        Returns True if frame was successfully encoded, False otherwise.
-        CSV timing is only written for successfully encoded frames.
-        """
+        """Encode frame (blocking, worker thread only). Returns success."""
         # Tentatively increment frame count (will be used for PTS)
         next_frame_num = self._frame_count + 1
 
@@ -474,11 +447,7 @@ class Encoder:
         return frame
 
     def stop(self) -> None:
-        """Finalize and close encoder (blocking).
-
-        Stops the worker thread first, draining any queued frames,
-        then finalizes the video container.
-        """
+        """Stop worker, drain queue, finalize video (blocking)."""
         # Stop worker thread first - this drains queued frames
         if self._worker:
             self._worker.stop()

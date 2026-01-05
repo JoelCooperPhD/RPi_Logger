@@ -7,17 +7,17 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.Cameras.camera_core.state import CapabilityMode, CameraCapabilities, CapabilitySource
+from rpi_logger.modules.Cameras.utils import parse_resolution
 
 MIN_SAFE_FPS = 5.0
 
 
 def normalize_modes(raw_modes: Iterable[Dict[str, Any]]) -> List[CapabilityMode]:
     """Normalize backend-reported modes into CapabilityMode objects."""
-
     normalized: list[CapabilityMode] = []
     for raw in raw_modes:
         try:
-            width, height = _parse_size(raw.get("size"))
+            width, height = parse_resolution(raw.get("size"))
             fps = float(raw.get("fps") or raw.get("frame_rate") or raw.get("framerate"))
             pixel_format = _normalize_format(raw.get("pixel_format") or raw.get("format") or "UNKNOWN")
             controls = raw.get("controls") or {}
@@ -94,16 +94,6 @@ def select_default_record(capabilities: CameraCapabilities) -> Optional[Capabili
 
 # ---------------------------------------------------------------------------
 # Internal helpers
-
-
-def _parse_size(raw: Any) -> Tuple[int, int]:
-    if isinstance(raw, (list, tuple)) and len(raw) == 2:
-        return int(raw[0]), int(raw[1])
-    if isinstance(raw, str) and "x" in raw.lower():
-        w, h = raw.lower().split("x", 1)
-        return int(w), int(h)
-    raise ValueError(f"Invalid size: {raw!r}")
-
 
 def _normalize_format(fmt: Any) -> str:
     if not fmt:
