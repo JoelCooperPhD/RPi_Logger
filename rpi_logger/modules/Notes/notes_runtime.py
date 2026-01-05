@@ -32,16 +32,14 @@ from rpi_logger.modules.base.storage_utils import ensure_module_data_dir, module
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager, ShutdownGuard
 try:
-    from .preferences import NotesPreferences  # type: ignore
-    from .config import NotesConfig  # type: ignore
+    from .config import NotesConfig, NotesPreferences  # type: ignore
 except ImportError:
-    from preferences import NotesPreferences
-    from config import NotesConfig
+    from config import NotesConfig, NotesPreferences
 
 
 @dataclass(slots=True)
 class NoteRecord:
-    """Container for an individual note."""
+    """Individual note container."""
     index: int
     trial_number: int
     text: str
@@ -87,7 +85,7 @@ class NotesArchive:
         if await asyncio.to_thread(target.exists):
             self.note_count = await asyncio.to_thread(self._count_existing_notes, target)
             await asyncio.to_thread(self._open_for_append, target)
-            self.logger.info("Appending to existing note file: %s (current notes: %d)", target, self.note_count)
+            self.logger.info("Appending to note file: %s (%d notes)", target, self.note_count)
         else:
             await asyncio.to_thread(self._write_header, target)
             self.note_count = 0
@@ -102,14 +100,14 @@ class NotesArchive:
             return
         self.recording = False
         await asyncio.to_thread(self._close_file)
-        self.logger.info("Notes archive closed with %d note(s) -> %s", self.note_count, self.file_path)
+        self.logger.info("Archive closed: %d note(s) -> %s", self.note_count, self.file_path)
 
     def _close_file(self) -> None:
         if self._file_handle:
             try:
                 self._file_handle.close()
             except Exception:
-                self.logger.debug("Error closing notes file handle")
+                self.logger.debug("Error closing file handle")
         self._file_handle = self._csv_writer = None
 
     async def add_note(self, text: str, modules: Sequence[str], *, posted_at: Optional[float] = None, trial_number: int) -> NoteRecord:
@@ -291,7 +289,8 @@ class NotesRuntime(ModuleRuntime):
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args
-        pref_scope = (fn := getattr(context.model, "preferences_scope", None)) and fn("notes") if callable(fn) else None
+        fn = getattr(context.model, "preferences_scope", None)
+        pref_scope = fn("notes") if callable(fn) else None
         self.preferences = NotesPreferences(pref_scope)
         self.typed_config = NotesConfig.from_preferences(pref_scope, self.args) if pref_scope else NotesConfig()
 
@@ -327,8 +326,6 @@ class NotesRuntime(ModuleRuntime):
             self._build_ui()
             if hasattr(self.view, 'set_data_subdir'):
                 self.view.set_data_subdir(self.MODULE_SUBDIR)
-        else:
-            self.logger.info("GUI view unavailable; Notes runtime running headless")
 
         if self.auto_start:
             self._run_async(self._start_recording())
@@ -341,7 +338,7 @@ class NotesRuntime(ModuleRuntime):
             try:
                 await self.archive.stop()
             except Exception:
-                self.logger.exception("Error while stopping archive during shutdown")
+                self.logger.exception("Error stopping archive during shutdown")
         self.archive = None
         self.model.recording = False
         await self.task_manager.shutdown()
@@ -361,7 +358,7 @@ class NotesRuntime(ModuleRuntime):
             (command.get("command") or "").lower(),
             note_text=(command.get("note") or command.get("note_text") or "").strip() or None,
             posted_at=self._extract_note_timestamp(command),
-            on_empty_note=lambda: self.logger.warning("Received add_note command without note text"),
+            on_empty_note=lambda: self.logger.warning("add_note command without text"),
         )
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
@@ -369,7 +366,7 @@ class NotesRuntime(ModuleRuntime):
             (action or "").lower(),
             note_text=(kwargs.get("note") or kwargs.get("note_text") or "").strip() or None,
             posted_at=time.time(),
-            on_empty_note=lambda: self.logger.debug("Ignored add_note user action with empty text"),
+            on_empty_note=lambda: self.logger.debug("add_note action with empty text"),
         )
 
     @staticmethod
@@ -421,7 +418,7 @@ class NotesRuntime(ModuleRuntime):
             parent.grid_columnconfigure(0, weight=1)
             parent.grid_rowconfigure(0, weight=1)
 
-            # Create main container with visible border (matching VOG/DRT style)
+            # Main container with border
             if HAS_THEME and Colors is not None:
                 container = tk.Frame(
                     parent,
@@ -436,13 +433,13 @@ class NotesRuntime(ModuleRuntime):
             container.grid_columnconfigure(0, weight=1)
             container.grid_rowconfigure(0, weight=1)
 
-            # History section in a LabelFrame (matching VOG/DRT pattern)
+            # History section
             history_lf = ttk.LabelFrame(container, text="History")
             history_lf.grid(row=0, column=0, sticky="nsew", padx=4, pady=(4, 2))
             history_lf.grid_columnconfigure(0, weight=1)
             history_lf.grid_rowconfigure(0, weight=1)
 
-            # Create history widget with theme-aware colors
+            # History widget
             self._history_widget = scrolledtext.ScrolledText(
                 history_lf,
                 height=12,
@@ -451,45 +448,33 @@ class NotesRuntime(ModuleRuntime):
             )
             self._history_widget.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
 
-            # Configure text colors based on theme availability
+            # Theme colors
             if HAS_THEME and Colors is not None:
-                # Dark theme colors - visible on dark background
-                timestamp_color = Colors.PRIMARY          # Blue (#3498db)
-                elapsed_color = Colors.SUCCESS            # Green (#2ecc71)
-                modules_color = Colors.WARNING            # Orange (#f39c12)
-                text_fg = Colors.FG_PRIMARY               # Light gray (#ecf0f1)
-                text_bg = Colors.BG_INPUT                 # Dark input bg (#3d3d3d)
-
-                # Apply ScrolledText theme styling
+                timestamp_color, elapsed_color, modules_color = Colors.PRIMARY, Colors.SUCCESS, Colors.WARNING
                 self._history_widget.configure(
-                    bg=text_bg,
-                    fg=text_fg,
-                    insertbackground=text_fg,
+                    bg=Colors.BG_INPUT,
+                    fg=Colors.FG_PRIMARY,
+                    insertbackground=Colors.FG_PRIMARY,
                     selectbackground=Colors.PRIMARY,
                     selectforeground=Colors.FG_PRIMARY,
                 )
             else:
-                # Fallback colors for light theme
-                timestamp_color = "#1565c0"  # Material Blue 800
-                elapsed_color = "#2e7d32"    # Material Green 800
-                modules_color = "#7b1fa2"    # Material Purple 700
+                timestamp_color, elapsed_color, modules_color = "#1565c0", "#2e7d32", "#7b1fa2"
 
             self._history_widget.tag_config("timestamp", foreground=timestamp_color)
             self._history_widget.tag_config("elapsed", foreground=elapsed_color)
             self._history_widget.tag_config("modules", foreground=modules_color)
 
-            # New Note section in a LabelFrame (matching VOG/DRT pattern)
+            # Input section
             input_lf = ttk.LabelFrame(container, text="New Note")
             input_lf.grid(row=1, column=0, sticky="ew", padx=4, pady=(2, 4))
             input_lf.grid_columnconfigure(0, weight=1)
 
-            # Entry widget - styled via ttk theme
             self._note_entry = ttk.Entry(input_lf)
             self._note_entry.grid(row=0, column=0, sticky="ew", padx=(4, 8), pady=4)
             self._note_entry.bind("<Return>", self._on_enter_pressed)
 
-            # Post button - use RoundedButton if available, else ttk.Button
-            # Using 'default' style and height=32 to match VOG/DRT
+            # Post button
             if HAS_THEME and RoundedButton is not None and Colors is not None:
                 self._post_button = RoundedButton(
                     input_lf,
@@ -498,7 +483,7 @@ class NotesRuntime(ModuleRuntime):
                     width=80,
                     height=32,
                     corner_radius=6,
-                    style='default',  # Match VOG/DRT button style
+                    style='default',
                     bg=Colors.BG_FRAME,
                 )
             else:
@@ -543,7 +528,7 @@ class NotesRuntime(ModuleRuntime):
             try:
                 asyncio.create_task(coro)
             except RuntimeError:
-                # No running event loop - close coroutine to prevent warning
+                # No running event loop
                 coro.close()  # type: ignore[union-attr]
 
     def _on_enter_pressed(self, event: Any):  # type: ignore[override]
@@ -567,26 +552,26 @@ class NotesRuntime(ModuleRuntime):
             try:
                 await archive.stop()
             except Exception:
-                self.logger.exception("Failed to stop previous archive before session switch")
+                self.logger.exception("Failed to stop previous archive")
             archive = None
 
         if not archive:
             archive = self.archive = NotesArchive(module_dir, self.logger.getChild("Archive"))
 
         if archive.recording:
-            self.logger.debug("Notes archive already active: %s", archive.file_path)
+            self.logger.debug("Archive already active: %s", archive.file_path)
             return False
 
         trial_number = self._resolve_trial_number()
         try:
             file_path = await archive.start(trial_number)
         except Exception as exc:
-            self.logger.exception("Failed to start note archive", exc_info=exc)
+            self.logger.exception("Failed to start archive", exc_info=exc)
             return False
 
         self.preferences.set_last_note_path(str(file_path))
         self.model.recording = True
-        self.logger.info("Notes recording started -> %s", file_path)
+        self.logger.info("Recording started -> %s", file_path)
         await self._refresh_history()
         self._emit_status(StatusType.RECORDING_STARTED, {
             "session_dir": str(module_dir),
@@ -602,9 +587,9 @@ class NotesRuntime(ModuleRuntime):
         try:
             await self.archive.stop()
         except Exception:
-            self.logger.exception("Error stopping notes archive")
+            self.logger.exception("Error stopping archive")
         self.model.recording = False
-        self.logger.info("Notes recording stopped (%d note(s))", self.archive.note_count)
+        self.logger.info("Recording stopped (%d note(s))", self.archive.note_count)
         self._emit_status(StatusType.RECORDING_STOPPED, {
             "session_dir": str(self._module_dir) if self._module_dir else None,
             "note_count": self.archive.note_count,
@@ -632,7 +617,7 @@ class NotesRuntime(ModuleRuntime):
         self._history.append(record)
         self._history = self._history[-self.history_limit:]
         self._render_history()
-        self.logger.info("Note %d recorded: %s", record.index, record.text if len(record.text) <= 80 else record.text[:77] + "...")
+        self.logger.info("Note %d: %s", record.index, record.text[:77] + "..." if len(record.text) > 80 else record.text)
         self._emit_status("note_added", {
             "note_index": record.index,
             "trial_number": record.trial_number,
@@ -661,7 +646,7 @@ class NotesRuntime(ModuleRuntime):
             self._module_dir = await asyncio.to_thread(ensure_module_data_dir, session_dir, self.MODULE_SUBDIR)
         except Exception:
             self._module_dir = session_dir / self.MODULE_SUBDIR
-            self.logger.exception("Failed to ensure session directory exists", exc_info=True)
+            self.logger.exception("Failed to ensure session directory")
 
         self._missing_session_notice_shown = False
         self._history.clear()
@@ -687,7 +672,7 @@ class NotesRuntime(ModuleRuntime):
                 await asyncio.to_thread(path.mkdir, parents=True, exist_ok=True)
                 return path
             except Exception:
-                self.logger.exception("Failed to ensure session directory exists", exc_info=True)
+                self.logger.exception("Failed to ensure session directory")
                 return None
         self._prompt_session_required()
         return None
@@ -699,7 +684,7 @@ class NotesRuntime(ModuleRuntime):
             self._module_dir = await asyncio.to_thread(ensure_module_data_dir, session_dir, self.MODULE_SUBDIR)
             return self._module_dir
         except Exception:
-            self.logger.exception("Failed to ensure notes module directory exists", exc_info=True)
+            self.logger.exception("Failed to ensure module directory")
             return None
 
     def _resolve_trial_number(self) -> int:
@@ -719,13 +704,13 @@ class NotesRuntime(ModuleRuntime):
         if self._missing_session_notice_shown:
             return
         self._missing_session_notice_shown = True
-        message = "Start a session from the main logger before saving notes.\nUse the Start Session button to choose where data will be stored."
+        message = "Start a session from the main logger before saving notes."
 
         if self.view and tk and messagebox and (root := getattr(self.view, "root", None)):
             try:
                 root.after(0, lambda: messagebox.showinfo("Session Required", message))
             except Exception:
-                self.logger.warning("Failed to schedule session prompt", exc_info=True)
+                self.logger.warning("Failed to show session prompt")
         else:
             self.logger.warning(message)
 
@@ -739,7 +724,7 @@ class NotesRuntime(ModuleRuntime):
                 return []
             return sorted([str(name) for name, state in data.items() if isinstance(state, dict) and state.get("recording")])
         except Exception:
-            self.logger.debug("Failed to read running modules info", exc_info=True)
+            self.logger.debug("Failed to read running modules")
             return []
 
     def _emit_status(self, status: str, payload: Optional[dict[str, Any]] = None) -> None:

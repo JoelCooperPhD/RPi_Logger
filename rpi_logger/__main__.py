@@ -99,9 +99,6 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
     import asyncio
     import signal
 
-    # Set up module aliases BEFORE importing any modules
-    _setup_module_aliases()
-
     module_key = module_name.lower().replace('-', '_')
 
     # Set up signal handlers for graceful shutdown in subprocesses
@@ -159,6 +156,9 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
 def main() -> None:
     # Required for PyInstaller multiprocessing support
     freeze_support()
+
+    # Set up module aliases for all execution paths
+    _setup_module_aliases()
 
     # Check if we're being called to run a specific module subprocess
     if len(sys.argv) >= 3 and sys.argv[1] == '--run-module':
