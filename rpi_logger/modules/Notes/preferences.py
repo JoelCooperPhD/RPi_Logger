@@ -8,6 +8,7 @@ from rpi_logger.modules.base.preferences import ScopedPreferences
 
 @dataclass(slots=True)
 class NotesPreferences:
+    """Preferences wrapper for Notes module."""
     prefs: Optional[ScopedPreferences]
 
     def history_limit(self, fallback: int) -> int:
@@ -22,18 +23,17 @@ class NotesPreferences:
         if not self.prefs:
             return fallback
         stored = self.prefs.get("auto_start")
-        if stored is None:
-            return fallback
-        return str(stored).strip().lower() in {"true", "1", "yes", "on"}
+        return fallback if stored is None else str(stored).strip().lower() in {"true", "1", "yes", "on"}
+
+    def _write(self, data: dict) -> None:
+        if self.prefs:
+            self.prefs.write_sync(data)
 
     def set_history_limit(self, value: int) -> None:
-        if self.prefs:
-            self.prefs.write_sync({"history_limit": value})
+        self._write({"history_limit": value})
 
     def set_auto_start(self, value: bool) -> None:
-        if self.prefs:
-            self.prefs.write_sync({"auto_start": value})
+        self._write({"auto_start": value})
 
     def set_last_note_path(self, path: str) -> None:
-        if self.prefs:
-            self.prefs.write_sync({"last_archive_path": path})
+        self._write({"last_archive_path": path})
