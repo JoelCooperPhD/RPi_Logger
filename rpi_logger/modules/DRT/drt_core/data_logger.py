@@ -1,8 +1,4 @@
-"""DRT data logger for CSV file output.
-
-Handles all file I/O for logging DRT trial data to CSV files.
-Supports both sDRT and wDRT data formats.
-"""
+"""DRT CSV data logger for sDRT and wDRT formats."""
 
 import time
 from pathlib import Path
@@ -17,16 +13,7 @@ logger = get_module_logger(__name__)
 
 
 class DRTDataLogger:
-    """Handles CSV logging for DRT trial data.
-
-    Responsibilities:
-    - Directory and file creation
-    - CSV header writing
-    - Data row formatting and appending
-    - Event dispatching for logged data
-
-    Supports both sDRT (10 fields) and wDRT (11 fields) formats.
-    """
+    """CSV logging for DRT trial data (sDRT: 10 fields, wDRT: 11 fields)."""
 
     def __init__(
         self,

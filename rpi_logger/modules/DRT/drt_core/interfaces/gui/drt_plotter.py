@@ -1,8 +1,4 @@
-"""DRT real-time plotter using matplotlib FuncAnimation.
-
-Real-time plotting of stimulus state and reaction time data for single-device display.
-Uses dark theme colors for consistent styling with the modern UI.
-"""
+"""Real-time DRT plotter for stimulus state and reaction times."""
 
 from __future__ import annotations
 
@@ -44,13 +40,7 @@ if TYPE_CHECKING:
 
 
 class DRTPlotter:
-    """Real-time plotter for DRT stimulus state and reaction time data.
-
-    Layout:
-        - Top subplot (211): Stimulus state (On/Off) over time
-        - Bottom subplot (212): Reaction times (hits/misses) over time
-    """
-
+    """Real-time DRT plotter: stimulus state (top) and reaction times (bottom)."""
     BUFFER_SIZE = 600
 
     def __init__(self, parent_frame: "Widget", title: str = "DRT - Detection Response Task"):
@@ -112,7 +102,6 @@ class DRTPlotter:
         self._start_animation()
 
     def _init_default_lines(self):
-        """Initialize default plot lines for display before any device connects."""
         # Create empty stimulus state line
         self._default_state_line, = self._ax_state.plot(
             self._time_array, np.full(len(self._time_array), np.nan),
@@ -134,7 +123,6 @@ class DRTPlotter:
         self._plot_lines = [self._default_state_line, self._default_rt_hit, self._default_rt_miss]
 
     def _setup_plots(self):
-        """Configure plot axes with dark theme styling."""
         # Top plot: Stimulus state
         self._ax_state.set_facecolor(Colors.BG_DARKER)
         self._ax_state.xaxis.set_tick_params(labelbottom=False)
@@ -164,7 +152,6 @@ class DRTPlotter:
             spine.set_color(Colors.BORDER)
 
     def _start_animation(self):
-        """Start the animation loop for the chart."""
         if self._ani is not None:
             return  # Already started
         self._ani = animation.FuncAnimation(

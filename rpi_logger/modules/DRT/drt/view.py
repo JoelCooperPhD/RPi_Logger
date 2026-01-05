@@ -1,7 +1,4 @@
-"""DRT view factory for VMC integration.
-
-Implements the DRT GUI with real-time matplotlib plotting for single-device support.
-"""
+"""DRT view with real-time matplotlib plotting."""
 
 from __future__ import annotations
 
@@ -25,8 +22,7 @@ ActionCallback = Optional[Callable[..., Awaitable[None]]]
 
 
 class _SystemPlaceholder:
-    """Minimal stand-in until the runtime is bound to the GUI."""
-
+    """Placeholder until runtime binds to GUI."""
     recording: bool = False
     trial_label: str = ""
 
@@ -42,11 +38,7 @@ class _SystemPlaceholder:
 
 
 class _LoopAsyncBridge:
-    """Lightweight bridge that schedules coroutines on the active asyncio loop.
-
-    Uses run_coroutine_threadsafe for thread-safe scheduling from Tkinter callbacks.
-    """
-
+    """Schedules coroutines on asyncio loop from Tkinter."""
     def __init__(self) -> None:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -54,9 +46,7 @@ class _LoopAsyncBridge:
         self.loop = loop
 
     def run_coroutine(self, coro):
-        loop = self._resolve_loop()
-        # Use run_coroutine_threadsafe for thread-safe scheduling from Tk thread
-        return asyncio.run_coroutine_threadsafe(coro, loop)
+        return asyncio.run_coroutine_threadsafe(coro, self._resolve_loop())
 
     def _resolve_loop(self) -> asyncio.AbstractEventLoop:
         if self.loop and not self.loop.is_closed():
@@ -64,20 +54,13 @@ class _LoopAsyncBridge:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError as exc:
-            raise RuntimeError("Tkinter bridge has no running event loop bound") from exc
+            raise RuntimeError("No event loop bound to Tkinter bridge") from exc
         self.loop = loop
         return loop
 
 
 class DRTTkinterGUI:
-    """Tkinter GUI for DRT with real-time plotting.
-
-    Key features:
-    - Real-time matplotlib plotting of stimulus state and reaction times
-    - Results display (trial number, reaction time, click count)
-    - Configuration dialog for device settings
-    - Single device display (no tabs)
-    """
+    """Tkinter GUI with real-time plotting, results display, and device config."""
 
     def __init__(
         self,
@@ -146,12 +129,6 @@ class DRTTkinterGUI:
             self.logger.error("Failed to build DRTTkinterGUI UI: %s", e, exc_info=True)
 
     def _build_device_ui(self, port: Optional[str], device_type: DRTDeviceType):
-        """Build UI components for the device.
-
-        Args:
-            port: Device port, or None if no device connected yet
-            device_type: Device type enum
-        """
         if not self._content_frame:
             return
 
@@ -171,7 +148,6 @@ class DRTTkinterGUI:
         self._init_stats_vars(device_type)
 
     def _init_stats_vars(self, device_type: DRTDeviceType):
-        """Initialize stats StringVars (UI built by DRTView in Capture Stats panel)."""
         if self._stats_initialized:
             return
 
@@ -189,7 +165,6 @@ class DRTTkinterGUI:
     # Device connection/disconnection
 
     def on_device_connected(self, port: str, device_type: DRTDeviceType = DRTDeviceType.SDRT):
-        """Handle device connection - update port and window title."""
         self.logger.info("%s device connected: %s", device_type.value, port)
 
         if self._port is not None:
@@ -207,7 +182,6 @@ class DRTTkinterGUI:
             self._plotter.add_device(port)
 
     def on_device_disconnected(self, port: str, device_type: DRTDeviceType = None):
-        """Handle device disconnection - clean up UI."""
         self.logger.info("Device disconnected: %s", port)
 
         if self._port != port:

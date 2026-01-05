@@ -1,9 +1,4 @@
-"""
-sDRT Handler
-
-Protocol handler for sDRT (Simple Detection Response Task) devices.
-Handles USB serial communication with sDRT-specific command/response protocol.
-"""
+"""sDRT protocol handler for USB serial communication."""
 
 import asyncio
 from pathlib import Path
@@ -26,12 +21,7 @@ logger = get_module_logger(__name__)
 
 
 class SDRTHandler(BaseDRTHandler):
-    """
-    Handler for sDRT devices.
-
-    Implements the sDRT-specific protocol for experiment control,
-    stimulus management, and data logging.
-    """
+    """sDRT handler with experiment control, stimulus management, and logging."""
 
     def __init__(
         self,

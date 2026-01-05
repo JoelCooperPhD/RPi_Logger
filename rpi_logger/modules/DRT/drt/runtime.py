@@ -1,8 +1,4 @@
-"""Runtime that hosts the legacy DRT hardware stack inside the stub framework.
-
-Device discovery is centralized in the main logger. This runtime waits for
-device assignments via assign_device commands.
-"""
+"""DRT runtime for VMC framework. Device discovery via main logger."""
 
 from __future__ import annotations
 
@@ -27,15 +23,7 @@ from rpi_logger.core.commands import StatusMessage, StatusType
 
 
 class DRTModuleRuntime(ModuleRuntime):
-    """VMC-compatible runtime for DRT module.
-
-    This runtime manages device handlers and provides the bridge between
-    the DRT core functionality and the VMC framework (model binding, view binding,
-    command dispatch).
-
-    Device discovery is handled by the main logger. This runtime receives
-    device assignments via assign_device commands.
-    """
+    """VMC runtime managing DRT device handlers. Receives device assignments from main logger."""
 
     def __init__(self, context: RuntimeContext) -> None:
         self.args = context.args

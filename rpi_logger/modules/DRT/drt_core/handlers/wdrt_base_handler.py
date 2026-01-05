@@ -1,10 +1,4 @@
-"""
-wDRT Base Handler
-
-Shared implementation for wDRT (Wireless Detection Response Task) devices.
-Both USB and Wireless variants share the same protocol, differing only in
-transport layer and minor configuration.
-"""
+"""wDRT base handler shared by USB and Wireless variants."""
 
 import asyncio
 from pathlib import Path
@@ -26,15 +20,7 @@ logger = get_module_logger(__name__)
 
 
 class WDRTBaseHandler(BaseDRTHandler):
-    """
-    Base handler for wDRT devices.
-
-    Implements the wDRT protocol for experiment control, stimulus management,
-    battery monitoring, RTC sync, and data logging. Subclasses specify the
-    transport type and device type enum.
-    """
-
-    # Battery polling interval in seconds (when not recording)
+    """wDRT handler with battery monitoring, RTC sync, and data logging."""
     BATTERY_POLL_INTERVAL = 10.0
 
     def __init__(

@@ -1,9 +1,4 @@
-"""
-USB Serial Transport
-
-Transport implementation for USB serial communication with DRT devices.
-Wraps pyserial with an async interface compatible with BaseTransport.
-"""
+"""USB serial transport for DRT devices."""
 
 import asyncio
 import threading
@@ -22,11 +17,7 @@ MAX_READ_BUFFER_SIZE = 65536  # 64KB
 
 
 class USBTransport(BaseTransport):
-    """
-    USB Serial transport for DRT devices.
-
-    Provides async read/write operations over a serial connection.
-    """
+    """Async USB serial transport for DRT devices."""
 
     def __init__(
         self,
@@ -59,12 +50,6 @@ class USBTransport(BaseTransport):
         return self._serial is not None and self._serial.is_open
 
     async def connect(self) -> bool:
-        """
-        Open the serial connection.
-
-        Returns:
-            True if connection was successful
-        """
         if self.is_connected:
             logger.warning("Already connected to %s", self.port)
             return True
@@ -91,7 +76,6 @@ class USBTransport(BaseTransport):
             return False
 
     async def disconnect(self) -> None:
-        """Close the serial connection."""
         if not self._serial:
             return
 
@@ -113,15 +97,6 @@ class USBTransport(BaseTransport):
             self._connected = False
 
     async def write(self, data: bytes) -> bool:
-        """
-        Write data to the serial port.
-
-        Args:
-            data: Bytes to write
-
-        Returns:
-            True if write was successful
-        """
         if not self.is_connected:
             logger.error("Cannot write to %s: not connected", self.port)
             return False
@@ -141,15 +116,6 @@ class USBTransport(BaseTransport):
             return False
 
     async def read_line(self) -> Optional[str]:
-        """
-        Read a line from the serial port.
-
-        Uses internal buffering to handle partial reads properly.
-        Lock is only held briefly during buffer access, not during the read.
-
-        Returns:
-            The line read (decoded as UTF-8), or None if no data/timeout
-        """
         if not self.is_connected:
             return None
 
