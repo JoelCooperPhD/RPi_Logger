@@ -201,8 +201,7 @@ class StreamHandler:
                             self._frame_ready_event.set()  # Signal frame available
 
                     except Exception as e:
-                        if frame_count == 1:
-                            logger.error("Video stream frame error: %s", e)
+                        logger.error("Video stream frame error (frame %d): %s", frame_count, e)
 
         except asyncio.CancelledError:
             raise

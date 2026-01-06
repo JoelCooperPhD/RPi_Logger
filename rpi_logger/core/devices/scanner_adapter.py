@@ -163,8 +163,10 @@ class ScannerEventAdapter:
             - address: str
             - port: int
         """
+        logger.info(f"Network device callback received: {network_device.device_id}")
         spec = get_spec(DeviceType.PUPIL_LABS_NEON)
         if not spec:
+            logger.warning("No spec found for PUPIL_LABS_NEON")
             return
 
         event = discovered_network_device(
@@ -176,6 +178,7 @@ class ScannerEventAdapter:
             address=network_device.address,
             port=network_device.port,
         )
+        logger.info(f"Emitting network device event for {network_device.device_id}")
         await self._emit(event)
 
     async def on_network_device_lost(self, device_id: str) -> None:

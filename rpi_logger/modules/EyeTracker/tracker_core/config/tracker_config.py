@@ -39,9 +39,9 @@ class TrackerConfig:
     overlay_line_start_y: int = 30
 
     # Gaze indicator settings
-    gaze_circle_radius: int = 60
-    gaze_circle_thickness: int = 6
-    gaze_center_radius: int = 4
+    gaze_circle_radius: int = 20
+    gaze_circle_thickness: int = 2
+    gaze_center_radius: int = 2
     gaze_shape: str = "circle"
     gaze_color_worn_b: int = 0
     gaze_color_worn_g: int = 0
