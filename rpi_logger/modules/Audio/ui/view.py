@@ -123,15 +123,6 @@ class AudioView:
             finalize_file()
 
     def _build_device_label(self, snapshot: AudioSnapshot) -> str:
-        selected = list(snapshot.selected_devices.values())
-        if selected:
-            return ""
-            
-        devices = list(snapshot.devices.values())
-        if not devices:
-            return "No Audio Devices Found"
-            
-        names = ", ".join(sorted(info.name for info in devices if info.name))
-        if not names:
-            return f"{len(devices)} device(s) available"
-        return f"Available Devices: {names}"
+        if snapshot.device:
+            return f"Device: {snapshot.device.name}"
+        return "Waiting for device assignment..."

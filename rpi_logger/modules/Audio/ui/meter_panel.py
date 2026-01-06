@@ -69,7 +69,7 @@ class MeterPanel:
     def rebuild(self, snapshot: AudioSnapshot) -> None:
         if tk is None or ttk is None or self._container is None:
             return
-        desired_order = tuple(sorted(snapshot.selected_devices.keys()))
+        desired_order = (snapshot.device.device_id,) if snapshot.device else ()
         if desired_order == self._rendered_devices:
             return
 
@@ -106,7 +106,7 @@ class MeterPanel:
         for device_id, canvas in list(self._meter_canvases.items()):
             if not canvas.winfo_exists():
                 continue
-            meter = snapshot.level_meters.get(device_id)
+            meter = snapshot.level_meter if snapshot.device and snapshot.device.device_id == device_id else None
             if not meter:
                 continue
             items = self._canvas_items.get(device_id)
