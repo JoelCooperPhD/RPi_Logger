@@ -25,6 +25,12 @@ dev = [
     "pyinstaller>=6.0.0",
     "appimage-builder>=1.0.0; sys_platform == 'linux'",
 ]
+test = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-timeout>=2.2.0",
+]
 xbee = [
     "digi-xbee>=1.4.1",
 ]

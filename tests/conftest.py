@@ -1,14 +1,27 @@
 """Shared pytest configuration and fixtures for Logger test suite."""
 
+import asyncio
 import sys
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 # Ensure the project root is in the path for imports
 PROJECT_ROOT = Path(__file__).parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+
+@pytest.fixture(scope="session")
+def event_loop_policy():
+    return asyncio.DefaultEventLoopPolicy()
+
+
+@pytest_asyncio.fixture
+async def async_temp_dir(tmp_path):
+    """Async-compatible temporary directory fixture."""
+    return tmp_path
 
 
 # =============================================================================
