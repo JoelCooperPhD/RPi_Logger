@@ -2,15 +2,11 @@
 """Download offline map tiles for the GPS module."""
 
 import logging
-import sys
 from pathlib import Path
 
-# Configure logging for CLI usage
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    stream=sys.stdout,
-)
+from rpi_logger.core.logging_config import configure_logging
+
+configure_logging(level=logging.INFO, console=True)
 logger = logging.getLogger(__name__)
 
 try:

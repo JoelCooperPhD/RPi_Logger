@@ -5,24 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Optional, Union
 
+from rpi_logger.core.logging_config import LOG_FORMAT
+
 MODULE_LOGGER_NAMESPACE = "rpi_logger"
 DEFAULT_COMPONENT = "Core"
-DEFAULT_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s | %(message)s"
-
-_root_configured = False
-
-
-def _configure_root_logger(level: int = logging.DEBUG) -> None:
-    """Ensure the root logger exists and is configured for DEBUG output."""
-    global _root_configured
-    if _root_configured:
-        return
-    root = logging.getLogger()
-    if not root.handlers:
-        logging.basicConfig(level=level, format=DEFAULT_LOG_FORMAT)
-    else:
-        root.setLevel(level)
-    _root_configured = True
 
 
 def _normalize_logger_name(name: Optional[str]) -> str:
@@ -171,6 +157,7 @@ def get_module_logger(name: Optional[str] = None) -> StructuredLogger:
 
 
 __all__ = [
+    "LOG_FORMAT",
     "StructuredLogger",
     "ensure_structured_logger",
     "get_module_logger",
