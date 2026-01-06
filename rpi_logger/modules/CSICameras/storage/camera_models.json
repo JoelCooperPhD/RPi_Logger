@@ -1,0 +1,384 @@
+{
+  "schema": 1,
+  "models": {
+    "imx296": {
+      "name": "imx296",
+      "backend": "picam",
+      "match_patterns": [
+        "imx296*"
+      ],
+      "capabilities": {
+        "modes": [
+          {
+            "size": [
+              1456,
+              1088
+            ],
+            "fps": 60.38,
+            "pixel_format": "RGB",
+            "controls": {
+              "ExposureLimits": [
+                29,
+                15534385,
+                20000
+              ],
+              "CropLimits": [
+                0,
+                0,
+                1456,
+                1088
+              ],
+              "BitDepth": 10,
+              "NativeFormat": "SRGGB10_CSI2P"
+            }
+          }
+        ],
+        "default_record": {
+          "size": [
+            1456,
+            1088
+          ],
+          "fps": 60.38,
+          "pixel_format": "RGB",
+          "controls": {
+            "ExposureLimits": [
+              29,
+              15534385,
+              20000
+            ],
+            "CropLimits": [
+              0,
+              0,
+              1456,
+              1088
+            ],
+            "BitDepth": 10,
+            "NativeFormat": "SRGGB10_CSI2P"
+          }
+        },
+        "default_preview": {
+          "size": [
+            1456,
+            1088
+          ],
+          "fps": 60.38,
+          "pixel_format": "RGB",
+          "controls": {
+            "ExposureLimits": [
+              29,
+              15534385,
+              20000
+            ],
+            "CropLimits": [
+              0,
+              0,
+              1456,
+              1088
+            ],
+            "BitDepth": 10,
+            "NativeFormat": "SRGGB10_CSI2P"
+          }
+        },
+        "controls": {
+          "ExposureValue": {
+            "name": "ExposureValue",
+            "type": "float",
+            "current": 0.0,
+            "min": -8.0,
+            "max": 8.0,
+            "default": 0.0,
+            "backend_id": "ExposureValue"
+          },
+          "AeEnable": {
+            "name": "AeEnable",
+            "type": "bool",
+            "current": true,
+            "min": false,
+            "max": true,
+            "default": true,
+            "backend_id": "AeEnable"
+          },
+          "Sharpness": {
+            "name": "Sharpness",
+            "type": "float",
+            "current": 1.0,
+            "min": 0.0,
+            "max": 16.0,
+            "default": 1.0,
+            "backend_id": "Sharpness"
+          },
+          "NoiseReductionMode": {
+            "name": "NoiseReductionMode",
+            "type": "enum",
+            "current": 0,
+            "min": 0,
+            "max": 4,
+            "default": 0,
+            "options": [
+              "Off",
+              "Fast",
+              "HighQuality",
+              "Minimal",
+              "ZSL"
+            ],
+            "backend_id": "NoiseReductionMode"
+          },
+          "ScalerCrop": {
+            "name": "ScalerCrop",
+            "type": "unknown",
+            "current": [
+              3,
+              0,
+              1450,
+              1088
+            ],
+            "min": [
+              0,
+              0,
+              41,
+              32
+            ],
+            "max": [
+              0,
+              0,
+              1456,
+              1088
+            ],
+            "default": [
+              3,
+              0,
+              1450,
+              1088
+            ],
+            "backend_id": "ScalerCrop"
+          },
+          "FrameDurationLimits": {
+            "name": "FrameDurationLimits",
+            "type": "tuple",
+            "current": 33333,
+            "min": 16562,
+            "max": 15534444,
+            "default": 33333,
+            "backend_id": "FrameDurationLimits"
+          },
+          "SyncMode": {
+            "name": "SyncMode",
+            "type": "int",
+            "current": 0,
+            "min": 0,
+            "max": 2,
+            "default": 0,
+            "backend_id": "SyncMode"
+          },
+          "SyncFrames": {
+            "name": "SyncFrames",
+            "type": "int",
+            "current": 100,
+            "min": 1,
+            "max": 1000000,
+            "default": 100,
+            "backend_id": "SyncFrames"
+          },
+          "Saturation": {
+            "name": "Saturation",
+            "type": "float",
+            "current": 1.0,
+            "min": 0.0,
+            "max": 32.0,
+            "default": 1.0,
+            "backend_id": "Saturation"
+          },
+          "ColourTemperature": {
+            "name": "ColourTemperature",
+            "type": "unknown",
+            "min": 100,
+            "max": 100000,
+            "backend_id": "ColourTemperature"
+          },
+          "AwbMode": {
+            "name": "AwbMode",
+            "type": "enum",
+            "current": 0,
+            "min": 0,
+            "max": 7,
+            "default": 0,
+            "options": [
+              "Off",
+              "Auto",
+              "Incandescent",
+              "Tungsten",
+              "Fluorescent",
+              "Indoor",
+              "Daylight",
+              "Cloudy",
+              "Custom"
+            ],
+            "backend_id": "AwbMode"
+          },
+          "ColourGains": {
+            "name": "ColourGains",
+            "type": "unknown",
+            "min": 0.0,
+            "max": 32.0,
+            "backend_id": "ColourGains"
+          },
+          "AwbEnable": {
+            "name": "AwbEnable",
+            "type": "unknown",
+            "min": false,
+            "max": true,
+            "backend_id": "AwbEnable"
+          },
+          "CnnEnableInputTensor": {
+            "name": "CnnEnableInputTensor",
+            "type": "bool",
+            "current": false,
+            "min": false,
+            "max": true,
+            "default": false,
+            "backend_id": "CnnEnableInputTensor"
+          },
+          "AeFlickerMode": {
+            "name": "AeFlickerMode",
+            "type": "int",
+            "current": 0,
+            "min": 0,
+            "max": 1,
+            "default": 0,
+            "backend_id": "AeFlickerMode"
+          },
+          "AeExposureMode": {
+            "name": "AeExposureMode",
+            "type": "enum",
+            "current": 0,
+            "min": 0,
+            "max": 3,
+            "default": 0,
+            "options": [
+              "Normal",
+              "Short",
+              "Long",
+              "Custom"
+            ],
+            "backend_id": "AeExposureMode"
+          },
+          "Contrast": {
+            "name": "Contrast",
+            "type": "float",
+            "current": 1.0,
+            "min": 0.0,
+            "max": 32.0,
+            "default": 1.0,
+            "backend_id": "Contrast"
+          },
+          "AeConstraintMode": {
+            "name": "AeConstraintMode",
+            "type": "int",
+            "current": 0,
+            "min": 0,
+            "max": 3,
+            "default": 0,
+            "backend_id": "AeConstraintMode"
+          },
+          "ExposureTimeMode": {
+            "name": "ExposureTimeMode",
+            "type": "int",
+            "current": 0,
+            "min": 0,
+            "max": 1,
+            "default": 0,
+            "backend_id": "ExposureTimeMode"
+          },
+          "HdrMode": {
+            "name": "HdrMode",
+            "type": "int",
+            "current": 0,
+            "min": 0,
+            "max": 4,
+            "default": 0,
+            "backend_id": "HdrMode"
+          },
+          "AeMeteringMode": {
+            "name": "AeMeteringMode",
+            "type": "enum",
+            "current": 0,
+            "min": 0,
+            "max": 3,
+            "default": 0,
+            "options": [
+              "CentreWeighted",
+              "Spot",
+              "Average",
+              "Custom"
+            ],
+            "backend_id": "AeMeteringMode"
+          },
+          "AeFlickerPeriod": {
+            "name": "AeFlickerPeriod",
+            "type": "unknown",
+            "min": 100,
+            "max": 1000000,
+            "backend_id": "AeFlickerPeriod"
+          },
+          "AnalogueGainMode": {
+            "name": "AnalogueGainMode",
+            "type": "int",
+            "current": 0,
+            "min": 0,
+            "max": 1,
+            "default": 0,
+            "backend_id": "AnalogueGainMode"
+          },
+          "Brightness": {
+            "name": "Brightness",
+            "type": "float",
+            "current": 0.0,
+            "min": -1.0,
+            "max": 1.0,
+            "default": 0.0,
+            "backend_id": "Brightness"
+          },
+          "ColourCorrectionMatrix": {
+            "name": "ColourCorrectionMatrix",
+            "type": "unknown",
+            "min": 0.0,
+            "max": 8.0,
+            "backend_id": "ColourCorrectionMatrix"
+          },
+          "AnalogueGain": {
+            "name": "AnalogueGain",
+            "type": "float",
+            "current": 1.0,
+            "min": 1.0,
+            "max": 251.1886444091797,
+            "default": 1.0,
+            "backend_id": "AnalogueGain"
+          },
+          "StatsOutputEnable": {
+            "name": "StatsOutputEnable",
+            "type": "bool",
+            "current": false,
+            "min": false,
+            "max": true,
+            "default": false,
+            "backend_id": "StatsOutputEnable"
+          },
+          "ExposureTime": {
+            "name": "ExposureTime",
+            "type": "int",
+            "current": 20000,
+            "min": 29,
+            "max": 15534385,
+            "default": 20000,
+            "backend_id": "ExposureTime"
+          }
+        },
+        "limits": {
+          "exposure_min": 29,
+          "exposure_max": 15534385
+        }
+      },
+      "tested": "2026-01-05"
+    }
+  }
+}
