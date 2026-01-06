@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+from rpi_logger.core.logging_config import LOG_FORMAT, LOG_DATEFMT
 from rpi_logger.core.logging_utils import get_module_logger
 
 from async_tkinter_loop import async_handler
@@ -481,12 +482,7 @@ class StubCodexView:
             def __init__(self, widget):
                 super().__init__()
                 self.widget = widget
-                self.setFormatter(
-                    logging.Formatter(
-                        '%(asctime)s | %(levelname)s | %(name)s | %(message)s',
-                        datefmt='%H:%M:%S',
-                    )
-                )
+                self.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
 
             def emit(self, record):
                 message = self.format(record) + '\n'

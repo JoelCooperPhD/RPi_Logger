@@ -5,9 +5,10 @@ import logging
 from pathlib import Path
 
 from rpi_logger.core.logging_config import configure_logging
+from rpi_logger.core.logging_utils import get_module_logger
 
 configure_logging(level=logging.INFO, console=True)
-logger = logging.getLogger(__name__)
+logger = get_module_logger("GPS.DownloadTiles")
 
 try:
     from tkintermapview import OfflineLoader

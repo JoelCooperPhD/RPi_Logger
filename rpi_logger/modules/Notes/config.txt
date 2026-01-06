@@ -1,5 +1,6 @@
 display_name = Notes
 enabled = true
+log_level = info
 internal = true
 visible = true
 gui_io_stub_visible = false
@@ -9,6 +10,6 @@ view.show_logger = false
 notes.history_limit = 200
 notes.auto_start = false
 notes.last_archive_path = /home/joel/session_20251207_151248/Notes/20251207_151248_NOTES_trial001.csv
-device_connected = true
+device_connected = false
 window_geometry = 320x200
 preview_resolution = auto

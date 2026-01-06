@@ -1,6 +1,7 @@
 # Stub (codex) shell module configuration
 # Starts disabled by default; module toggles itself off after exit.
 enabled = false
+log_level = info
 display_name = stub (codex)
 preview_resolution = auto
 # Hidden from the Modules view; used for prototyping only.

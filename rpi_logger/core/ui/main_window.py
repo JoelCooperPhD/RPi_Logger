@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from collections import deque
+from rpi_logger.core.logging_config import LOG_FORMAT, LOG_DATEFMT
 from rpi_logger.core.logging_utils import get_module_logger
 import tkinter as tk
 from tkinter import ttk
@@ -33,12 +34,7 @@ class TextHandler(logging.Handler):
         self._closed = False
         # Use bounded deque to prevent unbounded memory growth during active logging
         self._pending_after_ids: deque[str] = deque(maxlen=100)
-        self.setFormatter(
-            logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                datefmt='%H:%M:%S'
-            )
-        )
+        self.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
 
     def emit(self, record: logging.LogRecord) -> None:
         if self._closed:

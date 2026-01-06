@@ -3,6 +3,7 @@ import re
 from collections import deque
 from typing import TYPE_CHECKING, Optional
 
+from rpi_logger.core.logging_config import LOG_FORMAT, LOG_DATEFMT
 from rpi_logger.core.logging_utils import get_module_logger
 
 if TYPE_CHECKING:
@@ -288,12 +289,7 @@ class TkinterGUIBase:
                 # Use a bounded deque to prevent unbounded memory growth
                 # 100 pending callbacks is more than enough for normal operation
                 self._pending_after_ids: deque[str] = deque(maxlen=100)
-                self.setFormatter(
-                    logging.Formatter(
-                        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                        datefmt='%H:%M:%S'
-                    )
-                )
+                self.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
 
             def emit(self, record):
                 if self._closed:

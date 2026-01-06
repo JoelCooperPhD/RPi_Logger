@@ -1,4 +1,5 @@
 enabled = false
+log_level = info
 view.show_io_panel = true
 view.show_logger = true
 display_name = Cameras-USB
