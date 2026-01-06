@@ -40,28 +40,20 @@
             ],
             "fps": 15.0,
             "pixel_format": "MJPEG"
-          },
-          {
-            "size": [
-              1920,
-              1080
-            ],
-            "fps": 15.0,
-            "pixel_format": "MJPEG"
           }
         ],
         "default_record": {
           "size": [
-            1920,
-            1080
+            640,
+            480
           ],
           "fps": 15.0,
           "pixel_format": "MJPEG"
         },
         "default_preview": {
           "size": [
-            640,
-            480
+            320,
+            240
           ],
           "fps": 15.0,
           "pixel_format": "MJPEG"

@@ -91,6 +91,7 @@ class CameraView:
     def _install_metrics_display(self, tk, ttk) -> None:
         builder = getattr(self._stub_view, "build_io_stub_content", None)
         if not callable(builder):
+            self._logger.warning("build_io_stub_content not available - no metrics display")
             return
         fields = [("cap_tgt", "Cap In/Tgt"), ("rec_tgt", "Rec Out/Tgt"), ("disp_tgt", "Disp/Tgt")]
         for key, _ in fields:
@@ -112,8 +113,9 @@ class CameraView:
                 self._metrics_labels[key] = val
         try:
             builder(_builder)
+            self._logger.debug("Metrics display installed: %d fields", len(self._metrics_fields))
         except Exception:
-            pass
+            self._logger.debug("IO stub content build failed", exc_info=True)
 
     def _install_settings_window(self, tk) -> None:
         if self._settings_toggle_var is None:
@@ -294,6 +296,7 @@ class CameraView:
     def update_metrics(self, metrics: Dict[str, Any]) -> None:
         """Update metrics display with FPS values."""
         if not self._has_ui:
+            self._logger.debug("update_metrics called but no UI")
             return
 
         # Capture metrics: fps_capture vs target_fps

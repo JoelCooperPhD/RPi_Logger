@@ -244,18 +244,25 @@ class CamerasRuntime(ModuleRuntime):
     async def _get_capture_settings(self) -> tuple[tuple[int, int], float]:
         """Get resolution/FPS from cache or capabilities (validated)."""
         if not self._validator:
+            self.logger.warning("No validator - using default 1280x720@30")
             return (1280, 720), 30.0
         if self._camera_id and (cached := await self.cache.get_settings(self._camera_id.key)):
+            self.logger.info("Cached settings: %s", cached)
             validated = self._validator.validate_settings(cached)
             res_str, fps_str = validated.get("record_resolution"), validated.get("record_fps")
+            self.logger.info("Validated: res=%s fps=%s", res_str, fps_str)
             if res_str and "x" in res_str and fps_str:
                 try:
                     w, h = map(int, res_str.split("x"))
+                    self.logger.info("Using cached settings: %dx%d @ %s fps", w, h, fps_str)
                     return (w, h), float(fps_str)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.warning("Failed to parse cached settings: %s", e)
+        else:
+            self.logger.info("No cached settings found for %s", self._camera_id.key if self._camera_id else "None")
         if self._capabilities:
             if (dm := self._capabilities.default_record_mode):
+                self.logger.info("Using default_record_mode: %s @ %s fps", dm.size, dm.fps)
                 return dm.size, dm.fps
             if self._capabilities.modes:
                 best = max(self._capabilities.modes, key=lambda m: m.width * m.height)
@@ -400,7 +407,9 @@ class CamerasRuntime(ModuleRuntime):
         """Main capture and preview loop."""
         import time
         if not self._capture:
+            self.logger.warning("Capture loop started but no capture object")
             return
+        self.logger.info("Capture loop starting")
         frame_count, encode_count = 0, 0
         preview_interval = max(1, int(self._fps / self._preview_fps)) if self._preview_fps > 0 else 2
         fps_start, fps_frames, fps_preview, fps_encode = time.monotonic(), 0, 0, 0
@@ -409,6 +418,10 @@ class CamerasRuntime(ModuleRuntime):
             async for frame in self._capture.frames():
                 frame_count += 1
                 fps_frames += 1
+                if frame_count == 1:
+                    self.logger.info("First frame received from capture")
+                elif frame_count % 50 == 0:
+                    self.logger.info("Frame %d received (fps: %.1f)", frame_count, fps_vals[0])
                 now = time.monotonic()
                 if self._is_recording and self._encoder:
                     if self._encoder.write_frame(frame.data, timestamp=frame.wall_time, pts_time_ns=frame.sensor_timestamp_ns, color_format=frame.color_format):
@@ -422,11 +435,13 @@ class CamerasRuntime(ModuleRuntime):
                 if elapsed >= 1.0:
                     fps_vals = [fps_frames / elapsed, fps_preview / elapsed, fps_encode / elapsed]
                     fps_start, fps_frames, fps_preview, fps_encode = now, 0, 0, 0
-                if frame_count % 30 == 0:
+                if frame_count % 5 == 0:
                     metrics = {"frames_captured": frame_count, "frames_recorded": encode_count, "is_recording": self._is_recording, "fps_capture": fps_vals[0], "fps_encode": fps_vals[2] if self._is_recording else None, "fps_preview": fps_vals[1], "target_fps": self._fps, "target_record_fps": self._fps if self._is_recording else None, "target_preview_fps": self._fps / preview_interval}
                     if self._is_recording and self._encoder:
                         metrics["frames_dropped"] = self._encoder.frames_dropped
                         metrics["encode_queue_depth"] = self._encoder.queue_depth
+                    if frame_count == 5:
+                        self.logger.info("First metrics update: fps=%.1f", fps_vals[0])
                     self.view.update_metrics(metrics)
 
         except asyncio.CancelledError:

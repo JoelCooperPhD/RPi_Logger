@@ -301,6 +301,16 @@
       "updated_at": 1764191381.2651064
     },
     "usb:usb1-1-2": {
+      "fingerprint": "-7087979340365904438",
+      "model_key": "arducam_usb_camera",
+      "settings": {
+        "overlay": "true",
+        "preview_fps": "15.0",
+        "preview_resolution": "320x240",
+        "record_audio": "true",
+        "record_fps": "15",
+        "record_resolution": "1280x720"
+      },
       "state": {
         "capabilities": {
           "color_formats": [],
@@ -315,11 +325,11 @@
           },
           "default_record_mode": {
             "controls": {},
-            "fps": 30.0,
+            "fps": 15.0,
             "pixel_format": "MJPEG",
             "size": [
-              1920,
-              1080
+              640,
+              480
             ]
           },
           "limits": {},
@@ -359,15 +369,6 @@
                 1280,
                 720
               ]
-            },
-            {
-              "controls": {},
-              "fps": 30.0,
-              "pixel_format": "MJPEG",
-              "size": [
-                1920,
-                1080
-              ]
             }
           ],
           "source": "probe",
@@ -406,11 +407,11 @@
             "keep_every": null,
             "mode": {
               "controls": {},
-              "fps": 30.0,
+              "fps": 15.0,
               "pixel_format": "MJPEG",
               "size": [
-                1920,
-                1080
+                640,
+                480
               ]
             },
             "overlay": true,
@@ -420,7 +421,7 @@
         },
         "status": "selected"
       },
-      "updated_at": 1764085320.65983
+      "updated_at": 1767676884.0751798
     },
     "usb:usb3-3-1": {
       "fingerprint": "-8587721541981307267",
