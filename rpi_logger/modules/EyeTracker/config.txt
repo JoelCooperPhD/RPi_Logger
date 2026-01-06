@@ -61,9 +61,9 @@ overlay_margin_left = 10
 overlay_line_start_y = 30
 
 # Gaze indicator appearance (used for preview + recording)
-gaze_circle_radius = 60
-gaze_circle_thickness = 6
-gaze_center_radius = 4
+gaze_circle_radius = 30
+gaze_circle_thickness = 3
+gaze_center_radius = 2
 gaze_shape = circle        # circle | cross
 gaze_color_worn_b = 0
 gaze_color_worn_g = 0
@@ -89,11 +89,11 @@ discovery_retry = 3.0     # Seconds between retries
 ################################################################################
 # MASTER LOGGER INTEGRATION
 ################################################################################
-enabled = true
+enabled = false
 preview_resolution = auto
 gui_io_stub_visible = false
 view.show_io_panel = true
 view.show_logger = true
 window_geometry = 320x200
-device_connected = true
+device_connected = false
 eyetracker_config_dialog_geometry = +392+790
