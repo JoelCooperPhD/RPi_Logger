@@ -111,6 +111,12 @@ class GPSMapRenderer:
         self.set_zoom(self._current_zoom + delta)
         return self._current_zoom
 
+    def can_zoom_in(self) -> bool:
+        return self._current_zoom < MAX_ZOOM_LEVEL
+
+    def can_zoom_out(self) -> bool:
+        return self._current_zoom > MIN_ZOOM_LEVEL
+
     def add_position_to_trajectory(self, lat: float, lon: float) -> None:
         """Add position to trajectory history.
 
@@ -155,7 +161,7 @@ class GPSMapRenderer:
         Returns:
             Tuple of (rendered image, info string)
         """
-        zoom_int = max(0, int(round(zoom)))
+        zoom_int = max(int(MIN_ZOOM_LEVEL), min(int(MAX_ZOOM_LEVEL), int(round(zoom))))
         display_grid = GRID_SIZE
         load_grid = display_grid + 2
         display_size = display_grid * TILE_SIZE

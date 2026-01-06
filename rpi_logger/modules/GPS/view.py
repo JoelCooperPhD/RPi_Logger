@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 
 from rpi_logger.core.logging_utils import ensure_structured_logger, get_module_logger
 from vmc import LegacyTkViewBridge, StubCodexView
@@ -48,6 +49,13 @@ except ImportError:
     GPSConfigWindow = None
 
 ActionCallback = Optional[Callable[..., Awaitable[None]]]
+
+FIX_QUALITY_DESC = {
+    0: "Invalid", 1: "GPS", 2: "DGPS", 3: "PPS",
+    4: "RTK", 5: "Float RTK", 6: "Est", 7: "Manual", 8: "Sim"
+}
+
+CARDINAL_DIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
 
 
 class _SystemPlaceholder:
@@ -127,71 +135,283 @@ class GPSTkinterGUI:
         self._map_canvas: Optional[tk.Canvas] = None
         self._map_photo = None  # Keep reference to prevent garbage collection
 
+        # Split layout components
+        self._paned_window: Optional[tk.PanedWindow] = None
+        self._map_frame: Optional[tk.Frame] = None
+        self._dashboard_frame: Optional[tk.Frame] = None
+        self._zoom_in_btn = None
+        self._zoom_out_btn = None
+        self._telemetry_vars: Dict[str, tk.StringVar] = {}
+        self._telemetry_labels: Dict[str, tk.Label] = {}
+        self._zoom_callback: Optional[Callable] = None
+
         # Create UI
         if embedded_parent:
             self._build_ui(embedded_parent)
 
     def _build_ui(self, parent: tk.Widget):
-        """Build the embedded UI container."""
-        # Main frame
-        self._frame = ttk.Frame(parent)
+        bg = Colors.BG_DARK if HAS_THEME and Colors else "gray20"
+        fg = Colors.FG_PRIMARY if HAS_THEME and Colors else "white"
+        fg_sec = Colors.FG_SECONDARY if HAS_THEME and Colors else "gray70"
+
+        self._frame = tk.Frame(parent, bg=bg)
         self._frame.pack(fill=tk.BOTH, expand=True)
         self._frame.columnconfigure(0, weight=1)
         self._frame.rowconfigure(0, weight=1)
 
-        # Content frame - runtime will populate this
-        self._content_frame = ttk.Frame(self._frame)
+        self._content_frame = tk.Frame(self._frame, bg=bg)
         self._content_frame.grid(row=0, column=0, sticky="NSEW")
         self._content_frame.columnconfigure(0, weight=1)
         self._content_frame.rowconfigure(0, weight=1)
 
         # Status label for when no device is connected
-        if HAS_THEME and Colors is not None:
-            self._status_label = tk.Label(
-                self._content_frame,
-                text="Waiting for GPS device...",
-                bg=Colors.BG_FRAME,
-                fg=Colors.FG_SECONDARY,
-                font=("TkDefaultFont", 11),
-            )
-        else:
-            self._status_label = ttk.Label(
-                self._content_frame,
-                text="Waiting for GPS device...",
-            )
+        self._status_label = tk.Label(
+            self._content_frame,
+            text="Waiting for GPS device...",
+            bg=bg,
+            fg=fg_sec,
+            font=("TkDefaultFont", 11),
+        )
         self._status_label.grid(row=0, column=0)
 
-        # Map canvas for displaying rendered tiles (hidden until device connects)
-        bg_color = Colors.BG_FRAME if HAS_THEME and Colors else "gray20"
-        self._map_canvas = tk.Canvas(
+        # PanedWindow for split layout (hidden until device connects)
+        self._paned_window = tk.PanedWindow(
             self._content_frame,
-            bg=bg_color,
-            highlightthickness=0,
+            orient=tk.HORIZONTAL,
+            bg=bg,
+            sashwidth=4,
+            sashrelief=tk.FLAT,
         )
-        # Canvas starts hidden - shown when device connects
+
+        # Build map panel (left side)
+        self._build_map_panel(self._paned_window)
+        self._paned_window.add(self._map_frame, minsize=300, stretch="always")
+
+        # Build dashboard panel (right side)
+        self._build_dashboard_panel(self._paned_window)
+        self._paned_window.add(self._dashboard_frame, minsize=180, stretch="never")
+
+    def _build_map_panel(self, parent):
+        bg = Colors.BG_FRAME if HAS_THEME and Colors else "gray25"
+
+        self._map_frame = tk.Frame(parent, bg=bg)
+
+        # Map canvas fills the frame
+        self._map_canvas = tk.Canvas(self._map_frame, bg=bg, highlightthickness=0)
+        self._map_canvas.pack(fill=tk.BOTH, expand=True)
+
+        # Zoom button container - overlaid in top-right
+        zoom_frame = tk.Frame(self._map_frame, bg=bg)
+        zoom_frame.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
+
+        btn_bg = Colors.BTN_DEFAULT_BG if HAS_THEME and Colors else "#404040"
+        btn_fg = Colors.BTN_DEFAULT_FG if HAS_THEME and Colors else "white"
+
+        self._zoom_in_btn = tk.Button(
+            zoom_frame, text="+", font=("TkDefaultFont", 14, "bold"),
+            width=2, height=1, bg=btn_bg, fg=btn_fg,
+            activebackground=Colors.BTN_DEFAULT_HOVER if HAS_THEME and Colors else "#505050",
+            relief=tk.FLAT, command=self._on_zoom_in
+        )
+        self._zoom_in_btn.pack(pady=(0, 2))
+
+        self._zoom_out_btn = tk.Button(
+            zoom_frame, text="-", font=("TkDefaultFont", 14, "bold"),
+            width=2, height=1, bg=btn_bg, fg=btn_fg,
+            activebackground=Colors.BTN_DEFAULT_HOVER if HAS_THEME and Colors else "#505050",
+            relief=tk.FLAT, command=self._on_zoom_out
+        )
+        self._zoom_out_btn.pack()
+
+    def _build_dashboard_panel(self, parent):
+        bg = Colors.BG_DARK if HAS_THEME and Colors else "gray20"
+        fg = Colors.FG_PRIMARY if HAS_THEME and Colors else "white"
+        fg_sec = Colors.FG_SECONDARY if HAS_THEME and Colors else "gray70"
+        fg_muted = Colors.FG_MUTED if HAS_THEME and Colors else "gray50"
+
+        self._dashboard_frame = tk.Frame(parent, bg=bg)
+
+        # Title
+        title = tk.Label(
+            self._dashboard_frame, text="GPS TELEMETRY",
+            bg=bg, fg=fg, font=("TkDefaultFont", 10, "bold")
+        )
+        title.pack(pady=(8, 4), padx=8, anchor="w")
+
+        # Initialize all StringVars with placeholder values
+        metrics = [
+            "lat", "lon", "alt", "speed", "heading",
+            "sats", "hdop", "fix_mode", "fix_quality", "gps_time"
+        ]
+        for m in metrics:
+            self._telemetry_vars[m] = tk.StringVar(value="---")
+
+        # POSITION group
+        self._build_metric_group("POSITION", [
+            ("Lat", "lat", ""),
+            ("Lon", "lon", ""),
+            ("Alt", "alt", "m"),
+        ])
+
+        # MOTION group
+        self._build_metric_group("MOTION", [
+            ("Speed", "speed", "mph"),
+            ("Heading", "heading", ""),
+        ])
+
+        # SIGNAL group
+        self._build_metric_group("SIGNAL", [
+            ("Sats", "sats", ""),
+            ("HDOP", "hdop", ""),
+            ("Fix", "fix_mode", ""),
+            ("Quality", "fix_quality", ""),
+        ])
+
+        # TIME group
+        self._build_metric_group("TIME", [
+            ("GPS", "gps_time", ""),
+        ])
+
+    def _build_metric_group(self, title: str, metrics: list):
+        bg = Colors.BG_DARK if HAS_THEME and Colors else "gray20"
+        bg_frame = Colors.BG_FRAME if HAS_THEME and Colors else "gray25"
+        fg = Colors.FG_PRIMARY if HAS_THEME and Colors else "white"
+        fg_sec = Colors.FG_SECONDARY if HAS_THEME and Colors else "gray70"
+
+        # Group frame with border
+        group = tk.Frame(self._dashboard_frame, bg=bg_frame, relief=tk.FLAT)
+        group.pack(fill=tk.X, padx=6, pady=3)
+
+        # Group title
+        lbl = tk.Label(group, text=title, bg=bg_frame, fg=fg_sec, font=("TkDefaultFont", 8))
+        lbl.pack(anchor="w", padx=4, pady=(2, 0))
+
+        # Metrics
+        for label_text, var_key, unit in metrics:
+            row = tk.Frame(group, bg=bg_frame)
+            row.pack(fill=tk.X, padx=4, pady=1)
+
+            lbl = tk.Label(row, text=label_text, bg=bg_frame, fg=fg_sec,
+                          font=("TkDefaultFont", 9), width=7, anchor="w")
+            lbl.pack(side=tk.LEFT)
+
+            val_lbl = tk.Label(row, textvariable=self._telemetry_vars[var_key],
+                              bg=bg_frame, fg=fg, font=("TkFixedFont", 10), anchor="e")
+            val_lbl.pack(side=tk.RIGHT, fill=tk.X, expand=True)
+            self._telemetry_labels[var_key] = val_lbl
+
+            if unit:
+                unit_lbl = tk.Label(row, text=unit, bg=bg_frame, fg=fg_sec,
+                                   font=("TkDefaultFont", 8), width=4, anchor="w")
+                unit_lbl.pack(side=tk.RIGHT)
+
+    def _on_zoom_in(self):
+        if self._zoom_callback:
+            self._zoom_callback(1)
+
+    def _on_zoom_out(self):
+        if self._zoom_callback:
+            self._zoom_callback(-1)
+
+    # ------------------------------------------------------------------
+    # Value formatting helpers
+
+    def _format_coord(self, val: Optional[float], is_lat: bool) -> str:
+        if val is None:
+            return "---"
+        direction = ("N" if val >= 0 else "S") if is_lat else ("E" if val >= 0 else "W")
+        return f"{abs(val):.6f} {direction}"
+
+    def _format_float(self, val: Optional[float], decimals: int = 1) -> str:
+        if val is None:
+            return "---"
+        return f"{val:.{decimals}f}"
+
+    def _format_heading(self, deg: Optional[float]) -> str:
+        if deg is None:
+            return "---"
+        idx = int((deg + 22.5) / 45) % 8
+        cardinal = CARDINAL_DIRS[idx]
+        return f"{deg:.0f}° {cardinal}"
+
+    def _format_satellites(self, in_use: Optional[int], in_view: Optional[int]) -> str:
+        u = str(in_use) if in_use is not None else "--"
+        v = str(in_view) if in_view is not None else "--"
+        return f"{u} / {v}"
+
+    def _format_time(self, ts: Optional[datetime]) -> str:
+        if ts is None:
+            return "--:--:-- Z"
+        return ts.strftime("%H:%M:%S Z")
+
+    def _format_fix_quality(self, quality: Optional[int]) -> str:
+        if quality is None:
+            return "---"
+        desc = FIX_QUALITY_DESC.get(quality, "?")
+        return f"{quality} ({desc})"
+
+    # ------------------------------------------------------------------
+    # Dashboard update
+
+    def update_dashboard(self, fix) -> None:
+        if fix is None:
+            # Reset to placeholders
+            for var in self._telemetry_vars.values():
+                var.set("---")
+            self._telemetry_vars["sats"].set("-- / --")
+            self._telemetry_vars["gps_time"].set("--:--:-- Z")
+            return
+
+        # Position
+        self._telemetry_vars["lat"].set(self._format_coord(fix.latitude, is_lat=True))
+        self._telemetry_vars["lon"].set(self._format_coord(fix.longitude, is_lat=False))
+        self._telemetry_vars["alt"].set(self._format_float(fix.altitude_m, 1))
+
+        # Motion
+        self._telemetry_vars["speed"].set(self._format_float(fix.speed_mph, 1))
+        self._telemetry_vars["heading"].set(self._format_heading(fix.course_deg))
+
+        # Signal quality
+        self._telemetry_vars["sats"].set(
+            self._format_satellites(fix.satellites_in_use, fix.satellites_in_view)
+        )
+        self._telemetry_vars["hdop"].set(self._format_float(fix.hdop, 1))
+        self._telemetry_vars["fix_mode"].set(fix.fix_mode or "No Fix")
+        self._telemetry_vars["fix_quality"].set(self._format_fix_quality(fix.fix_quality))
+
+        # Time
+        self._telemetry_vars["gps_time"].set(self._format_time(fix.timestamp))
+
+        # Color-code fix mode based on validity
+        if "fix_mode" in self._telemetry_labels:
+            lbl = self._telemetry_labels["fix_mode"]
+            if fix.fix_mode == "3D":
+                color = Colors.SUCCESS if HAS_THEME and Colors else "#2ecc71"
+            elif fix.fix_mode == "2D":
+                color = Colors.WARNING if HAS_THEME and Colors else "#f39c12"
+            else:
+                color = Colors.ERROR if HAS_THEME and Colors else "#e74c3c"
+            lbl.configure(fg=color)
 
     def get_content_frame(self) -> Optional[tk.Widget]:
         """Get the content frame for runtime to populate."""
         return self._content_frame
 
     def on_device_connected(self, device_id: str, port: str = None):
-        """Handle device connection."""
         self.logger.info("GPS device connected: %s (port: %s)", device_id, port)
         self._device_id = device_id
         self._port = port
         self._connected = True
 
-        # Hide status label and show map canvas
+        # Hide status label and show paned window with map + dashboard
         if self._status_label:
             self._status_label.grid_forget()
-        if self._map_canvas:
-            self._map_canvas.grid(row=0, column=0, sticky="NSEW")
+        if self._paned_window:
+            self._paned_window.grid(row=0, column=0, sticky="NSEW")
 
-        # Update window title
         self._update_window_title()
 
     def on_device_disconnected(self, device_id: str):
-        """Handle device disconnection."""
         self.logger.info("GPS device disconnected: %s", device_id)
 
         if self._device_id != device_id:
@@ -201,17 +421,16 @@ class GPSTkinterGUI:
         self._port = None
         self._connected = False
 
-        # Hide map canvas and show status label
-        if self._map_canvas:
-            self._map_canvas.grid_forget()
+        # Hide paned window and show status label
+        if self._paned_window:
+            self._paned_window.grid_forget()
         if self._status_label:
             self._status_label.configure(text="GPS device disconnected")
             self._status_label.grid(row=0, column=0)
 
         self._update_window_title()
 
-    def update_map_display(self, pil_image, info_str: str = "") -> None:
-        """Update map canvas with rendered image from GPS data."""
+    def update_map_display(self, pil_image, info_str: str = "", fix=None) -> None:
         if not self._map_canvas or not HAS_PIL or pil_image is None:
             return
         try:
@@ -220,6 +439,10 @@ class GPSTkinterGUI:
             self._map_canvas.create_image(0, 0, image=self._map_photo, anchor="nw")
         except Exception as e:
             self.logger.warning("Failed to update map display: %s", e)
+
+        # Update dashboard with fix data
+        if fix is not None:
+            self.update_dashboard(fix)
 
     def update_connection_status(self, connected: bool, error: Optional[str] = None):
         """Update connection status display."""
@@ -433,26 +656,47 @@ class GPSView:
         # Apply pending runtime binding if bind_runtime was called before GUI was created
         if self._runtime:
             gui.system = self._runtime
+            gui._zoom_callback = self._handle_zoom_request
             self.logger.info("Applied pending runtime binding to GUI")
 
         return container
 
     def bind_runtime(self, runtime) -> None:
-        """Allow the runtime to expose its API to the GUI once ready."""
         self._runtime = runtime
         if not self.gui:
             self.logger.warning("bind_runtime called but self.gui is None")
             return
         self.gui.system = runtime
+        self.gui._zoom_callback = self._handle_zoom_request
         self.logger.info("Runtime bound to GUI (system=%s)", type(runtime).__name__)
         if isinstance(self.gui.async_bridge, _LoopAsyncBridge):
             loop = getattr(runtime, "_loop", None)
             if loop:
                 self.gui.async_bridge.bind_loop(loop)
-        # Set data folder subdirectory for File menu
         if hasattr(self._stub_view, 'set_data_subdir'):
             module_subdir = getattr(runtime, 'module_subdir', 'GPS')
             self._stub_view.set_data_subdir(module_subdir)
+
+    def _handle_zoom_request(self, delta: int) -> None:
+        if not self._runtime:
+            return
+        renderer = getattr(self._runtime, 'get_map_renderer', lambda: None)()
+        if renderer:
+            renderer.adjust_zoom(delta)
+            # Update button states based on zoom limits
+            if self.gui:
+                self.call_in_gui(self._update_zoom_button_states, renderer)
+
+    def _update_zoom_button_states(self, renderer) -> None:
+        if not self.gui:
+            return
+        can_in = renderer.can_zoom_in() if hasattr(renderer, 'can_zoom_in') else True
+        can_out = renderer.can_zoom_out() if hasattr(renderer, 'can_zoom_out') else True
+
+        if self.gui._zoom_in_btn:
+            self.gui._zoom_in_btn.configure(state="normal" if can_in else "disabled")
+        if self.gui._zoom_out_btn:
+            self.gui._zoom_out_btn.configure(state="normal" if can_out else "disabled")
 
     def get_content_frame(self) -> Optional[Any]:
         """Get the content frame for runtime to build UI into."""
@@ -495,10 +739,13 @@ class GPSView:
         self.call_in_gui(self.gui.sync_recording_state)
 
     def on_gps_data(self, device_id: str, fix, pil_image=None, info_str: str = "") -> None:
-        """Handle GPS data update from runtime - update map display."""
-        if not self.gui or pil_image is None:
+        if not self.gui:
             return
-        self.call_in_gui(self.gui.update_map_display, pil_image, info_str)
+        # Always update dashboard with fix, update map only if we have an image
+        if pil_image is not None:
+            self.call_in_gui(self.gui.update_map_display, pil_image, info_str, fix)
+        elif fix is not None:
+            self.call_in_gui(self.gui.update_dashboard, fix)
 
     def set_window_title(self, title: str) -> None:
         """Set the window title."""
