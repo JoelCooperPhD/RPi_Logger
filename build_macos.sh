@@ -66,6 +66,15 @@ python -m nuitka \
     --nofollow-import-to=matplotlib.backends.backend_pgf \
     --nofollow-import-to=PIL.ImageQt \
     --nofollow-import-to=tkintermapview \
+    --nofollow-import-to=scipy \
+    --nofollow-import-to=scipy.stats \
+    --nofollow-import-to=scipy.optimize \
+    --nofollow-import-to=scipy.interpolate \
+    --nofollow-import-to=pandas \
+    --nofollow-import-to=pandas.core \
+    --nofollow-import-to=IPython \
+    --nofollow-import-to=jupyter \
+    --nofollow-import-to=notebook \
     --noinclude-custom-mode=zeroconf:bytecode \
     --include-data-dir=rpi_logger/core/ui=rpi_logger/core/ui \
     --include-data-file=config.txt=config.txt \
