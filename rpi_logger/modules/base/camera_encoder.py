@@ -18,12 +18,18 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Optional
 
-import cv2
 import numpy as np
 
 from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
+
+try:
+    import cv2
+    _HAS_CV2 = True
+except ImportError:
+    cv2 = None
+    _HAS_CV2 = False
 
 try:
     import av
@@ -304,6 +310,8 @@ class Encoder:
         self._kind = "pyav"
 
     def _start_opencv(self) -> None:
+        if not _HAS_CV2:
+            raise RuntimeError("OpenCV not available for video encoding")
         fourcc = cv2.VideoWriter_fourcc(*"MJPG")
         self._writer = cv2.VideoWriter(
             self.video_path,
@@ -459,13 +467,14 @@ class Encoder:
             pass
 
     def _apply_overlay(self, frame: np.ndarray, timestamp: float, frame_number: int) -> np.ndarray:
-        # Format timestamp
+        if not _HAS_CV2:
+            return frame
+
         from datetime import datetime, timezone
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         text = f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{int((timestamp % 1) * 1000):03d} #{frame_number}"
 
-        # Draw text on frame
-        frame = frame.copy()  # Don't modify original
+        frame = frame.copy()
         cv2.putText(
             frame,
             text,

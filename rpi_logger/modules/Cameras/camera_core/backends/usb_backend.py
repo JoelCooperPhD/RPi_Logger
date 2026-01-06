@@ -6,8 +6,14 @@ import asyncio, concurrent.futures, contextlib, re, subprocess, sys, time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-import cv2
 import numpy as np
+
+try:
+    import cv2
+    _HAS_CV2 = True
+except ImportError:
+    cv2 = None
+    _HAS_CV2 = False
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 from rpi_logger.modules.base.camera_types import CapabilityMode, CameraCapabilities, ControlInfo, ControlType
@@ -15,15 +21,23 @@ from rpi_logger.modules.Cameras.camera_core.capabilities import build_capabiliti
 from rpi_logger.modules.Cameras.utils import set_usb_control_v4l2, to_snake_case, open_videocapture
 
 USB_CONTROL_PROPS: Dict[str, int] = {
-    "Brightness": cv2.CAP_PROP_BRIGHTNESS, "Contrast": cv2.CAP_PROP_CONTRAST,
-    "Saturation": cv2.CAP_PROP_SATURATION, "Hue": cv2.CAP_PROP_HUE,
-    "Gain": cv2.CAP_PROP_GAIN, "Gamma": cv2.CAP_PROP_GAMMA,
-    "Exposure": cv2.CAP_PROP_EXPOSURE, "AutoExposure": cv2.CAP_PROP_AUTO_EXPOSURE,
-    "WhiteBalanceBlueU": cv2.CAP_PROP_WHITE_BALANCE_BLUE_U, "WhiteBalanceRedV": cv2.CAP_PROP_WHITE_BALANCE_RED_V,
-    "Focus": cv2.CAP_PROP_FOCUS, "AutoFocus": cv2.CAP_PROP_AUTOFOCUS,
-    "Zoom": cv2.CAP_PROP_ZOOM, "Backlight": cv2.CAP_PROP_BACKLIGHT,
-    "Pan": cv2.CAP_PROP_PAN, "Tilt": cv2.CAP_PROP_TILT,
-}
+    "Brightness": cv2.CAP_PROP_BRIGHTNESS if _HAS_CV2 else 0,
+    "Contrast": cv2.CAP_PROP_CONTRAST if _HAS_CV2 else 0,
+    "Saturation": cv2.CAP_PROP_SATURATION if _HAS_CV2 else 0,
+    "Hue": cv2.CAP_PROP_HUE if _HAS_CV2 else 0,
+    "Gain": cv2.CAP_PROP_GAIN if _HAS_CV2 else 0,
+    "Gamma": cv2.CAP_PROP_GAMMA if _HAS_CV2 else 0,
+    "Exposure": cv2.CAP_PROP_EXPOSURE if _HAS_CV2 else 0,
+    "AutoExposure": cv2.CAP_PROP_AUTO_EXPOSURE if _HAS_CV2 else 0,
+    "WhiteBalanceBlueU": cv2.CAP_PROP_WHITE_BALANCE_BLUE_U if _HAS_CV2 else 0,
+    "WhiteBalanceRedV": cv2.CAP_PROP_WHITE_BALANCE_RED_V if _HAS_CV2 else 0,
+    "Focus": cv2.CAP_PROP_FOCUS if _HAS_CV2 else 0,
+    "AutoFocus": cv2.CAP_PROP_AUTOFOCUS if _HAS_CV2 else 0,
+    "Zoom": cv2.CAP_PROP_ZOOM if _HAS_CV2 else 0,
+    "Backlight": cv2.CAP_PROP_BACKLIGHT if _HAS_CV2 else 0,
+    "Pan": cv2.CAP_PROP_PAN if _HAS_CV2 else 0,
+    "Tilt": cv2.CAP_PROP_TILT if _HAS_CV2 else 0,
+} if _HAS_CV2 else {}
 BOOLEAN_CONTROLS = {"AutoExposure", "AutoFocus"}
 
 
@@ -216,6 +230,8 @@ def _update_menu_opts(controls: Dict[str, ControlInfo], name: str, opts: List[tu
 
 
 async def probe(dev_path: str, *, logger: LoggerLike = None) -> Optional[CameraCapabilities]:
+    if not _HAS_CV2:
+        return None
     return await asyncio.to_thread(_probe_sync, dev_path, ensure_structured_logger(logger, fallback_name=__name__))
 
 
@@ -280,6 +296,8 @@ def _probe_sync(dev_path: str, log) -> Optional[CameraCapabilities]:
 
 
 async def open_device(dev_path: str, mode: CapabilityMode, *, logger: LoggerLike = None) -> USBHandle:
+    if not _HAS_CV2:
+        raise DeviceLost("OpenCV not available for USB camera support")
     handle = USBHandle(dev_path, mode, logger=logger)
     await handle.start()
     if not handle.is_alive():
