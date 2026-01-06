@@ -653,6 +653,17 @@ class RecordingManager(RecordingManagerBase):
 
         wave_file: Optional[wave.Wave_write] = None
 
+        def _open_wave(filename: str, channels: int, sample_rate: int) -> wave.Wave_write:
+            wf = wave.open(filename, "wb")
+            wf.setnchannels(channels)
+            wf.setsampwidth(2)  # 16-bit
+            wf.setframerate(sample_rate)
+            return wf
+
+        def _write_chunks(wf: wave.Wave_write, chunks: list[bytes]) -> None:
+            for chunk in chunks:
+                wf.writeframes(chunk)
+
         try:
             while True:
                 item = await self._audio_frame_queue.get()
@@ -664,13 +675,11 @@ class RecordingManager(RecordingManagerBase):
                     continue
 
                 if wave_file is None:
-                    wave_file = wave.open(self.audio_filename, "wb")
-                    wave_file.setnchannels(channels)
-                    wave_file.setsampwidth(2)  # 16-bit
-                    wave_file.setframerate(sample_rate)
+                    wave_file = await asyncio.to_thread(
+                        _open_wave, self.audio_filename, channels, sample_rate
+                    )
 
-                for chunk in chunks:
-                    wave_file.writeframes(chunk)
+                await asyncio.to_thread(_write_chunks, wave_file, chunks)
 
         except asyncio.CancelledError:
             raise
@@ -678,7 +687,7 @@ class RecordingManager(RecordingManagerBase):
             logger.error("Audio writer loop failed: %s", exc)
         finally:
             if wave_file is not None:
-                wave_file.close()
+                await asyncio.to_thread(wave_file.close)
 
     def _prepare_audio_frame(
         self, audio_frame: "AudioFrame"

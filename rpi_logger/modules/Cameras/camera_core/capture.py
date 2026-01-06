@@ -53,16 +53,20 @@ class USBCapture(CaptureHandle):
         if sys.platform == "linux" and isinstance(self._dev_path, str) and self._dev_path.startswith("/dev/video"):
             import subprocess
             try:
-                subprocess.run(["v4l2-ctl", "-d", self._dev_path, "-c", "exposure_dynamic_framerate=0"], capture_output=True, timeout=2.0)
+                await asyncio.to_thread(
+                    subprocess.run,
+                    ["v4l2-ctl", "-d", self._dev_path, "-c", "exposure_dynamic_framerate=0"],
+                    capture_output=True,
+                    timeout=2.0
+                )
             except Exception:
                 pass
 
         # Read a test frame to verify the camera works (with retry for cameras that need warmup)
-        import time as _time
         for attempt in range(3):
             if attempt > 0:
-                _time.sleep(0.2)
-            success, _ = self._cap.read()
+                await asyncio.sleep(0.2)
+            success, _ = await asyncio.to_thread(self._cap.read)
             if success:
                 break
             logger.debug("USB camera %s test frame attempt %d failed, retrying...", self._dev_path, attempt + 1)
@@ -138,7 +142,7 @@ class USBCapture(CaptureHandle):
             # Ensure thread cleanup even if iterator is abandoned
             self._running = False
             if thread.is_alive():
-                thread.join(timeout=2.0)
+                await asyncio.to_thread(thread.join, 2.0)
                 if thread.is_alive():
                     logger.warning("Capture thread did not stop in time, proceeding with cleanup")
             self._capture_thread = None

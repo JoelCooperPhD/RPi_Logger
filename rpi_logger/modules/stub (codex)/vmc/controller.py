@@ -148,12 +148,26 @@ class StubCodexController:
                     self.logger.debug("Failed to parse command: %s", line[:100])
                     continue
 
-                self.logger.info("Received command: %s", command.get("command", "unknown"))
+                # Debug log for command reception
+                import os as _os
+                import time as _time
+                def _recv_debug(msg: str) -> None:
+                    ts = _time.strftime('%H:%M:%S') + f'.{int((_time.time() % 1) * 1000):03d}'
+                    try:
+                        with open('/tmp/csi_debug.log', 'a') as f:
+                            f.write(f"{ts} [STDIN_CMD] [{_os.getpid()}] {msg}\n")
+                            f.flush()
+                    except Exception:
+                        pass
+
+                cmd_name = command.get("command", "unknown")
+                _recv_debug(f"COMMAND_RECEIVED cmd={cmd_name} device_id={command.get('device_id')}")
+                self.logger.info("Received command: %s", cmd_name)
                 await self._process_command(command)
         finally:
             shutdown_flag.set()
             if self._stdin_thread:
-                self._stdin_thread.join(timeout=0.5)
+                await asyncio.to_thread(self._stdin_thread.join, 0.5)
                 self._stdin_thread = None
 
     async def request_shutdown(self, reason: str) -> None:
@@ -201,10 +215,24 @@ class StubCodexController:
 
         if not handled and self._runtime:
             self.logger.info("Forwarding command to runtime: %s", action)
+            # Debug log for command forwarding
+            import os as _os
+            import time as _time
+            def _ctrl_debug(msg: str) -> None:
+                ts = _time.strftime('%H:%M:%S') + f'.{int((_time.time() % 1) * 1000):03d}'
+                try:
+                    with open('/tmp/csi_debug.log', 'a') as f:
+                        f.write(f"{ts} [CONTROLLER] [{_os.getpid()}] {msg}\n")
+                        f.flush()
+                except Exception:
+                    pass
+            _ctrl_debug(f"FORWARDING_TO_RUNTIME action={action} device_id={command.get('device_id')}")
             try:
                 handled = await self._runtime.handle_command(command)
+                _ctrl_debug(f"RUNTIME_HANDLED action={action} result={handled}")
                 self.logger.info("Runtime handled command %s: %s", action, handled)
             except Exception:
+                _ctrl_debug(f"RUNTIME_EXCEPTION action={action}")
                 self.logger.exception("Runtime command handler failed [%s]", action)
                 handled = True
         elif not handled:

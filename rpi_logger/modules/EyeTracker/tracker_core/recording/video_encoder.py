@@ -131,14 +131,16 @@ class VideoEncoder:
         """Sync file to disk for crash safety."""
         if self._output_path is None:
             return
-        try:
-            # For FFmpeg subprocess, we can't directly fsync the pipe
-            # but we can fsync the output file periodically
-            fd = os.open(str(self._output_path), os.O_RDONLY)
+
+        def _do_fsync(path: Path) -> None:
+            fd = os.open(str(path), os.O_RDONLY)
             try:
                 os.fsync(fd)
             finally:
                 os.close(fd)
+
+        try:
+            await asyncio.to_thread(_do_fsync, self._output_path)
         except (OSError, FileNotFoundError):
             pass  # File may not exist yet or be locked
 

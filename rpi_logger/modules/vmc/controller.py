@@ -149,7 +149,7 @@ class StubCodexController:
         finally:
             shutdown_flag.set()
             if self._stdin_thread:
-                self._stdin_thread.join(timeout=0.5)
+                await asyncio.to_thread(self._stdin_thread.join, 0.5)
                 self._stdin_thread = None
 
     async def request_shutdown(self, reason: str) -> None:

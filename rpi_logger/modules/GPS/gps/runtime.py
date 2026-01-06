@@ -388,7 +388,8 @@ class GPSModuleRuntime(ModuleRuntime):
             return
 
         for device_id, handler in self.handlers.items():
-            if handler.start_recording(self._active_trial_number):
+            result = await asyncio.to_thread(handler.start_recording, self._active_trial_number)
+            if result:
                 self.logger.info("Started recording on %s", device_id)
             else:
                 self.logger.error("Failed to start recording on %s", device_id)
@@ -411,7 +412,7 @@ class GPSModuleRuntime(ModuleRuntime):
             return
 
         for device_id, handler in self.handlers.items():
-            handler.stop_recording()
+            await asyncio.to_thread(handler.stop_recording)
             self.logger.info("Stopped recording on %s", device_id)
 
         self._recording_active = False
