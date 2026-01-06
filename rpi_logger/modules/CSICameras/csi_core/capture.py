@@ -78,6 +78,7 @@ class PicamCapture(CaptureHandle):
             config["lores"] = {
                 "size": self._lores_size,
                 "format": "YUV420",
+                "preserve_ar": False,  # Required by newer Picamera2 versions
             }
             logger.info("Enabling lores stream: %s (YUV420)", self._lores_size)
 

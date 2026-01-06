@@ -389,6 +389,10 @@ class CSICameraView:
 
     def push_frame(self, ppm_data: Optional[bytes]) -> None:
         """Display preview frame (pre-scaled PPM)."""
+        if self._frame_count < 5:
+            self._logger.info("push_frame called: has_ui=%s, canvas=%s, ppm_len=%s",
+                             self._has_ui, self._canvas is not None,
+                             len(ppm_data) if ppm_data else None)
         if not self._has_ui or not self._canvas:
             return
 
