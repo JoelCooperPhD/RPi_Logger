@@ -24,6 +24,14 @@ except ImportError:
     ttk = None
 
 try:
+    from PIL import Image, ImageTk
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+    Image = None
+    ImageTk = None
+
+try:
     from rpi_logger.core.ui.theme.styles import Theme
     from rpi_logger.core.ui.theme.widgets import RoundedButton
     from rpi_logger.core.ui.theme.colors import Colors
@@ -116,6 +124,8 @@ class GPSTkinterGUI:
         self._content_frame: Optional[tk.Frame] = None
         self._status_label: Optional[tk.Label] = None
         self._configure_btn: Optional[Any] = None
+        self._map_canvas: Optional[tk.Canvas] = None
+        self._map_photo = None  # Keep reference to prevent garbage collection
 
         # Create UI
         if embedded_parent:
@@ -151,6 +161,15 @@ class GPSTkinterGUI:
             )
         self._status_label.grid(row=0, column=0)
 
+        # Map canvas for displaying rendered tiles (hidden until device connects)
+        bg_color = Colors.BG_FRAME if HAS_THEME and Colors else "gray20"
+        self._map_canvas = tk.Canvas(
+            self._content_frame,
+            bg=bg_color,
+            highlightthickness=0,
+        )
+        # Canvas starts hidden - shown when device connects
+
     def get_content_frame(self) -> Optional[tk.Widget]:
         """Get the content frame for runtime to populate."""
         return self._content_frame
@@ -162,9 +181,11 @@ class GPSTkinterGUI:
         self._port = port
         self._connected = True
 
-        # Hide status label - runtime will show map
+        # Hide status label and show map canvas
         if self._status_label:
             self._status_label.grid_forget()
+        if self._map_canvas:
+            self._map_canvas.grid(row=0, column=0, sticky="NSEW")
 
         # Update window title
         self._update_window_title()
@@ -180,12 +201,25 @@ class GPSTkinterGUI:
         self._port = None
         self._connected = False
 
-        # Show status label
+        # Hide map canvas and show status label
+        if self._map_canvas:
+            self._map_canvas.grid_forget()
         if self._status_label:
             self._status_label.configure(text="GPS device disconnected")
             self._status_label.grid(row=0, column=0)
 
         self._update_window_title()
+
+    def update_map_display(self, pil_image, info_str: str = "") -> None:
+        """Update map canvas with rendered image from GPS data."""
+        if not self._map_canvas or not HAS_PIL or pil_image is None:
+            return
+        try:
+            self._map_photo = ImageTk.PhotoImage(pil_image)
+            self._map_canvas.delete("all")
+            self._map_canvas.create_image(0, 0, image=self._map_photo, anchor="nw")
+        except Exception as e:
+            self.logger.warning("Failed to update map display: %s", e)
 
     def update_connection_status(self, connected: bool, error: Optional[str] = None):
         """Update connection status display."""
@@ -460,6 +494,23 @@ class GPSView:
             return
         self.call_in_gui(self.gui.sync_recording_state)
 
+    def on_gps_data(self, device_id: str, fix, pil_image=None, info_str: str = "") -> None:
+        """Handle GPS data update from runtime - update map display."""
+        if not self.gui or pil_image is None:
+            return
+        self.call_in_gui(self.gui.update_map_display, pil_image, info_str)
+
+    def set_window_title(self, title: str) -> None:
+        """Set the window title."""
+        if not HAS_TK:
+            return
+        root = getattr(self._stub_view, "root", None)
+        if root:
+            try:
+                root.winfo_toplevel().title(title)
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------
     # Stub view delegation for runtime UI building
 
@@ -506,6 +557,9 @@ class GPSView:
         self._bridge.cleanup()
         await self._stub_view.cleanup()
         self.gui = None
+
+    def attach_logging_handler(self) -> None:
+        self._stub_view.attach_logging_handler()
 
     @property
     def window_duration_ms(self) -> float:

@@ -6,8 +6,8 @@ import asyncio
 from typing import Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
-# Import as BaseGPSTransport for consistency with GPS naming convention
-from rpi_logger.core.devices.transports import BaseReadOnlyTransport as BaseGPSTransport
+# Import directly from base_transport to avoid triggering XBee imports
+from rpi_logger.core.devices.transports.base_transport import BaseReadOnlyTransport as BaseGPSTransport
 from ..constants import DEFAULT_BAUD_RATE, DEFAULT_RECONNECT_DELAY
 
 logger = get_module_logger(__name__)

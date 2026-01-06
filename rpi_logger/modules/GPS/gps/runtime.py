@@ -21,13 +21,13 @@ from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import ensure_structured_logger
 
-from ..gps_core.constants import DEFAULT_NMEA_HISTORY
-from ..gps_core.handlers import GPSHandler
-from ..gps_core.transports import SerialGPSTransport
-from ..gps_core.parsers.nmea_types import GPSFixSnapshot
-from ..gps_core.interfaces.gui import GPSMapRenderer
-from ..preferences import GPSPreferences
-from ..config import GPSConfig
+from gps_core.constants import DEFAULT_NMEA_HISTORY
+from gps_core.handlers import GPSHandler
+from gps_core.transports import SerialGPSTransport
+from gps_core.parsers.nmea_types import GPSFixSnapshot
+from gps_core.interfaces.gui import GPSMapRenderer
+from preferences import GPSPreferences
+from config import GPSConfig
 
 
 class GPSModuleRuntime(ModuleRuntime):
@@ -60,7 +60,8 @@ class GPSModuleRuntime(ModuleRuntime):
         pref_scope = scope_fn("gps") if callable(scope_fn) else None
         self.preferences = GPSPreferences(pref_scope)
 
-        self.config_path = Path(getattr(self.args, "config_path", self.module_dir / "config.txt"))
+        config_path = getattr(self.args, "config_path", None)
+        self.config_path = Path(config_path) if config_path else (self.module_dir / "config.txt" if self.module_dir else Path("config.txt"))
         self.typed_config = GPSConfig.from_preferences(pref_scope, self.args) if pref_scope else GPSConfig()
 
         # Keep dict config for backward compatibility during migration
@@ -452,11 +453,19 @@ class GPSModuleRuntime(ModuleRuntime):
             timestamp = datetime.now().strftime("%H:%M:%S")
             self._recent_sentences.append(f"[{timestamp}] {raw_sentence}")
 
-        # Notify view
+        # Render map and notify view
         if self.view:
             on_data = getattr(self.view, "on_gps_data", None)
             if callable(on_data):
-                on_data(device_id, fix, update)
+                pil_image = None
+                info_str = ""
+                renderer = self._map_renderers.get(device_id)
+                if renderer:
+                    try:
+                        pil_image, info_str = renderer.render(fix)
+                    except Exception as e:
+                        self.logger.warning("Map render failed: %s", e)
+                on_data(device_id, fix, pil_image, info_str)
 
     # ------------------------------------------------------------------
     # Session helpers
@@ -546,7 +555,7 @@ class GPSModuleRuntime(ModuleRuntime):
 
     def _clamp_zoom(self, value: float) -> float:
         """Clamp zoom level to valid range."""
-        from ..gps_core.constants import MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL
+        from gps_core.constants import MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL
         return max(MIN_ZOOM_LEVEL, min(MAX_ZOOM_LEVEL, float(value)))
 
     def _resolve_offline_db_path(self) -> Path:

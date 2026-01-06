@@ -48,7 +48,7 @@ from rpi_logger.cli.common import add_common_cli_arguments, add_config_to_args, 
 from rpi_logger.core.logging_utils import get_module_logger  # noqa: E402
 from rpi_logger.modules.base.config_paths import resolve_module_config_path  # noqa: E402
 
-from .config import GPSConfig  # noqa: E402
+from config import GPSConfig  # noqa: E402
 
 logger = get_module_logger("MainGPS")
 MODULE_ID = "gps"
