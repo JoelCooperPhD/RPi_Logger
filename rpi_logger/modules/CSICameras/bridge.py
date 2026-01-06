@@ -8,6 +8,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
+import os
+import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -20,7 +23,6 @@ from rpi_logger.modules.CSICameras.csi_core import (
     CaptureHandle,
     CaptureFrame,
     PicamCapture,
-    Encoder,
     yuv420_to_bgr,
 )
 from rpi_logger.modules.CSICameras.csi_core.backends import picam_backend
@@ -42,6 +44,18 @@ except Exception:
     RuntimeContext = Any
 
 logger = get_module_logger(__name__)
+
+def _bridge_debug(msg: str) -> None:
+    """Write debug message to unified log file."""
+    ts = time.strftime('%H:%M:%S') + f'.{int((time.time() % 1) * 1000):03d}'
+    tid = threading.current_thread().name
+    pid = os.getpid()
+    try:
+        with open('/tmp/csi_debug.log', 'a') as f:
+            f.write(f"{ts} [BRIDGE] [{pid}:{tid}] {msg}\n")
+            f.flush()
+    except Exception:
+        pass
 
 
 class CSICamerasRuntime(ModuleRuntime):
@@ -66,8 +80,7 @@ class CSICamerasRuntime(ModuleRuntime):
         self._descriptor: Optional[CameraDescriptor] = None
         self._capabilities: Optional[CameraCapabilities] = None
         self._validator: Optional[CapabilityValidator] = None  # For settings validation
-        self._capture: Optional[CaptureHandle] = None
-        self._encoder: Optional[Encoder] = None
+        self._capture: Optional[PicamCapture] = None
         self._is_assigned: bool = False
         self._is_recording: bool = False
         self._camera_name: Optional[str] = None
@@ -130,6 +143,21 @@ class CSICamerasRuntime(ModuleRuntime):
 
         self.logger.info("CSI Cameras runtime ready - waiting for device assignment")
         StatusMessage.send("ready")
+
+        # Auto-assign for direct testing if --camera-index provided
+        test_camera_index = getattr(self.ctx.args, "camera_index", None)
+        if test_camera_index is not None:
+            self.logger.info("TEST MODE: Auto-assigning CSI camera %d", test_camera_index)
+            await self._assign_camera({
+                "command_id": "test_auto_assign",
+                "device_id": f"picam:{test_camera_index}",
+                "camera_type": "picam",
+                "camera_stable_id": str(test_camera_index),
+                "camera_dev_path": "",
+                "display_name": f"CSI Camera {test_camera_index}",
+                "camera_hw_model": None,
+                "camera_location": f"CSI{test_camera_index}",
+            })
 
     async def shutdown(self) -> None:
         """Stop recording and release camera."""
@@ -208,6 +236,7 @@ class CSICamerasRuntime(ModuleRuntime):
 
     async def _assign_camera(self, command: Dict[str, Any]) -> bool:
         """Handle camera assignment."""
+        _bridge_debug(f"ASSIGN_CAMERA_START assigned={self._is_assigned} device={command.get('device_id')}")
         if self._is_assigned:
             self.logger.warning("Camera already assigned - rejecting new assignment")
             device_id = command.get("device_id")
@@ -288,7 +317,11 @@ class CSICamerasRuntime(ModuleRuntime):
                 known_model = self.model_db.lookup(model_name, "picam") if model_name else None
 
                 # Probe camera capabilities
+                probe_start = time.time()
+                _bridge_debug(f"PROBE_START sensor={stable_id}")
                 probed_caps = await self._probe_camera(stable_id)
+                probe_ms = int((time.time() - probe_start) * 1000)
+                _bridge_debug(f"PROBE_DONE sensor={stable_id} caps={probed_caps is not None} elapsed={probe_ms}ms")
 
                 if known_model and probed_caps:
                     # Compare fingerprints to detect hardware changes
@@ -351,7 +384,11 @@ class CSICamerasRuntime(ModuleRuntime):
             self._resolution, self._fps = await self._get_capture_settings()
 
             # Initialize capture (CSI only - with lores stream)
+            init_start = time.time()
+            _bridge_debug(f"INIT_CAPTURE_START sensor={stable_id} res={self._resolution} fps={self._fps}")
             await self._init_capture(stable_id)
+            init_ms = int((time.time() - init_start) * 1000)
+            _bridge_debug(f"INIT_CAPTURE_DONE sensor={stable_id} elapsed={init_ms}ms")
 
             self._is_assigned = True
             self._camera_name = display_name or device_id
@@ -374,10 +411,12 @@ class CSICamerasRuntime(ModuleRuntime):
                     self.ctx.view.set_window_title(display_name)
 
             # Start capture/preview loop
+            _bridge_debug(f"CAPTURE_TASK_CREATE capture={self._capture is not None}")
             self._capture_task = asyncio.create_task(
                 self._capture_loop(),
                 name="csi_camera_capture_loop"
             )
+            _bridge_debug(f"CAPTURE_TASK_CREATED task={self._capture_task.get_name() if self._capture_task else 'None'}")
 
             # Acknowledge assignment
             StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
@@ -466,17 +505,16 @@ class CSICamerasRuntime(ModuleRuntime):
         return (1280, 720), 30.0
 
     async def _init_capture(self, stable_id: str) -> None:
-        """Initialize capture with lores preview stream."""
+        """Initialize capture (software scaling for preview)."""
         self.logger.info("Initializing CSI capture: %dx%d @ %.1f fps",
                         self._resolution[0], self._resolution[1], self._fps)
 
-        # CSI cameras use lores stream for efficient preview
-        lores_size = (320, 240)
+        # No hardware lores stream - use software scaling for preview
         self._capture = PicamCapture(
             stable_id,
             self._resolution,
             self._fps,
-            lores_size=lores_size
+            lores_size=None
         )
 
         await self._capture.start()
@@ -499,7 +537,7 @@ class CSICamerasRuntime(ModuleRuntime):
         self._is_assigned = False
 
     async def _start_recording(self) -> None:
-        """Start recording."""
+        """Start recording using picamera2's native H.264 pipeline."""
         if self._is_recording:
             self.logger.debug("Already recording")
             return
@@ -519,20 +557,16 @@ class CSICamerasRuntime(ModuleRuntime):
             trial_number=self._trial_number,
         )
 
-        self._encoder = Encoder(
+        # Use picamera2's native H.264 recording pipeline
+        await self._capture.start_recording(
             video_path=str(paths.video_path),
-            resolution=self._resolution,
-            fps=self._fps,
-            overlay_enabled=self._overlay_enabled,
             csv_path=str(paths.timing_path),
             trial_number=self._trial_number,
-            module_name="CSICameras",
+            device_id=self._camera_id.key,
         )
 
-        await asyncio.to_thread(self._encoder.start)
-
         self._is_recording = True
-        self.logger.info("Recording started: %s", paths.video_path)
+        self.logger.info("Recording started (H.264/MP4): %s", paths.video_path)
         StatusMessage.send("recording_started", {
             "video_path": str(paths.video_path),
             "camera_id": self._camera_id.key,
@@ -545,12 +579,12 @@ class CSICamerasRuntime(ModuleRuntime):
 
         self._is_recording = False
 
-        if self._encoder:
-            frames_dropped = self._encoder.frames_dropped
-            await asyncio.to_thread(self._encoder.stop)
-            frame_count = self._encoder.frame_count
-            duration = self._encoder.duration_sec
-            self._encoder = None
+        if self._capture:
+            metrics = await self._capture.stop_recording()
+            frame_count = metrics.get("frame_count", 0)
+            duration = metrics.get("duration_sec", 0.0)
+            frames_dropped = metrics.get("frames_dropped", 0)
+
             if frames_dropped > 0:
                 self.logger.warning(
                     "Recording stopped: %d frames, %.1fs (%d frames dropped)",
@@ -700,42 +734,37 @@ class CSICamerasRuntime(ModuleRuntime):
             self.logger.error("Reprobe failed: %s", e)
 
     async def _capture_loop(self) -> None:
-        """Capture and preview loop."""
+        """Preview loop - recording handled by picamera2's native pipeline."""
         import time
 
+        _bridge_debug(f"CAPTURE_LOOP_ENTER capture={self._capture is not None}")
+
         if not self._capture:
+            _bridge_debug("CAPTURE_LOOP_NO_CAPTURE exiting")
             return
 
         frame_count = 0
-        encode_count = 0
 
         preview_interval = max(1, int(self._fps / self._preview_fps)) if self._preview_fps > 0 else 2
+        self.logger.info("CAPTURE_LOOP: preview_interval=%d, fps=%.1f, preview_fps=%.1f",
+                        preview_interval, self._fps, self._preview_fps)
 
         fps_window_start = time.monotonic()
         fps_window_frames = 0
         fps_preview_frames = 0
-        fps_encode_frames = 0
         fps_capture = 0.0
         fps_preview = 0.0
-        fps_encode = 0.0
 
         try:
+            _bridge_debug("CAPTURE_LOOP_FRAME_ITER_START")
             async for frame in self._capture.frames():
                 frame_count += 1
+                if frame_count <= 5:
+                    _bridge_debug(f"CAPTURE_LOOP_FRAME frame={frame_count}")
                 fps_window_frames += 1
                 now = time.monotonic()
 
-                if self._is_recording and self._encoder:
-                    queued = self._encoder.write_frame(
-                        frame.data,
-                        timestamp=frame.wall_time,
-                        pts_time_ns=frame.sensor_timestamp_ns,
-                        color_format=frame.color_format,
-                    )
-                    if queued:
-                        encode_count += 1
-                        fps_encode_frames += 1
-
+                # Preview generation (recording handled by picamera2 internally)
                 if frame_count % preview_interval == 0:
                     preview_frame = self._make_preview_frame(frame)
                     if preview_frame is not None:
@@ -746,27 +775,25 @@ class CSICamerasRuntime(ModuleRuntime):
                 if elapsed >= 1.0:
                     fps_capture = fps_window_frames / elapsed
                     fps_preview = fps_preview_frames / elapsed
-                    fps_encode = fps_encode_frames / elapsed
                     fps_window_start = now
                     fps_window_frames = 0
                     fps_preview_frames = 0
-                    fps_encode_frames = 0
 
+                # Update metrics every 30 frames
                 if frame_count % 30 == 0:
                     metrics = {
                         "frames_captured": frame_count,
-                        "frames_recorded": encode_count,
                         "is_recording": self._is_recording,
                         "fps_capture": fps_capture,
-                        "fps_encode": fps_encode if self._is_recording else None,
                         "fps_preview": fps_preview,
                         "target_fps": self._fps,
-                        "target_record_fps": self._fps if self._is_recording else None,
                         "target_preview_fps": self._fps / preview_interval,
                     }
-                    if self._is_recording and self._encoder:
-                        metrics["frames_dropped"] = self._encoder.frames_dropped
-                        metrics["encode_queue_depth"] = self._encoder.queue_depth
+                    # Get recording metrics from capture if recording
+                    if self._is_recording and self._capture:
+                        metrics["frames_recorded"] = self._capture.recording_frame_count
+                        metrics["fps_encode"] = fps_capture  # Encoder runs at capture rate
+                        metrics["target_record_fps"] = self._fps
                     self.view.update_metrics(metrics)
 
         except asyncio.CancelledError:
@@ -781,10 +808,19 @@ class CSICamerasRuntime(ModuleRuntime):
         from PIL import Image
 
         try:
-            if frame.lores_data is not None and frame.lores_format == "yuv420":
-                bgr = yuv420_to_bgr(frame.lores_data)
+            # Convert YUV420 to BGR for display
+            if frame.color_format == "yuv420" or frame.lores_format == "yuv420":
+                yuv_data = frame.lores_data if frame.lores_data is not None else frame.data
+                bgr = yuv420_to_bgr(yuv_data)
             else:
                 bgr = frame.data
+
+            # Crop to actual image size (remove stride padding that causes green bar)
+            if self._capture and hasattr(self._capture, 'actual_size'):
+                actual_w, actual_h = self._capture.actual_size
+                buf_h, buf_w = bgr.shape[:2]
+                if buf_w > actual_w or buf_h > actual_h:
+                    bgr = bgr[:actual_h, :actual_w]
 
             h, w = bgr.shape[:2]
             target_w, target_h = self.view.get_canvas_size()

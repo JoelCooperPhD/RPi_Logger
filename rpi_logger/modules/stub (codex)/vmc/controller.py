@@ -50,12 +50,16 @@ class StubCodexController:
         ready_ms = self.model.mark_ready()
         self.logger.info("%s module ready and idle (%.1f ms)", self.display_name, ready_ms)
 
-        if not self.args.enable_commands:
+        # Skip command listener if not enabled, but allow standalone test mode
+        test_camera_index = getattr(self.args, "camera_index", None)
+        if not self.args.enable_commands and test_camera_index is None:
             self.logger.warning("Command channel disabled; initiating shutdown")
             await self._begin_shutdown("commands disabled")
             return
 
-        self._command_task = asyncio.create_task(self._listen_for_commands(), name="StubCodexCommands")
+        # Only start command listener if commands are enabled (not in standalone test mode)
+        if self.args.enable_commands:
+            self._command_task = asyncio.create_task(self._listen_for_commands(), name="StubCodexCommands")
 
     async def stop(self) -> None:
         self._shutdown_requested = True

@@ -91,6 +91,14 @@ def parse_args(argv: Optional[list[str]] = None):
         include_window_geometry=True,
     )
 
+    parser.add_argument(
+        "--camera-index",
+        type=int,
+        choices=[0, 1],
+        default=None,
+        help="CSI camera index for direct testing (0 or 1)",
+    )
+
     return parser.parse_args(argv)
 
 
