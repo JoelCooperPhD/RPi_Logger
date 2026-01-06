@@ -37,7 +37,8 @@ class DeviceManager:
 
         defaults = self._default_stream_urls()
         for key, value in defaults.items():
-            urls.setdefault(key, value)
+            if urls.get(key) is None:
+                urls[key] = value
 
         return {k: v for k, v in urls.items() if v is not None}
 
