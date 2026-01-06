@@ -461,7 +461,7 @@ class CamerasRuntime(ModuleRuntime):
                 scale = min(target_w / w, target_h / h)
                 new_w, new_h = int(w * scale), int(h * scale)
                 if new_w > 0 and new_h > 0:
-                    bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
             buf = io.BytesIO()
             Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)).save(buf, format="PPM")
             return buf.getvalue()

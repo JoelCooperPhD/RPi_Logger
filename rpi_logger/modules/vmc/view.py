@@ -715,7 +715,7 @@ class StubCodexView:
                 except tk.TclError as exc:
                     self.logger.error("Tk root.update() raised: %s", exc, exc_info=exc)
                     break
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.033)  # 30 FPS - responsive UI without excessive CPU
         finally:
             self._window_duration_ms = max(0.0, (time.perf_counter() - open_time) * 1000.0)
             self._loop_running = False

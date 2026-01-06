@@ -10,10 +10,14 @@ device assignments via assign_device commands.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Deque, Dict, Optional
+
+# Map rendering throttle (seconds) - limits UI updates, not data logging
+_MAP_RENDER_THROTTLE = 0.2  # 200ms = max 5 renders per second
 
 from vmc import ModuleRuntime, RuntimeContext
 from vmc.runtime_helpers import BackgroundTaskManager
@@ -94,7 +98,8 @@ class GPSModuleRuntime(ModuleRuntime):
         history_limit = max(1, int(getattr(self.args, "nmea_history", DEFAULT_NMEA_HISTORY)))
         self._recent_sentences: Deque[str] = deque(maxlen=history_limit)
 
-        # Map rendering settings
+        # Map rendering state
+        self._last_render_time: Dict[str, float] = {}  # device_id -> last render timestamp
         initial_zoom = float(getattr(self.args, "zoom", self.config.get("zoom", 13.0)))
         initial_lat = float(getattr(self.args, "center_lat", self.config.get("center_lat", 40.7608)))
         initial_lon = float(getattr(self.args, "center_lon", self.config.get("center_lon", -111.8910)))
@@ -453,7 +458,7 @@ class GPSModuleRuntime(ModuleRuntime):
             timestamp = datetime.now().strftime("%H:%M:%S")
             self._recent_sentences.append(f"[{timestamp}] {raw_sentence}")
 
-        # Render map and notify view
+        # Render map and notify view (throttled to reduce CPU)
         if self.view:
             on_data = getattr(self.view, "on_gps_data", None)
             if callable(on_data):
@@ -461,10 +466,14 @@ class GPSModuleRuntime(ModuleRuntime):
                 info_str = ""
                 renderer = self._map_renderers.get(device_id)
                 if renderer:
-                    try:
-                        pil_image, info_str = renderer.render(fix)
-                    except Exception as e:
-                        self.logger.warning("Map render failed: %s", e)
+                    current_time = time.monotonic()
+                    last_render = self._last_render_time.get(device_id, 0.0)
+                    if current_time - last_render >= _MAP_RENDER_THROTTLE:
+                        try:
+                            pil_image, info_str = renderer.render(fix)
+                            self._last_render_time[device_id] = current_time
+                        except Exception as e:
+                            self.logger.warning("Map render failed: %s", e)
                 on_data(device_id, fix, pil_image, info_str)
 
     # ------------------------------------------------------------------
