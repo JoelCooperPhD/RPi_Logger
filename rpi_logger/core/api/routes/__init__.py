@@ -18,6 +18,7 @@ Each module handles a category of endpoints:
 - settings: Comprehensive settings management (Phase 3)
 - windows: Window and UI control endpoints (Phase 4)
 - testing: Testing and verification endpoints (Phase 5)
+- debug: Debug and introspection endpoints
 """
 
 from .system import setup_system_routes
@@ -36,6 +37,7 @@ from .drt import setup_drt_routes
 from .settings import setup_settings_routes
 from .windows import setup_windows_routes
 from .testing import setup_testing_routes
+from .debug import setup_debug_routes
 
 
 def setup_all_routes(app, controller):
@@ -56,6 +58,7 @@ def setup_all_routes(app, controller):
     setup_settings_routes(app, controller)
     setup_windows_routes(app, controller)
     setup_testing_routes(app, controller)
+    setup_debug_routes(app, controller)
 
 
 __all__ = ["setup_all_routes"]

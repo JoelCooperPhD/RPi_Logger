@@ -97,6 +97,13 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Host for REST API server (default: 127.0.0.1)"
     )
 
+    parser.add_argument(
+        "--api-debug",
+        action="store_true",
+        default=False,
+        help="Enable API debug mode (verbose errors, request logging)"
+    )
+
     args = parser.parse_args(argv)
     return args
 
@@ -126,6 +133,7 @@ async def _setup_api_server(
         host=args.api_host,
         port=args.api_port,
         localhost_only=(args.api_host == "127.0.0.1"),
+        debug=args.api_debug,
     )
 
     await server.start()
@@ -222,7 +230,8 @@ async def main(argv: Optional[list[str]] = None) -> None:
     logger.info("Logger - Master System Starting")
     logger.info("=" * 60)
     if args.api:
-        logger.info("REST API: http://%s:%d", args.api_host, args.api_port)
+        debug_info = " (debug mode)" if args.api_debug else ""
+        logger.info("REST API: http://%s:%d%s", args.api_host, args.api_port, debug_info)
     logger.info("Data directory: %s", args.data_dir)
     logger.info("Log file: %s", MASTER_LOG_FILE)
     logger.info("Session will be created when user starts recording")

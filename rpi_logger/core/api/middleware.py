@@ -5,10 +5,12 @@ Provides:
 - Localhost-only access enforcement
 - Unified error response formatting
 - Request logging
+- Debug mode with verbose errors
 """
 
+import time
 import traceback
-from typing import Callable
+from typing import Callable, Optional
 
 from aiohttp import web
 
@@ -16,6 +18,21 @@ from rpi_logger.core.logging_utils import get_module_logger
 
 
 logger = get_module_logger("APIMiddleware")
+
+# Debug mode flag - set via APIServer or environment
+_debug_mode: bool = False
+
+
+def set_debug_mode(enabled: bool) -> None:
+    """Enable or disable debug mode for verbose error responses."""
+    global _debug_mode
+    _debug_mode = enabled
+    logger.info("API debug mode %s", "enabled" if enabled else "disabled")
+
+
+def is_debug_mode() -> bool:
+    """Check if debug mode is enabled."""
+    return _debug_mode
 
 
 @web.middleware
@@ -47,6 +64,59 @@ async def localhost_only_middleware(request: web.Request, handler: Callable) -> 
             )
 
     return await handler(request)
+
+
+@web.middleware
+async def request_logging_middleware(request: web.Request, handler: Callable) -> web.Response:
+    """
+    Middleware to log all API requests and responses for debugging.
+
+    Logs:
+    - Request method, path, query params
+    - Response status and timing
+    - Request body (in debug mode)
+    """
+    start_time = time.perf_counter()
+    method = request.method
+    path = request.path
+    query = dict(request.query) if request.query else None
+
+    # Log request
+    if query:
+        logger.debug("API Request: %s %s ?%s", method, path, query)
+    else:
+        logger.debug("API Request: %s %s", method, path)
+
+    # In debug mode, log request body for POST/PUT
+    if _debug_mode and method in ("POST", "PUT", "PATCH"):
+        try:
+            body = await request.text()
+            if body:
+                # Truncate large bodies
+                if len(body) > 1000:
+                    body = body[:1000] + "... (truncated)"
+                logger.debug("API Request Body: %s", body)
+        except Exception:
+            pass
+
+    try:
+        response = await handler(request)
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Log response
+        logger.debug(
+            "API Response: %s %s -> %d (%.1fms)",
+            method, path, response.status, elapsed_ms
+        )
+
+        return response
+    except Exception as e:
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.debug(
+            "API Response: %s %s -> ERROR (%.1fms): %s",
+            method, path, elapsed_ms, type(e).__name__
+        )
+        raise
 
 
 @web.middleware
@@ -106,21 +176,31 @@ async def error_handling_middleware(request: web.Request, handler: Callable) -> 
         )
     except Exception as e:
         # Unexpected errors
-        logger.error("Unexpected error: %s\n%s", e, traceback.format_exc())
-        return web.json_response(
-            {
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An unexpected error occurred",
-                    "details": {
-                        "type": type(e).__name__,
-                        "message": str(e),
-                    },
+        tb = traceback.format_exc()
+        logger.error("Unexpected error: %s\n%s", e, tb)
+
+        error_response = {
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred",
+                "details": {
+                    "type": type(e).__name__,
+                    "message": str(e),
                 },
-                "status": 500,
             },
-            status=500,
-        )
+            "status": 500,
+        }
+
+        # In debug mode, include full stack trace
+        if _debug_mode:
+            error_response["error"]["details"]["traceback"] = tb.split("\n")
+            error_response["error"]["details"]["request"] = {
+                "method": request.method,
+                "path": request.path,
+                "query": dict(request.query) if request.query else None,
+            }
+
+        return web.json_response(error_response, status=500)
 
 
 def create_json_response(data: dict, status: int = 200) -> web.Response:

@@ -14,10 +14,65 @@ Endpoints:
 - POST /api/v1/test/cancel                     - Cancel running test
 """
 
+from pathlib import Path
+from typing import Optional, Tuple
+
 from aiohttp import web
 
 from ..controller import APIController
 from ..middleware import create_error_response
+
+
+def _validate_data_path(path_str: str) -> Tuple[bool, str, Optional[Path]]:
+    """
+    Validate that a path is within allowed data directories.
+
+    Only allows access to:
+    - Project data directories
+    - User home data directories
+    - Session output directories
+
+    Returns:
+        Tuple of (is_valid, error_message, resolved_path)
+    """
+    from rpi_logger.core.paths import PROJECT_ROOT, DATA_DIR
+
+    try:
+        resolved = Path(path_str).resolve()
+    except (ValueError, OSError) as e:
+        return False, f"Invalid path: {e}", None
+
+    # Define allowed directories for data validation
+    allowed_dirs = []
+
+    # Project data directory
+    if DATA_DIR and DATA_DIR.exists():
+        allowed_dirs.append(DATA_DIR.resolve())
+
+    # Project root data subdirectory
+    project_data = (PROJECT_ROOT / "data").resolve()
+    if project_data.exists():
+        allowed_dirs.append(project_data)
+
+    # User home Logger data
+    home_data = Path.home() / "Logger" / "data"
+    if home_data.exists():
+        allowed_dirs.append(home_data.resolve())
+
+    # /tmp for test data
+    tmp_dir = Path("/tmp")
+    if tmp_dir.exists():
+        allowed_dirs.append(tmp_dir.resolve())
+
+    # Check if the resolved path is under any allowed directory
+    for allowed_dir in allowed_dirs:
+        try:
+            resolved.relative_to(allowed_dir)
+            return True, "", resolved
+        except ValueError:
+            continue
+
+    return False, "Path is outside allowed data directories", None
 
 
 def setup_testing_routes(app: web.Application, controller: APIController) -> None:
@@ -144,24 +199,30 @@ async def validate_session_handler(request: web.Request) -> web.Response:
     controller: APIController = request.app["controller"]
     session_path = "/" + request.match_info["path"]
 
-    # Validate the path exists
-    from pathlib import Path
+    # Validate path is within allowed directories
+    is_valid, error_msg, resolved_path = _validate_data_path(session_path)
+    if not is_valid:
+        return create_error_response(
+            "INVALID_PATH",
+            error_msg,
+            status=403,
+        )
 
-    if not Path(session_path).exists():
+    if not resolved_path.exists():
         return create_error_response(
             "PATH_NOT_FOUND",
             f"Session path does not exist: {session_path}",
             status=404,
         )
 
-    if not Path(session_path).is_dir():
+    if not resolved_path.is_dir():
         return create_error_response(
             "INVALID_PATH",
             "Session path must be a directory",
             status=400,
         )
 
-    result = await controller.validate_session(session_path)
+    result = await controller.validate_session(str(resolved_path))
 
     if not result.get("success"):
         status = 500
@@ -205,24 +266,30 @@ async def validate_against_schema_handler(request: web.Request) -> web.Response:
 
     data_path = body["data_path"]
 
-    # Validate the path exists
-    from pathlib import Path
+    # Validate path is within allowed directories
+    is_valid, error_msg, resolved_path = _validate_data_path(data_path)
+    if not is_valid:
+        return create_error_response(
+            "INVALID_PATH",
+            error_msg,
+            status=403,
+        )
 
-    if not Path(data_path).exists():
+    if not resolved_path.exists():
         return create_error_response(
             "FILE_NOT_FOUND",
             f"Data file does not exist: {data_path}",
             status=404,
         )
 
-    if not Path(data_path).is_file():
+    if not resolved_path.is_file():
         return create_error_response(
             "INVALID_PATH",
             "data_path must be a file",
             status=400,
         )
 
-    result = await controller.validate_against_schema(module_name, data_path)
+    result = await controller.validate_against_schema(module_name, str(resolved_path))
 
     if not result.get("success"):
         status = 500

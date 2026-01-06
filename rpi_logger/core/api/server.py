@@ -13,7 +13,12 @@ from aiohttp import web
 from rpi_logger.core.logging_utils import get_module_logger
 
 from .controller import APIController
-from .middleware import localhost_only_middleware, error_handling_middleware
+from .middleware import (
+    localhost_only_middleware,
+    error_handling_middleware,
+    request_logging_middleware,
+    set_debug_mode,
+)
 from .routes import setup_all_routes
 
 
@@ -38,6 +43,7 @@ class APIServer:
         host: str = "127.0.0.1",
         port: int = 8080,
         localhost_only: bool = True,
+        debug: bool = False,
     ):
         """
         Initialize the API server.
@@ -47,20 +53,29 @@ class APIServer:
             host: Host to bind to (default: localhost only)
             port: Port to bind to (default: 8080)
             localhost_only: If True, reject requests from non-localhost
+            debug: If True, enable verbose error responses and request logging
         """
         self.controller = controller
         self.host = host
         self.port = port
         self.localhost_only = localhost_only
+        self.debug = debug
 
         self._app: Optional[web.Application] = None
         self._runner: Optional[web.AppRunner] = None
         self._site: Optional[web.TCPSite] = None
         self._running = False
 
+        # Set debug mode in middleware
+        set_debug_mode(debug)
+
     def _create_app(self) -> web.Application:
         """Create and configure the aiohttp application."""
+        # Build middleware chain: localhost check -> request logging -> error handling
         middlewares = [error_handling_middleware]
+
+        # Add request logging (always, but verbosity depends on debug mode)
+        middlewares.insert(0, request_logging_middleware)
 
         if self.localhost_only:
             middlewares.insert(0, localhost_only_middleware)
@@ -89,7 +104,8 @@ class APIServer:
         await self._site.start()
 
         self._running = True
-        logger.info("API server started on http://%s:%d", self.host, self.port)
+        mode_info = " (debug mode)" if self.debug else ""
+        logger.info("API server started on http://%s:%d%s", self.host, self.port, mode_info)
 
     async def stop(self) -> None:
         """Stop the API server gracefully."""
