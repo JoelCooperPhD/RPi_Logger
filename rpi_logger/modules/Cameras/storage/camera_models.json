@@ -55,7 +55,7 @@
             320,
             240
           ],
-          "fps": 15.0,
+          "fps": 10.0,
           "pixel_format": "MJPEG"
         },
         "controls": {
@@ -255,10 +255,10 @@
         },
         "default_preview": {
           "size": [
-            640,
-            480
+            320,
+            240
           ],
-          "fps": 30.0,
+          "fps": 10.0,
           "pixel_format": "MJPEG"
         },
         "controls": {
@@ -421,10 +421,10 @@
         },
         "default_preview": {
           "size": [
-            640,
-            480
+            320,
+            240
           ],
-          "fps": 15.0,
+          "fps": 10.0,
           "pixel_format": "MJPEG"
         },
         "controls": {
@@ -663,10 +663,10 @@
         },
         "default_preview": {
           "size": [
-            640,
-            480
+            320,
+            240
           ],
-          "fps": 30.0,
+          "fps": 10.0,
           "pixel_format": "MJPEG"
         },
         "controls": {
@@ -821,10 +821,10 @@
         },
         "default_preview": {
           "size": [
-            640,
-            480
+            320,
+            240
           ],
-          "fps": 30.0,
+          "fps": 10.0,
           "pixel_format": "MJPEG"
         },
         "controls": {
