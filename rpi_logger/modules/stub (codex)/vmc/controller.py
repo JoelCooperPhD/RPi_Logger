@@ -34,9 +34,7 @@ class StubCodexController:
         self.logger = module_logger
         self.display_name = display_name
         self._command_task: Optional[asyncio.Task] = None
-        self._stdin_thread: Optional[threading.Thread] = None
         self._stdin_shutdown = threading.Event()
-        self._command_queue: Optional[asyncio.Queue[str]] = None
         self._shutdown_requested = False
         self._runtime: Optional[ModuleRuntime] = None
 
@@ -57,7 +55,13 @@ class StubCodexController:
             await self._begin_shutdown("commands disabled")
             return
 
-        # Only start command listener if commands are enabled (not in standalone test mode)
+        # If camera_index is provided, defer command listener until after camera init
+        # This prevents stdin reading from interfering with libcamera initialization
+        if test_camera_index is not None:
+            self.logger.info("Deferring command listener start (camera init via --camera-index)")
+            return
+
+        # Start command listener if commands are enabled
         if self.args.enable_commands:
             self._command_task = asyncio.create_task(self._listen_for_commands(), name="StubCodexCommands")
 
@@ -70,11 +74,6 @@ class StubCodexController:
                 await self._command_task
 
         self._stdin_shutdown.set()
-        if self._command_queue:
-            try:
-                self._command_queue.put_nowait("")
-            except asyncio.QueueFull:
-                pass
 
         StatusMessage.send(StatusType.QUITTING, {"message": f"{self.display_name} exiting"})
         await asyncio.sleep(0.05)
@@ -109,38 +108,33 @@ class StubCodexController:
             self.logger.debug("Unhandled user action: %s", action)
 
     async def _listen_for_commands(self) -> None:
-        """Listen for commands from stdin in a background thread."""
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[str] = asyncio.Queue()
-        self._command_queue = queue
-        shutdown_flag = self._stdin_shutdown
+        """Listen for commands from stdin using select-based polling.
 
-        def reader() -> None:
+        Uses select.select() to poll stdin without modifying its file descriptor
+        state. This avoids interference with libcamera's internal threading that
+        was caused by asyncio's connect_read_pipe() setting stdin to non-blocking.
+        """
+        import select
+
+        def poll_stdin_line(timeout: float = 0.2) -> Optional[str]:
+            """Poll stdin using select and read one line if available."""
             try:
-                while not shutdown_flag.is_set():
-                    line = sys.stdin.readline()
-                    if not line:
-                        break
-                    loop.call_soon_threadsafe(queue.put_nowait, line)
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, "")
-
-        try:
-            thread = threading.Thread(target=reader, name="StubCodexCommandReader", daemon=True)
-            thread.start()
-            self._stdin_thread = thread
-        except Exception as exc:  # pragma: no cover - defensive
-            self.logger.warning("Command reader unavailable: %s", exc)
-            return
+                readable, _, _ = select.select([sys.stdin], [], [], timeout)
+                if not readable:
+                    return None
+                return sys.stdin.readline()
+            except Exception:
+                return ""
 
         try:
             while not self.model.shutdown_event.is_set():
-                try:
-                    line = await asyncio.wait_for(queue.get(), timeout=0.2)
-                except asyncio.TimeoutError:
-                    continue
+                line = await asyncio.to_thread(poll_stdin_line, 0.2)
 
-                if not line:
+                if line is None:
+                    continue
+                if line == "":
+                    break
+                if not line.strip():
                     continue
 
                 command = CommandMessage.parse(line)
@@ -148,27 +142,10 @@ class StubCodexController:
                     self.logger.debug("Failed to parse command: %s", line[:100])
                     continue
 
-                # Debug log for command reception
-                import os as _os
-                import time as _time
-                def _recv_debug(msg: str) -> None:
-                    ts = _time.strftime('%H:%M:%S') + f'.{int((_time.time() % 1) * 1000):03d}'
-                    try:
-                        with open('/tmp/csi_debug.log', 'a') as f:
-                            f.write(f"{ts} [STDIN_CMD] [{_os.getpid()}] {msg}\n")
-                            f.flush()
-                    except Exception:
-                        pass
-
-                cmd_name = command.get("command", "unknown")
-                _recv_debug(f"COMMAND_RECEIVED cmd={cmd_name} device_id={command.get('device_id')}")
-                self.logger.info("Received command: %s", cmd_name)
+                self.logger.info("Received command: %s", command.get("command", "unknown"))
                 await self._process_command(command)
         finally:
-            shutdown_flag.set()
-            if self._stdin_thread:
-                await asyncio.to_thread(self._stdin_thread.join, 0.5)
-                self._stdin_thread = None
+            self._stdin_shutdown.set()
 
     async def request_shutdown(self, reason: str) -> None:
         await self._begin_shutdown(reason)
@@ -215,24 +192,10 @@ class StubCodexController:
 
         if not handled and self._runtime:
             self.logger.info("Forwarding command to runtime: %s", action)
-            # Debug log for command forwarding
-            import os as _os
-            import time as _time
-            def _ctrl_debug(msg: str) -> None:
-                ts = _time.strftime('%H:%M:%S') + f'.{int((_time.time() % 1) * 1000):03d}'
-                try:
-                    with open('/tmp/csi_debug.log', 'a') as f:
-                        f.write(f"{ts} [CONTROLLER] [{_os.getpid()}] {msg}\n")
-                        f.flush()
-                except Exception:
-                    pass
-            _ctrl_debug(f"FORWARDING_TO_RUNTIME action={action} device_id={command.get('device_id')}")
             try:
                 handled = await self._runtime.handle_command(command)
-                _ctrl_debug(f"RUNTIME_HANDLED action={action} result={handled}")
                 self.logger.info("Runtime handled command %s: %s", action, handled)
             except Exception:
-                _ctrl_debug(f"RUNTIME_EXCEPTION action={action}")
                 self.logger.exception("Runtime command handler failed [%s]", action)
                 handled = True
         elif not handled:
@@ -306,3 +269,23 @@ class StubCodexController:
     def attach_runtime(self, runtime: Optional[ModuleRuntime]) -> None:
         """Allow the supervisor to register a runtime for command dispatch."""
         self._runtime = runtime
+
+    async def start_command_listener(self) -> None:
+        """Start the command listener (call from runtime after camera init).
+
+        This is used when --camera-index is provided to defer stdin reading
+        until after libcamera initialization completes. The runtime calls
+        this after camera is initialized and frames are flowing.
+        """
+        if self._command_task is not None:
+            self.logger.debug("Command listener already started")
+            return
+
+        if not self.args.enable_commands:
+            self.logger.debug("Commands not enabled, skipping listener start")
+            return
+
+        self.logger.info("Starting deferred command listener (camera init complete)")
+        self._command_task = asyncio.create_task(
+            self._listen_for_commands(), name="StubCodexCommands"
+        )

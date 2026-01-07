@@ -129,6 +129,11 @@ class LoggerSystem:
         # Maps device_id -> instance_id (e.g., "ACM0" -> "DRT:ACM0")
         self._device_instance_map: Dict[str, str] = {}
 
+        # CSI camera serialization - prevents concurrent camera init which causes
+        # libcamera resource contention and capture_array() hangs
+        self._csi_camera_lock = asyncio.Lock()
+        self._csi_pending_instance: Optional[str] = None
+
         # Instance state manager - single source of truth for instance lifecycle
         self.instance_manager = InstanceStateManager(
             module_manager=self.module_manager,
@@ -768,7 +773,7 @@ class LoggerSystem:
     # =========================================================================
 
     # Modules that support multiple simultaneous instances (one per device)
-    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS"}
+    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS", "CSICAMERAS"}
 
     def _is_multi_instance_module(self, module_id: str) -> bool:
         """Check if a module supports multiple simultaneous instances."""
@@ -975,73 +980,134 @@ class LoggerSystem:
         3. Module sends device_ready (CONNECTING -> CONNECTED)
         4. UI updated via callback from InstanceStateManager
 
+        CSI cameras are serialized: only one camera initializes at a time
+        to prevent libcamera resource contention.
+
         Returns:
             True if device connection was initiated successfully.
         """
         self.logger.info("connect_and_start_device: %s", device_id)
 
-        device = self.device_system.get_device(device_id)
-        if not device:
-            self.logger.warning("Device not found: %s", device_id)
-            return False
+        # Check if this is a CSI camera - requires serialized initialization
+        is_csi_camera = device_id.startswith("picam:")
+        camera_index: int | None = None
+        if is_csi_camera:
+            # Extract camera index from device_id (picam:0 → 0, picam:1 → 1)
+            try:
+                camera_index = int(device_id.split(":")[1])
+            except (IndexError, ValueError):
+                self.logger.error("Invalid CSI camera device_id format: %s", device_id)
+                return False
+            await self._csi_camera_lock.acquire()
 
-        module_id = device.module_id
-        if not module_id:
-            self.logger.warning("Device has no module_id: %s", device_id)
-            return False
+        try:
+            device = self.device_system.get_device(device_id)
+            if not device:
+                self.logger.warning("Device not found: %s", device_id)
+                return False
 
-        # Generate instance ID for this device
-        instance_id = self._make_instance_id(module_id, device_id)
-        self.logger.info("Instance ID for device %s: %s", device_id, instance_id)
+            module_id = device.module_id
+            if not module_id:
+                self.logger.warning("Device has no module_id: %s", device_id)
+                return False
 
-        # Check if already connected
-        if self.instance_manager.is_instance_connected(instance_id):
-            self.logger.info("Instance %s already connected", instance_id)
+            # Generate instance ID for this device
+            instance_id = self._make_instance_id(module_id, device_id)
+            self.logger.info("Instance ID for device %s: %s", device_id, instance_id)
+
+            # Check if already connected
+            if self.instance_manager.is_instance_connected(instance_id):
+                self.logger.info("Instance %s already connected", instance_id)
+                return True
+
+            # Load geometry for this instance (try instance-specific first for multi-instance)
+            window_geometry = await self._load_module_geometry(module_id, instance_id)
+
+            # Start instance via InstanceStateManager
+            # For CSI cameras, pass camera_index so module can init camera directly via CLI arg
+            success = await self.instance_manager.start_instance(
+                instance_id=instance_id,
+                module_id=module_id,
+                device_id=device_id,
+                window_geometry=window_geometry,
+                camera_index=camera_index,
+            )
+
+            if not success:
+                self.logger.error("Failed to start instance %s", instance_id)
+                return False
+
+            # Register device-to-instance mapping
+            self._register_device_instance(device_id, instance_id)
+
+            # Set up XBee send callback for the instance
+            self._setup_xbee_send_callback(instance_id)
+
+            # Wait for module to become ready before sending connection command
+            if not await self.instance_manager.wait_for_ready(instance_id, timeout=10.0):
+                self.logger.error("Instance %s failed to become ready", instance_id)
+                return False
+
+            self.logger.info("Instance %s is ready, proceeding with device connection", instance_id)
+
+            # Send assign_device command via InstanceStateManager (non-blocking)
+            # CSI cameras are special: they init via --camera-index CLI arg, not assign_device
+            if is_csi_camera:
+                # CSI cameras init on startup via CLI arg. The module sends device_ready
+                # when camera is initialized and frames are flowing.
+                await self._wait_for_csi_connected(instance_id, timeout=30.0)
+            elif not device.is_internal:
+                self.logger.info("Sending assign_device to non-internal device %s", device_id)
+                command_builder = self._build_assign_device_command_builder(device)
+                await self.instance_manager.connect_device(instance_id, command_builder)
+            else:
+                # Internal modules don't send device_ready (no hardware to connect)
+                await self._state.on_device_connected(module_id)
+
             return True
 
-        # Load geometry for this instance (try instance-specific first for multi-instance)
-        window_geometry = await self._load_module_geometry(module_id, instance_id)
+        finally:
+            if is_csi_camera:
+                self._csi_camera_lock.release()
 
-        # Start instance via InstanceStateManager
-        # This handles waiting for any shutting-down instance and sets STARTING state
-        success = await self.instance_manager.start_instance(
-            instance_id=instance_id,
-            module_id=module_id,
-            device_id=device_id,
-            window_geometry=window_geometry,
+    async def _wait_for_csi_connected(self, instance_id: str, timeout: float = 30.0) -> bool:
+        """Wait for a CSI camera instance to reach CONNECTED state.
+
+        This is used to serialize CSI camera initialization - we wait for one
+        camera to fully connect (with frames flowing) before starting the next.
+
+        Args:
+            instance_id: The instance to wait for
+            timeout: Maximum time to wait in seconds (default 30s for camera init)
+
+        Returns:
+            True if instance reached CONNECTED state, False on timeout
+        """
+        from .instance_state import InstanceState
+
+        elapsed = 0.0
+        interval = 0.2
+
+        while elapsed < timeout:
+            info = self.instance_manager.get_instance(instance_id)
+            if not info:
+                return False
+
+            if info.state == InstanceState.CONNECTED:
+                return True
+
+            if info.state == InstanceState.STOPPED:
+                # Process died during init
+                return False
+
+            await asyncio.sleep(interval)
+            elapsed += interval
+
+        self.logger.warning(
+            "Timeout waiting for CSI camera %s to connect (%.1fs)",
+            instance_id, timeout
         )
-
-        if not success:
-            self.logger.error("Failed to start instance %s", instance_id)
-            return False
-
-        # Register device-to-instance mapping
-        self._register_device_instance(device_id, instance_id)
-
-        # Set up XBee send callback for the instance
-        self._setup_xbee_send_callback(instance_id)
-
-        # Wait for module to become ready before sending connection command
-        # This prevents race condition where connect_device is called before module is ready
-        if not await self.instance_manager.wait_for_ready(instance_id, timeout=10.0):
-            self.logger.error("Instance %s failed to become ready", instance_id)
-            return False
-
-        self.logger.info("Instance %s is ready, proceeding with device connection", instance_id)
-
-        # Send assign_device command via InstanceStateManager (non-blocking)
-        # This transitions to CONNECTING state. Connection result comes via status messages.
-        if not device.is_internal:
-            self.logger.info("Sending assign_device to non-internal device %s", device_id)
-            command_builder = self._build_assign_device_command_builder(device)
-            await self.instance_manager.connect_device(instance_id, command_builder)
-            # Connection result will arrive via on_status_message -> device_ready/device_error
-        else:
-            # Internal modules don't send device_ready (no hardware to connect)
-            # Save connection state now for auto-connect on next startup
-            await self._state.on_device_connected(module_id)
-
-        return True
+        return False
 
     async def stop_and_disconnect_device(self, device_id: str) -> bool:
         """Stop module instance and disconnect device.

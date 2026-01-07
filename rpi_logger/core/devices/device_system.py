@@ -164,10 +164,14 @@ class DeviceSystem:
 
         self._csi_scanner: Optional[CSIScanner] = None
         if PICAMERA2_AVAILABLE:
-            self._csi_scanner = CSIScanner(
-                on_device_found=self._adapter.on_csi_camera_found,
-                on_device_lost=self._adapter.on_csi_camera_lost,
-            )
+            try:
+                self._csi_scanner = CSIScanner(
+                    on_device_found=self._adapter.on_csi_camera_found,
+                    on_device_lost=self._adapter.on_csi_camera_lost,
+                )
+                logger.info("CSI scanner created")
+            except Exception as e:
+                logger.error(f"Failed to create CSI scanner: {e}", exc_info=True)
 
         self._uart_scanner = UARTScanner(
             on_device_found=self._adapter.on_uart_device_found,

@@ -119,6 +119,7 @@ class InstanceStateManager:
         module_id: str,
         device_id: str,
         window_geometry: Optional[Any] = None,
+        camera_index: Optional[int] = None,
     ) -> bool:
         """Start a module instance.
 
@@ -127,6 +128,7 @@ class InstanceStateManager:
             module_id: Base module ID (e.g., "DRT")
             device_id: Device ID this instance will handle
             window_geometry: Optional window geometry
+            camera_index: Optional camera index for CSI cameras (enables direct init)
 
         Returns:
             True if instance started successfully (process launched)
@@ -155,17 +157,13 @@ class InstanceStateManager:
 
         # Start the process
         success = await self._module_manager.start_module_instance(
-            module_id, instance_id, window_geometry
+            module_id, instance_id, window_geometry, camera_index=camera_index
         )
 
         if not success:
             logger.error("Failed to start process for instance %s", instance_id)
             self._set_state(instance_id, InstanceState.STOPPED, error="Failed to start process")
             return False
-
-        # Stay in STARTING state until module sends "ready" status
-        # The "ready" status handler will transition to RUNNING
-        # This ensures proper handshake: yellow indicator until module is truly ready
 
         logger.info("Instance %s process launched, waiting for 'ready' status", instance_id)
         return True

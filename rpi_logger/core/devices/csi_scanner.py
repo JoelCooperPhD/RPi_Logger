@@ -1,11 +1,14 @@
 """
 CSI (Camera Serial Interface) scanner for Raspberry Pi cameras.
 
-Discovers Pi CSI cameras using Picamera2.
-This is separate from the USB camera scanner.
+Discovers Pi CSI cameras using libcamera-hello CLI tool.
+This avoids importing Picamera2 in the parent process, which would
+prevent child processes from accessing cameras.
 """
 
 import asyncio
+import re
+import subprocess
 from dataclasses import dataclass
 from typing import Callable, Optional, Dict, Awaitable
 
@@ -13,13 +16,26 @@ from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger("CSIScanner")
 
-# Try to import Picamera2 - required for Pi camera discovery
-try:
-    from picamera2 import Picamera2  # type: ignore
-    PICAMERA2_AVAILABLE = True
-except ImportError:
-    PICAMERA2_AVAILABLE = False
-    logger.debug("Picamera2 not available - Pi camera discovery disabled")
+# Check which camera CLI tool is available (rpicam-hello or libcamera-hello)
+def _find_camera_cli() -> Optional[str]:
+    for cmd in ["rpicam-hello", "libcamera-hello"]:
+        try:
+            result = subprocess.run(
+                [cmd, "--version"],
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return cmd
+        except Exception:
+            continue
+    return None
+
+CAMERA_CLI = _find_camera_cli()
+LIBCAMERA_AVAILABLE = CAMERA_CLI is not None
+
+# For backwards compatibility
+PICAMERA2_AVAILABLE = LIBCAMERA_AVAILABLE
 
 
 @dataclass
@@ -39,12 +55,14 @@ CSICameraLostCallback = Callable[[str], Awaitable[None]]  # device_id
 
 class CSIScanner:
     """
-    Continuously scans for CSI camera devices (Raspberry Pi cameras).
+    Scans for CSI camera devices (Raspberry Pi cameras).
 
-    Discovers Pi cameras via Picamera2.global_camera_info().
+    Uses libcamera-hello --list-cameras to discover cameras without
+    importing Picamera2, which would prevent child processes from
+    accessing cameras.
     """
 
-    DEFAULT_SCAN_INTERVAL = 2.0  # Scan every 2 seconds
+    DEFAULT_SCAN_INTERVAL = 2.0
 
     def __init__(
         self,
@@ -57,7 +75,6 @@ class CSIScanner:
         self._on_device_lost = on_device_lost
 
         self._known_devices: Dict[str, DiscoveredCSICamera] = {}
-        self._scan_task: Optional[asyncio.Task] = None
         self._running = False
 
     @property
@@ -71,22 +88,25 @@ class CSIScanner:
         return self._running
 
     async def start(self) -> None:
-        """Start CSI camera device scanning."""
+        """Start CSI camera device scanning.
+
+        CSI cameras are hardwired (not hot-pluggable), so we only scan once
+        on startup. Uses libcamera-hello CLI to avoid polluting libcamera
+        state in the parent process.
+        """
         if self._running:
             return
 
-        if not PICAMERA2_AVAILABLE:
-            logger.debug("Cannot start CSI scanner - Picamera2 not available")
+        if not LIBCAMERA_AVAILABLE:
+            logger.debug("Cannot start CSI scanner - libcamera-hello not available")
             return
 
         self._running = True
 
-        # Perform initial scan immediately
+        # Single scan - CSI cameras are hardwired
         await self._scan_devices()
 
-        # Start continuous scanning
-        self._scan_task = asyncio.create_task(self._scan_loop())
-        logger.info("CSI camera scanner started")
+        logger.info(f"CSI camera scanner started - found {len(self._known_devices)} cameras")
 
     async def stop(self) -> None:
         """Stop CSI camera device scanning."""
@@ -95,15 +115,6 @@ class CSIScanner:
 
         self._running = False
 
-        if self._scan_task:
-            self._scan_task.cancel()
-            try:
-                await self._scan_task
-            except asyncio.CancelledError:
-                pass
-            self._scan_task = None
-
-        # Notify about lost devices
         for device_id in list(self._known_devices.keys()):
             if self._on_device_lost:
                 try:
@@ -129,23 +140,12 @@ class CSIScanner:
                 except Exception as e:
                     logger.error(f"Error re-announcing CSI camera: {e}")
 
-    async def _scan_loop(self) -> None:
-        """Main scanning loop."""
-        while self._running:
-            try:
-                await asyncio.sleep(self._scan_interval)
-                await self._scan_devices()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"Error in CSI camera scan loop: {e}")
-
     async def _scan_devices(self) -> None:
         """Scan for CSI cameras and detect changes."""
         current_devices: Dict[str, DiscoveredCSICamera] = {}
 
-        # Discover Pi cameras (runs in thread to avoid blocking)
-        cameras = await asyncio.to_thread(self._discover_picam_sync)
+        # Discover cameras via CLI (runs in thread to avoid blocking)
+        cameras = await asyncio.to_thread(self._discover_via_cli)
         for cam in cameras:
             current_devices[cam.device_id] = cam
 
@@ -171,39 +171,66 @@ class CSIScanner:
                 except Exception as e:
                     logger.error(f"Error in device lost callback: {e}")
 
-    def _discover_picam_sync(self) -> list[DiscoveredCSICamera]:
-        """Synchronous Pi camera discovery (runs in thread)."""
+    def _discover_via_cli(self) -> list[DiscoveredCSICamera]:
+        """Discover CSI cameras using libcamera-hello CLI.
+
+        This runs libcamera-hello as a subprocess, which fully releases
+        all libcamera resources when it exits. This prevents the parent
+        process from holding camera locks that would block child processes.
+        """
         cameras: list[DiscoveredCSICamera] = []
 
-        if not PICAMERA2_AVAILABLE:
+        if not CAMERA_CLI:
             return cameras
 
         try:
-            cam_info_list = Picamera2.global_camera_info()
+            result = subprocess.run(
+                [CAMERA_CLI, "--list-cameras"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            if result.returncode != 0:
+                return cameras
+
+            # Parse output like:
+            # Available cameras
+            # -----------------
+            # 0 : imx296 [1456x1088 10-bit MONO] (/base/axi/pcie@...)
+            #     Modes: 'SBGGR10_CSI2P' : 1456x1088 [60.39 fps - (0, 0)/1456x1088 crop]
+            # 1 : imx296 [1456x1088 10-bit MONO] (/base/axi/pcie@...)
+            #     Modes: ...
+
+            output = result.stdout + result.stderr  # Sometimes output goes to stderr
+
+            # Pattern: "N : model [resolution] (location)"
+            pattern = r'^(\d+)\s*:\s*(\w+)\s*\[([^\]]+)\]\s*\(([^)]+)\)'
+
+            for line in output.split('\n'):
+                line = line.strip()
+                match = re.match(pattern, line)
+                if match:
+                    cam_num = match.group(1)
+                    model = match.group(2)
+                    location = match.group(4)
+
+                    # Skip USB cameras that might show up
+                    if 'usb' in location.lower():
+                        continue
+
+                    cameras.append(DiscoveredCSICamera(
+                        device_id=f"picam:{cam_num}",
+                        stable_id=cam_num,
+                        friendly_name=f"RPi:Cam{cam_num}",
+                        hw_model=model,
+                        location_hint=location,
+                    ))
+
+        except subprocess.TimeoutExpired:
+            logger.warning("libcamera-hello timed out")
         except Exception as exc:
-            logger.warning(f"Picamera2 discovery failed: {exc}")
-            return cameras
-
-        for idx, info in enumerate(cam_info_list):
-            model = info.get("Model") or ""
-            cam_id = info.get("Id") or ""
-
-            # Skip non-CSI cameras that show up via libcamera (e.g., UVC).
-            if "usb@" in cam_id or model.lower().startswith("uvc"):
-                logger.debug(f"Skipping non-CSI camera entry: {cam_id or model}")
-                continue
-
-            sensor_id = info.get("SensorId")
-            stable_id = str(info.get("Num")) if info.get("Num") is not None else str(sensor_id or cam_id or idx)
-            friendly_label = f"RPi:Cam{stable_id}" if str(stable_id).isdigit() else f"RPi:Cam{idx}"
-
-            cameras.append(DiscoveredCSICamera(
-                device_id=f"picam:{stable_id}",
-                stable_id=stable_id,
-                friendly_name=friendly_label,
-                hw_model=model or None,
-                location_hint=cam_id or None,
-            ))
+            logger.warning(f"CSI camera discovery failed: {exc}")
 
         logger.debug(f"Discovered {len(cameras)} CSI cameras")
         return cameras
@@ -219,4 +246,5 @@ __all__ = [
     "CSICameraFoundCallback",
     "CSICameraLostCallback",
     "PICAMERA2_AVAILABLE",
+    "LIBCAMERA_AVAILABLE",
 ]

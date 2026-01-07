@@ -147,7 +147,12 @@ class StubCodexView:
         if tk is None or ttk is None or scrolledtext is None:
             raise RuntimeError(f"tkinter unavailable: {TK_IMPORT_ERROR}")
 
-        self.root = tk.Tk()
+        try:
+            self.root = tk.Tk()
+        except Exception as e:
+            import os
+            display = os.environ.get('DISPLAY', 'NOT_SET')
+            raise RuntimeError(f"Tkinter initialization failed (DISPLAY={display}): {e}") from e
         self.root.title(self.display_name)
         self.root.report_callback_exception = self._log_tk_exception  # type: ignore[attr-defined]
 

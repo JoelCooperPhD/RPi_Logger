@@ -38,6 +38,7 @@ class ModuleProcess:
         window_geometry: Optional[WindowGeometry] = None,
         instance_id: Optional[str] = None,
         config_path: Optional[Path] = None,
+        camera_index: Optional[int] = None,
     ):
         self.module_info = module_info
         self.output_dir = Path(output_dir)
@@ -47,6 +48,7 @@ class ModuleProcess:
         self.window_geometry = window_geometry
         self.instance_id = instance_id
         self.config_path = config_path
+        self.camera_index = camera_index
 
         self.logger = get_module_logger(f"ModuleProcess.{module_info.name}")
 
@@ -110,6 +112,10 @@ class ModuleProcess:
             # Pass instance-specific config path for multi-instance modules
             if self.config_path:
                 base_args.extend(["--config-path", str(self.config_path)])
+
+            # Pass camera index for CSI camera modules (enables direct init without assign_device)
+            if self.camera_index is not None:
+                base_args.extend(["--camera-index", str(self.camera_index)])
 
             # Pass platform information to subprocess
             platform_info = get_platform_info()

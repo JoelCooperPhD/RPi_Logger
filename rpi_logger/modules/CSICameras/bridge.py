@@ -7,9 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fnmatch
-import os
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -31,6 +28,7 @@ from rpi_logger.modules.base.camera_models import (
     extract_model_name,
     copy_capabilities,
 )
+from rpi_logger.modules.base.camera_capabilities import build_capabilities
 from rpi_logger.modules.CSICameras.config import CSICamerasConfig
 from rpi_logger.modules.base.camera_validator import CapabilityValidator
 from rpi_logger.modules.base.camera_storage import DiskGuard, KnownCamerasCache
@@ -44,18 +42,6 @@ except Exception:
     RuntimeContext = Any
 
 logger = get_module_logger(__name__)
-
-def _bridge_debug(msg: str) -> None:
-    """Write debug message to unified log file."""
-    ts = time.strftime('%H:%M:%S') + f'.{int((time.time() % 1) * 1000):03d}'
-    tid = threading.current_thread().name
-    pid = os.getpid()
-    try:
-        with open('/tmp/csi_debug.log', 'a') as f:
-            f.write(f"{ts} [BRIDGE] [{pid}:{tid}] {msg}\n")
-            f.flush()
-    except Exception:
-        pass
 
 
 class CSICamerasRuntime(ModuleRuntime):
@@ -86,9 +72,9 @@ class CSICamerasRuntime(ModuleRuntime):
         self._camera_name: Optional[str] = None
         self._known_model = None  # CameraModel from database (has sensor_info)
 
-        # Capture settings (for recording)
-        self._resolution: tuple[int, int] = (1280, 720)
-        self._fps: float = 30.0
+        # Capture settings (for recording) - default to full IMX296 sensor resolution
+        self._resolution: tuple[int, int] = (1456, 1088)
+        self._fps: float = 60.0
         self._overlay_enabled: bool = True
 
         # Preview settings (for display only)
@@ -102,6 +88,9 @@ class CSICamerasRuntime(ModuleRuntime):
 
         # Background tasks
         self._capture_task: Optional[asyncio.Task] = None
+
+        # Pending device_ready - sent after first frame captured (prevents CSI lock release too early)
+        self._pending_device_ready: Optional[tuple[str, Optional[str]]] = None  # (device_id, command_id)
 
         # Storage
         self.cache = KnownCamerasCache(
@@ -126,6 +115,19 @@ class CSICamerasRuntime(ModuleRuntime):
         self.logger.info("CSI CAMERAS RUNTIME STARTING (single-camera architecture)")
         self.logger.info("=" * 60)
 
+        # Log all startup parameters for debugging
+        args = self.ctx.args
+        self.logger.info("LAUNCH PARAMETERS:")
+        self.logger.info("  instance_id:     %s", getattr(args, "instance_id", None))
+        self.logger.info("  camera_index:    %s", getattr(args, "camera_index", None))
+        self.logger.info("  output_dir:      %s", getattr(args, "output_dir", None))
+        self.logger.info("  session_prefix:  %s", getattr(args, "session_prefix", None))
+        self.logger.info("  window_geometry: %s", getattr(args, "window_geometry", None))
+        self.logger.info("  config_path:     %s", getattr(args, "config_path", None))
+        self.logger.info("  enable_commands: %s", getattr(args, "enable_commands", None))
+        self.logger.info("  log_level:       %s", getattr(args, "log_level", None))
+        self.logger.info("=" * 60)
+
         await self.cache.load()
 
         if self.ctx.view:
@@ -146,6 +148,8 @@ class CSICamerasRuntime(ModuleRuntime):
 
         # Auto-assign for direct testing if --camera-index provided
         test_camera_index = getattr(self.ctx.args, "camera_index", None)
+        instance_id = getattr(self.ctx.args, "instance_id", None)
+
         if test_camera_index is not None:
             self.logger.info("TEST MODE: Auto-assigning CSI camera %d", test_camera_index)
             await self._assign_camera({
@@ -158,6 +162,24 @@ class CSICamerasRuntime(ModuleRuntime):
                 "camera_hw_model": None,
                 "camera_location": f"CSI{test_camera_index}",
             })
+        else:
+            # Only auto-assign for standalone/menu launches (no device in instance_id)
+            # Multi-instance launches (instance_id contains "picam:") will receive
+            # assign_device command from parent - don't double-assign
+            if not instance_id or "picam:" not in instance_id:
+                self.logger.info("AUTO-ASSIGN: Standalone mode, defaulting to camera 0 (instance_id=%s)", instance_id)
+                await self._assign_camera({
+                    "command_id": "auto_assign_default",
+                    "device_id": "picam:0",
+                    "camera_type": "picam",
+                    "camera_stable_id": "0",
+                    "camera_dev_path": "",
+                    "display_name": "CSI Camera 0",
+                    "camera_hw_model": None,
+                    "camera_location": "CSI0",
+                })
+            else:
+                self.logger.info("MULTI-INSTANCE: Waiting for assign_device command (instance_id=%s)", instance_id)
 
     async def shutdown(self) -> None:
         """Stop recording and release camera."""
@@ -176,6 +198,8 @@ class CSICamerasRuntime(ModuleRuntime):
         """Handle commands from main logger."""
         action = (command.get("command") or "").lower()
         self.logger.debug("Received command: %s (keys: %s)", action, list(command.keys()))
+
+        # Detailed logging for command reception
 
         if action == "assign_device":
             self.logger.info("Processing assign_device command")
@@ -236,12 +260,10 @@ class CSICamerasRuntime(ModuleRuntime):
 
     async def _assign_camera(self, command: Dict[str, Any]) -> bool:
         """Handle camera assignment."""
-        _bridge_debug(f"ASSIGN_CAMERA_START assigned={self._is_assigned} device={command.get('device_id')}")
         if self._is_assigned:
-            self.logger.warning("Camera already assigned - rejecting new assignment")
-            device_id = command.get("device_id")
-            command_id = command.get("command_id")
-            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
+            # Already assigned - don't send device_ready (it's deferred until first frame)
+            # The duplicate assign_device commands are expected during startup
+            self.logger.debug("Camera already assigned - ignoring duplicate assignment")
             return True
 
         command_id = command.get("command_id")
@@ -276,103 +298,28 @@ class CSICamerasRuntime(ModuleRuntime):
         )
 
         try:
-            # Extract model name and camera key for lookups
+            # Extract model name for lookup (no probing - use known capabilities)
             model_name = extract_model_name(self._descriptor)
-            camera_key = self._camera_id.key  # e.g., "picam:0"
 
-            # Check for fast path: trusted cache for this stable_id
-            cached_model_key = await self.cache.get_model_key(camera_key)
-            use_fast_path = False
-            known_model = None
+            # Look up known model - skip probing entirely
+            known_model = self.model_db.lookup(model_name, "picam") if model_name else None
 
-            if cached_model_key and model_name:
-                # Verify the cached model still matches the connected camera
-                known_model = self.model_db.get(cached_model_key)
-                if known_model:
-                    # Check if current model name matches cached model's patterns
-                    for pattern in known_model.match_patterns:
-                        if fnmatch.fnmatch(model_name, pattern):
-                            # Model matches - check if cache is trustworthy
-                            if self.model_db.can_trust_cache(cached_model_key):
-                                use_fast_path = True
-                            break
-
-            if use_fast_path:
-                # FAST PATH: Skip probing, use cached capabilities
+            if known_model:
                 self._capabilities = copy_capabilities(known_model.capabilities)
                 self._known_model = known_model
                 self.logger.info(
-                    "FAST PATH: Using cached capabilities for '%s' "
-                    "(model: %s, stable_id: %s)",
+                    "Using known capabilities for '%s' (model: %s, stable_id: %s)",
                     model_name, known_model.key, stable_id
                 )
             else:
-                # SLOW PATH: Must probe the camera
-                self.logger.info(
-                    "SLOW PATH: Probing CSI camera '%s' (stable_id: %s, cached_key: %s)",
-                    model_name, stable_id, cached_model_key
-                )
-
-                # Lookup model by name (may be different from cached)
-                known_model = self.model_db.lookup(model_name, "picam") if model_name else None
-
-                # Probe camera capabilities
-                probe_start = time.time()
-                _bridge_debug(f"PROBE_START sensor={stable_id}")
-                probed_caps = await self._probe_camera(stable_id)
-                probe_ms = int((time.time() - probe_start) * 1000)
-                _bridge_debug(f"PROBE_DONE sensor={stable_id} caps={probed_caps is not None} elapsed={probe_ms}ms")
-
-                if known_model and probed_caps:
-                    # Compare fingerprints to detect hardware changes
-                    cached_caps = copy_capabilities(known_model.capabilities)
-                    cached_validator = CapabilityValidator(cached_caps)
-                    probed_validator = CapabilityValidator(probed_caps)
-
-                    if cached_validator.fingerprint() == probed_validator.fingerprint():
-                        # Fingerprint matches - use cached (may have more complete data)
-                        self._capabilities = cached_caps
-                        self._known_model = known_model
-                        self.logger.info(
-                            "Verified capabilities for '%s' (model: %s)",
-                            model_name, known_model.key
-                        )
-                    else:
-                        # Fingerprint mismatch - different hardware, use probed
-                        self.logger.warning(
-                            "Capability mismatch for '%s' - camera hardware may have changed. "
-                            "Using probed capabilities.",
-                            model_name
-                        )
-                        self._capabilities = probed_caps
-                        self._known_model = self.model_db.add_model(
-                            model_name, "picam", probed_caps, force_update=True
-                        )
-                elif probed_caps:
-                    # New camera - use probed capabilities
-                    self._capabilities = probed_caps
-                    if model_name:
-                        self._known_model = self.model_db.add_model(model_name, "picam", probed_caps)
-                        self.logger.info("Cached new camera model: %s", model_name)
-                elif known_model:
-                    # Probe failed but we have cached - use cached as fallback
-                    self._capabilities = copy_capabilities(known_model.capabilities)
-                    self._known_model = known_model
-                    self.logger.warning(
-                        "Probe failed, using cached capabilities for '%s'",
-                        model_name
-                    )
-                else:
-                    # No capabilities available
-                    self.logger.warning("No capabilities available for camera")
-                    self._capabilities = None
-
-                # Store model association for future fast paths
-                if self._known_model and self._capabilities:
-                    fingerprint = CapabilityValidator(self._capabilities).fingerprint()
-                    await self.cache.set_model_association(
-                        camera_key, self._known_model.key, fingerprint
-                    )
+                # Fallback to hardcoded defaults for imx296 (most common CSI camera)
+                self.logger.info("Using default capabilities for '%s' (stable_id: %s)", model_name, stable_id)
+                self._capabilities = build_capabilities([{
+                    "size": [1456, 1088],
+                    "fps": 60.38,
+                    "pixel_format": "RGB",
+                }])
+                self._known_model = None
 
             # Create validator for capability enforcement
             if self._capabilities:
@@ -385,10 +332,8 @@ class CSICamerasRuntime(ModuleRuntime):
 
             # Initialize capture (CSI only - with lores stream)
             init_start = time.time()
-            _bridge_debug(f"INIT_CAPTURE_START sensor={stable_id} res={self._resolution} fps={self._fps}")
             await self._init_capture(stable_id)
             init_ms = int((time.time() - init_start) * 1000)
-            _bridge_debug(f"INIT_CAPTURE_DONE sensor={stable_id} elapsed={init_ms}ms")
 
             self._is_assigned = True
             self._camera_name = display_name or device_id
@@ -411,16 +356,15 @@ class CSICamerasRuntime(ModuleRuntime):
                     self.ctx.view.set_window_title(display_name)
 
             # Start capture/preview loop
-            _bridge_debug(f"CAPTURE_TASK_CREATE capture={self._capture is not None}")
             self._capture_task = asyncio.create_task(
                 self._capture_loop(),
                 name="csi_camera_capture_loop"
             )
-            _bridge_debug(f"CAPTURE_TASK_CREATED task={self._capture_task.get_name() if self._capture_task else 'None'}")
 
-            # Acknowledge assignment
-            StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
-            self.logger.info("CSI Camera assigned successfully: %s", self._camera_id.key)
+            # Store pending device_ready - will be sent after first frame captured
+            # This prevents CSI camera lock from being released before capture is working
+            self._pending_device_ready = (device_id, command_id)
+            self.logger.info("CSI Camera assigned, waiting for first frame: %s", self._camera_id.key)
             return True
 
         except Exception as e:
@@ -442,10 +386,10 @@ class CSICamerasRuntime(ModuleRuntime):
 
     async def _get_capture_settings(self) -> tuple[tuple[int, int], float]:
         """Get resolution/FPS from capabilities or cache, validated."""
-        # If no validator (no capabilities), use safe fallback
+        # If no validator (no capabilities), use full sensor resolution
         if not self._validator:
-            self.logger.info("No capabilities - using default settings: 1280x720 @ 30 fps")
-            return (1280, 720), 30.0
+            self.logger.info("No capabilities - using full sensor resolution: 1456x1088 @ 60 fps")
+            return (1456, 1088), 60.0
 
         # Try cached settings, validated through validator
         if self._camera_id:
@@ -501,8 +445,8 @@ class CSICamerasRuntime(ModuleRuntime):
                 return resolution, fps
 
         # Absolute fallback (shouldn't reach here if validator exists)
-        self.logger.warning("No valid modes found - using fallback: 1280x720 @ 30 fps")
-        return (1280, 720), 30.0
+        self.logger.warning("No valid modes found - using full sensor fallback: 1456x1088 @ 60 fps")
+        return (1456, 1088), 60.0
 
     async def _init_capture(self, stable_id: str) -> None:
         """Initialize capture (software scaling for preview)."""
@@ -737,10 +681,8 @@ class CSICamerasRuntime(ModuleRuntime):
         """Preview loop - recording handled by picamera2's native pipeline."""
         import time
 
-        _bridge_debug(f"CAPTURE_LOOP_ENTER capture={self._capture is not None}")
 
         if not self._capture:
-            _bridge_debug("CAPTURE_LOOP_NO_CAPTURE exiting")
             return
 
         frame_count = 0
@@ -756,11 +698,22 @@ class CSICamerasRuntime(ModuleRuntime):
         fps_preview = 0.0
 
         try:
-            _bridge_debug("CAPTURE_LOOP_FRAME_ITER_START")
             async for frame in self._capture.frames():
                 frame_count += 1
-                if frame_count <= 5:
-                    _bridge_debug(f"CAPTURE_LOOP_FRAME frame={frame_count}")
+
+                # Send deferred device_ready after first frame - this releases the CSI lock
+                if frame_count == 1 and self._pending_device_ready:
+                    device_id, command_id = self._pending_device_ready
+                    self._pending_device_ready = None
+                    self.logger.info("First frame captured - sending device_ready: %s", device_id)
+                    StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
+
+                    # Now safe to start command listener (camera init complete, frames flowing)
+                    # This is deferred when --camera-index is used to prevent stdin interference
+                    controller = getattr(self.ctx, "controller", None)
+                    if controller and hasattr(controller, "start_command_listener"):
+                        await controller.start_command_listener()
+
                 fps_window_frames += 1
                 now = time.monotonic()
 
@@ -830,7 +783,7 @@ class CSICamerasRuntime(ModuleRuntime):
                 new_w = int(w * scale)
                 new_h = int(h * scale)
                 if new_w > 0 and new_h > 0:
-                    bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                    bgr = cv2.resize(bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 

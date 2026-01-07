@@ -1,4 +1,4 @@
-"""CSI camera capture using Picamera2 with native H.264 recording."""
+"""CSI camera capture using Picamera2 with MJPEG recording."""
 from __future__ import annotations
 
 import asyncio
@@ -18,34 +18,21 @@ from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 
-def _capture_debug(msg: str) -> None:
-    """Write debug message to unified log file."""
-    ts = time.strftime('%H:%M:%S') + f'.{int((time.time() % 1) * 1000):03d}'
-    tid = threading.current_thread().name
-    pid = os.getpid()
-    try:
-        with open('/tmp/csi_debug.log', 'a') as f:
-            f.write(f"{ts} [CAPTURE] [{pid}:{tid}] {msg}\n")
-            f.flush()
-    except Exception:
-        pass
-
 # Try to import Picamera2 - may not be available on non-Pi platforms
 try:
     from picamera2 import Picamera2, MappedArray  # type: ignore
-    from picamera2.encoders import H264Encoder  # type: ignore
+    from picamera2.encoders import JpegEncoder  # type: ignore
 except Exception:  # pragma: no cover - picamera2 may be absent on non-Pi platforms
     Picamera2 = None  # type: ignore
     MappedArray = None  # type: ignore
-    H264Encoder = None  # type: ignore
+    JpegEncoder = None  # type: ignore
 
 
 class PicamCapture(CaptureHandle):
-    """Picamera2 capture for Raspberry Pi CSI cameras with native H.264 recording."""
+    """Picamera2 capture for Raspberry Pi CSI cameras with MJPEG recording."""
 
     # Default encoder settings for minimal CPU usage on Pi 5
-    DEFAULT_BITRATE = 5_000_000  # 5 Mbps
-    DEFAULT_IPERIOD = 30  # I-frame every 30 frames
+    DEFAULT_JPEG_QUALITY = 85  # 1-100, higher = better quality but larger files
 
     def __init__(
         self,
@@ -88,19 +75,14 @@ class PicamCapture(CaptureHandle):
     async def start(self) -> None:
         cam_num = int(self._sensor_id) if self._sensor_id.isdigit() else 0
         logger.info("Opening Picamera2 sensor %s (cam_num=%d)", self._sensor_id, cam_num)
-        _capture_debug(f"START_ASYNC sensor={self._sensor_id} cam_num={cam_num}")
 
         # Run all blocking Picamera2 operations in thread pool
         await asyncio.to_thread(self._start_sync, cam_num)
-        _capture_debug(f"START_ASYNC_DONE running=True")
         self._running = True
 
     def _start_sync(self, cam_num: int) -> None:
-        _capture_debug(f"START_SYNC cam_num={cam_num} res={self._resolution} fps={self._fps} lores={self._lores_size}")
         logger.info("Creating Picamera2 instance...")
-        _capture_debug(f"CAM_CREATE_START")
         self._cam = Picamera2(camera_num=cam_num)
-        _capture_debug(f"CAM_CREATE_DONE")
         logger.info("Creating video configuration: %s @ %.1f fps", self._resolution, self._fps)
 
         # Build lores config if requested
@@ -114,20 +96,19 @@ class PicamCapture(CaptureHandle):
             logger.info("Enabling lores stream: %s (YUV420)", self._lores_size)
 
         # Use YUV420 for main stream - required for H.264 encoding
-        # (RGB888 would require conversion, wasting CPU)
+        # Allow flexible frame rate (don't force exact timing which can cause issues)
         frame_duration_us = int(1_000_000 / self._fps)
+        min_duration = max(1000, frame_duration_us - 5000)  # Allow faster
+        max_duration = frame_duration_us + 10000  # Allow slower
         config = self._cam.create_video_configuration(
             main={"size": self._resolution, "format": "YUV420"},
             lores=lores_config,
             buffer_count=6,
-            controls={"FrameDurationLimits": (frame_duration_us, frame_duration_us)},
+            controls={"FrameDurationLimits": (min_duration, max_duration)},
         )
 
-        _capture_debug(f"CONFIG_CREATE_DONE main={config.get('main')} lores={config.get('lores')}")
         logger.info("Configuring camera...")
-        _capture_debug("CONFIGURE_START")
         self._cam.configure(config)
-        _capture_debug("CONFIGURE_DONE")
 
         # Get actual image size (vs stride-padded buffer size)
         main_config = self._cam.camera_configuration().get('main', {})
@@ -135,86 +116,47 @@ class PicamCapture(CaptureHandle):
         logger.info("Actual image size: %s (buffer may be larger due to stride)", self._actual_size)
 
         logger.info("Starting camera...")
-        _capture_debug("CAM_START_START")
         self._cam.start()
-        _capture_debug("CAM_START_DONE")
-        # Log camera state after start
-        try:
-            _capture_debug(f"CAM_STATE started={self._cam.started} camera_config={self._cam.camera_configuration()}")
-        except Exception as e:
-            _capture_debug(f"CAM_STATE_ERROR {e}")
         logger.info("Camera started successfully")
 
     def _capture_thread_func(self, queue: "asyncio.Queue[Any]", loop: asyncio.AbstractEventLoop) -> None:
-        """Dedicated capture thread that puts frames in a queue.
-
-        Uses capture_request() for proper stream access - works reliably with
-        dual stream configuration.
-        """
-        _capture_debug("CAPTURE_THREAD_START")
+        """Dedicated capture thread using capture_array() for simplicity."""
         frame_num = 0
+
+        # Brief delay to let camera pipeline stabilize
+        time.sleep(0.1)
+
         while self._running:
             try:
-                # Log camera state before capture (first 3 frames only)
-                if frame_num < 3:
-                    try:
-                        _capture_debug(f"CAPTURE_PRE_STATE frame={frame_num} cam_started={self._cam.started if self._cam else 'N/A'}")
-                    except Exception:
-                        pass
+                # Use capture_array() - simpler than capture_request()
+                frame_data = self._cam.capture_array("main")
 
-                # Use capture_request() which returns a CompletedRequest
-                # This is more reliable than capture_array() with dual streams
-                _capture_debug(f"CAPTURE_REQ_START frame={frame_num}")
-                request = self._cam.capture_request()
-                _capture_debug(f"CAPTURE_REQ_DONE frame={frame_num} request={type(request).__name__ if request else 'None'}")
-                if request is None:
-                    _capture_debug(f"CAPTURE_REQ_NONE frame={frame_num}")
+                if frame_data is None:
+                    time.sleep(0.01)
                     continue
 
                 frame_num += 1
                 monotonic_ns = time.monotonic_ns()
                 wall_time = time.time()
 
-                # Get frame array - use lores if configured, otherwise main
-                _capture_debug(f"MAKE_ARRAY_START frame={frame_num}")
-                if self._lores_size is not None:
+                def enqueue_frame(q, data):
                     try:
-                        lores_frame = request.make_array("lores")
-                        _capture_debug(f"MAKE_ARRAY_DONE frame={frame_num} stream=lores shape={lores_frame.shape}")
-                    except Exception as e:
-                        _capture_debug(f"MAKE_ARRAY_LORES_FAIL frame={frame_num} err={e}")
-                        lores_frame = request.make_array("main")
-                        _capture_debug(f"MAKE_ARRAY_DONE frame={frame_num} stream=main shape={lores_frame.shape}")
-                else:
-                    lores_frame = request.make_array("main")
-                    _capture_debug(f"MAKE_ARRAY_DONE frame={frame_num} stream=main shape={lores_frame.shape}")
+                        q.put_nowait(data)
+                    except asyncio.QueueFull:
+                        pass
 
-                # Get metadata
-                metadata = request.get_metadata() or {}
-
-                # Release the request buffer back to the camera
-                _capture_debug(f"REQUEST_RELEASE frame={frame_num}")
-                request.release()
-
-                # Put frame data in queue (thread-safe via call_soon_threadsafe)
                 loop.call_soon_threadsafe(
-                    queue.put_nowait,
-                    (lores_frame, monotonic_ns, wall_time, metadata, lores_frame, frame_num)
+                    enqueue_frame,
+                    queue,
+                    (frame_data, monotonic_ns, wall_time, {}, frame_data, frame_num)
                 )
-                if frame_num <= 5:
-                    _capture_debug(f"FRAME_QUEUED frame={frame_num}")
             except Exception as e:
                 if self._running:
-                    _capture_debug(f"CAPTURE_THREAD_ERROR frame={frame_num} err={type(e).__name__}: {e}")
-                    import traceback
-                    _capture_debug(f"CAPTURE_THREAD_TRACEBACK\n{traceback.format_exc()}")
-                break
-        _capture_debug("CAPTURE_THREAD_EXIT")
+                    logger.warning("Capture error: %s", e)
+                time.sleep(0.1)
 
     async def frames(self) -> AsyncIterator[CaptureFrame]:
         import threading
-
-        _capture_debug(f"FRAMES_START running={self._running}")
 
         # Create queue and start capture thread
         queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=4)
@@ -225,22 +167,16 @@ class PicamCapture(CaptureHandle):
             daemon=True
         )
         capture_thread.start()
-        _capture_debug(f"FRAMES_THREAD_LAUNCHED thread={capture_thread.name}")
 
         try:
             while self._running:
                 try:
-                    # Wait for frame from capture thread
                     frame_data = await asyncio.wait_for(queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    if self._frame_number < 10:
-                        _capture_debug(f"QUEUE_TIMEOUT frame={self._frame_number + 1} qsize={queue.qsize()}")
                     continue
 
                 frame, monotonic_ns, wall_time, metadata, lores_frame, frame_num = frame_data
                 self._frame_number = frame_num
-                if self._frame_number <= 5:
-                    _capture_debug(f"FRAME_YIELD frame={self._frame_number}")
 
                 sensor_ts = self._extract_sensor_timestamp(metadata)
                 # Note: frame IS lores_frame now (YUV420 format)
@@ -307,7 +243,7 @@ class PicamCapture(CaptureHandle):
             return False
 
     # -------------------------------------------------------------------------
-    # Native H.264 Recording (canonical picamera2 pipeline)
+    # MJPEG Recording (canonical picamera2 pipeline)
     # -------------------------------------------------------------------------
 
     async def start_recording(
@@ -316,13 +252,9 @@ class PicamCapture(CaptureHandle):
         csv_path: Optional[str] = None,
         trial_number: Optional[int] = None,
         device_id: str = "",
-        bitrate: Optional[int] = None,
+        quality: Optional[int] = None,
     ) -> None:
-        """Start H.264 recording using picamera2's native encoder pipeline.
-
-        This uses the canonical picamera2 recording API with H264Encoder
-        and FfmpegOutput for zero-copy, CPU-efficient encoding.
-        """
+        """Start MJPEG recording using picamera2's native encoder pipeline."""
         if self._recording:
             logger.warning("Recording already in progress")
             return
@@ -331,21 +263,13 @@ class PicamCapture(CaptureHandle):
             logger.error("Camera not started, cannot begin recording")
             return
 
-        if H264Encoder is None:
-            raise RuntimeError("H264Encoder not available")
+        if JpegEncoder is None:
+            raise RuntimeError("JpegEncoder not available")
 
-        logger.info("Starting native H.264 recording: %s", video_path)
+        logger.info("Starting MJPEG recording: %s", video_path)
 
-        # Create encoder with ultrafast preset for minimal CPU
-        effective_bitrate = bitrate or self.DEFAULT_BITRATE
-        self._encoder = H264Encoder(
-            bitrate=effective_bitrate,
-            repeat=True,
-            iperiod=self.DEFAULT_IPERIOD,
-            framerate=int(self._fps),
-        )
-        # Set ultrafast preset for minimal CPU usage on Pi 5
-        self._encoder.preset = "ultrafast"
+        effective_quality = quality or self.DEFAULT_JPEG_QUALITY
+        self._encoder = JpegEncoder(q=effective_quality)
 
         # Create output with timing CSV
         self._output = TimingAwareFfmpegOutput(
@@ -370,7 +294,7 @@ class PicamCapture(CaptureHandle):
 
         self._recording = True
         self._recording_frame_count = 0
-        logger.info("Native H.264 recording started: bitrate=%d, preset=ultrafast", effective_bitrate)
+        logger.info("MJPEG recording started: quality=%d", effective_quality)
 
     async def stop_recording(self) -> dict:
         """Stop recording and return metrics.
@@ -380,7 +304,7 @@ class PicamCapture(CaptureHandle):
         if not self._recording:
             return {"frame_count": 0, "duration_sec": 0.0, "frames_dropped": 0}
 
-        logger.info("Stopping native H.264 recording...")
+        logger.info("Stopping MJPEG recording...")
         self._recording = False
 
         # Remove overlay callback

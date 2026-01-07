@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
-import time
+import gc
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, List, Optional
 
@@ -295,8 +295,9 @@ async def probe(sensor_id: str, *, logger: LoggerLike = None) -> Optional[Camera
 
 
 def _probe_sync(sensor_id: str, log) -> Optional[CameraCapabilities]:
+    cam_num = int(sensor_id) if sensor_id.isdigit() else 0
     try:
-        cam = Picamera2(camera_num=int(sensor_id) if sensor_id.isdigit() else 0)
+        cam = Picamera2(camera_num=cam_num)
     except Exception as exc:
         log.warning("Failed to open Picamera2 sensor %s: %s", sensor_id, exc)
         return None
@@ -332,6 +333,7 @@ def _probe_sync(sensor_id: str, log) -> Optional[CameraCapabilities]:
             log.info("Probed %d controls from Picamera2 for sensor %s", len(controls), sensor_id)
     finally:
         cam.close()
+        gc.collect()
 
     caps = build_capabilities(modes)
     caps.controls = controls

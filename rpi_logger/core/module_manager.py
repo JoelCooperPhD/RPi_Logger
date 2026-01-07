@@ -303,7 +303,8 @@ class ModuleManager:
         self,
         module_id: str,
         instance_id: str,
-        window_geometry: Optional[WindowGeometry] = None
+        window_geometry: Optional[WindowGeometry] = None,
+        camera_index: Optional[int] = None,
     ) -> bool:
         """Start a module instance with a specific instance ID.
 
@@ -314,6 +315,7 @@ class ModuleManager:
             module_id: Base module ID (e.g., "DRT") - used to find ModuleInfo
             instance_id: Unique instance ID (e.g., "DRT:ACM0") - used as process key
             window_geometry: Optional window geometry for the instance
+            camera_index: Optional camera index for CSI cameras (enables direct init)
 
         Returns:
             True if the instance started successfully
@@ -340,7 +342,7 @@ class ModuleManager:
 
         # Start the process with the instance ID as the key
         return await self._start_module_process_for_instance(
-            module_info, instance_id
+            module_info, instance_id, camera_index=camera_index
         )
 
     async def stop_module_instance(self, instance_id: str) -> bool:
@@ -422,7 +424,8 @@ class ModuleManager:
     async def _start_module_process_for_instance(
         self,
         module_info: ModuleInfo,
-        instance_id: str
+        instance_id: str,
+        camera_index: Optional[int] = None,
     ) -> bool:
         """Internal: Start a module process for a specific instance.
 
@@ -432,6 +435,7 @@ class ModuleManager:
         Args:
             module_info: The module info (entry point, config, etc.)
             instance_id: The unique instance ID (e.g., "DRT:ACM0")
+            camera_index: Optional camera index for CSI cameras
 
         Returns:
             True if the process started successfully
@@ -478,6 +482,7 @@ class ModuleManager:
                 window_geometry=window_geometry,
                 instance_id=instance_id,
                 config_path=config_path,
+                camera_index=camera_index,
             )
 
             try:
