@@ -385,10 +385,10 @@ class MainController:
         """
         try:
             if not enabled:
-                # Stop the module if it's running
-                if self.logger_system.is_module_running(module_name):
-                    self.logger.info("Stopping module %s before disabling", module_name)
-                    await self.logger_system.set_module_enabled(module_name, False)
+                # Stop all running instances of this module
+                if self.logger_system.has_running_instances(module_name):
+                    self.logger.info("Stopping all instances of %s before disabling", module_name)
+                    await self.logger_system.stop_all_instances_for_module(module_name)
 
             # Enable/disable the connection type (updates both device_system and device_manager)
             self.logger_system.set_connection_enabled(interface, family, enabled)

@@ -567,6 +567,48 @@ class InstanceStateManager:
         info = self._instances.get(instance_id)
         return info.error_message if info else None
 
+    def get_instances_for_module(self, module_id: str) -> List[str]:
+        """Get all instance IDs for a given module."""
+        return [
+            instance_id for instance_id, info in self._instances.items()
+            if info.module_id == module_id
+        ]
+
+    def has_running_instances(self, module_id: str) -> bool:
+        """Check if any instances of a module are running."""
+        for info in self._instances.values():
+            if info.module_id == module_id and info.state not in {
+                InstanceState.STOPPED, InstanceState.STOPPING
+            }:
+                return True
+        return False
+
+    async def stop_all_instances_for_module(self, module_id: str) -> bool:
+        """Stop all instances of a module.
+
+        Args:
+            module_id: Base module ID (e.g., "Cameras", "DRT")
+
+        Returns:
+            True if all instances were stopped successfully
+        """
+        instance_ids = self.get_instances_for_module(module_id)
+        if not instance_ids:
+            logger.debug("No instances found for module %s", module_id)
+            return True
+
+        logger.info("Stopping %d instances of module %s", len(instance_ids), module_id)
+        results = await asyncio.gather(
+            *(self.stop_instance(iid) for iid in instance_ids),
+            return_exceptions=True
+        )
+
+        all_success = all(r is True for r in results if not isinstance(r, Exception))
+        if not all_success:
+            logger.warning("Some instances of %s failed to stop", module_id)
+
+        return all_success
+
     # =========================================================================
     # UI State
     # =========================================================================

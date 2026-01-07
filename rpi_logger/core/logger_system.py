@@ -520,6 +520,22 @@ class LoggerSystem:
         self.logger.info("Stopping module instance %s", instance_id)
         return await self.module_manager.stop_module_instance(instance_id)
 
+    def has_running_instances(self, module_id: str) -> bool:
+        """Check if any instances of a module are running."""
+        return self.instance_manager.has_running_instances(module_id)
+
+    async def stop_all_instances_for_module(self, module_id: str) -> bool:
+        """Stop all running instances of a module.
+
+        Args:
+            module_id: Base module ID (e.g., "Cameras", "DRT")
+
+        Returns:
+            True if all instances stopped successfully
+        """
+        self.logger.info("Stopping all instances of module %s", module_id)
+        return await self.instance_manager.stop_all_instances_for_module(module_id)
+
     def is_module_enabled(self, module_name: str) -> bool:
         """Check if module is enabled (checkbox state)."""
         return self.state_manager.is_module_enabled(module_name)
