@@ -1022,9 +1022,12 @@ class LoggerSystem:
             instance_id = self._make_instance_id(module_id, device_id)
             self.logger.info("Instance ID for device %s: %s", device_id, instance_id)
 
-            # Check if already connected
+            # Check if already connected or in progress
             if self.instance_manager.is_instance_connected(instance_id):
                 self.logger.info("Instance %s already connected", instance_id)
+                return True
+            if self.instance_manager.is_instance_running(instance_id):
+                self.logger.info("Instance %s already starting/running", instance_id)
                 return True
 
             # Load geometry for this instance (try instance-specific first for multi-instance)

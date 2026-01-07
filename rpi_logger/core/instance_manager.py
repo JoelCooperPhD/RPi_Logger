@@ -135,12 +135,21 @@ class InstanceStateManager:
         """
         logger.info("Starting instance %s for device %s", instance_id, device_id)
 
-        # Check if instance exists and is stopping - wait for it
+        # Check if instance already exists
         existing = self._instances.get(instance_id)
-        if existing and existing.state == InstanceState.STOPPING:
-            logger.info("Instance %s is stopping, waiting...", instance_id)
-            if not await self._wait_for_state(instance_id, InstanceState.STOPPED, timeout=5.0):
-                logger.error("Instance %s failed to stop in time", instance_id)
+        if existing:
+            if existing.state == InstanceState.STOPPING:
+                # Wait for it to finish stopping
+                logger.info("Instance %s is stopping, waiting...", instance_id)
+                if not await self._wait_for_state(instance_id, InstanceState.STOPPED, timeout=5.0):
+                    logger.error("Instance %s failed to stop in time", instance_id)
+                    return False
+            elif existing.state != InstanceState.STOPPED:
+                # Already starting/running/connected - reject duplicate
+                logger.warning(
+                    "Instance %s already exists in state %s, ignoring duplicate start",
+                    instance_id, existing.state.value
+                )
                 return False
 
         # Create or reset instance info
