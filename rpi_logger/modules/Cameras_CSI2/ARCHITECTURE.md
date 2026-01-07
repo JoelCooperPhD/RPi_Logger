@@ -1,4 +1,4 @@
-# Cameras-CSI2 Architecture
+# Cameras_CSI2 Architecture
 
 > Scientific-grade CSI camera capture for Raspberry Pi 5
 
@@ -111,7 +111,7 @@ docs/
 ## Folder Structure
 
 ```
-Cameras-CSI2/
+Cameras_CSI2/
 ├── ARCHITECTURE.md       ← This file
 ├── docs/                 ← Detailed documentation
 │
@@ -172,4 +172,4 @@ See [docs/TASKS.md](docs/TASKS.md) for detailed status and dependencies.
 
 ---
 
-*Last updated: 2026-01-06*
+*Last updated: 2026-01-07*

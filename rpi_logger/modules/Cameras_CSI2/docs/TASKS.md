@@ -1,19 +1,8 @@
-# Cameras-CSI2 Task Tracker
+# Cameras_CSI2 Task Tracker
 
 > **Master task list for AI-driven development**
 >
 > This is the single source of truth for task status. AI agents check here for available work.
-
-## FIRST: Rename Folder
-
-The folder `Cameras-CSI2` has a hyphen which breaks Python imports. Rename it first:
-
-```bash
-cd /home/rs-pi-2/Development/Logger/rpi_logger/modules
-mv Cameras-CSI2 Cameras_CSI2
-```
-
----
 
 ## Coding Standards (MANDATORY)
 
