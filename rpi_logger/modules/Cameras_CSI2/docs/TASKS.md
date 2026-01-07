@@ -1,166 +1,182 @@
 # Cameras_CSI2 Task Tracker
 
-> **Master task list for AI-driven development**
->
-> This is the single source of truth for task status. AI agents check here for available work.
+> **Implementation Complete** - Elm/Redux architecture with StubCodexSupervisor
 
-## Coding Standards (MANDATORY)
+## Current Status
 
-Before implementing ANY task, read [design.md](reference/design.md). Key requirements:
-
-- **Modern asyncio** - use `async/await`, not threads (except capture loop)
-- **Non-blocking I/O** - all file/network ops via `asyncio.to_thread()` or async libs
-- **No docstrings** - skip docstrings and obvious comments
-- **Concise code** - optimize for AI readability (context/token efficiency)
-- **Type hints** - use type hints instead of documentation
+| Metric | Value |
+|--------|-------|
+| Tests Passing | 74/74 |
+| Core Complete | Yes |
+| UI Complete | Yes (StubCodexSupervisor) |
+| GUI Tests | Comprehensive (53 widget tests) |
+| Recording | Basic (needs encoder work) |
 
 ---
 
-## How to Use
+## Quick Start
 
-1. Find a task with status `available` and all dependencies `completed`
-2. Change status to `in_progress` and add your agent ID (format: `claude-YYYYMMDD-HHMMSS`)
-3. Read the linked task file for detailed instructions
-4. When validation checklist passes, change status to `completed` and note the date
-5. If blocked, set status to `blocked` and add blocker notes
+```bash
+cd /home/rs-pi-2/Development/Logger/rpi_logger/modules/Cameras_CSI2
 
----
+# Basic: open camera 0
+python3 main.py --camera-index 0
 
-## Phase 1: Foundation (4 sub-tasks)
+# Auto-record to session directory
+python3 main.py --camera-index 0 --record --output-dir /data/session_001
 
-Core data types and frame acquisition.
-
-| ID | Task | Status | Depends On | Agent | File to Create |
-|----|------|--------|------------|-------|----------------|
-| P1.1 | CapturedFrame dataclass | available | - | - | `capture/frame.py` |
-| P1.2 | FrameSource protocol | available | P1.1 | - | `capture/source.py` |
-| P1.3 | PicamSource implementation | available | P1.2 | - | `capture/picam_source.py` |
-| P1.4 | Lock-free frame buffer | available | - | - | `pipeline/frame_buffer.py` |
-
-**Task File**: [phase1_foundation.md](tasks/phase1_foundation.md) | **Specs**: [components.md](specs/components.md)
+# Run tests (74 tests)
+cd /home/rs-pi-2/Development/Logger
+uv run pytest rpi_logger/modules/Cameras_CSI2/tests/ -v
+```
 
 ---
 
-## Phase 2: Pipeline (3 sub-tasks)
+## Completed Phases
 
-Frame routing and timing control.
+### Phase 0: Project Setup ✓
 
-| ID | Task | Status | Depends On | Agent | File to Create |
-|----|------|--------|------------|-------|----------------|
-| P2.1 | TimingGate | available | P1.1 | - | `pipeline/timing_gate.py` |
-| P2.2 | FrameRouter | available | P1.4, P2.1 | - | `pipeline/router.py` |
-| P2.3 | FrameMetrics | available | - | - | `pipeline/metrics.py` |
+| ID | Task | Status | File(s) |
+|----|------|--------|---------|
+| P0.1 | Directory structure | completed | `core/`, `infra/`, `ui/`, `capture/`, `recording/`, `tests/` |
+| P0.2 | Init files | completed | `__init__.py` in each directory |
+| P0.3 | Test fixtures | completed | `tests/conftest.py` |
 
-**Task File**: [phase2_pipeline.md](tasks/phase2_pipeline.md) | **Specs**: [components.md](specs/components.md)
+### Phase 1: Core State Machine ✓
 
----
+| ID | Task | Status | File |
+|----|------|--------|------|
+| P1.1 | State dataclasses | completed | `core/state.py` |
+| P1.2 | Action types | completed | `core/actions.py` |
+| P1.3 | Effect descriptions | completed | `core/effects.py` |
+| P1.4 | Update reducer | completed | `core/update.py` |
+| P1.5 | Store implementation | completed | `core/store.py` |
 
-## Phase 3: Recording (4 sub-tasks)
+### Phase 2: Capture Layer ✓
 
-Video and CSV output pipeline.
+| ID | Task | Status | File |
+|----|------|--------|------|
+| P2.1 | Frame dataclass | completed | `capture/frame.py` |
+| P2.2 | Source protocol | completed | `capture/source.py` |
+| P2.3 | Frame buffer | completed | `capture/frame_buffer.py` |
+| P2.4 | Picamera2 source | completed | `capture/picam_source.py` |
 
-| ID | Task | Status | Depends On | Agent | File to Create |
-|----|------|--------|------------|-------|----------------|
-| P3.1 | TimingCSVWriter | available | P1.1 | - | `recording/timing_csv.py` |
-| P3.2 | VideoEncoder wrapper | available | - | - | `recording/encoder.py` |
-| P3.3 | RecordingSession | available | P3.1, P3.2, P2.1 | - | `recording/recorder.py` |
-| P3.4 | Session paths | available | - | - | `recording/session_paths.py` |
+### Phase 3: Recording Layer ✓
 
-**Task File**: [phase3_recording.md](tasks/phase3_recording.md) | **Specs**: [output_formats.md](specs/output_formats.md)
+| ID | Task | Status | File |
+|----|------|--------|------|
+| P3.1 | Timing CSV writer | completed | `recording/timing_writer.py` |
+| P3.2 | Video encoder | completed | `recording/encoder.py` |
+| P3.3 | Session manager | completed | `recording/session.py` |
 
----
+### Phase 4: Infrastructure ✓
 
-## Phase 4: Preview (single task)
+| ID | Task | Status | File |
+|----|------|--------|------|
+| P4.1 | Effect executor | completed | `infra/effect_executor.py` |
+| P4.2 | Command handler | completed | `infra/command_handler.py` |
 
-Display pipeline with efficient scaling.
+### Phase 5: UI Layer ✓
 
-| ID | Task | Status | Depends On | Agent | Files to Create |
-|----|------|--------|------------|-------|-----------------|
-| P4 | Preview pipeline | available | P1.1, P2.1 | - | `preview/processor.py`, `preview/scaler.py` |
+| ID | Task | Status | File |
+|----|------|--------|------|
+| P5.1 | CSI2CameraView | completed | `ui/view.py` |
+| P5.2 | Standalone renderer | completed | `ui/renderer.py` |
+| P5.3 | Settings window | completed | `ui/widgets/settings_window.py` |
 
-**Task File**: [phase4_preview.md](tasks/phase4_preview.md)
+### Phase 6: Entry Point ✓
 
----
+| ID | Task | Status | File |
+|----|------|--------|------|
+| P6.1 | Main (StubCodexSupervisor) | completed | `main.py` |
+| P6.2 | Bridge (ModuleRuntime) | completed | `bridge.py` |
+| P6.3 | Module exports | completed | `__init__.py` |
 
-## Phase 5: View (single task)
+### Testing ✓
 
-GUI layer matching current module.
+| ID | Task | Status | Files |
+|----|------|--------|-------|
+| T1 | Unit tests | completed | `tests/unit/test_update.py` (10 tests) |
+| T2 | Integration tests | completed | `tests/integration/test_store.py` (11 tests) |
+| T3 | Widget tests | completed | `tests/widget/test_renderer.py`, `test_settings.py`, `test_view.py` (53 tests) |
 
-| ID | Task | Status | Depends On | Agent | Files to Create |
-|----|------|--------|------------|-------|-----------------|
-| P5 | GUI/View layer | available | P4 | - | `view/view.py`, `view/settings_window.py`, `view/dialogs/` |
-
-**Task File**: [phase5_view.md](tasks/phase5_view.md) | **Specs**: [gui.md](specs/gui.md)
-
----
-
-## Phase 6: Runtime (3 sub-tasks)
-
-Orchestration and entry points.
-
-| ID | Task | Status | Depends On | Agent | File to Create |
-|----|------|--------|------------|-------|----------------|
-| P6.1 | CSICameraRuntime | available | P1-P5 | - | `runtime.py` |
-| P6.2 | Entry point & factory | available | P6.1 | - | `main.py`, `__init__.py` |
-| P6.3 | Configuration | available | - | - | `config.py` |
-
-**Task File**: [phase6_runtime.md](tasks/phase6_runtime.md) | **Specs**: [commands.md](specs/commands.md)
-
----
-
-## Phase 7: Hardening (single task)
-
-Production readiness.
-
-| ID | Task | Status | Depends On | Agent | Focus |
-|----|------|--------|------------|-------|-------|
-| P7 | Production hardening | available | P6 | - | Error handling, graceful degradation |
-
-**Task File**: [phase7_hardening.md](tasks/phase7_hardening.md) | **Specs**: [debugging.md](specs/debugging.md)
-
----
-
-## Testing Tasks
-
-| ID | Task | Status | Depends On | Agent | Task File |
-|----|------|--------|------------|-------|-----------|
-| T1 | Unit tests | available | P1, P2 | - | [testing_unit.md](tasks/testing_unit.md) |
-| T2 | Integration tests | available | P6 | - | [testing_integration.md](tasks/testing_integration.md) |
-| T3 | Stress tests | available | P6 | - | [testing_stress.md](tasks/testing_stress.md) |
+**Widget test coverage** (`test_view.py`):
+- View attachment and menu wiring
+- Settings window open/apply/cancel
+- All settings fields (resolution, capture_fps, preview_fps, record_fps)
+- Metrics rendering during streaming/recording
+- Frame rendering pipeline
+- End-to-end workflows
 
 ---
 
-## Migration
+## Architecture Summary
 
-| ID | Task | Status | Depends On | Agent | Task File |
-|----|------|--------|------------|-------|-----------|
-| M1 | Cutover & cleanup | available | P7, T1-T3 | - | [migration.md](tasks/migration.md) |
+```
+StubCodexSupervisor (UI shell)
+    │
+    ▼
+CSI2CamerasRuntime (ModuleRuntime)
+    │
+    ├── Store (Elm/Redux)
+    │   ├── state.py (frozen dataclasses)
+    │   ├── actions.py (user intents)
+    │   ├── effects.py (side-effect descriptions)
+    │   ├── update.py (pure reducer)
+    │   └── store.py (dispatch/subscribe)
+    │
+    ├── EffectExecutor (I/O boundary)
+    │   ├── Camera probing/opening
+    │   ├── Capture loop
+    │   └── Recording control
+    │
+    └── CSI2CameraView (attaches to stub_view)
+        ├── build_stub_content()
+        ├── build_io_stub_content()
+        └── render(state)
+```
 
 ---
 
-## Status Legend
+## Future Work
 
-| Status | Meaning |
-|--------|---------|
-| `available` | Ready to start (all dependencies completed) |
-| `in_progress` | Being worked on (agent ID assigned) |
-| `blocked` | Waiting on external issue (add blocker notes) |
-| `completed` | Done and validation checklist passed |
-
----
-
-## Completed Tasks Log
-
-| ID | Completed | Agent | Duration | Notes |
-|----|-----------|-------|----------|-------|
-| - | - | - | - | - |
+| Task | Priority | Notes |
+|------|----------|-------|
+| Hardware encoder | High | Use picamera2 native H.264 |
+| Settings persistence | Medium | Cache to known_cameras.json |
+| Live camera controls | Medium | Exposure, gain sliders |
+| Multi-camera support | Low | Multiple instances via parent |
 
 ---
 
-## Quick Stats
+## Preview Settings
 
-- **Total Tasks**: 21 (17 sub-tasks + 4 single tasks)
-- **Available**: 21
-- **In Progress**: 0
-- **Completed**: 0
-- **Blocked**: 0
+Default preview configuration (optimized for low overhead):
+- **Scale**: 0.25 (1/4 of capture resolution)
+- **FPS**: 10 fps
+- **Never upscales**: Preview is always native or smaller
+
+## CLI Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--camera-index N` | CSI camera index (default: 0) |
+| `--record` | Start recording immediately on camera ready |
+| `--output-dir PATH` | Session directory for recordings |
+
+---
+
+## Coding Standards
+
+| Requirement | Rationale |
+|-------------|-----------|
+| Modern asyncio | `async/await`, not threads (except capture) |
+| Non-blocking I/O | All I/O via `asyncio.to_thread()` |
+| No docstrings | Skip docstrings and obvious comments |
+| Type hints | Self-documenting code |
+| Max 200 lines/file | AI context efficiency |
+| Frozen dataclasses | Immutable state for testability |
+
+---
+
+*Last updated: 2026-01-07*
