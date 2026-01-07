@@ -1,0 +1,6 @@
+# Local settings (machine-specific permissions)
+settings.local.json
+
+# Any cached/generated files
+*.cache
+*.log
