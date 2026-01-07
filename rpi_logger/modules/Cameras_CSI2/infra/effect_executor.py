@@ -156,8 +156,10 @@ class EffectExecutor:
 
     def _start_capture_loop(self, dispatch: Callable[[Action], Awaitable[None]]) -> None:
         if self._capture_task and not self._capture_task.done():
+            self._logger.debug("Capture task already running")
             return
 
+        self._logger.info("Starting capture loop task")
         self._capture_task = asyncio.create_task(self._capture_loop(dispatch))
 
     async def _stop_capture_loop(self) -> None:
@@ -171,19 +173,24 @@ class EffectExecutor:
 
     async def _capture_loop(self, dispatch: Callable[[Action], Awaitable[None]]) -> None:
         if not self._camera:
+            self._logger.warning("Capture loop: no camera available")
             return
+
+        self._logger.info("Capture loop starting, preview_callback=%s", self._preview_callback is not None)
 
         frame_count = 0
         record_count = 0
         preview_count = 0
         last_record_time = 0.0
         last_preview_time = 0.0
-        record_interval = 1.0 / self._record_fps if self._record_fps > 0 else 1.0
-        preview_interval = 1.0 / self._preview_fps if self._preview_fps > 0 else 0.1
 
         async for frame in self._camera.frames():
             frame_count += 1
             now = frame.wall_time
+
+            # Read intervals dynamically so settings changes take effect immediately
+            record_interval = 1.0 / self._record_fps if self._record_fps > 0 else 1.0
+            preview_interval = 1.0 / self._preview_fps if self._preview_fps > 0 else 0.1
 
             if self._recording and (now - last_record_time) >= record_interval:
                 await self._recording.write_frame(frame)
@@ -194,6 +201,10 @@ class EffectExecutor:
                 preview_data = self._frame_to_ppm(frame)
                 if preview_data:
                     self._preview_callback(preview_data)
+                    if preview_count < 3:
+                        self._logger.info("Preview frame %d sent, size=%d bytes", preview_count, len(preview_data))
+                elif preview_count < 3:
+                    self._logger.warning("Preview frame %d: _frame_to_ppm returned None", preview_count)
                 preview_count += 1
                 last_preview_time = now
 
@@ -212,18 +223,32 @@ class EffectExecutor:
         """Convert frame to PPM format for Tkinter PhotoImage.
 
         Uses preview_scale (default 0.25 = 1/4 scale). Never upscales.
+        Handles buffer stride padding (e.g., 1456 -> 1536 for DMA alignment).
         """
         try:
             import cv2
+            target_width, target_height = frame.size
+
             if frame.color_format == "yuv420":
-                width, height = frame.size
-                yuv_height = height + height // 2
-                yuv = frame.data.reshape((yuv_height, width))
-                rgb = cv2.cvtColor(yuv, cv2.COLOR_YUV2RGB_I420)
+                # YUV420 buffer has stride padding for DMA alignment
+                # Shape is (height * 1.5, stride) where stride >= width
+                if len(frame.data.shape) == 2:
+                    yuv_height, stride = frame.data.shape
+                    rgb = cv2.cvtColor(frame.data, cv2.COLOR_YUV2RGB_I420)
+                    # Crop to actual image size (remove stride padding)
+                    rgb = rgb[:target_height, :target_width]
+                else:
+                    # Fallback: try to reshape using actual dimensions
+                    yuv_height = target_height + target_height // 2
+                    yuv = frame.data.reshape((yuv_height, -1))
+                    rgb = cv2.cvtColor(yuv, cv2.COLOR_YUV2RGB_I420)
+                    rgb = rgb[:target_height, :target_width]
             else:
                 rgb = frame.data
                 if len(rgb.shape) == 3 and rgb.shape[2] == 3:
                     rgb = cv2.cvtColor(rgb, cv2.COLOR_BGR2RGB)
+                # Crop if needed
+                rgb = rgb[:target_height, :target_width]
 
             h, w = rgb.shape[:2]
 
@@ -239,7 +264,8 @@ class EffectExecutor:
             header = f"P6\n{w} {h}\n255\n".encode('ascii')
             return header + rgb.tobytes()
         except Exception as e:
-            self._logger.debug("Preview frame error: %s", e)
+            self._logger.warning("Preview frame error: %s (format=%s, size=%s, shape=%s)",
+                               e, frame.color_format, frame.size, frame.data.shape)
             return None
 
     async def _start_recording(

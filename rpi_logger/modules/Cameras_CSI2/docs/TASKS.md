@@ -103,10 +103,12 @@ uv run pytest rpi_logger/modules/Cameras_CSI2/tests/ -v
 **Widget test coverage** (`test_view.py`):
 - View attachment and menu wiring
 - Settings window open/apply/cancel
-- All settings fields (resolution, capture_fps, preview_fps, record_fps)
+- All settings fields (preview_scale, preview_fps, record_fps)
 - Metrics rendering during streaming/recording
 - Frame rendering pipeline
 - End-to-end workflows
+
+**Note**: Resolution is NOT user-configurable - always uses sensor native (1456×1088 for IMX296)
 
 ---
 

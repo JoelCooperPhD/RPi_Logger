@@ -153,26 +153,15 @@ class TestSettingsWindow:
         assert view._settings_window is not None
         view._settings_window.destroy()
 
-    def test_settings_window_shows_current_resolution(self, view_with_dispatch):
+    def test_settings_window_shows_current_preview_scale(self, view_with_dispatch):
         view, actions = view_with_dispatch
         view._current_state = AppState(
-            settings=CameraSettings(resolution=(1280, 720))
+            settings=CameraSettings(preview_scale=0.5)
         )
 
         view._on_settings_click()
 
-        assert view._settings_window.resolution_var.get() == "1280x720"
-        view._settings_window.destroy()
-
-    def test_settings_window_shows_current_capture_fps(self, view_with_dispatch):
-        view, actions = view_with_dispatch
-        view._current_state = AppState(
-            settings=CameraSettings(capture_fps=60)
-        )
-
-        view._on_settings_click()
-
-        assert view._settings_window.capture_fps_var.get() == "60"
+        assert view._settings_window.preview_scale_var.get() == "1/2"
         view._settings_window.destroy()
 
     def test_settings_window_shows_current_preview_fps(self, view_with_dispatch):
@@ -223,32 +212,18 @@ class TestSettingsWindow:
 
 class TestSettingsApply:
     @pytest.mark.asyncio
-    async def test_apply_resolution_change(self, view_with_dispatch, tk_root):
+    async def test_apply_preview_scale_change(self, view_with_dispatch, tk_root):
         view, actions = view_with_dispatch
-        view._current_state = AppState(settings=CameraSettings(resolution=(1920, 1080)))
+        view._current_state = AppState(settings=CameraSettings(preview_scale=0.25))
 
         view._on_settings_click()
-        view._settings_window.resolution_var.set("640x480")
+        view._settings_window.preview_scale_var.set("1/2")
         view._settings_window.apply_button.invoke()
         tk_root.update()
         await asyncio.sleep(0.1)
 
         assert len(actions) == 1
-        assert actions[0].settings.resolution == (640, 480)
-
-    @pytest.mark.asyncio
-    async def test_apply_capture_fps_change(self, view_with_dispatch, tk_root):
-        view, actions = view_with_dispatch
-        view._current_state = AppState(settings=CameraSettings(capture_fps=30))
-
-        view._on_settings_click()
-        view._settings_window.capture_fps_var.set("60")
-        view._settings_window.apply_button.invoke()
-        tk_root.update()
-        await asyncio.sleep(0.1)
-
-        assert len(actions) == 1
-        assert actions[0].settings.capture_fps == 60
+        assert actions[0].settings.preview_scale == 0.5
 
     @pytest.mark.asyncio
     async def test_apply_preview_fps_change(self, view_with_dispatch, tk_root):
@@ -284,20 +259,21 @@ class TestSettingsApply:
         view._current_state = AppState()
 
         view._on_settings_click()
-        view._settings_window.resolution_var.set("1280x720")
-        view._settings_window.capture_fps_var.set("60")
-        view._settings_window.preview_fps_var.set("5")
-        view._settings_window.record_fps_var.set("15")
+        view._settings_window.preview_scale_var.set("1/8")
+        view._settings_window.preview_fps_var.set("2")
+        view._settings_window.record_fps_var.set("30")
         view._settings_window.apply_button.invoke()
         tk_root.update()
         await asyncio.sleep(0.1)
 
         assert len(actions) == 1
         s = actions[0].settings
-        assert s.resolution == (1280, 720)
+        assert s.preview_scale == 0.125
+        assert s.preview_fps == 2
+        assert s.record_fps == 30
+        # Resolution and capture_fps should be unchanged from defaults (IMX296 native)
+        assert s.resolution == (1456, 1088)
         assert s.capture_fps == 60
-        assert s.preview_fps == 5
-        assert s.record_fps == 15
 
 
 # =============================================================================
@@ -439,6 +415,7 @@ class TestEndToEndWorkflows:
                 resolution=(1920, 1080),
                 capture_fps=30,
                 preview_fps=10,
+                preview_scale=0.25,
                 record_fps=5,
             ),
         )
@@ -447,8 +424,9 @@ class TestEndToEndWorkflows:
         view._on_settings_click()
         assert view._settings_window is not None
 
-        # User changes resolution
-        view._settings_window.resolution_var.set("1280x720")
+        # User changes preview scale and record fps
+        view._settings_window.preview_scale_var.set("1/2")
+        view._settings_window.record_fps_var.set("15")
 
         # User clicks Apply
         view._settings_window.apply_button.invoke()
@@ -458,7 +436,10 @@ class TestEndToEndWorkflows:
         # Verify dispatch
         assert len(actions) == 1
         assert isinstance(actions[0], ApplySettings)
-        assert actions[0].settings.resolution == (1280, 720)
+        assert actions[0].settings.preview_scale == 0.5
+        assert actions[0].settings.record_fps == 15
+        # Resolution should be unchanged (not user-configurable)
+        assert actions[0].settings.resolution == (1920, 1080)
 
         # Settings window should be closed
         assert view._settings_window is None

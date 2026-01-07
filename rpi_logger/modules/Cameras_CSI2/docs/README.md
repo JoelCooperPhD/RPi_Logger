@@ -13,7 +13,7 @@ python3 main.py --camera-index 0
 # Auto-record to session directory
 python3 main.py --camera-index 0 --record --output-dir /data/session_001
 
-# Run tests (74 tests)
+# Run tests (73 tests)
 cd /home/rs-pi-2/Development/Logger
 uv run pytest rpi_logger/modules/Cameras_CSI2/tests/ -v
 ```
@@ -89,17 +89,19 @@ CSI2CamerasRuntime (ModuleRuntime)
 |----------|-------|-------|
 | Unit | 10 | Pure state machine |
 | Integration | 11 | Store + mock executor |
-| Widget | 53 | Comprehensive GUI coverage |
-| **Total** | **74** | All passing |
+| Widget | 52 | Comprehensive GUI coverage |
+| **Total** | **73** | All passing |
 
 ### GUI Test Coverage
 Widget tests cover all user interactions:
 - View attachment and menu wiring
 - Settings window open/apply/cancel
-- All settings fields (resolution, fps, preview, record)
+- All settings fields (preview scale, preview fps, record fps)
 - Metrics rendering during streaming
 - Recording state changes
 - Frame rendering pipeline
+
+**Note**: Resolution is NOT user-configurable - always uses sensor native (1456×1088 for IMX296)
 
 ---
 

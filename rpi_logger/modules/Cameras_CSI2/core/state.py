@@ -20,8 +20,8 @@ class RecordingStatus(Enum):
 
 @dataclass(frozen=True)
 class CameraSettings:
-    resolution: tuple[int, int] = (1920, 1080)
-    capture_fps: int = 30
+    resolution: tuple[int, int] = (1456, 1088)  # IMX296 native
+    capture_fps: int = 60  # IMX296 max at native res
     preview_fps: int = 10
     preview_scale: float = 0.25  # 1/4 scale default
     record_fps: int = 5
