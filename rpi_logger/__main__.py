@@ -135,13 +135,16 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
         elif module_key == 'vog':
             from rpi_logger.modules.VOG.main_vog import main
             asyncio.run(main())
+        elif module_key == 'cameras_csi2':
+            from rpi_logger.modules.Cameras_CSI2.main_cameras_csi2 import main
+            asyncio.run(main())
         elif module_key == 'stub_codex':
             # Note: This module has a space in the directory name
             # Python doesn't allow spaces in module names, so this needs special handling
             print(f"Module stub_codex cannot be run in frozen mode", file=sys.stderr)
             sys.exit(1)
         else:
-            available = ['audio', 'cameras', 'drt', 'eye_tracker', 'gps', 'notes', 'vog']
+            available = ['audio', 'cameras', 'cameras_csi2', 'drt', 'eye_tracker', 'gps', 'notes', 'vog']
             print(f"Unknown module: {module_name}", file=sys.stderr)
             print(f"Available modules: {', '.join(available)}", file=sys.stderr)
             sys.exit(1)

@@ -1,8 +1,9 @@
-enabled = false
+enabled = true
 log_level = info
 console_output = false
 view.show_io_panel = true
 view.show_logger = true
 display_name = Cameras-CSI2
 preview_resolution = auto
-window_geometry = 323x381+1542+478
+window_geometry = 850x646+879+227
+device_connected = true
