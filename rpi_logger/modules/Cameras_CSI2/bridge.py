@@ -91,28 +91,20 @@ class CSI2CamerasRuntime(ModuleRuntime):
 
         self.executor.set_preview_callback(self.view.push_frame)
 
-        self.logger.info("CSI2 Cameras runtime ready - waiting for device assignment")
+        self.logger.info("CSI2 Cameras runtime ready")
         StatusMessage.send("ready")
 
-        test_camera_index = getattr(self.ctx.args, "camera_index", None)
-        instance_id = getattr(self.ctx.args, "instance_id", None)
+        camera_index = getattr(self.ctx.args, "camera_index", None)
 
-        if test_camera_index is not None:
-            self.logger.info("TEST MODE: Auto-assigning CSI camera %d", test_camera_index)
+        if camera_index is not None:
+            self.logger.info("Auto-assigning CSI camera %d via CLI arg", camera_index)
             await self._assign_camera({
-                "command_id": "test_auto_assign",
-                "device_id": f"picam:{test_camera_index}",
-                "camera_index": test_camera_index,
-            })
-        elif not instance_id or "picam:" not in instance_id:
-            self.logger.info("AUTO-ASSIGN: Standalone mode, defaulting to camera 0")
-            await self._assign_camera({
-                "command_id": "auto_assign_default",
-                "device_id": "picam:0",
-                "camera_index": 0,
+                "command_id": "cli_auto_assign",
+                "device_id": f"picam:{camera_index}",
+                "camera_index": camera_index,
             })
         else:
-            self.logger.info("MULTI-INSTANCE: Waiting for assign_device command")
+            self.logger.info("Waiting for assign_device command")
 
     async def shutdown(self) -> None:
         self.logger.info("Shutting down CSI2 Cameras runtime")

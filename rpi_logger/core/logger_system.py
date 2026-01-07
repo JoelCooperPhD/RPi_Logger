@@ -129,11 +129,6 @@ class LoggerSystem:
         # Maps device_id -> instance_id (e.g., "ACM0" -> "DRT:ACM0")
         self._device_instance_map: Dict[str, str] = {}
 
-        # CSI camera serialization - prevents concurrent camera init which causes
-        # libcamera resource contention and capture_array() hangs
-        self._csi_camera_lock = asyncio.Lock()
-        self._csi_pending_instance: Optional[str] = None
-
         # Instance state manager - single source of truth for instance lifecycle
         self.instance_manager = InstanceStateManager(
             module_manager=self.module_manager,
@@ -773,7 +768,7 @@ class LoggerSystem:
     # =========================================================================
 
     # Modules that support multiple simultaneous instances (one per device)
-    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS", "CSICAMERAS"}
+    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS", "CSICAMERAS", "CAMERASCSI2"}
 
     def _is_multi_instance_module(self, module_id: str) -> bool:
         """Check if a module supports multiple simultaneous instances."""
@@ -980,15 +975,12 @@ class LoggerSystem:
         3. Module sends device_ready (CONNECTING -> CONNECTED)
         4. UI updated via callback from InstanceStateManager
 
-        CSI cameras are serialized: only one camera initializes at a time
-        to prevent libcamera resource contention.
-
         Returns:
             True if device connection was initiated successfully.
         """
         self.logger.info("connect_and_start_device: %s", device_id)
 
-        # Check if this is a CSI camera - requires serialized initialization
+        # Check if this is a CSI camera
         is_csi_camera = device_id.startswith("picam:")
         camera_index: int | None = None
         if is_csi_camera:
@@ -998,7 +990,6 @@ class LoggerSystem:
             except (IndexError, ValueError):
                 self.logger.error("Invalid CSI camera device_id format: %s", device_id)
                 return False
-            await self._csi_camera_lock.acquire()
 
         try:
             device = self.device_system.get_device(device_id)
@@ -1066,15 +1057,12 @@ class LoggerSystem:
 
             return True
 
-        finally:
-            if is_csi_camera:
-                self._csi_camera_lock.release()
+        except Exception as e:
+            self.logger.error("Failed to connect device %s: %s", device_id, e)
+            return False
 
     async def _wait_for_csi_connected(self, instance_id: str, timeout: float = 30.0) -> bool:
         """Wait for a CSI camera instance to reach CONNECTED state.
-
-        This is used to serialize CSI camera initialization - we wait for one
-        camera to fully connect (with frames flowing) before starting the next.
 
         Args:
             instance_id: The instance to wait for
