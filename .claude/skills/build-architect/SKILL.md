@@ -58,6 +58,43 @@ Technical specifications for implementation:
 - commands.md - Protocol definitions
 - gui.md - UI requirements (if applicable)
 
+### Testing Task Files (REQUIRED)
+
+Every module MUST include testing tasks:
+- testing_unit.md - Unit test coverage requirements
+- testing_integration.md - Integration test scenarios
+- testing_stress.md - Performance and stress test criteria
+
+These are separate from implementation phases and should be documented as their own tasks with validation checklists.
+
+## Complete Folder Structure
+
+```
+module_name/
+├── ARCHITECTURE.md           # High-level overview (optional)
+└── docs/
+    ├── TASKS.md              # Master task tracker (START HERE)
+    ├── README.md             # Navigation and quick start
+    │
+    ├── reference/            # Background context (read-only)
+    │   ├── mission.md        # Goals, non-goals, success metrics
+    │   ├── design.md         # Principles, coding standards
+    │   └── [topic].md        # Hardware, API docs, etc.
+    │
+    ├── specs/                # Technical specifications
+    │   ├── components.md     # Interface definitions with pseudocode
+    │   ├── output_formats.md # File format specs (CSV, video, etc.)
+    │   └── [area].md         # Area-specific specs (gui, commands)
+    │
+    └── tasks/                # Individual task files
+        ├── phase1_[name].md
+        ├── phase2_[name].md
+        ├── ...
+        ├── testing_unit.md         # REQUIRED
+        ├── testing_integration.md  # REQUIRED
+        └── testing_stress.md       # REQUIRED
+```
+
 ## Coding Standards Template
 
 Include this in TASKS.md and design.md:
@@ -148,3 +185,34 @@ AFTER P1.4 + P2.1:
 4. **Include examples**: Code snippets over prose descriptions
 5. **Explicit dependencies**: Never assume, always state
 6. **Measurable validation**: Every checkbox should be verifiable
+
+## Required Specifications (DO NOT SKIP)
+
+When defining data structures and interfaces, you MUST specify:
+
+### Data Format Requirements
+- For `bytes` fields: specify format (JPEG, PNG, raw BGR, YUV420, etc.)
+- For buffer/queue bounds: specify overflow behavior (drop oldest, block, raise exception)
+- For timestamps: specify precision and source (wall clock, monotonic, hardware sensor)
+
+### Algorithm Documentation
+- Non-trivial algorithms MUST include pseudocode, not just method signatures
+- Include edge case handling in pseudocode
+- Document time/space complexity for performance-critical code
+
+### Thread/Async Model Consistency
+- If architecture mentions "thread", design MUST specify if it's:
+  - A dedicated thread (threading.Thread)
+  - A task via asyncio.to_thread()
+  - A ProcessPoolExecutor worker
+- These MUST be consistent across all documentation files
+
+### Phase Sequencing Rationale
+- TASKS.md MUST include a brief explanation of WHY phases are ordered as they are
+- Document what would break if phases were reordered
+
+### Error Recovery
+- Every component that can fail MUST document:
+  - Expected failure modes
+  - Recovery behavior (retry, propagate, fallback)
+  - State after failure (clean, dirty, unknown)

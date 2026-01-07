@@ -105,6 +105,38 @@ AFTER P1.2: P1.3
 - Tasks that unlock others (high priority)
 - Independent task chains
 
+## Required Sections (DO NOT SKIP)
+
+### Testing Tasks
+Every module MUST include these task files:
+- `tasks/testing_unit.md` - Unit test coverage, mocking strategy
+- `tasks/testing_integration.md` - Component interaction tests
+- `tasks/testing_stress.md` - Performance limits, memory bounds, concurrent load
+
+### Data Format Specifications
+In components.md, for every `bytes` field specify:
+- Format: JPEG, PNG, raw BGR (H×W×3), YUV420, etc.
+- Byte order: big-endian, little-endian, native
+- Example with actual hex/values
+
+### Queue/Buffer Overflow Behavior
+For every bounded buffer or queue, document:
+- Max size
+- Behavior when full: drop_oldest | block | raise OverflowError
+- Example scenario showing the behavior
+
+### Algorithm Pseudocode
+For non-trivial algorithms (timing gates, frame selection, encoding):
+- Show full pseudocode with edge cases
+- Document time/space complexity
+- Show example inputs → outputs
+
+### Phase Sequencing Rationale
+In TASKS.md, add section explaining:
+- Why phases are ordered this way
+- What breaks if Phase N runs before Phase N-1
+- Which phases can truly run in parallel
+
 ## Remember
 
 - Design for AI agents, not human readers
@@ -112,3 +144,6 @@ AFTER P1.2: P1.3
 - Concise > comprehensive
 - Structured > narrative
 - Checkboxes > paragraphs
+- **Always include testing tasks**
+- **Always specify data formats**
+- **Always show algorithm pseudocode**

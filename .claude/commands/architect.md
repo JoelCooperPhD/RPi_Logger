@@ -86,6 +86,9 @@ You are a build architect helping plan and structure a new module or feature. Yo
 - **Technical**: Which library/pattern should we use for Y?
 - **Integration**: How should this communicate with Z?
 - **Quality**: What testing/validation is required?
+- **Data formats**: What format is data in at each boundary? (JPEG, raw BGR, YUV420, etc.)
+- **Error handling**: What happens when X fails? (retry, propagate, fallback)
+- **Overflow behavior**: When buffers/queues fill, what happens? (drop oldest, block, raise)
 
 If user says "use your judgment", provide your recommendation and get explicit confirmation.
 
@@ -155,11 +158,15 @@ If user says "use your judgment", provide your recommendation and get explicit c
    - Task files with validation checklists
    - Spec files with interface definitions
    - Reference files with context
+   - **Testing task files** (testing_unit.md, testing_integration.md, testing_stress.md)
 
 3. Include in all documentation:
    - Coding standards section (asyncio, no docstrings, type hints, etc.)
    - Standalone testing guidance
    - Validation checklists
+   - **Phase sequencing rationale** (why phases are ordered this way)
+   - **Data format specifications** (bytes format, timestamp precision, queue overflow behavior)
+   - **Algorithm pseudocode** for non-trivial logic
 
 ---
 
@@ -175,13 +182,22 @@ If user says "use your judgment", provide your recommendation and get explicit c
    - No missing tasks
    - Clear validation criteria
 
-2. Present summary to user:
+2. **Completeness checklist** (MUST verify all):
+   - [ ] Testing tasks exist: testing_unit.md, testing_integration.md, testing_stress.md
+   - [ ] All `bytes` fields have format specified (JPEG, BGR, YUV420, etc.)
+   - [ ] All bounded queues/buffers have overflow behavior documented
+   - [ ] All non-trivial algorithms have pseudocode
+   - [ ] Phase sequencing rationale is in TASKS.md
+   - [ ] Thread/async model is consistent across all docs (no conflicts)
+   - [ ] Error recovery documented for each component that can fail
+
+3. Present summary to user:
    - Total tasks created
    - Parallelization opportunities
    - Estimated complexity distribution
    - Any remaining questions
 
-3. **Ask user for final approval**
+4. **Ask user for final approval**
 
 ---
 
