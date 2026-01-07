@@ -157,24 +157,26 @@ class NetworkScanner:
                 except Exception as e:
                     logger.error(f"Error re-announcing network device: {e}")
 
-    def _on_service_state_change(
-        self,
-        zeroconf: Zeroconf,
-        service_type: str,
-        name: str,
-        state_change: ServiceStateChange,
-    ) -> None:
+    def _on_service_state_change(self, **kwargs) -> None:
         """Handle mDNS service state changes.
 
         This is called from the zeroconf thread, so we schedule
         the actual handling on the asyncio event loop.
+
+        Note: zeroconf >= 0.132 changed to keyword-only arguments.
+        Using **kwargs for compatibility with both old and new versions.
         """
         if self._loop is None:
             return
 
+        zeroconf_instance = kwargs.get("zeroconf")
+        service_type = kwargs.get("service_type", "")
+        name = kwargs.get("name", "")
+        state_change = kwargs.get("state_change")
+
         if state_change == ServiceStateChange.Added:
             asyncio.run_coroutine_threadsafe(
-                self._handle_service_added(zeroconf, service_type, name),
+                self._handle_service_added(zeroconf_instance, service_type, name),
                 self._loop
             )
         elif state_change == ServiceStateChange.Removed:

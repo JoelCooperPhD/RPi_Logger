@@ -1,9 +1,18 @@
 import argparse
 import asyncio
+import multiprocessing
 import signal
 import sys
 from pathlib import Path
 from typing import Optional
+
+# Force spawn method for subprocesses to avoid libcamera fork issues
+# libcamera initializes in parent process during CSI camera discovery,
+# and fork() inherits broken state. spawn() starts fresh.
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    pass  # Already set
 
 # Add the optional per-project virtualenv (created at repo root) to sys.path so
 # scripts launched directly from source can still import installed wheels.

@@ -27,7 +27,7 @@ IO Metrics - In/Rec/Tgt FPS, Queue depths, Wait time
 
 OUTPUT FILES
 Location: {session_dir}/CSICameras/{camera_id}/
-  {prefix}_{camera_id}.avi - Video (AVI/MJPEG/YUV420P)
+  {prefix}_{camera_id}.mp4 - Video (MP4/H.264)
   {prefix}_{camera_id}_timing.csv - Per-frame timing
 
 TIMING CSV COLUMNS

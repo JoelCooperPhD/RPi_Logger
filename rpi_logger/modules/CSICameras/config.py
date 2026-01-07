@@ -13,10 +13,10 @@ from rpi_logger.modules.base.preferences import ModulePreferences, ScopedPrefere
 # Type alias for resolution
 Resolution = Tuple[int, int]
 
-# Core defaults
-DEFAULT_CAPTURE_RESOLUTION: Resolution = (1280, 720)
-DEFAULT_CAPTURE_FPS = 30.0
-DEFAULT_RECORD_FPS = 30.0
+# Core defaults - IMX296 full sensor resolution
+DEFAULT_CAPTURE_RESOLUTION: Resolution = (1456, 1088)
+DEFAULT_CAPTURE_FPS = 60.0
+DEFAULT_RECORD_FPS = 60.0
 DEFAULT_PREVIEW_SIZE: Resolution = (320, 180)
 DEFAULT_PREVIEW_FPS = 10.0
 DEFAULT_PREVIEW_JPEG_QUALITY = 80

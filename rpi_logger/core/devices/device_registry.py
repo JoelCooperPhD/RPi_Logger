@@ -225,7 +225,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=None,
         baudrate=0,  # Not a serial device
         display_name="Pi Camera",
-        module_id="CSICameras",
+        module_id="Csicameras",
     ),
 
     # GPS devices (UART, discovered via fixed path check)

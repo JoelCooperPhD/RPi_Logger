@@ -1,9 +1,9 @@
 {
   "entries": {
-    "picam:0": {
-      "fingerprint": "-7834502840492528644",
+    "picam:1": {
+      "fingerprint": "6197559376730993639",
       "model_key": "imx296",
-      "updated_at": 1767668170.7171078
+      "updated_at": 1767707563.1615114
     }
   },
   "schema": 2

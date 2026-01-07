@@ -95,5 +95,5 @@ gui_io_stub_visible = false
 view.show_io_panel = true
 view.show_logger = true
 window_geometry = 320x200
-device_connected = false
+device_connected = true
 eyetracker_config_dialog_geometry = +392+790

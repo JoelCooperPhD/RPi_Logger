@@ -1,5 +1,5 @@
 display_name = Notes
-enabled = true
+enabled = false
 log_level = info
 internal = true
 visible = true

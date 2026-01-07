@@ -5,4 +5,4 @@ view.show_logger = true
 display_name = Cameras-USB
 preview_resolution = auto
 device_connected = false
-window_geometry = 320x200
+window_geometry = 524x502+1648+723

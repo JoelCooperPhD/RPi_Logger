@@ -1,5 +1,5 @@
 display_name = Audio
-enabled = true
+enabled = false
 log_level = info
 gui_logger_visible = false
 gui_io_stub_visible = false
@@ -8,4 +8,5 @@ view.show_logger = false
 device_connected = false
 preview_resolution = auto
 audio.selected_device_names = 
-window_geometry = 320x200
+window_geometry = 672x68+38+640
+audio.device_name = USB Microphoner: Audio (hw:2,0)(USB):audio_1

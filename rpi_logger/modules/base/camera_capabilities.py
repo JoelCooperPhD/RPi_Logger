@@ -69,11 +69,10 @@ def select_default_preview(capabilities: CameraCapabilities) -> Optional[Capabil
 
 
 def select_default_record(capabilities: CameraCapabilities) -> Optional[CapabilityMode]:
-    """Pick a sensible default record mode: highest 16:9 up to 30 fps."""
-    candidates = [m for m in capabilities.modes if _is_16_9(m.size)] or capabilities.modes
-    if not candidates:
+    """Pick highest resolution mode available (full sensor resolution)."""
+    if not capabilities.modes:
         return None
-    return sorted(candidates, key=lambda m: (m.width * m.height, min(m.fps, 30)), reverse=True)[0]
+    return sorted(capabilities.modes, key=lambda m: (m.width * m.height, m.fps), reverse=True)[0]
 
 
 # ---------------------------------------------------------------------------
