@@ -1,218 +1,147 @@
 ---
 name: build-architect
-description: Knowledge base for designing AI-agent-friendly build documentation
+description: Knowledge base for designing AI-agent-friendly build documentation (project)
 globs:
   - "**/ARCHITECTURE.md"
   - "**/docs/TASKS.md"
-  - "**/docs/README.md"
 ---
 
 # Build Architect Skill
 
-This skill provides templates and patterns for creating AI-agent-friendly documentation structures.
+Guide for creating documentation structures for Logger modules. All modules use **Elm/Redux architecture** for consistency and testability.
 
 ## When to Use
 
-Use `/architect` command when:
-- Starting a new module from scratch
-- Refactoring a large module into structured tasks
-- Planning a multi-phase feature implementation
-- Setting up documentation for parallel AI development
+Use `/architect` when starting a new module or planning a multi-phase implementation.
 
-## Documentation Patterns
+---
 
-### TASKS.md (Master Tracker)
+## Core Principles
 
-The single source of truth for task status. AI agents check here first.
+### 1. Architecture-First
 
-**Required sections**:
-1. Folder rename warning (if applicable)
-2. Coding standards (MANDATORY)
-3. How to use instructions
-4. Phase tables with task status
-5. Status legend
-6. Quick stats
+Create `ARCHITECTURE.md` BEFORE task documentation. Must include:
+- Pattern declaration (Elm/Redux)
+- Data flow diagram (ASCII art)
+- Folder structure
+- Standalone execution command (`uv run main.py`)
 
-### Task Files
+### 2. Testability via Elm/Redux
 
-Each phase gets a dedicated task file with:
-1. Quick reference table (status, dependencies, effort, specs)
-2. Goal statement (one sentence)
-3. Sub-tasks with file deliverables
-4. Validation checklist with checkboxes
-5. Completion criteria
+All modules use Elm/Redux for testable state management:
+- **State**: Frozen dataclasses (`@dataclass(frozen=True)`)
+- **Actions**: Immutable intent descriptions
+- **Update**: Pure function `(state, action) -> (new_state, effects)`
+- **Effects**: I/O descriptions, not I/O itself
+- **Store**: Dispatch/subscribe pattern
+- **Widgets**: Receive `dispatch` callback, never own state
 
-### Reference Files
+This enables:
+- Unit tests without GUI
+- Widget tests via `button.invoke()` (no mouse)
+- 100% testable state logic
 
-Background context that doesn't change during implementation:
-- mission.md - Goals and non-goals
-- design.md - Principles and coding standards
-- hardware.md - Platform constraints (if applicable)
-- [api].md - External API documentation
+### 3. Standalone Execution
 
-### Spec Files
+Every module MUST run without the Logger parent:
+- `uv run main.py` launches GUI standalone
+- Graceful degradation when parent absent
+- Test before integration
 
-Technical specifications for implementation:
-- components.md - Interface definitions with code examples
-- output_formats.md - File format specifications
-- commands.md - Protocol definitions
-- gui.md - UI requirements (if applicable)
+### 4. Logger Integration
 
-### Testing Task Files (REQUIRED)
+Modules integrate via `StubCodexSupervisor`. The Elm/Redux Store replaces VMC:
 
-Every module MUST include testing tasks:
-- testing_unit.md - Unit test coverage requirements
-- testing_integration.md - Integration test scenarios
-- testing_stress.md - Performance and stress test criteria
+```
+StubCodexSupervisor
+    └─► ModuleRuntime (wraps Store)
+            ├─► Store.dispatch() ─► update() ─► effects
+            └─► UI subscribes to state
+```
 
-These are separate from implementation phases and should be documented as their own tasks with validation checklists.
+See `templates/runtime.template.py` for implementation pattern.
 
-## Complete Folder Structure
+---
+
+## Documentation Structure
+
+### Required Files
+
+| File | Purpose |
+|------|---------|
+| `ARCHITECTURE.md` | High-level pattern, data flow, folder map |
+| `docs/TASKS.md` | Master task tracker (agents start here) |
+| `docs/README.md` | Navigation |
+| `docs/reference/mission.md` | Goals, non-goals |
+| `docs/reference/design.md` | Coding standards, standalone test commands |
+| `docs/specs/components.md` | Interface definitions with full code |
+| `docs/tasks/phase*.md` | Individual phase tasks |
+| `docs/tasks/testing_*.md` | Unit, integration, stress test tasks |
+
+### Folder Structure
 
 ```
 module_name/
-├── ARCHITECTURE.md           # High-level overview (optional)
-└── docs/
-    ├── TASKS.md              # Master task tracker (START HERE)
-    ├── README.md             # Navigation and quick start
-    │
-    ├── reference/            # Background context (read-only)
-    │   ├── mission.md        # Goals, non-goals, success metrics
-    │   ├── design.md         # Principles, coding standards
-    │   └── [topic].md        # Hardware, API docs, etc.
-    │
-    ├── specs/                # Technical specifications
-    │   ├── components.md     # Interface definitions with pseudocode
-    │   ├── output_formats.md # File format specs (CSV, video, etc.)
-    │   └── [area].md         # Area-specific specs (gui, commands)
-    │
-    └── tasks/                # Individual task files
-        ├── phase1_[name].md
-        ├── phase2_[name].md
-        ├── ...
-        ├── testing_unit.md         # REQUIRED
-        ├── testing_integration.md  # REQUIRED
-        └── testing_stress.md       # REQUIRED
+├── ARCHITECTURE.md
+├── main.py
+├── config.py
+├── runtime.py
+├── core/                 # Elm/Redux (state, actions, effects, update, store)
+├── infra/                # I/O boundary (effect_executor, command_handler)
+├── [domain]/             # Module-specific (capture/, hardware/, etc.)
+├── ui/                   # Tkinter widgets
+├── tests/                # unit/, integration/, widget/
+└── docs/                 # TASKS.md, README.md, reference/, specs/, tasks/
 ```
 
-## Coding Standards Template
+---
 
-Include this in TASKS.md and design.md:
+## TASKS.md Requirements
 
-```markdown
-## Coding Standards (MANDATORY)
+1. **Coding standards table** - asyncio, no docstrings, type hints
+2. **Phase tables** - ID, Task, Status, Depends On, File to Create
+3. **Inline code** - Full dataclass definitions, not vague descriptions
+4. **Validation commands** - Copy-pasteable verification for each task
 
-| Requirement | Rationale |
-|-------------|-----------|
-| Modern asyncio patterns | Use async/await, not threads |
-| Non-blocking I/O | All I/O via asyncio.to_thread() |
-| No docstrings | Skip docstrings and obvious comments |
-| Concise code | Optimize for AI readability |
-| Type hints | Use type hints for self-documentation |
+---
+
+## Wiring Verification Checklist
+
+Before marking a module complete:
+
+```
+Core Elm/Redux:
+- [ ] Store.dispatch() calls update()
+- [ ] update() returns (new_state, effects)
+- [ ] EffectExecutor handles ALL effect types
+
+UI:
+- [ ] UI subscribes to Store
+- [ ] Buttons dispatch actions (not mutate state)
+
+Logger Integration:
+- [ ] ModuleRuntime wraps Store
+- [ ] handle_command() routes to dispatch()
+- [ ] main.py uses StubCodexSupervisor
+
+Standalone:
+- [ ] `uv run main.py` works
+- [ ] Button clicks cause visible state changes
 ```
 
-## Task Table Template
+---
 
-```markdown
-| ID | Task | Status | Depends On | Agent | File to Create |
-|----|------|--------|------------|-------|----------------|
-| P1.1 | [task name] | available | - | - | `path/file.py` |
-| P1.2 | [task name] | available | P1.1 | - | `path/file.py` |
-```
+## References
 
-## Validation Checklist Template
+### Templates
+- `templates/ARCHITECTURE.template.md` - Module architecture doc
+- `templates/TASKS.template.md` - Task tracker
+- `templates/runtime.template.py` - ModuleRuntime + main.py pattern
+- `templates/state.template.py` - Elm/Redux core files
 
-```markdown
-## Validation Checklist
+### Existing Infrastructure
+- `rpi_logger/modules/base/` - Shared utilities (config, encoding, GUI base classes)
+- `rpi_logger/modules/stub (codex)/vmc/` - StubCodexSupervisor, ModuleRuntime
 
-- [ ] All files created: `file1.py`, `file2.py`
-- [ ] `__init__.py` exports all public classes
-- [ ] Unit test passes: `pytest tests/unit/test_X.py`
-- [ ] Integration test: [specific test description]
-- [ ] Benchmark: [metric] < [threshold]
-```
-
-## Dependency Graph Template
-
-Use text-based format for clarity:
-
-```markdown
-NO DEPENDENCIES (can start immediately):
-  P1.1, P1.4, P2.3, P3.2
-
-AFTER P1.1:
-  P1.2, P2.1, P3.1
-
-AFTER P1.2:
-  P1.3
-
-AFTER P1.4 + P2.1:
-  P2.2
-```
-
-## Agent Workflow Template
-
-```markdown
-## Agent Workflow
-
-1. Read TASKS.md
-   └─► Find task with status=available, deps=completed
-
-2. Update TASKS.md
-   └─► Set status=in_progress, add agent ID
-
-3. Read task file
-   └─► tasks/phase{N}_{name}.md
-
-4. Read relevant specs
-   └─► specs/*.md (linked in task file)
-
-5. Implement deliverables
-   └─► Create files listed in task
-
-6. Run validation checklist
-   └─► Tests, benchmarks from task file
-
-7. Update TASKS.md
-   └─► Set status=completed, add date and notes
-```
-
-## Best Practices
-
-1. **Keep files small**: 50-200 lines per file
-2. **Link, don't duplicate**: Reference other docs instead of copying
-3. **Use tables**: Structured data is easier to parse
-4. **Include examples**: Code snippets over prose descriptions
-5. **Explicit dependencies**: Never assume, always state
-6. **Measurable validation**: Every checkbox should be verifiable
-
-## Required Specifications (DO NOT SKIP)
-
-When defining data structures and interfaces, you MUST specify:
-
-### Data Format Requirements
-- For `bytes` fields: specify format (JPEG, PNG, raw BGR, YUV420, etc.)
-- For buffer/queue bounds: specify overflow behavior (drop oldest, block, raise exception)
-- For timestamps: specify precision and source (wall clock, monotonic, hardware sensor)
-
-### Algorithm Documentation
-- Non-trivial algorithms MUST include pseudocode, not just method signatures
-- Include edge case handling in pseudocode
-- Document time/space complexity for performance-critical code
-
-### Thread/Async Model Consistency
-- If architecture mentions "thread", design MUST specify if it's:
-  - A dedicated thread (threading.Thread)
-  - A task via asyncio.to_thread()
-  - A ProcessPoolExecutor worker
-- These MUST be consistent across all documentation files
-
-### Phase Sequencing Rationale
-- TASKS.md MUST include a brief explanation of WHY phases are ordered as they are
-- Document what would break if phases were reordered
-
-### Error Recovery
-- Every component that can fail MUST document:
-  - Expected failure modes
-  - Recovery behavior (retry, propagate, fallback)
-  - State after failure (clean, dirty, unknown)
+### Example Module
+- `rpi_logger/modules/Cameras_CSI2/` - Reference Elm/Redux implementation
