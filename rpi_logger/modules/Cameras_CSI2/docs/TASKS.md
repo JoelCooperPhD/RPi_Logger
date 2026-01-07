@@ -6,10 +6,10 @@
 
 | Metric | Value |
 |--------|-------|
-| Tests Passing | 74/74 |
+| Tests Passing | 73/73 |
 | Core Complete | Yes |
 | UI Complete | Yes (StubCodexSupervisor) |
-| GUI Tests | Comprehensive (53 widget tests) |
+| GUI Tests | Comprehensive (52 widget tests) |
 | Recording | Basic (needs encoder work) |
 
 ---
@@ -25,7 +25,7 @@ python3 main.py --camera-index 0
 # Auto-record to session directory
 python3 main.py --camera-index 0 --record --output-dir /data/session_001
 
-# Run tests (74 tests)
+# Run tests (73 tests)
 cd /home/rs-pi-2/Development/Logger
 uv run pytest rpi_logger/modules/Cameras_CSI2/tests/ -v
 ```
@@ -98,7 +98,7 @@ uv run pytest rpi_logger/modules/Cameras_CSI2/tests/ -v
 |----|------|--------|-------|
 | T1 | Unit tests | completed | `tests/unit/test_update.py` (10 tests) |
 | T2 | Integration tests | completed | `tests/integration/test_store.py` (11 tests) |
-| T3 | Widget tests | completed | `tests/widget/test_renderer.py`, `test_settings.py`, `test_view.py` (53 tests) |
+| T3 | Widget tests | completed | `tests/widget/test_renderer.py`, `test_settings.py`, `test_view.py` (52 tests) |
 
 **Widget test coverage** (`test_view.py`):
 - View attachment and menu wiring

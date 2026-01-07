@@ -198,7 +198,7 @@ def attach(self):
 
 ## Testing
 
-**74 tests pass** (10 unit + 11 integration + 53 widget)
+**73 tests pass** (10 unit + 11 integration + 52 widget)
 
 ### Unit Tests (Pure, No GUI)
 ```python
@@ -212,16 +212,13 @@ def test_start_recording():
 ### Widget Tests (Comprehensive GUI Coverage)
 All GUI interactions are tested programmatically:
 ```python
-@pytest.mark.asyncio
-async def test_settings_apply(view_with_dispatch, tk_root):
+def test_settings_apply(view_with_dispatch, tk_root):
     view, actions = view_with_dispatch
-    view._current_state = AppState(settings=CameraSettings(resolution=(1920, 1080)))
     view._on_settings_click()
-    view._settings_window.resolution_var.set("640x480")
+    view._settings_window.preview_scale_var.set("1/2")
     view._settings_window.apply_button.invoke()
     tk_root.update()
-    await asyncio.sleep(0.1)
-    assert actions[0].settings.resolution == (640, 480)
+    assert actions[0].settings.preview_scale == 0.5
 ```
 
 ### Integration Tests (Store + Mock Executor)
@@ -251,8 +248,8 @@ Configured via `CameraSettings`:
 ```python
 @dataclass(frozen=True)
 class CameraSettings:
-    resolution: tuple[int, int] = (1920, 1080)
-    capture_fps: int = 30
+    resolution: tuple[int, int] = (1456, 1088)  # IMX296 native
+    capture_fps: int = 60  # IMX296 max at native res
     preview_fps: int = 10
     preview_scale: float = 0.25  # 1/4 scale default
     record_fps: int = 5
