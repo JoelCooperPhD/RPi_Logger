@@ -187,6 +187,8 @@ class EffectExecutor:
         preview_count = 0
         last_record_time = 0.0
         last_preview_time = 0.0
+        preview_intervals: list[float] = []
+        preview_fps_actual = 0.0
 
         async for frame in self._camera.frames():
             frame_count += 1
@@ -210,6 +212,13 @@ class EffectExecutor:
                 elif preview_count < 3:
                     self._logger.warning("Preview frame %d: _frame_to_ppm returned None", preview_count)
                 preview_count += 1
+                if last_preview_time > 0:
+                    preview_intervals.append(now - last_preview_time)
+                    if len(preview_intervals) > 30:
+                        preview_intervals.pop(0)
+                    if len(preview_intervals) >= 5:
+                        avg_interval = sum(preview_intervals) / len(preview_intervals)
+                        preview_fps_actual = 1.0 / avg_interval if avg_interval > 0 else 0.0
                 last_preview_time = now
 
             if frame_count % 30 == 0:
@@ -220,6 +229,7 @@ class EffectExecutor:
                     frames_dropped=self._camera.drop_count,
                     last_frame_time=now,
                     capture_fps_actual=self._camera.hardware_fps,
+                    preview_fps_actual=preview_fps_actual,
                 )
                 await dispatch(UpdateMetrics(metrics))
 

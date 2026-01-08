@@ -46,6 +46,7 @@ class FrameMetrics:
     last_frame_time: float = 0.0
     capture_fps_actual: float = 0.0
     record_fps_actual: float = 0.0
+    preview_fps_actual: float = 0.0
 
 
 @dataclass(frozen=True)

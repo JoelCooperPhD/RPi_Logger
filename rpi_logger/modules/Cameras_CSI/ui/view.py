@@ -240,10 +240,8 @@ class CSICameraView:
         else:
             self._metrics_fields["rec_tgt"].set("  -- /   --")
 
-        disp_actual = metrics.capture_fps_actual
+        disp_actual = metrics.preview_fps_actual
         disp_target = settings.preview_fps
-        if disp_actual and cap_target:
-            disp_actual = disp_actual * (settings.preview_fps / cap_target) if cap_target > 0 else 0
         self._metrics_fields["disp_tgt"].set(f"{_format_fps(disp_actual)} / {_format_fps(disp_target)}")
 
         if "cap_tgt" in self._metrics_labels:
