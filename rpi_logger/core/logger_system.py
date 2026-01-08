@@ -784,7 +784,7 @@ class LoggerSystem:
     # =========================================================================
 
     # Modules that support multiple simultaneous instances (one per device)
-    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS", "CSICAMERAS", "CAMERASCSI2"}
+    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS", "CAMERASCSI"}
 
     def _is_multi_instance_module(self, module_id: str) -> bool:
         """Check if a module supports multiple simultaneous instances."""
