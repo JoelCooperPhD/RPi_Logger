@@ -52,9 +52,13 @@ class VideoEncoder:
 
     def _convert_yuv_to_bgr(self, yuv_data: np.ndarray, size: tuple[int, int]) -> np.ndarray:
         width, height = size
+        if len(yuv_data.shape) == 2:
+            bgr = cv2.cvtColor(yuv_data, cv2.COLOR_YUV2BGR_I420)
+            return bgr[:height, :width]
         yuv_height = height + height // 2
-        yuv = yuv_data.reshape((yuv_height, width))
-        return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+        yuv = yuv_data.reshape((yuv_height, -1))
+        bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+        return bgr[:height, :width]
 
     async def stop(self) -> None:
         self._running = False
