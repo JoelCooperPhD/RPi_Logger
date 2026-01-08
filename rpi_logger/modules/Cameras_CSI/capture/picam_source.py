@@ -115,6 +115,8 @@ class PicamSource:
                 last_time = now
                 if len(frame_times) > 30:
                     frame_times.pop(0)
+                # Start calculating FPS after 3 frames (not 31)
+                if len(frame_times) >= 3:
                     avg_interval = sum(frame_times) / len(frame_times)
                     self._hardware_fps = 1.0 / avg_interval if avg_interval > 0 else 0.0
 

@@ -180,14 +180,19 @@ class EffectExecutor:
             self._logger.warning("Capture loop: no camera available")
             return
 
-        self._logger.info("Capture loop starting, preview_callback=%s", self._preview_callback is not None)
+        self._logger.info("Capture loop starting, preview_callback=%s, record_fps=%s, preview_fps=%s",
+                         self._preview_callback is not None, self._record_fps, self._preview_fps)
 
         frame_count = 0
         record_count = 0
         preview_count = 0
-        last_record_time = 0.0
-        last_preview_time = 0.0
+        next_record_time = 0.0
+        next_preview_time = 0.0
+        last_record_actual = 0.0  # For interval measurement only
+        last_preview_actual = 0.0  # For interval measurement only
+        record_intervals: list[float] = []
         preview_intervals: list[float] = []
+        record_fps_actual = 0.0
         preview_fps_actual = 0.0
 
         async for frame in self._camera.frames():
@@ -198,28 +203,55 @@ class EffectExecutor:
             record_interval = 1.0 / self._record_fps if self._record_fps > 0 else 1.0
             preview_interval = 1.0 / self._preview_fps if self._preview_fps > 0 else 0.1
 
-            if self._recording and (now - last_record_time) >= record_interval:
-                await self._recording.write_frame(frame)
-                record_count += 1
-                last_record_time = now
+            if self._recording:
+                # Initialize schedule on first frame
+                if next_record_time == 0.0:
+                    next_record_time = now
+                if now >= next_record_time:
+                    await self._recording.write_frame(frame)
+                    record_count += 1
+                    # Record actual interval for FPS measurement
+                    if last_record_actual > 0:
+                        record_intervals.append(now - last_record_actual)
+                        if len(record_intervals) > 30:
+                            record_intervals.pop(0)
+                        if len(record_intervals) >= 3:
+                            avg_interval = sum(record_intervals) / len(record_intervals)
+                            record_fps_actual = 1.0 / avg_interval if avg_interval > 0 else 0.0
+                    last_record_actual = now
+                    # Advance target by interval (not actual time) to prevent drift
+                    next_record_time += record_interval
+                    # Catch up if we've fallen behind (e.g., app was paused)
+                    if next_record_time < now:
+                        next_record_time = now + record_interval
 
-            if self._preview_callback and (now - last_preview_time) >= preview_interval:
-                preview_data = self._frame_to_ppm(frame)
-                if preview_data:
-                    self._preview_callback(preview_data)
-                    if preview_count < 3:
-                        self._logger.info("Preview frame %d sent, size=%d bytes", preview_count, len(preview_data))
-                elif preview_count < 3:
-                    self._logger.warning("Preview frame %d: _frame_to_ppm returned None", preview_count)
-                preview_count += 1
-                if last_preview_time > 0:
-                    preview_intervals.append(now - last_preview_time)
-                    if len(preview_intervals) > 30:
-                        preview_intervals.pop(0)
-                    if len(preview_intervals) >= 5:
-                        avg_interval = sum(preview_intervals) / len(preview_intervals)
-                        preview_fps_actual = 1.0 / avg_interval if avg_interval > 0 else 0.0
-                last_preview_time = now
+            if self._preview_callback:
+                # Initialize schedule on first frame
+                if next_preview_time == 0.0:
+                    next_preview_time = now
+                if now >= next_preview_time:
+                    preview_data = self._frame_to_ppm(frame)
+                    if preview_data:
+                        self._preview_callback(preview_data)
+                        if preview_count < 3:
+                            self._logger.info("Preview frame %d sent, size=%d bytes", preview_count, len(preview_data))
+                    elif preview_count < 3:
+                        self._logger.warning("Preview frame %d: _frame_to_ppm returned None", preview_count)
+                    preview_count += 1
+                    # Record actual interval for FPS measurement
+                    if last_preview_actual > 0:
+                        preview_intervals.append(now - last_preview_actual)
+                        if len(preview_intervals) > 30:
+                            preview_intervals.pop(0)
+                        if len(preview_intervals) >= 5:
+                            avg_interval = sum(preview_intervals) / len(preview_intervals)
+                            preview_fps_actual = 1.0 / avg_interval if avg_interval > 0 else 0.0
+                    last_preview_actual = now
+                    # Advance target by interval (not actual time) to prevent drift
+                    next_preview_time += preview_interval
+                    # Catch up if we've fallen behind (e.g., app was paused)
+                    if next_preview_time < now:
+                        next_preview_time = now + preview_interval
 
             if frame_count % 30 == 0:
                 metrics = FrameMetrics(
@@ -229,6 +261,7 @@ class EffectExecutor:
                     frames_dropped=self._camera.drop_count,
                     last_frame_time=now,
                     capture_fps_actual=self._camera.hardware_fps,
+                    record_fps_actual=record_fps_actual,
                     preview_fps_actual=preview_fps_actual,
                 )
                 await dispatch(UpdateMetrics(metrics))
