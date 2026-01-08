@@ -50,15 +50,15 @@ class CSICamerasRuntime(ModuleRuntime):
         self._preferences = getattr(ctx.model, "preferences", None)
         config = self._preferences.snapshot() if self._preferences else {}
 
-        preview_fps = self._parse_int(config.get("preview_fps"), 10)
+        frame_rate = self._parse_int(config.get("frame_rate"), 30)
         preview_scale = self._parse_float(config.get("preview_scale"), 0.25)
-        record_fps = self._parse_int(config.get("record_fps"), 5)
+        preview_divisor = self._parse_int(config.get("preview_divisor"), 4)
 
         self.store: Store = create_store(
             initial_state(
-                preview_fps=preview_fps,
+                frame_rate=frame_rate,
                 preview_scale=preview_scale,
-                record_fps=record_fps,
+                preview_divisor=preview_divisor,
             )
         )
 
@@ -252,9 +252,9 @@ class CSICamerasRuntime(ModuleRuntime):
         if not self._preferences:
             return
         updates = {
-            "preview_fps": str(settings.preview_fps),
+            "frame_rate": str(settings.frame_rate),
             "preview_scale": str(settings.preview_scale),
-            "record_fps": str(settings.record_fps),
+            "preview_divisor": str(settings.preview_divisor),
         }
         try:
             await self._preferences.write_async(updates)

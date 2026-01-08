@@ -123,8 +123,9 @@ class Renderer:
         self.status_var.set(status_text)
 
         metrics = state.metrics
-        self.cap_var.set(f"{metrics.capture_fps_actual:.1f} / {state.settings.capture_fps}")
-        self.rec_var.set(f"{metrics.frames_recorded} / {state.settings.record_fps}")
+        cap_target = "MAX" if state.settings.frame_rate >= 60 else str(state.settings.frame_rate)
+        self.cap_var.set(f"{metrics.capture_fps_actual:.1f} / {cap_target}")
+        self.rec_var.set(f"{metrics.frames_recorded} / {state.settings.frame_rate}")
         self.disp_var.set(f"{metrics.frames_previewed} / {state.settings.preview_fps}")
 
         self._update_fps_colors(state)
@@ -132,7 +133,7 @@ class Renderer:
 
     def _update_fps_colors(self, state: AppState) -> None:
         actual = state.metrics.capture_fps_actual
-        target = state.settings.capture_fps
+        target = state.settings.frame_rate
         if target > 0:
             ratio = actual / target
             if ratio >= 0.95:

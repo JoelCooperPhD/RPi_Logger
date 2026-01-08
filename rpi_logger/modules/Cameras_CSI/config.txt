@@ -6,4 +6,4 @@ view.show_logger = true
 display_name = Cameras-CSI
 preview_resolution = auto
 window_geometry = 320x200
-device_connected = true
+device_connected = false

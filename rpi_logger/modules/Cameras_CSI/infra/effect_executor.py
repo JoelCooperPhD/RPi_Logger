@@ -39,10 +39,11 @@ class EffectExecutor:
         self._status_callback = status_callback
         self._settings_save_callback = settings_save_callback
         self._preview_callback: Callable[[bytes], None] | None = None
-        self._record_fps = 5
-        self._preview_fps = 10
+        self._frame_rate = 30
+        self._preview_divisor = 4
         self._preview_scale = 0.25  # 1/4 scale default
         self._resolution = (1920, 1080)
+        self._camera_index: int = 0
         self._camera_id: str = ""
 
     def set_preview_callback(self, callback: Callable[[bytes], None] | None) -> None:
@@ -58,11 +59,12 @@ class EffectExecutor:
                 await self._probe_camera(camera_index, dispatch)
 
             case OpenCamera(camera_index, settings):
+                self._camera_index = camera_index
                 self._resolution = settings.resolution
-                self._record_fps = settings.record_fps
-                self._preview_fps = settings.preview_fps
+                self._frame_rate = settings.frame_rate
+                self._preview_divisor = settings.preview_divisor
                 self._preview_scale = settings.preview_scale
-                await self._open_camera(camera_index, settings.resolution, settings.capture_fps)
+                await self._open_camera(camera_index, settings.resolution, settings.frame_rate)
 
             case CloseCamera():
                 await self._close_camera()
@@ -86,12 +88,21 @@ class EffectExecutor:
                 pass
 
             case ApplyCameraSettings(settings):
+                old_frame_rate = self._frame_rate
                 self._resolution = settings.resolution
-                self._record_fps = settings.record_fps
-                self._preview_fps = settings.preview_fps
+                self._frame_rate = settings.frame_rate
+                self._preview_divisor = settings.preview_divisor
                 self._preview_scale = settings.preview_scale
                 if self._settings_save_callback:
                     self._settings_save_callback(settings)
+                # Reconfigure camera hardware if frame rate changed
+                if self._camera and old_frame_rate != self._frame_rate:
+                    self._logger.info("Frame rate changed %d -> %d, reconfiguring camera",
+                                     old_frame_rate, self._frame_rate)
+                    # Stop capture loop, reconfigure camera, restart capture loop
+                    await self._stop_capture_loop()
+                    await self._open_camera(self._camera_index, self._resolution, self._frame_rate)
+                    self._start_capture_loop(dispatch)
 
             case SendStatus(status_type, payload):
                 if self._status_callback:
@@ -180,8 +191,9 @@ class EffectExecutor:
             self._logger.warning("Capture loop: no camera available")
             return
 
-        self._logger.info("Capture loop starting, preview_callback=%s, record_fps=%s, preview_fps=%s",
-                         self._preview_callback is not None, self._record_fps, self._preview_fps)
+        preview_fps = max(1, self._frame_rate // self._preview_divisor)
+        self._logger.info("Capture loop starting, preview_callback=%s, frame_rate=%s, preview_fps=%s",
+                         self._preview_callback is not None, self._frame_rate, preview_fps)
 
         frame_count = 0
         record_count = 0
@@ -200,8 +212,9 @@ class EffectExecutor:
             now = frame.wall_time
 
             # Read intervals dynamically so settings changes take effect immediately
-            record_interval = 1.0 / self._record_fps if self._record_fps > 0 else 1.0
-            preview_interval = 1.0 / self._preview_fps if self._preview_fps > 0 else 0.1
+            record_interval = 1.0 / self._frame_rate if self._frame_rate > 0 else 1.0
+            preview_fps = max(1, self._frame_rate // self._preview_divisor)
+            preview_interval = 1.0 / preview_fps
 
             if self._recording:
                 # Initialize schedule on first frame

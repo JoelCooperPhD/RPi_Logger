@@ -100,7 +100,7 @@ class TestRendererStateRendering:
         state = AppState(
             camera_status=CameraStatus.STREAMING,
             metrics=metrics,
-            settings=CameraSettings(capture_fps=30),
+            settings=CameraSettings(frame_rate=30),
         )
         renderer.render(state)
 
@@ -116,7 +116,7 @@ class TestRendererFPSColorCoding:
         state = AppState(
             camera_status=CameraStatus.STREAMING,
             metrics=metrics,
-            settings=CameraSettings(capture_fps=30),
+            settings=CameraSettings(frame_rate=30),
         )
         renderer.render(state)
 
@@ -130,7 +130,7 @@ class TestRendererFPSColorCoding:
         state = AppState(
             camera_status=CameraStatus.STREAMING,
             metrics=metrics,
-            settings=CameraSettings(capture_fps=30),
+            settings=CameraSettings(frame_rate=30),
         )
         renderer.render(state)
 
@@ -144,7 +144,7 @@ class TestRendererFPSColorCoding:
         state = AppState(
             camera_status=CameraStatus.STREAMING,
             metrics=metrics,
-            settings=CameraSettings(capture_fps=30),
+            settings=CameraSettings(frame_rate=30),
         )
         renderer.render(state)
 

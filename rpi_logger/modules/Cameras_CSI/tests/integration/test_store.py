@@ -130,14 +130,13 @@ class TestStoreWithMockExecutor:
 
         new_settings = CameraSettings(
             resolution=(1280, 720),
-            capture_fps=60,
-            preview_fps=5,
-            record_fps=10,
+            frame_rate=30,
+            preview_divisor=4,
         )
         await store.dispatch(ApplySettings(new_settings))
 
         assert store.state.settings.resolution == (1280, 720)
-        assert store.state.settings.capture_fps == 60
+        assert store.state.settings.frame_rate == 30
 
     @pytest.mark.asyncio
     async def test_shutdown_cleans_up(self):

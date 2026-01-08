@@ -163,26 +163,26 @@ class TestSettingsWindow:
         assert view._settings_window.preview_scale_var.get() == "1/2"
         view._settings_window.destroy()
 
-    def test_settings_window_shows_current_preview_fps(self, view_with_dispatch):
+    def test_settings_window_shows_current_frame_rate(self, view_with_dispatch):
         view, actions = view_with_dispatch
         view._current_state = AppState(
-            settings=CameraSettings(preview_fps=5)
+            settings=CameraSettings(frame_rate=15)
         )
 
         view._on_settings_click()
 
-        assert view._settings_window.preview_fps_var.get() == "5"
+        assert view._settings_window.frame_rate_var.get() == "15"
         view._settings_window.destroy()
 
-    def test_settings_window_shows_current_record_fps(self, view_with_dispatch):
+    def test_settings_window_shows_current_preview_divisor(self, view_with_dispatch):
         view, actions = view_with_dispatch
         view._current_state = AppState(
-            settings=CameraSettings(record_fps=15)
+            settings=CameraSettings(preview_divisor=2)
         )
 
         view._on_settings_click()
 
-        assert view._settings_window.record_fps_var.get() == "15"
+        assert view._settings_window.preview_divisor_var.get() == "1/2"
         view._settings_window.destroy()
 
     def test_settings_cancel_does_not_dispatch(self, view_with_dispatch, tk_root):
@@ -225,32 +225,32 @@ class TestSettingsApply:
         assert actions[0].settings.preview_scale == 0.5
 
     @pytest.mark.asyncio
-    async def test_apply_preview_fps_change(self, view_with_dispatch, tk_root):
+    async def test_apply_frame_rate_change(self, view_with_dispatch, tk_root):
         view, actions = view_with_dispatch
-        view._current_state = AppState(settings=CameraSettings(preview_fps=10))
+        view._current_state = AppState(settings=CameraSettings(frame_rate=30))
 
         view._on_settings_click()
-        view._settings_window.preview_fps_var.set("5")
+        view._settings_window.frame_rate_var.set("15")
         view._settings_window.apply_button.invoke()
         tk_root.update()
         await asyncio.sleep(0.1)
 
         assert len(actions) == 1
-        assert actions[0].settings.preview_fps == 5
+        assert actions[0].settings.frame_rate == 15
 
     @pytest.mark.asyncio
-    async def test_apply_record_fps_change(self, view_with_dispatch, tk_root):
+    async def test_apply_preview_divisor_change(self, view_with_dispatch, tk_root):
         view, actions = view_with_dispatch
-        view._current_state = AppState(settings=CameraSettings(record_fps=5))
+        view._current_state = AppState(settings=CameraSettings(preview_divisor=4))
 
         view._on_settings_click()
-        view._settings_window.record_fps_var.set("15")
+        view._settings_window.preview_divisor_var.set("1/2")
         view._settings_window.apply_button.invoke()
         tk_root.update()
         await asyncio.sleep(0.1)
 
         assert len(actions) == 1
-        assert actions[0].settings.record_fps == 15
+        assert actions[0].settings.preview_divisor == 2
 
     @pytest.mark.asyncio
     async def test_apply_all_settings_at_once(self, view_with_dispatch, tk_root):
@@ -259,8 +259,8 @@ class TestSettingsApply:
 
         view._on_settings_click()
         view._settings_window.preview_scale_var.set("1/8")
-        view._settings_window.preview_fps_var.set("2")
-        view._settings_window.record_fps_var.set("30")
+        view._settings_window.frame_rate_var.set("30")
+        view._settings_window.preview_divisor_var.set("1/8")
         view._settings_window.apply_button.invoke()
         tk_root.update()
         await asyncio.sleep(0.1)
@@ -268,11 +268,10 @@ class TestSettingsApply:
         assert len(actions) == 1
         s = actions[0].settings
         assert s.preview_scale == 0.125
-        assert s.preview_fps == 2
-        assert s.record_fps == 30
-        # Resolution and capture_fps should be unchanged from defaults (IMX296 native)
+        assert s.frame_rate == 30
+        assert s.preview_divisor == 8
+        # Resolution should be unchanged from defaults (IMX296 native)
         assert s.resolution == (1456, 1088)
-        assert s.capture_fps == 60
 
 
 # =============================================================================
@@ -291,7 +290,7 @@ class TestRenderMetrics:
         state = AppState(
             camera_status=CameraStatus.STREAMING,
             metrics=FrameMetrics(capture_fps_actual=29.5),
-            settings=CameraSettings(capture_fps=30),
+            settings=CameraSettings(frame_rate=30),
         )
         view.render(state)
         tk_root.update()
@@ -305,7 +304,7 @@ class TestRenderMetrics:
             camera_status=CameraStatus.STREAMING,
             recording_status=RecordingStatus.RECORDING,
             metrics=FrameMetrics(capture_fps_actual=30.0),
-            settings=CameraSettings(record_fps=5),
+            settings=CameraSettings(frame_rate=5),
         )
         view.render(state)
         tk_root.update()
@@ -330,13 +329,13 @@ class TestRenderMetrics:
         state = AppState(
             camera_status=CameraStatus.STREAMING,
             metrics=FrameMetrics(capture_fps_actual=30.0),
-            settings=CameraSettings(capture_fps=30, preview_fps=10),
+            settings=CameraSettings(frame_rate=30, preview_divisor=4),  # preview_fps = 30/4 = 7
         )
         view.render(state)
         tk_root.update()
 
         disp_text = view._metrics_fields["disp_tgt"].get()
-        assert "10" in disp_text  # Target should show 10
+        assert "7" in disp_text  # Target should show 7 (30/4)
 
 
 class TestRenderWithoutUI:
@@ -412,10 +411,9 @@ class TestEndToEndWorkflows:
             camera_status=CameraStatus.STREAMING,
             settings=CameraSettings(
                 resolution=(1920, 1080),
-                capture_fps=30,
-                preview_fps=10,
+                frame_rate=30,
+                preview_divisor=4,
                 preview_scale=0.25,
-                record_fps=5,
             ),
         )
 
@@ -423,9 +421,9 @@ class TestEndToEndWorkflows:
         view._on_settings_click()
         assert view._settings_window is not None
 
-        # User changes preview scale and record fps
+        # User changes preview scale and frame rate
         view._settings_window.preview_scale_var.set("1/2")
-        view._settings_window.record_fps_var.set("15")
+        view._settings_window.frame_rate_var.set("15")
 
         # User clicks Apply
         view._settings_window.apply_button.invoke()
@@ -436,7 +434,7 @@ class TestEndToEndWorkflows:
         assert len(actions) == 1
         assert isinstance(actions[0], ApplySettings)
         assert actions[0].settings.preview_scale == 0.5
-        assert actions[0].settings.record_fps == 15
+        assert actions[0].settings.frame_rate == 15
         # Resolution should be unchanged (not user-configurable)
         assert actions[0].settings.resolution == (1920, 1080)
 
@@ -483,7 +481,7 @@ class TestEndToEndWorkflows:
             camera_status=CameraStatus.STREAMING,
             recording_status=RecordingStatus.RECORDING,
             metrics=FrameMetrics(capture_fps_actual=30.0),
-            settings=CameraSettings(record_fps=5),
+            settings=CameraSettings(frame_rate=5),
         ))
         tk_root.update()
         recording_rec = view._metrics_fields["rec_tgt"].get()

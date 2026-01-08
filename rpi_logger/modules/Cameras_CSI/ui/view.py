@@ -230,15 +230,15 @@ class CSICameraView:
         settings = state.settings
 
         cap_actual = metrics.capture_fps_actual
-        cap_target = settings.capture_fps
-        self._metrics_fields["cap_tgt"].set(f"{_format_fps(cap_actual)} /   MAX")
+        cap_target = settings.frame_rate
+        cap_target_str = "  MAX" if cap_target >= 60 else _format_fps(cap_target)
+        self._metrics_fields["cap_tgt"].set(f"{_format_fps(cap_actual)} / {cap_target_str}")
 
         if state.recording_status == RecordingStatus.RECORDING:
             rec_actual = metrics.record_fps_actual
-            rec_target = settings.record_fps
-            self._metrics_fields["rec_tgt"].set(f"{_format_fps(rec_actual)} / {_format_fps(rec_target)}")
+            self._metrics_fields["rec_tgt"].set(f"{_format_fps(rec_actual)} / {cap_target_str}")
         else:
-            self._metrics_fields["rec_tgt"].set("  -- /   --")
+            self._metrics_fields["rec_tgt"].set(f"  -- / {cap_target_str}")
 
         disp_actual = metrics.preview_fps_actual
         disp_target = settings.preview_fps

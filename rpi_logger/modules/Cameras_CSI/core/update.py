@@ -101,7 +101,7 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                     trial_number=trial
                 ),
                 [
-                    StartEncoder(video_path, state.settings.record_fps, state.settings.resolution),
+                    StartEncoder(video_path, state.settings.frame_rate, state.settings.resolution),
                     StartTimingWriter(timing_path)
                 ]
             )

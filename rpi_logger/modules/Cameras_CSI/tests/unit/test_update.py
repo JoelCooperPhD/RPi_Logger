@@ -49,7 +49,7 @@ class TestStartRecording:
     def test_from_streaming_starts_recording(self):
         state = AppState(
             camera_status=CameraStatus.STREAMING,
-            settings=CameraSettings(resolution=(1920, 1080), record_fps=5)
+            settings=CameraSettings(resolution=(1920, 1080), frame_rate=5)
         )
         new_state, effects = update(state, StartRecording(Path("/data"), 1))
 

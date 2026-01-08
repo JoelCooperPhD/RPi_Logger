@@ -38,26 +38,25 @@ class TestSettingsWindowCreation:
         applied = []
         window = SettingsWindow(tk_root, default_settings, capabilities, applied.append)
 
-        # Default: preview_scale=0.25 (1/4), preview_fps=10, record_fps=5
+        # Default: preview_scale=0.25 (1/4), frame_rate=30, preview_divisor=4 (1/4)
         assert window.preview_scale_var.get() == "1/4"
-        assert window.preview_fps_var.get() == "10"
-        assert window.record_fps_var.get() == "5"
+        assert window.frame_rate_var.get() == "30"
+        assert window.preview_divisor_var.get() == "1/4"
         window.destroy()
 
     def test_displays_custom_settings(self, tk_root, capabilities):
         custom = CameraSettings(
             resolution=(1280, 720),
-            capture_fps=60,
-            preview_fps=5,
+            frame_rate=15,
+            preview_divisor=2,
             preview_scale=0.5,
-            record_fps=15,
         )
         applied = []
         window = SettingsWindow(tk_root, custom, capabilities, applied.append)
 
         assert window.preview_scale_var.get() == "1/2"
-        assert window.preview_fps_var.get() == "5"
-        assert window.record_fps_var.get() == "15"
+        assert window.frame_rate_var.get() == "15"
+        assert window.preview_divisor_var.get() == "1/2"
         window.destroy()
 
     def test_displays_eighth_scale(self, tk_root, capabilities):
@@ -84,19 +83,18 @@ class TestSettingsWindowInteraction:
         window = SettingsWindow(tk_root, default_settings, capabilities, applied.append)
 
         window.preview_scale_var.set("1/2")
-        window.preview_fps_var.set("5")
-        window.record_fps_var.set("15")
+        window.frame_rate_var.set("15")
+        window.preview_divisor_var.set("1/2")
 
         window.apply_button.invoke()
 
         assert len(applied) == 1
         settings = applied[0]
         assert settings.preview_scale == 0.5
-        assert settings.preview_fps == 5
-        assert settings.record_fps == 15
-        # Resolution and capture_fps should be unchanged
+        assert settings.frame_rate == 15
+        assert settings.preview_divisor == 2
+        # Resolution should be unchanged
         assert settings.resolution == default_settings.resolution
-        assert settings.capture_fps == default_settings.capture_fps
 
     def test_cancel_button_closes_window(self, tk_root, default_settings, capabilities):
         applied = []
