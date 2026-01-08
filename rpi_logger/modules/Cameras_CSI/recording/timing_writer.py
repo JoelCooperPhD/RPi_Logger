@@ -24,6 +24,7 @@ class TimingCSVWriter:
     def _open_file(self) -> TextIO:
         f = open(self._path, 'w', newline='')
         f.write(self.HEADER)
+        f.flush()
         return f
 
     async def write_frame(self, frame: CapturedFrame) -> None:
@@ -31,7 +32,11 @@ class TimingCSVWriter:
             return
         self._frame_index += 1
         row = self._format_row(frame, self._frame_index)
-        await asyncio.to_thread(self._file.write, row)
+        await asyncio.to_thread(self._write_and_flush, row)
+
+    def _write_and_flush(self, row: str) -> None:
+        self._file.write(row)
+        self._file.flush()
 
     def _format_row(self, frame: CapturedFrame, frame_index: int) -> str:
         return (
