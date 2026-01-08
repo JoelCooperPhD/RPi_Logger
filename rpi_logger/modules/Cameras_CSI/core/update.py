@@ -89,8 +89,10 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 return state, []
             if state.recording_status != RecordingStatus.STOPPED:
                 return state, []
-            video_path = session_dir / f"trial_{trial:03d}.avi"
-            timing_path = session_dir / f"trial_{trial:03d}_timing.csv"
+            camera_idx = state.camera_index if state.camera_index is not None else 0
+            camera_dir = session_dir / f"picam{camera_idx}"
+            video_path = camera_dir / f"trial_{trial:03d}.avi"
+            timing_path = camera_dir / f"trial_{trial:03d}_timing.csv"
             return (
                 replace(
                     state,
