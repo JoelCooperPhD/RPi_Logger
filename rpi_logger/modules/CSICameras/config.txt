@@ -1,9 +1,0 @@
-enabled = true
-log_level = info
-console_output = false
-view.show_io_panel = true
-view.show_logger = true
-display_name = Cameras-CSI
-preview_resolution = auto
-window_geometry = 320x200
-device_connected = true

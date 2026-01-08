@@ -1,4 +1,4 @@
-enabled = true
+enabled = false
 log_level = info
 console_output = false
 view.show_io_panel = true

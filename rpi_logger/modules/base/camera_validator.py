@@ -594,6 +594,18 @@ class CapabilityValidator:
         """
         return [self._format_fps(f) for f in sorted(self._all_fps, reverse=True)]
 
+    def get_sensor_resolution(self) -> Optional[Tuple[int, int]]:
+        """Get full sensor resolution from default record mode or highest available.
+
+        Returns:
+            (width, height) tuple of the full sensor resolution, or None if unavailable.
+        """
+        if self._caps.default_record_mode:
+            return self._caps.default_record_mode.size
+        if self._resolution_set:
+            return max(self._resolution_set, key=lambda r: r[0] * r[1])
+        return None
+
     @staticmethod
     def _format_fps(fps: float) -> str:
         """Format FPS value for display, showing as integer if whole number."""

@@ -54,6 +54,8 @@ class CameraSettingsWindowBase:
     - SUPPORTS_AUDIO: Whether to show audio recording checkbox
     - DEFAULT_SETTINGS: Dict of default settings (extends BASE_DEFAULT_SETTINGS)
     - BACKEND_DISPLAY_MAP: Dict mapping backend names to display names
+    - USES_PREVIEW_SCALE: If True, preview uses scale selector instead of resolution picker
+    - PREVIEW_SCALE_OPTIONS: Available scale options when USES_PREVIEW_SCALE is True
     """
 
     # Override in subclasses
@@ -64,6 +66,8 @@ class CameraSettingsWindowBase:
     SUPPORTS_AUDIO: bool = False
     DEFAULT_SETTINGS: Dict[str, str] = BASE_DEFAULT_SETTINGS
     BACKEND_DISPLAY_MAP: Dict[str, str] = {}
+    USES_PREVIEW_SCALE: bool = False
+    PREVIEW_SCALE_OPTIONS: List[str] = []
 
     # Subclasses can override to provide module-specific sensor info dialog
     @staticmethod
@@ -90,13 +94,17 @@ class CameraSettingsWindowBase:
         self._camera_info: Dict[str, Dict[str, Any]] = {}
         self._preview_res_var: Optional[tk.StringVar] = None
         self._preview_fps_var: Optional[tk.StringVar] = None
+        self._preview_scale_var: Optional[tk.StringVar] = None
         self._record_res_var: Optional[tk.StringVar] = None
         self._record_fps_var: Optional[tk.StringVar] = None
         self._record_audio_var: Optional[tk.BooleanVar] = None
         self._preview_res_combo = None
         self._preview_fps_combo = None
+        self._preview_scale_combo = None
         self._record_res_combo = None
+        self._record_res_label = None
         self._record_fps_combo = None
+        self._sensor_resolution: Optional[tuple] = None
         self._record_audio_cb = None
         self._record_audio_frame = None
         self._has_audio_sibling: Dict[str, bool] = {}
@@ -145,7 +153,9 @@ class CameraSettingsWindowBase:
                               preview_resolutions: Optional[List[str]] = None,
                               record_resolutions: Optional[List[str]] = None,
                               preview_fps_values: Optional[List[str]] = None,
-                              record_fps_values: Optional[List[str]] = None) -> None:
+                              record_fps_values: Optional[List[str]] = None,
+                              preview_scale_options: Optional[List[str]] = None,
+                              sensor_resolution: Optional[tuple] = None) -> None:
         """Update available resolution/FPS options."""
         opts = self._options.setdefault(camera_id, {})
         if preview_resolutions is not None:
@@ -156,6 +166,10 @@ class CameraSettingsWindowBase:
             opts["preview_fps_values"] = preview_fps_values
         if record_fps_values is not None:
             opts["record_fps_values"] = record_fps_values
+        if preview_scale_options is not None:
+            opts["preview_scale_options"] = preview_scale_options
+        if sensor_resolution is not None:
+            opts["sensor_resolution"] = sensor_resolution
         self._clamp_settings_to_options(camera_id)
         if camera_id == self._active_camera:
             self._refresh_resolution_ui()
@@ -306,15 +320,28 @@ class CameraSettingsWindowBase:
         tk.Label(card, text="Preview", bg=bg, fg=fg, anchor="w").grid(
             row=0, column=0, sticky="w", padx=(0, 10), pady=2
         )
-        self._preview_res_var = tk.StringVar(value=self.DEFAULT_SETTINGS["preview_resolution"])
-        self._preview_res_combo = ttk.Combobox(
-            card, textvariable=self._preview_res_var, values=(), state="readonly", width=12
-        )
-        self._preview_res_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=2)
+
+        if self.USES_PREVIEW_SCALE:
+            # Scale selector mode (CSI cameras)
+            self._preview_scale_var = tk.StringVar(value="1/4")
+            self._preview_scale_combo = ttk.Combobox(
+                card, textvariable=self._preview_scale_var,
+                values=self.PREVIEW_SCALE_OPTIONS or ["1/2", "1/4", "1/8"],
+                state="readonly", width=12
+            )
+            self._preview_scale_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=2)
+        else:
+            # Resolution picker mode (USB cameras)
+            self._preview_res_var = tk.StringVar(value=self.DEFAULT_SETTINGS["preview_resolution"])
+            self._preview_res_combo = ttk.Combobox(
+                card, textvariable=self._preview_res_var, values=(), state="readonly", width=12
+            )
+            self._preview_res_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8), pady=2)
 
         self._preview_fps_var = tk.StringVar(value=self.DEFAULT_SETTINGS["preview_fps"])
+        preview_fps_values = getattr(self, 'PREVIEW_FPS_OPTIONS', ("1", "2", "5", "10", "15"))
         self._preview_fps_combo = ttk.Combobox(
-            card, textvariable=self._preview_fps_var, values=("1", "2", "5", "10", "15"),
+            card, textvariable=self._preview_fps_var, values=preview_fps_values,
             state="readonly", width=5
         )
         self._preview_fps_combo.grid(row=0, column=2, sticky="e", pady=2)
@@ -326,11 +353,21 @@ class CameraSettingsWindowBase:
         tk.Label(card, text="Record", bg=bg, fg=fg, anchor="w").grid(
             row=1, column=0, sticky="w", padx=(0, 10), pady=2
         )
-        self._record_res_var = tk.StringVar(value=self.DEFAULT_SETTINGS["record_resolution"])
-        self._record_res_combo = ttk.Combobox(
-            card, textvariable=self._record_res_var, values=(), state="readonly", width=12
-        )
-        self._record_res_combo.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=2)
+
+        if self.USES_PREVIEW_SCALE:
+            # Read-only label mode (CSI cameras - always full sensor)
+            self._record_res_var = tk.StringVar(value="")
+            self._record_res_label = tk.Label(
+                card, textvariable=self._record_res_var, bg=bg, fg=fg_secondary, anchor="w", width=14
+            )
+            self._record_res_label.grid(row=1, column=1, sticky="w", padx=(0, 8), pady=2)
+        else:
+            # Resolution picker mode (USB cameras)
+            self._record_res_var = tk.StringVar(value=self.DEFAULT_SETTINGS["record_resolution"])
+            self._record_res_combo = ttk.Combobox(
+                card, textvariable=self._record_res_var, values=(), state="readonly", width=12
+            )
+            self._record_res_combo.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=2)
 
         self._record_fps_var = tk.StringVar(value=self.DEFAULT_SETTINGS["record_fps"])
         self._record_fps_combo = ttk.Combobox(
@@ -814,9 +851,10 @@ class CameraSettingsWindowBase:
 
     def _refresh_resolution_ui(self) -> None:
         """Refresh resolution/FPS comboboxes."""
-        if not self._window or not self._preview_res_var:
-            self._logger.debug("_refresh_resolution_ui: window=%s, var=%s - skipping",
-                             self._window is not None, self._preview_res_var is not None)
+        has_preview_var = self._preview_res_var or self._preview_scale_var
+        if not self._window or not has_preview_var:
+            self._logger.debug("_refresh_resolution_ui: window=%s, has_var=%s - skipping",
+                             self._window is not None, has_preview_var)
             return
 
         self._suppress_change = True
@@ -826,28 +864,51 @@ class CameraSettingsWindowBase:
                 opts = self._options.get(self._active_camera, {})
                 self._logger.debug("_refresh_resolution_ui: settings=%s, opts=%s", settings, opts)
 
-                if self._preview_res_combo:
-                    self._preview_res_combo["values"] = opts.get("preview_resolutions", [])
+                if self.USES_PREVIEW_SCALE:
+                    # Scale-based mode (CSI cameras)
+                    if self._preview_scale_combo:
+                        self._preview_scale_combo["values"] = opts.get("preview_scale_options", self.PREVIEW_SCALE_OPTIONS)
+                    if self._preview_scale_var:
+                        self._preview_scale_var.set(settings.get("preview_scale", "1/4"))
+                    # Record resolution is read-only - display sensor resolution
+                    sensor_res = opts.get("sensor_resolution")
+                    if self._record_res_var and sensor_res:
+                        self._record_res_var.set(f"{sensor_res[0]}x{sensor_res[1]}")
+                else:
+                    # Resolution picker mode (USB cameras)
+                    if self._preview_res_combo:
+                        self._preview_res_combo["values"] = opts.get("preview_resolutions", [])
+                    if self._preview_res_var:
+                        self._preview_res_var.set(settings.get("preview_resolution", ""))
+                    if self._record_res_combo:
+                        self._record_res_combo["values"] = opts.get("record_resolutions", [])
+                    if self._record_res_var:
+                        self._record_res_var.set(settings.get("record_resolution", ""))
+
                 if self._preview_fps_combo:
                     self._preview_fps_combo["values"] = opts.get("preview_fps_values", ["1", "2", "5", "10", "15"])
-                if self._record_res_combo:
-                    self._record_res_combo["values"] = opts.get("record_resolutions", [])
                 if self._record_fps_combo:
                     self._record_fps_combo["values"] = opts.get("record_fps_values", ["15", "24", "30", "60"])
 
-                self._preview_res_var.set(settings.get("preview_resolution", ""))
-                self._preview_fps_var.set(settings.get("preview_fps", "5"))
-                self._record_res_var.set(settings.get("record_resolution", ""))
-                self._record_fps_var.set(settings.get("record_fps", "15"))
+                if self._preview_fps_var:
+                    self._preview_fps_var.set(settings.get("preview_fps", "5"))
+                if self._record_fps_var:
+                    self._record_fps_var.set(settings.get("record_fps", "15"))
 
                 if self.SUPPORTS_AUDIO and self._record_audio_var:
                     record_audio = settings.get("record_audio", "true").lower() == "true"
                     self._record_audio_var.set(record_audio)
             else:
-                self._preview_res_var.set("")
-                self._preview_fps_var.set("5")
-                self._record_res_var.set("")
-                self._record_fps_var.set("15")
+                if self._preview_scale_var:
+                    self._preview_scale_var.set("1/4")
+                if self._preview_res_var:
+                    self._preview_res_var.set("")
+                if self._preview_fps_var:
+                    self._preview_fps_var.set("5")
+                if self._record_res_var:
+                    self._record_res_var.set("")
+                if self._record_fps_var:
+                    self._record_fps_var.set("15")
                 if self.SUPPORTS_AUDIO and self._record_audio_var:
                     self._record_audio_var.set(True)
         finally:
@@ -910,30 +971,46 @@ class CameraSettingsWindowBase:
 
     def _apply_settings_to_ui(self, settings: Dict[str, str]) -> None:
         """Apply settings dict to resolution UI."""
-        if not self._preview_res_var:
+        has_preview_var = self._preview_res_var or self._preview_scale_var
+        if not has_preview_var:
             return
         self._suppress_change = True
         try:
-            if "preview_resolution" in settings:
-                self._preview_res_var.set(settings["preview_resolution"])
-            if "preview_fps" in settings:
+            if self.USES_PREVIEW_SCALE:
+                if "preview_scale" in settings and self._preview_scale_var:
+                    self._preview_scale_var.set(settings["preview_scale"])
+            else:
+                if "preview_resolution" in settings and self._preview_res_var:
+                    self._preview_res_var.set(settings["preview_resolution"])
+                if "record_resolution" in settings and self._record_res_var:
+                    self._record_res_var.set(settings["record_resolution"])
+            if "preview_fps" in settings and self._preview_fps_var:
                 self._preview_fps_var.set(settings["preview_fps"])
-            if "record_resolution" in settings:
-                self._record_res_var.set(settings["record_resolution"])
-            if "record_fps" in settings:
+            if "record_fps" in settings and self._record_fps_var:
                 self._record_fps_var.set(settings["record_fps"])
         finally:
             self._suppress_change = False
 
     def _get_resolution_settings(self) -> Dict[str, str]:
         """Get current resolution/FPS settings from UI."""
-        settings = {
-            "preview_resolution": (self._preview_res_var.get() or "").strip() if self._preview_res_var else "",
-            "preview_fps": (self._preview_fps_var.get() or "").strip() if self._preview_fps_var else "5",
-            "record_resolution": (self._record_res_var.get() or "").strip() if self._record_res_var else "",
-            "record_fps": (self._record_fps_var.get() or "").strip() if self._record_fps_var else "15",
-            "overlay": "true",
-        }
+        if self.USES_PREVIEW_SCALE:
+            # Scale-based mode (CSI cameras) - preview_scale instead of preview_resolution
+            # record_resolution is not included as it's always full sensor
+            settings = {
+                "preview_scale": (self._preview_scale_var.get() or "1/4").strip() if self._preview_scale_var else "1/4",
+                "preview_fps": (self._preview_fps_var.get() or "").strip() if self._preview_fps_var else "5",
+                "record_fps": (self._record_fps_var.get() or "").strip() if self._record_fps_var else "15",
+                "overlay": "true",
+            }
+        else:
+            # Resolution picker mode (USB cameras)
+            settings = {
+                "preview_resolution": (self._preview_res_var.get() or "").strip() if self._preview_res_var else "",
+                "preview_fps": (self._preview_fps_var.get() or "").strip() if self._preview_fps_var else "5",
+                "record_resolution": (self._record_res_var.get() or "").strip() if self._record_res_var else "",
+                "record_fps": (self._record_fps_var.get() or "").strip() if self._record_fps_var else "15",
+                "overlay": "true",
+            }
         if self.SUPPORTS_AUDIO:
             settings["record_audio"] = "true" if (self._record_audio_var and self._record_audio_var.get()) else "false"
         return settings
