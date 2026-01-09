@@ -282,11 +282,13 @@ class USBCameraView:
             import tkinter as tk
             self._photo = tk.PhotoImage(data=frame_data)
 
+            cx = self._canvas_width // 2
+            cy = self._canvas_height // 2
+
             if self._canvas_image_id:
+                self._canvas.coords(self._canvas_image_id, cx, cy)
                 self._canvas.itemconfig(self._canvas_image_id, image=self._photo)
             else:
-                cx = self._canvas_width // 2
-                cy = self._canvas_height // 2
                 self._canvas_image_id = self._canvas.create_image(
                     cx, cy, image=self._photo, anchor="center"
                 )

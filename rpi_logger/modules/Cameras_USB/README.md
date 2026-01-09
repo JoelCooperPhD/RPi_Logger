@@ -14,15 +14,15 @@ USB camera module with optional audio recording. Supports video-only or synchron
 
 ## Architecture
 
-Uses an Elm/Redux-style architecture with unidirectional data flow:
+Uses a direct async controller pattern with simple state management:
 
 ```
-User Input → Action → Store.dispatch() → update() → new State + Effects
-                                              ↓
-                                    EffectExecutor (side effects)
-                                              ↓
-                                    View.render(state)
+Command → CameraController.method() → state update + async operations
+                                          ↓
+                                   View.render(state)
 ```
+
+The controller combines state management and side effects into a single class with direct async methods, avoiding the overhead of action dispatch and effect execution layers.
 
 ### Module Structure
 
@@ -31,12 +31,9 @@ Cameras_USB/
 ├── main_cameras_usb.py   # Entry point
 ├── bridge.py             # USBCamerasRuntime (ModuleRuntime interface)
 ├── config.txt            # Module configuration
-├── core/                 # Pure state machine
-│   ├── state.py          # AppState, CameraPhase, AudioPhase, CameraSettings
-│   ├── actions.py        # Action types (AssignDevice, SetAudioMode, StartRecording, etc.)
-│   ├── effects.py        # Effect types (LookupKnownCamera, ProbeVideo, OpenCamera, etc.)
-│   ├── update.py         # Pure reducer function
-│   └── store.py          # Store class with subscribe/dispatch
+├── core/                 # State and controller
+│   ├── state.py          # CameraState (boolean flags), CameraSettings, device types
+│   └── controller.py     # CameraController (state + operations)
 ├── discovery/            # Cross-platform device discovery
 │   ├── platform_scanner.py  # Platform abstraction (get_scanner())
 │   ├── linux_scanner.py     # Linux: sysfs + ALSA
@@ -44,7 +41,7 @@ Cameras_USB/
 │   ├── windows_scanner.py   # Windows: DirectShow + sounddevice
 │   ├── usb_scanner.py       # Linux-specific USB enumeration
 │   ├── audio_matcher.py     # Linux-specific ALSA matching
-│   ├── fingerprint.py       # VID:PID + capability hash
+│   ├── camera_knowledge.py  # VID:PID capability cache
 │   └── prober.py            # OpenCV-based capability probing
 ├── capture/              # Camera and audio capture
 │   ├── usb_source.py     # USBSource wrapping OpenCV VideoCapture
@@ -56,14 +53,42 @@ Cameras_USB/
 │   ├── muxer.py          # AVMuxer for audio+video (ffmpeg → MP4)
 │   ├── timing_writer.py  # TimingCSVWriter for frame timestamps
 │   └── session.py        # RecordingSession coordinator
-├── infra/                # Side effect handlers
-│   ├── effect_executor.py    # Executes effects (probe, capture, record, preview)
+├── infra/                # Command handling
 │   └── command_handler.py    # JSON stdin/stdout command interface
 ├── ui/                   # User interface
 │   ├── view.py           # USBCameraView (stub integration)
 │   └── widgets/
 │       └── settings_window.py  # Camera/audio settings dialog
 └── tests/                # Test suite
+```
+
+### CameraController API
+
+```python
+class CameraController:
+    # State access
+    @property
+    def state(self) -> CameraState
+    def subscribe(callback) -> unsubscribe_fn
+
+    # Camera lifecycle
+    async def assign(device_info: USBDeviceInfo)
+    async def unassign()
+
+    # Streaming
+    async def start_streaming()
+    async def stop_streaming()
+
+    # Recording
+    async def start_recording(session_dir, trial)
+    async def stop_recording()
+
+    # Settings
+    async def set_audio_mode(mode: str)
+    async def apply_settings(settings: CameraSettings)
+
+    # Cleanup
+    async def shutdown()
 ```
 
 ## Device Discovery
@@ -87,12 +112,14 @@ audio = await scanner.match_audio_to_video(video)  # → AudioDevice | None
 | macOS | OpenCV + AVFoundation | Name substring matching | Device index `0, 1, 2` |
 | Windows | OpenCV + DirectShow | Name substring matching | Device index `0, 1, 2` |
 
-### Known Camera Cache (Linux)
+### Camera Knowledge Cache (Linux)
 
-On Linux, the module uses a two-path discovery system:
+On Linux, the module uses a two-path discovery system via `CameraKnowledge`:
 
-1. **Fast Path**: Check `known_cameras.json` for cached fingerprint, quick verify
-2. **Slow Path**: Full probe, compute fingerprint, cache for next time
+1. **Fast Path**: Check cache for VID:PID → quick verify camera accessible (1-2 seconds)
+2. **Slow Path**: Full OpenCV probe, filter modes, cache for next time (30-60 seconds)
+
+The cache stores per-camera profiles including supported modes, resolution limits, and defaults.
 
 ### Device Identifiers
 
@@ -232,32 +259,59 @@ JSON commands via stdin when running as subprocess:
 | `get_capabilities` | Query camera capabilities |
 | `shutdown` | Clean shutdown |
 
-## State Machine
+## State Model
 
-### Camera Phases
+The `CameraState` dataclass uses boolean flags instead of enums for simplicity:
 
-- `IDLE` - No camera assigned
-- `DISCOVERING` - Looking up known cameras cache
-- `PROBING` - Full capability probe (unknown camera)
-- `VERIFYING` - Fingerprint verification (known camera)
-- `READY` - Camera assigned, capabilities available
-- `STREAMING` - Camera active, frames flowing
-- `ERROR` - Camera error occurred
+```python
+@dataclass
+class CameraState:
+    # Camera state
+    assigned: bool        # Camera device assigned
+    probing: bool         # Discovering capabilities
+    ready: bool           # Ready to stream
+    streaming: bool       # Actively capturing
+    camera_error: str?    # Error message if failed
 
-### Audio Phases
+    # Audio state
+    audio_enabled: bool   # User preference (not "off")
+    audio_available: bool # Matching audio device found
+    audio_capturing: bool # Audio stream active
+    audio_error: str?     # Audio error if any
 
-- `DISABLED` - Audio recording disabled by user
-- `UNAVAILABLE` - No audio device detected for this camera
-- `AVAILABLE` - Audio device detected, not yet opened
-- `CAPTURING` - Audio stream active
-- `ERROR` - Audio device error
+    # Recording
+    recording: bool       # Currently recording
 
-### Recording Phases
+    # Data
+    device_info: USBDeviceInfo?
+    capabilities: CameraCapabilities?
+    audio_device: USBAudioDevice?
+    settings: CameraSettings
+    metrics: FrameMetrics
+```
 
-- `STOPPED` - Not recording
-- `STARTING` - Encoder/muxer initializing
-- `RECORDING` - Actively recording
-- `STOPPING` - Finalizing and flushing streams
+### State Transitions
+
+```
+assign() → assigned=True, probing=True
+       → [probe camera]
+       → probing=False, ready=True, capabilities=...
+       → [probe audio in background]
+       → audio_available=True/False
+
+start_streaming() → streaming=True
+                 → [start capture loop]
+                 → [start audio if available]
+
+start_recording() → recording=True
+                 → [frames written to encoder]
+
+stop_recording() → recording=False
+
+stop_streaming() → streaming=False, audio_capturing=False
+
+unassign() → reset to initial state (preserving settings)
+```
 
 ## Dependencies
 
@@ -273,5 +327,5 @@ pytest rpi_logger/modules/Cameras_USB/tests/
 ```
 
 Test categories:
-- `tests/unit/` - Pure function tests (update, fingerprint, timing_writer)
-- `tests/integration/` - Store, device discovery, and multi-component tests
+- `tests/unit/` - Pure function tests (state, timing_writer)
+- `tests/integration/` - Controller, device discovery, and multi-component tests
