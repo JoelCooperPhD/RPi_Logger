@@ -10,6 +10,13 @@ from ..core.state import (
 )
 from ..core.actions import Action, ApplySettings, SetAudioMode
 
+try:
+    from rpi_logger.core.ui.theme.colors import Colors
+    HAS_THEME = True
+except ImportError:
+    HAS_THEME = False
+    Colors = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,6 +27,23 @@ def _format_fps(value: Any) -> str:
         return f"{float(value):5.1f}"
     except (ValueError, TypeError):
         return "  --"
+
+
+def _fps_color(actual: Any, target: Any) -> Optional[str]:
+    if not HAS_THEME or Colors is None:
+        return None
+    try:
+        if actual is not None and target is not None and float(target) > 0:
+            pct = (float(actual) / float(target)) * 100
+            if pct >= 95:
+                return Colors.SUCCESS
+            elif pct >= 80:
+                return Colors.WARNING
+            else:
+                return Colors.ERROR
+    except (ValueError, TypeError):
+        pass
+    return Colors.FG_PRIMARY
 
 
 class USBCameraView:
@@ -36,6 +60,7 @@ class USBCameraView:
         self._has_ui = False
 
         self._metrics_fields: Dict[str, Any] = {}
+        self._metrics_labels: Dict[str, Any] = {}
         self._status_var = None
         self._audio_var = None
 
@@ -100,30 +125,48 @@ class USBCameraView:
 
         fields = [
             ("status", "Status"),
-            ("cap_fps", "Cap FPS"),
-            ("rec_fps", "Rec FPS"),
+            ("cap_tgt", "Cap In/Max"),
+            ("rec_tgt", "Rec Out/Tgt"),
+            ("disp_tgt", "Disp/Tgt"),
             ("audio", "Audio"),
         ]
 
         for key, _ in fields:
-            self._metrics_fields[key] = tk.StringVar(master=self._root, value="--")
+            default = "  -- /   --" if key in ("cap_tgt", "rec_tgt", "disp_tgt") else "--"
+            self._metrics_fields[key] = tk.StringVar(master=self._root, value=default)
 
         self._status_var = self._metrics_fields.get("status")
         self._audio_var = self._metrics_fields.get("audio")
 
         def _builder(frame) -> None:
-            container = ttk.Frame(frame)
+            bg = Colors.BG_FRAME if HAS_THEME and Colors else None
+            fg1 = Colors.FG_SECONDARY if HAS_THEME and Colors else None
+            fg2 = Colors.FG_PRIMARY if HAS_THEME and Colors else None
+
+            if HAS_THEME and Colors:
+                container = tk.Frame(frame, bg=bg)
+            else:
+                container = ttk.Frame(frame)
             container.grid(row=0, column=0, sticky="ew")
             for idx in range(len(fields)):
                 container.columnconfigure(idx, weight=1, uniform="iofields")
 
             for col, (key, label_text) in enumerate(fields):
-                name = ttk.Label(container, text=label_text, anchor="center")
-                val = ttk.Label(container, textvariable=self._metrics_fields[key], anchor="center")
+                if HAS_THEME and Colors:
+                    name = tk.Label(container, text=label_text, anchor="center", bg=bg, fg=fg1)
+                    val = tk.Label(container, textvariable=self._metrics_fields[key],
+                                  anchor="center", bg=bg, fg=fg2, font=("TkFixedFont", 9))
+                else:
+                    name = ttk.Label(container, text=label_text, anchor="center")
+                    val = ttk.Label(container, textvariable=self._metrics_fields[key], anchor="center")
                 name.grid(row=0, column=col, sticky="ew", padx=2)
                 val.grid(row=1, column=col, sticky="ew", padx=2)
+                self._metrics_labels[key] = val
 
-        builder(_builder)
+        try:
+            builder(_builder)
+        except Exception:
+            logger.debug("IO stub content build failed", exc_info=True)
 
     def _install_menus(self) -> None:
         view_menu = getattr(self._stub_view, "view_menu", None)
@@ -201,11 +244,30 @@ class USBCameraView:
         if self._status_var:
             self._status_var.set(status)
 
-        if self._metrics_fields.get("cap_fps"):
-            self._metrics_fields["cap_fps"].set(_format_fps(state.metrics.capture_fps_actual))
+        metrics = state.metrics
+        settings = state.settings
 
-        if self._metrics_fields.get("rec_fps"):
-            self._metrics_fields["rec_fps"].set(_format_fps(state.metrics.record_fps_actual))
+        cap_actual = metrics.capture_fps_actual
+        cap_target = settings.frame_rate
+        self._metrics_fields["cap_tgt"].set(f"{_format_fps(cap_actual)} / {_format_fps(cap_target)}")
+
+        if recording == RecordingPhase.RECORDING:
+            rec_actual = metrics.record_fps_actual
+            self._metrics_fields["rec_tgt"].set(f"{_format_fps(rec_actual)} / {_format_fps(cap_target)}")
+        else:
+            self._metrics_fields["rec_tgt"].set(f"  -- / {_format_fps(cap_target)}")
+
+        disp_actual = metrics.preview_fps_actual
+        disp_target = settings.preview_fps
+        self._metrics_fields["disp_tgt"].set(f"{_format_fps(disp_actual)} / {_format_fps(disp_target)}")
+
+        if "cap_tgt" in self._metrics_labels:
+            color = _fps_color(cap_actual, cap_target)
+            if color:
+                try:
+                    self._metrics_labels["cap_tgt"].configure(fg=color)
+                except Exception:
+                    pass
 
         audio_phase = state.audio.phase
         if audio_phase == AudioPhase.DISABLED:

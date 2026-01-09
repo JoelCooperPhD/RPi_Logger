@@ -317,30 +317,60 @@ class EffectExecutor:
         preview_count = 0
         preview_divisor = self._settings.preview_divisor
 
+        capture_start_time = 0.0
+        record_intervals: list[float] = []
+        preview_intervals: list[float] = []
+        last_record_time = 0.0
+        last_preview_time = 0.0
+        record_fps_actual = 0.0
+        preview_fps_actual = 0.0
+
         async for frame in self._camera.frames():
             frame_count += 1
+            now = frame.wall_time
+
+            if capture_start_time == 0.0:
+                capture_start_time = now
 
             if self._recording:
                 await self._recording.write_frame(frame)
                 record_count += 1
+                if last_record_time > 0:
+                    record_intervals.append(now - last_record_time)
+                    if len(record_intervals) > 30:
+                        record_intervals.pop(0)
+                    if len(record_intervals) >= 3:
+                        avg_interval = sum(record_intervals) / len(record_intervals)
+                        record_fps_actual = 1.0 / avg_interval if avg_interval > 0 else 0.0
+                last_record_time = now
 
             if self._preview_callback and frame_count % preview_divisor == 0:
                 preview_data = self._frame_to_ppm(frame)
                 if preview_data:
                     self._preview_callback(preview_data)
                 preview_count += 1
+                if last_preview_time > 0:
+                    preview_intervals.append(now - last_preview_time)
+                    if len(preview_intervals) > 30:
+                        preview_intervals.pop(0)
+                    if len(preview_intervals) >= 5:
+                        avg_interval = sum(preview_intervals) / len(preview_intervals)
+                        preview_fps_actual = 1.0 / avg_interval if avg_interval > 0 else 0.0
+                last_preview_time = now
 
             if frame_count % 30 == 0:
+                elapsed = now - capture_start_time
+                capture_fps_actual = frame_count / elapsed if elapsed > 0 else 0.0
                 metrics = FrameMetrics(
                     frames_captured=frame_count,
                     frames_recorded=record_count,
                     frames_previewed=preview_count,
                     frames_dropped=self._camera.drops,
                     audio_chunks_captured=self._audio.chunk_count if self._audio else 0,
-                    last_frame_time=frame.wall_time,
-                    capture_fps_actual=frame_count / max(1, frame.wall_time - self._camera.frame_count + frame_count),
-                    record_fps_actual=0.0,
-                    preview_fps_actual=0.0,
+                    last_frame_time=now,
+                    capture_fps_actual=capture_fps_actual,
+                    record_fps_actual=record_fps_actual,
+                    preview_fps_actual=preview_fps_actual,
                 )
                 await dispatch(UpdateMetrics(metrics))
 
