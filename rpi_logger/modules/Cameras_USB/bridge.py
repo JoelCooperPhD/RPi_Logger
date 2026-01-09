@@ -17,10 +17,9 @@ if str(_module_dir) not in sys.path:
     sys.path.insert(0, str(_module_dir))
 
 try:
-    from rpi_logger.core.commands import StatusMessage, StatusType
+    from rpi_logger.core.commands import StatusMessage
 except ImportError:
     StatusMessage = None
-    StatusType = None
 
 try:
     from rpi_logger.core.logging_utils import get_module_logger
@@ -30,10 +29,8 @@ except ImportError:
 
 try:
     from rpi_logger.core.paths import USER_MODULE_CONFIG_DIR
-    from rpi_logger.modules.base.camera_storage import KnownCamerasCache
 except ImportError:
-    USER_MODULE_CONFIG_DIR = None
-    KnownCamerasCache = None
+    USER_MODULE_CONFIG_DIR = Path.home() / ".config" / "rpi_logger"
 
 from .core import (
     AppState, CameraPhase, AudioPhase, RecordingPhase, CameraSettings,
@@ -47,7 +44,7 @@ from .core.actions import (
 )
 from .infra import EffectExecutor
 from .ui.view import USBCameraView
-from .discovery import scan_usb_cameras, get_device_by_path
+from .discovery import scan_usb_cameras, get_device_by_path, CameraKnowledge
 
 try:
     from vmc.runtime import ModuleRuntime, RuntimeContext
@@ -88,19 +85,14 @@ class USBCamerasRuntime(ModuleRuntime):
         self._trial_number: int = 1
         self._auto_record: bool = False
 
-        # Initialize known cameras cache for fast startup
-        self._known_cameras_cache: Optional[KnownCamerasCache] = None
-        if KnownCamerasCache and USER_MODULE_CONFIG_DIR:
-            cache_dir = USER_MODULE_CONFIG_DIR / "cameras_usb"
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            cache_path = cache_dir / "known_cameras.json"
-            self._known_cameras_cache = KnownCamerasCache(cache_path, logger=self.logger)
+        # Camera knowledge database (single source of truth for capabilities)
+        knowledge_path = USER_MODULE_CONFIG_DIR / "cameras_usb" / "camera_knowledge.json"
+        self._knowledge = CameraKnowledge(knowledge_path)
 
         self.executor = EffectExecutor(
+            knowledge=self._knowledge,
             status_callback=self._on_effect_status,
             settings_save_callback=self._save_settings,
-            known_camera_lookup=self._lookup_known_camera,
-            known_camera_save=self._save_known_camera,
         )
         self.store.set_effect_handler(self.executor)
 
@@ -126,7 +118,7 @@ class USBCamerasRuntime(ModuleRuntime):
 
     async def start(self) -> None:
         self.logger.info("=" * 60)
-        self.logger.info("USB CAMERAS RUNTIME STARTING (Elm/Redux architecture)")
+        self.logger.info("USB CAMERAS RUNTIME STARTING")
         self.logger.info("=" * 60)
 
         args = self.ctx.args
@@ -136,6 +128,9 @@ class USBCamerasRuntime(ModuleRuntime):
         self.logger.info("  output_dir:   %s", getattr(args, "output_dir", None))
         self.logger.info("  record:       %s", getattr(args, "record", False))
         self.logger.info("=" * 60)
+
+        # Load camera knowledge
+        await self._knowledge.load()
 
         self._auto_record = getattr(args, "record", False)
         if output_dir := getattr(args, "output_dir", None):
@@ -214,7 +209,6 @@ class USBCamerasRuntime(ModuleRuntime):
         return False
 
     async def _handle_assign_device(self, command: Dict[str, Any]) -> bool:
-        # Support both direct field names and camera-prefixed names from core logger
         device_path = command.get("device_path") or command.get("camera_dev_path")
         stable_id = (
             command.get("stable_id")
@@ -225,18 +219,17 @@ class USBCamerasRuntime(ModuleRuntime):
 
         self.logger.info("assign_device: device_path=%s, stable_id=%s", device_path, stable_id)
 
-        # Send immediate ACK before starting slow initialization
+        # Send immediate ACK
         if StatusMessage:
             device_id = stable_id or device_path or "unknown"
             StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
-            self.logger.info("Sent device_ack for %s", device_id)
 
         if device_path:
             return await self._assign_device_by_path(device_path, command_id)
         elif stable_id:
             return await self._assign_device_by_stable_id(stable_id, command_id)
         else:
-            self.logger.warning("assign_device: no device_path or stable_id in command: %s", command)
+            self.logger.warning("assign_device: no device_path or stable_id")
             if StatusMessage:
                 StatusMessage.send("device_error", {"error": "Missing device_path or stable_id"}, command_id=command_id)
             return False
@@ -305,14 +298,13 @@ class USBCamerasRuntime(ModuleRuntime):
     def _on_effect_status(self, status_type: str, payload: dict) -> None:
         self.logger.debug("Effect status: %s %s", status_type, payload)
 
-        if status_type == "camera_ready" or status_type == "ui:camera_ready":
+        if status_type == "camera_ready":
             if self._pending_device_ready:
                 device_id, command_id = self._pending_device_ready
                 self._pending_device_ready = None
                 if StatusMessage:
                     StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
 
-                # Always start streaming for preview
                 self.logger.info("Camera ready, auto-starting streaming for preview")
                 asyncio.create_task(self._auto_start_streaming())
 
@@ -361,39 +353,17 @@ class USBCamerasRuntime(ModuleRuntime):
             return
 
         if isinstance(settings, CameraSettings):
-            self._preferences.set("frame_rate", str(settings.frame_rate))
-            self._preferences.set("preview_scale", str(settings.preview_scale))
-            self._preferences.set("preview_divisor", str(settings.preview_divisor))
-            self._preferences.set("audio_mode", settings.audio_mode)
-            self._preferences.set("sample_rate", str(settings.sample_rate))
+            updates = {
+                "frame_rate": str(settings.frame_rate),
+                "preview_scale": str(settings.preview_scale),
+                "preview_divisor": str(settings.preview_divisor),
+                "audio_mode": settings.audio_mode,
+                "sample_rate": str(settings.sample_rate),
+            }
+            self._preferences.write_sync(updates)
         elif isinstance(settings, dict):
-            for key, value in settings.items():
-                self._preferences.set(key, str(value))
-
-    async def _lookup_known_camera(self, stable_id: str, vid_pid: str) -> Optional[tuple[str, str]]:
-        if not self._known_cameras_cache:
-            return None
-        try:
-            model_key = await self._known_cameras_cache.get_model_key(stable_id)
-            fingerprint = await self._known_cameras_cache.get_fingerprint(stable_id)
-            if model_key and fingerprint:
-                self.logger.info("Found known camera: %s -> %s", stable_id, model_key)
-                return (model_key, fingerprint)
-        except Exception as e:
-            self.logger.warning("Failed to lookup known camera %s: %s", stable_id, e)
-        return None
-
-    async def _save_known_camera(self, stable_id: str, model_key: str, fingerprint: str, capabilities: Any) -> None:
-        if not self._known_cameras_cache:
-            return
-        try:
-            # Force reload from disk to avoid race conditions between module instances
-            # (each instance runs in a separate subprocess with its own cache object)
-            self._known_cameras_cache._loaded = False
-            await self._known_cameras_cache.set_model_association(stable_id, model_key, fingerprint)
-            self.logger.info("Saved known camera: %s -> %s", stable_id, model_key)
-        except Exception as e:
-            self.logger.warning("Failed to save known camera %s: %s", stable_id, e)
+            updates = {key: str(value) for key, value in settings.items()}
+            self._preferences.write_sync(updates)
 
 
 def factory(ctx: RuntimeContext) -> USBCamerasRuntime:

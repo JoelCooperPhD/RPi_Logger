@@ -1,8 +1,14 @@
+"""USB camera capability probing.
+
+Probes camera hardware to discover supported modes (resolutions/framerates).
+Returns raw probe results - filtering is handled by CameraKnowledge.
+"""
+
 import asyncio
 from typing import Callable, Optional, Any
+import logging
 
-from ..core.state import CameraCapabilities
-
+logger = logging.getLogger(__name__)
 
 COMMON_RESOLUTIONS = [
     (320, 240),
@@ -16,42 +22,28 @@ COMMON_RESOLUTIONS = [
     (3840, 2160),
 ]
 
-COMMON_FPS = [5, 10, 15, 24, 25, 30, 60]
 
-
-async def probe_video_capabilities(
+async def probe_camera_modes(
     device: int | str,
     on_progress: Optional[Callable[[str], None]] = None,
-) -> CameraCapabilities:
+) -> list[dict[str, Any]]:
+    """Probe a camera device and return all supported modes.
+
+    Returns raw modes - no filtering applied. Filtering is done by CameraKnowledge.
+    """
     if on_progress:
-        on_progress("Opening device...")
+        on_progress("Probing video modes...")
 
     modes = await asyncio.to_thread(_probe_modes_sync, device, on_progress)
 
     if not modes:
         raise RuntimeError(f"Failed to probe capabilities for {device}")
 
-    default_resolution = (640, 480)
-    default_fps = 30.0
-    for mode in modes:
-        size = mode.get("size", (0, 0))
-        fps = mode.get("fps", 0)
-        if size == (640, 480) and fps >= 30:
-            default_resolution = size
-            default_fps = fps
-            break
-
     if on_progress:
         on_progress("Probing complete")
 
-    camera_id = f"usb:{device}"
-    return CameraCapabilities(
-        camera_id=camera_id,
-        modes=tuple(modes),
-        controls={},
-        default_resolution=default_resolution,
-        default_fps=default_fps,
-    )
+    logger.info("Probed %d modes for %s", len(modes), device)
+    return modes
 
 
 def _probe_modes_sync(
@@ -126,36 +118,30 @@ def _probe_modes_sync(
     return modes
 
 
-async def probe_video_quick(device: int | str) -> CameraCapabilities:
-    def _quick_probe():
+async def verify_camera_accessible(device: int | str) -> bool:
+    """Quick check if camera can be opened and read.
+
+    Used to verify a known camera is still accessible before using cached modes.
+    """
+    def _verify():
         try:
             import cv2
         except ImportError:
-            raise RuntimeError("OpenCV (cv2) is required")
+            return False
 
         cap = cv2.VideoCapture(device)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open device {device}")
+            return False
 
         try:
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                raise RuntimeError(f"Cannot read from {device}")
-
-            width = frame.shape[1]
-            height = frame.shape[0]
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps <= 0:
-                fps = 30.0
-
-            return CameraCapabilities(
-                camera_id=f"usb:{device}",
-                modes=({"size": (width, height), "fps": fps, "pixel_format": "MJPEG", "controls": {}},),
-                controls={},
-                default_resolution=(width, height),
-                default_fps=fps,
-            )
+            ret, _ = cap.read()
+            return ret
         finally:
             cap.release()
 
-    return await asyncio.to_thread(_quick_probe)
+    return await asyncio.to_thread(_verify)
+
+
+# Keep old names for backwards compatibility during transition
+probe_video_capabilities = probe_camera_modes
+probe_video_quick = verify_camera_accessible

@@ -185,7 +185,7 @@ class USBCameraView:
         state = self._current_state
         caps = state.camera.capabilities if state else None
         settings = state.settings if state else CameraSettings()
-        audio_available = state.audio.phase != AudioPhase.UNAVAILABLE if state else False
+        audio_available = state.audio.device is not None if state else False
 
         def on_apply(new_settings: CameraSettings):
             if self._dispatch:
@@ -223,12 +223,8 @@ class USBCameraView:
 
         if phase == CameraPhase.IDLE:
             status = "Idle"
-        elif phase == CameraPhase.DISCOVERING:
-            status = state.camera.probing_progress or "Discovering..."
         elif phase == CameraPhase.PROBING:
             status = state.camera.probing_progress or "Probing..."
-        elif phase == CameraPhase.VERIFYING:
-            status = "Verifying..."
         elif phase == CameraPhase.READY:
             status = "Ready"
         elif phase == CameraPhase.STREAMING:

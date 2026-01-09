@@ -1,44 +1,48 @@
+"""State reducer for USB camera module.
+
+Simplified flow:
+  IDLE → (AssignDevice) → PROBING → (CameraReady) → READY → (StartStreaming) → STREAMING
+"""
+
 from dataclasses import replace
 
 from .state import (
     AppState, CameraPhase, AudioPhase, RecordingPhase,
     CameraSlot, AudioSlot, FrameMetrics,
-    USBDeviceInfo, CameraFingerprint
+    USBDeviceInfo,
 )
 from .actions import (
     Action,
-    AssignDevice, DeviceDiscovered,
-    StartProbing, ProbingProgress, VideoProbingComplete, AudioProbingComplete, ProbingFailed,
-    FingerprintComputed, QuickVerifyComplete, QuickVerifyFailed,
-    CameraReady, StartStreaming, StreamingStarted, StopStreaming, CameraError, UnassignCamera,
-    SetAudioMode, AudioDeviceMatched, StartAudioCapture, AudioCaptureStarted, StopAudioCapture, AudioError,
+    AssignDevice, ProbingProgress, CameraReady, CameraError, UnassignCamera,
+    StartStreaming, StreamingStarted, StopStreaming,
+    SetAudioMode, AudioReady, AudioCaptureStarted, AudioError,
     StartRecording, RecordingStarted, StopRecording, RecordingStopped,
     ApplySettings, SettingsApplied,
     UpdateMetrics, PreviewFrameReady,
-    Shutdown
+    Shutdown,
 )
 from .effects import (
     Effect,
-    LookupKnownCamera, ProbeVideoCapabilities, QuickVerifyCamera, ProbeAudioCapabilities,
-    ComputeFingerprint,
-    PersistKnownCamera, LoadCachedSettings,
+    EnsureCameraProbed, ProbeAudio,
     OpenCamera, CloseCamera, StartCapture, StopCapture, ApplyCameraSettings,
     OpenAudioDevice, CloseAudioDevice, StartAudioStream, StopAudioStream,
     StartEncoder, StopEncoder, StartMuxer, StopMuxer, StartTimingWriter, StopTimingWriter,
-    SendStatus, NotifyUI, CleanupResources
+    SendStatus, CleanupResources,
 )
 
 
-def _generate_model_key(display_name: str) -> str:
-    return display_name.lower().replace(" ", "_").replace(":", "_")[:32]
-
-
 def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
+    """Pure reducer function: (state, action) -> (new_state, effects)"""
+
     match action:
-        # IDLE -> DISCOVERING
+        # ================================================================
+        # Camera Lifecycle
+        # ================================================================
+
         case AssignDevice(dev_path, stable_id, vid_pid, display_name, sysfs_path, bus_path):
             if state.camera.phase != CameraPhase.IDLE:
                 return state, []
+
             device_info = USBDeviceInfo(
                 device=dev_path,
                 stable_id=stable_id,
@@ -49,169 +53,85 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
             )
             new_camera = replace(
                 state.camera,
-                phase=CameraPhase.DISCOVERING,
+                phase=CameraPhase.PROBING,
                 device_info=device_info,
-                probing_progress="Checking known cameras...",
+                probing_progress="Checking camera...",
             )
             return (
                 replace(state, camera=new_camera),
-                [LookupKnownCamera(stable_id, vid_pid)]
+                [EnsureCameraProbed(dev_path, vid_pid, display_name)]
             )
-
-        # DISCOVERING -> VERIFYING (known) or PROBING (unknown)
-        case DeviceDiscovered(device_info, cached_model_key, cached_fingerprint):
-            if cached_model_key and cached_fingerprint:
-                new_camera = replace(
-                    state.camera,
-                    phase=CameraPhase.VERIFYING,
-                    device_info=device_info,
-                    model_key=cached_model_key,
-                    probing_progress="Verifying camera...",
-                )
-                return (
-                    replace(state, camera=new_camera),
-                    [
-                        QuickVerifyCamera(device_info.dev_path, cached_model_key, cached_fingerprint),
-                        LoadCachedSettings(device_info.stable_id),
-                    ]
-                )
-            else:
-                new_camera = replace(
-                    state.camera,
-                    phase=CameraPhase.PROBING,
-                    device_info=device_info,
-                    probing_progress="Probing video capabilities...",
-                )
-                return (
-                    replace(state, camera=new_camera),
-                    [ProbeVideoCapabilities(device_info.dev_path)]
-                )
 
         case ProbingProgress(message):
             new_camera = replace(state.camera, probing_progress=message)
             return replace(state, camera=new_camera), []
 
-        # PROBING -> handle video capabilities (unknown cameras only)
-        case VideoProbingComplete(capabilities):
+        case CameraReady(capabilities):
             device_info = state.camera.device_info
             if not device_info:
                 return state, []
-            new_camera = replace(
-                state.camera,
-                capabilities=capabilities,
-                probing_progress="Checking audio devices...",
-            )
-            return replace(state, camera=new_camera), [
-                ComputeFingerprint(device_info.vid_pid, capabilities),
-                ProbeAudioCapabilities(device_info.bus_path),
-            ]
 
-        case FingerprintComputed(fingerprint):
-            new_camera = replace(state.camera, fingerprint=fingerprint)
-            return replace(state, camera=new_camera), []
-
-        # VERIFYING -> READY (quick verify for known cameras)
-        case QuickVerifyComplete(model_key, capabilities):
-            device_info = state.camera.device_info
-            if not device_info:
-                return state, []
             new_camera = replace(
                 state.camera,
                 phase=CameraPhase.READY,
                 capabilities=capabilities,
-                model_key=model_key,
-                is_known=True,
                 probing_progress="",
             )
-            return (
-                replace(state, camera=new_camera),
-                [
-                    ProbeAudioCapabilities(device_info.bus_path),
-                    NotifyUI("camera_ready", {"is_known": True, "model_key": model_key}),
-                ]
-            )
+            effects: list[Effect] = [
+                ProbeAudio(device_info.bus_path),
+                SendStatus("camera_ready", {"camera_id": device_info.stable_id}),
+            ]
+            return replace(state, camera=new_camera), effects
 
-        # VERIFYING -> PROBING (quick verify failed, fall back to full probe)
-        case QuickVerifyFailed(error):
-            device_info = state.camera.device_info
-            if not device_info:
-                return state, []
-            new_camera = replace(
-                state.camera,
-                phase=CameraPhase.PROBING,
-                probing_progress="Quick verify failed, full probing...",
-                is_known=False,
-                model_key=None,
-                fingerprint=None,
-            )
-            return (
-                replace(state, camera=new_camera),
-                [ProbeVideoCapabilities(device_info.dev_path)]
-            )
-
-        case AudioProbingComplete(audio_device):
-            audio_phase = AudioPhase.AVAILABLE if audio_device else AudioPhase.UNAVAILABLE
-            if state.settings.audio_mode == "off":
-                audio_phase = AudioPhase.DISABLED
-            new_audio = AudioSlot(phase=audio_phase, device=audio_device)
-
-            # If we were probing (unknown camera), now move to READY and persist
-            effects: list[Effect] = []
-            if state.camera.phase == CameraPhase.PROBING:
-                device_info = state.camera.device_info
-                capabilities = state.camera.capabilities
-                fingerprint = state.camera.fingerprint
-                if device_info and capabilities and fingerprint:
-                    model_key = _generate_model_key(device_info.display_name)
-                    effects.append(
-                        PersistKnownCamera(
-                            device_info.stable_id,
-                            model_key,
-                            f"{fingerprint.vid_pid}:{fingerprint.capability_hash}",
-                            capabilities,
-                        )
-                    )
-                    new_camera = replace(
-                        state.camera,
-                        phase=CameraPhase.READY,
-                        model_key=model_key,
-                        is_known=False,
-                        probing_progress="",
-                    )
-                else:
-                    new_camera = replace(
-                        state.camera,
-                        phase=CameraPhase.READY,
-                        probing_progress="",
-                    )
-                effects.append(NotifyUI("camera_ready", {"is_known": False}))
-                return replace(state, camera=new_camera, audio=new_audio), effects
-
-            return replace(state, audio=new_audio), effects
-
-        case ProbingFailed(error):
+        case CameraError(message):
             new_camera = replace(
                 state.camera,
                 phase=CameraPhase.ERROR,
-                error_message=error,
+                error_message=message,
                 probing_progress="",
             )
             return (
                 replace(state, camera=new_camera),
-                [SendStatus("error", {"message": error})]
+                [SendStatus("error", {"message": message})]
             )
 
-        case CameraReady(is_known):
-            return state, []
+        case UnassignCamera():
+            if state.camera.phase == CameraPhase.IDLE:
+                return state, []
 
-        # READY -> STREAMING
+            effects: list[Effect] = []
+            if state.camera.phase == CameraPhase.STREAMING:
+                effects.extend([StopCapture(), CloseCamera()])
+            if state.audio.phase == AudioPhase.CAPTURING:
+                effects.extend([StopAudioStream(), CloseAudioDevice()])
+            if state.recording_phase == RecordingPhase.RECORDING:
+                effects.extend([StopEncoder(), StopTimingWriter()])
+            effects.append(SendStatus("camera_unassigned", {}))
+
+            return (
+                replace(
+                    state,
+                    camera=CameraSlot(),
+                    audio=AudioSlot(),
+                    recording_phase=RecordingPhase.STOPPED,
+                    metrics=FrameMetrics(),
+                ),
+                effects
+            )
+
+        # ================================================================
+        # Streaming
+        # ================================================================
+
         case StartStreaming():
             if state.camera.phase != CameraPhase.READY:
                 return state, []
+
             device_info = state.camera.device_info
             if not device_info:
                 return state, []
-            effects = [
+
+            effects: list[Effect] = [
                 OpenCamera(device_info.dev_path, state.settings.resolution, state.settings.frame_rate),
                 StartCapture(),
             ]
@@ -224,59 +144,33 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                         state.audio.device.sample_rates,
                     )
                 )
+
             new_camera = replace(state.camera, phase=CameraPhase.STREAMING)
             return replace(state, camera=new_camera), effects
 
         case StreamingStarted():
-            return (
-                state,
-                [SendStatus("streaming_started", {"camera_id": state.camera.device_info.stable_id if state.camera.device_info else ""})]
-            )
+            device_id = state.camera.device_info.stable_id if state.camera.device_info else ""
+            return state, [SendStatus("streaming_started", {"camera_id": device_id})]
 
         case StopStreaming():
             if state.camera.phase != CameraPhase.STREAMING:
                 return state, []
+
             effects: list[Effect] = [StopCapture(), CloseCamera()]
             if state.audio.phase == AudioPhase.CAPTURING:
                 effects.extend([StopAudioStream(), CloseAudioDevice()])
+
             new_camera = replace(state.camera, phase=CameraPhase.READY)
-            new_audio = replace(state.audio, phase=AudioPhase.AVAILABLE if state.audio.device else AudioPhase.UNAVAILABLE)
+            new_audio = replace(
+                state.audio,
+                phase=AudioPhase.AVAILABLE if state.audio.device else AudioPhase.UNAVAILABLE
+            )
             return replace(state, camera=new_camera, audio=new_audio), effects
 
-        case CameraError(message):
-            new_camera = replace(
-                state.camera,
-                phase=CameraPhase.ERROR,
-                error_message=message,
-            )
-            return (
-                replace(state, camera=new_camera),
-                [SendStatus("error", {"message": message})]
-            )
+        # ================================================================
+        # Audio
+        # ================================================================
 
-        case UnassignCamera():
-            if state.camera.phase == CameraPhase.IDLE:
-                return state, []
-            effects: list[Effect] = []
-            if state.camera.phase == CameraPhase.STREAMING:
-                effects.extend([StopCapture(), CloseCamera()])
-            if state.audio.phase == AudioPhase.CAPTURING:
-                effects.extend([StopAudioStream(), CloseAudioDevice()])
-            if state.recording_phase == RecordingPhase.RECORDING:
-                effects.extend([StopEncoder(), StopTimingWriter()])
-            effects.append(SendStatus("camera_unassigned", {}))
-            return (
-                replace(
-                    state,
-                    camera=CameraSlot(),
-                    audio=AudioSlot(),
-                    recording_phase=RecordingPhase.STOPPED,
-                    metrics=FrameMetrics(),
-                ),
-                effects
-            )
-
-        # Audio actions
         case SetAudioMode(mode):
             new_settings = replace(state.settings, audio_mode=mode)
             if mode == "off":
@@ -287,26 +181,19 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 new_audio = replace(state.audio, phase=AudioPhase.UNAVAILABLE)
             return replace(state, settings=new_settings, audio=new_audio), []
 
-        case StartAudioCapture():
-            if state.audio.phase != AudioPhase.AVAILABLE or not state.audio.device:
-                return state, []
-            new_audio = replace(state.audio, phase=AudioPhase.CAPTURING)
-            return (
-                replace(state, audio=new_audio),
-                [StartAudioStream()]
-            )
+        case AudioReady(device):
+            if state.settings.audio_mode == "off":
+                phase = AudioPhase.DISABLED
+            elif device:
+                phase = AudioPhase.AVAILABLE
+            else:
+                phase = AudioPhase.UNAVAILABLE
+
+            new_audio = AudioSlot(phase=phase, device=device)
+            return replace(state, audio=new_audio), []
 
         case AudioCaptureStarted():
             return state, [SendStatus("audio_started", {})]
-
-        case StopAudioCapture():
-            if state.audio.phase != AudioPhase.CAPTURING:
-                return state, []
-            new_audio = replace(state.audio, phase=AudioPhase.AVAILABLE)
-            return (
-                replace(state, audio=new_audio),
-                [StopAudioStream()]
-            )
 
         case AudioError(message):
             new_audio = replace(state.audio, phase=AudioPhase.ERROR, error_message=message)
@@ -315,7 +202,10 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 [SendStatus("audio_error", {"message": message})]
             )
 
-        # Recording actions
+        # ================================================================
+        # Recording
+        # ================================================================
+
         case StartRecording(session_dir, trial):
             if state.camera.phase != CameraPhase.STREAMING:
                 return state, []
@@ -366,13 +256,12 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
         case StopRecording():
             if state.recording_phase not in (RecordingPhase.RECORDING, RecordingPhase.STARTING):
                 return state, []
+
             effects: list[Effect] = [StopEncoder(), StopTimingWriter()]
             if state.audio.phase == AudioPhase.CAPTURING:
                 effects.append(StopMuxer())
-            return (
-                replace(state, recording_phase=RecordingPhase.STOPPING),
-                effects
-            )
+
+            return replace(state, recording_phase=RecordingPhase.STOPPING), effects
 
         case RecordingStopped():
             return (
@@ -385,7 +274,10 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 [SendStatus("recording_stopped", {})]
             )
 
+        # ================================================================
         # Settings
+        # ================================================================
+
         case ApplySettings(settings):
             effects: list[Effect] = []
             if state.camera.phase == CameraPhase.STREAMING:
@@ -398,14 +290,20 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 [SendStatus("settings_applied", {"resolution": settings.resolution})]
             )
 
-        # Metrics and preview
+        # ================================================================
+        # Metrics
+        # ================================================================
+
         case UpdateMetrics(metrics):
             return replace(state, metrics=metrics), []
 
         case PreviewFrameReady(frame_data):
             return replace(state, preview_frame=frame_data), []
 
+        # ================================================================
         # Shutdown
+        # ================================================================
+
         case Shutdown():
             effects: list[Effect] = [CleanupResources()]
             if state.recording_phase == RecordingPhase.RECORDING:
@@ -414,6 +312,7 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 effects = [StopCapture(), CloseCamera()] + effects
             if state.audio.phase == AudioPhase.CAPTURING:
                 effects = [StopAudioStream(), CloseAudioDevice()] + effects
+
             return (
                 replace(
                     state,

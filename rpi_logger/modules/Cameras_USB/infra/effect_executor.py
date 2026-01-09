@@ -1,54 +1,61 @@
+"""Effect executor for USB camera module.
+
+Handles side effects requested by the reducer:
+- Camera probing and knowledge management
+- Camera open/close and capture
+- Audio device matching
+- Recording to disk
+"""
+
 import asyncio
 from pathlib import Path
 from typing import Callable, Awaitable, Optional, Any
 import logging
 
 from ..core.state import (
-    CameraCapabilities, CameraFingerprint, CameraSettings,
+    CameraCapabilities, CameraSettings,
     FrameMetrics, USBDeviceInfo, USBAudioDevice,
 )
 from ..core.actions import (
     Action,
-    DeviceDiscovered, ProbingProgress, VideoProbingComplete, AudioProbingComplete,
-    ProbingFailed, FingerprintComputed, QuickVerifyComplete, QuickVerifyFailed,
-    StreamingStarted, CameraError, AudioCaptureStarted, AudioError,
+    ProbingProgress, CameraReady, CameraError,
+    AudioReady, AudioError,
+    StreamingStarted,
     RecordingStarted, RecordingStopped, SettingsApplied,
-    UpdateMetrics, PreviewFrameReady,
+    UpdateMetrics,
 )
 from ..core.effects import (
     Effect,
-    LookupKnownCamera, ProbeVideoCapabilities, QuickVerifyCamera, ProbeAudioCapabilities,
-    ComputeFingerprint, PersistKnownCamera, LoadCachedSettings, PersistSettings,
+    EnsureCameraProbed, ProbeAudio,
     OpenCamera, CloseCamera, StartCapture, StopCapture, ApplyCameraSettings,
     OpenAudioDevice, CloseAudioDevice, StartAudioStream, StopAudioStream,
     StartEncoder, StopEncoder, StartMuxer, StopMuxer, StartTimingWriter, StopTimingWriter,
-    SendStatus, NotifyUI, CleanupResources,
+    SendStatus, CleanupResources,
 )
-from ..capture import USBSource, AudioSource, CapturedFrame, AudioChunk
+from ..capture import USBSource, AudioSource, CapturedFrame
 from ..recording import RecordingSession
 from ..discovery import (
-    probe_video_capabilities,
-    probe_video_quick,
+    probe_camera_modes,
+    verify_camera_accessible,
     match_audio_to_camera,
-    compute_fingerprint as compute_fp,
+    CameraKnowledge,
 )
-
 
 logger = logging.getLogger(__name__)
 
 
 class EffectExecutor:
+    """Executes side effects for the USB camera module."""
+
     def __init__(
         self,
+        knowledge: CameraKnowledge,
         status_callback: Optional[Callable[[str, dict], None]] = None,
         settings_save_callback: Optional[Callable[..., None]] = None,
-        known_camera_lookup: Optional[Callable[[str, str], Awaitable[tuple[str, str] | None]]] = None,
-        known_camera_save: Optional[Callable[[str, str, str, CameraCapabilities], Awaitable[None]]] = None,
     ):
+        self._knowledge = knowledge
         self._status_callback = status_callback
         self._settings_save_callback = settings_save_callback
-        self._known_camera_lookup = known_camera_lookup
-        self._known_camera_save = known_camera_save
 
         self._camera: Optional[USBSource] = None
         self._audio: Optional[AudioSource] = None
@@ -58,49 +65,28 @@ class EffectExecutor:
         self._audio_task: Optional[asyncio.Task] = None
 
         self._preview_callback: Optional[Callable[[bytes], None]] = None
-
         self._device_info: Optional[USBDeviceInfo] = None
-        self._capabilities: Optional[CameraCapabilities] = None
         self._audio_device: Optional[USBAudioDevice] = None
-
         self._settings = CameraSettings()
-        self._cached_fingerprint: Optional[str] = None
-        self._cached_model_key: Optional[str] = None
 
     def set_preview_callback(self, callback: Optional[Callable[[bytes], None]]) -> None:
         self._preview_callback = callback
+
+    def set_device_info(self, device_info: USBDeviceInfo) -> None:
+        self._device_info = device_info
 
     async def __call__(
         self,
         effect: Effect,
         dispatch: Callable[[Action], Awaitable[None]]
     ) -> None:
+        """Execute an effect."""
         match effect:
-            case LookupKnownCamera(stable_id, vid_pid):
-                await self._lookup_known_camera(stable_id, vid_pid, dispatch)
+            case EnsureCameraProbed(device, vid_pid, display_name):
+                await self._ensure_probed(device, vid_pid, display_name, dispatch)
 
-            case ProbeVideoCapabilities(device):
-                await self._probe_video(device, dispatch)
-
-            case QuickVerifyCamera(device, cached_model_key, cached_fingerprint):
-                await self._quick_verify_camera(device, cached_model_key, cached_fingerprint, dispatch)
-
-            case ProbeAudioCapabilities(bus_path):
+            case ProbeAudio(bus_path):
                 await self._probe_audio(bus_path, dispatch)
-
-            case ComputeFingerprint(vid_pid, capabilities):
-                fp = compute_fp(vid_pid, capabilities)
-                await dispatch(FingerprintComputed(fp))
-
-            case PersistKnownCamera(stable_id, model_key, fingerprint, capabilities):
-                await self._persist_known_camera(stable_id, model_key, fingerprint, capabilities)
-
-            case LoadCachedSettings(stable_id):
-                pass
-
-            case PersistSettings(stable_id, settings):
-                if self._settings_save_callback:
-                    self._settings_save_callback(settings)
 
             case OpenCamera(device, resolution, fps):
                 await self._open_camera(device, resolution, fps)
@@ -136,13 +122,13 @@ class EffectExecutor:
                 await self._stop_recording(dispatch)
 
             case StartMuxer(output_path, video_fps, resolution, audio_sample_rate, audio_channels):
-                pass
+                pass  # Handled by RecordingSession
 
             case StopMuxer():
                 pass
 
             case StartTimingWriter(output_path):
-                pass
+                pass  # Handled by RecordingSession
 
             case StopTimingWriter():
                 pass
@@ -151,105 +137,91 @@ class EffectExecutor:
                 if self._status_callback:
                     self._status_callback(status_type, payload)
 
-            case NotifyUI(event, payload):
-                if self._status_callback:
-                    self._status_callback(f"ui:{event}", payload)
-
             case CleanupResources():
                 await self._cleanup()
 
-    async def _lookup_known_camera(
-        self,
-        stable_id: str,
-        vid_pid: str,
-        dispatch: Callable[[Action], Awaitable[None]]
-    ) -> None:
-        await dispatch(ProbingProgress("Checking known cameras..."))
-
-        if self._known_camera_lookup:
-            result = await self._known_camera_lookup(stable_id, vid_pid)
-            if result:
-                model_key, fingerprint = result
-                self._cached_model_key = model_key
-                self._cached_fingerprint = fingerprint
-                await dispatch(DeviceDiscovered(
-                    device_info=self._device_info,
-                    cached_model_key=model_key,
-                    cached_fingerprint=fingerprint,
-                ))
-                return
-
-        await dispatch(DeviceDiscovered(
-            device_info=self._device_info,
-            cached_model_key=None,
-            cached_fingerprint=None,
-        ))
-
-    async def _probe_video(
+    async def _ensure_probed(
         self,
         device: int | str,
+        vid_pid: str,
+        display_name: str,
         dispatch: Callable[[Action], Awaitable[None]]
     ) -> None:
+        """Ensure camera capabilities are known - probe if needed."""
         try:
-            await dispatch(ProbingProgress("Probing video capabilities..."))
+            # Check if we already know this camera
+            profile = await self._knowledge.get(vid_pid)
+
+            if profile:
+                # Known camera - verify it's still accessible
+                await dispatch(ProbingProgress("Verifying camera..."))
+                accessible = await verify_camera_accessible(device)
+
+                if accessible:
+                    logger.info("Known camera %s (%s) - using cached %d modes",
+                               vid_pid, display_name, len(profile.modes))
+                    capabilities = CameraCapabilities(
+                        camera_id=f"usb:{device}",
+                        modes=tuple(profile.modes),
+                        controls={},
+                        default_resolution=profile.default_resolution,
+                        default_fps=profile.default_fps,
+                    )
+                    await dispatch(CameraReady(capabilities))
+                    return
+                else:
+                    logger.warning("Known camera %s not accessible, will re-probe", vid_pid)
+
+            # Unknown camera or failed verification - probe it
+            await dispatch(ProbingProgress("Probing camera modes..."))
 
             loop = asyncio.get_running_loop()
-
             def on_progress(msg: str):
                 loop.call_soon_threadsafe(
                     lambda: loop.create_task(dispatch(ProbingProgress(msg)))
                 )
 
-            capabilities = await probe_video_capabilities(device, on_progress=on_progress)
-            self._capabilities = capabilities
+            probed_modes = await probe_camera_modes(device, on_progress=on_progress)
 
-            await dispatch(VideoProbingComplete(capabilities))
+            # Create profile with filtered modes
+            profile = CameraKnowledge.create_profile_from_probe(
+                vid_pid=vid_pid,
+                display_name=display_name,
+                probed_modes=probed_modes,
+            )
+
+            # Store in knowledge
+            await self._knowledge.register(profile)
+
+            capabilities = CameraCapabilities(
+                camera_id=f"usb:{device}",
+                modes=tuple(profile.modes),
+                controls={},
+                default_resolution=profile.default_resolution,
+                default_fps=profile.default_fps,
+            )
+
+            logger.info("Probed camera %s: %d modes (filtered from %d)",
+                       vid_pid, len(profile.modes), len(probed_modes))
+            await dispatch(CameraReady(capabilities))
 
         except Exception as e:
-            logger.error("Video probing failed: %s", e)
-            await dispatch(ProbingFailed(str(e)))
-
-    async def _quick_verify_camera(
-        self,
-        device: int | str,
-        cached_model_key: str,
-        cached_fingerprint: str,
-        dispatch: Callable[[Action], Awaitable[None]]
-    ) -> None:
-        try:
-            await dispatch(ProbingProgress("Quick verify..."))
-            capabilities = await probe_video_quick(device)
-            self._capabilities = capabilities
-            logger.info("Quick verify succeeded for %s", cached_model_key)
-            await dispatch(QuickVerifyComplete(cached_model_key, capabilities))
-        except Exception as e:
-            logger.warning("Quick verify failed for %s: %s", cached_model_key, e)
-            await dispatch(QuickVerifyFailed(str(e)))
+            logger.error("Camera probing failed: %s", e)
+            await dispatch(CameraError(str(e)))
 
     async def _probe_audio(
         self,
         bus_path: str,
         dispatch: Callable[[Action], Awaitable[None]]
     ) -> None:
-        await dispatch(ProbingProgress("Detecting audio devices..."))
-
+        """Find matching audio device for the camera."""
         try:
             audio_device = await match_audio_to_camera(bus_path)
             self._audio_device = audio_device
-            await dispatch(AudioProbingComplete(audio_device))
+            await dispatch(AudioReady(audio_device))
         except Exception as e:
             logger.warning("Audio probing failed: %s", e)
-            await dispatch(AudioProbingComplete(None))
-
-    async def _persist_known_camera(
-        self,
-        stable_id: str,
-        model_key: str,
-        fingerprint: str,
-        capabilities: CameraCapabilities,
-    ) -> None:
-        if self._known_camera_save:
-            await self._known_camera_save(stable_id, model_key, fingerprint, capabilities)
+            await dispatch(AudioReady(None))
 
     async def _open_camera(
         self,
@@ -401,14 +373,27 @@ class EffectExecutor:
         old_settings = self._settings
         self._settings = settings
 
-        if self._camera and (
-            old_settings.resolution != settings.resolution or
-            old_settings.frame_rate != settings.frame_rate
-        ):
-            self._camera.configure(
+        resolution_changed = old_settings.resolution != settings.resolution
+        fps_changed = old_settings.frame_rate != settings.frame_rate
+
+        if self._camera and (resolution_changed or fps_changed):
+            # Stop capture task before reconfiguring
+            await self._stop_capture_loop()
+
+            # Reconfigure camera (closes and reopens with new settings)
+            self._camera.close()
+            self._camera = USBSource(
+                device=self._camera._device,
                 resolution=settings.resolution,
                 fps=float(settings.frame_rate),
             )
+            self._camera.set_error_callback(lambda msg: logger.error("Camera error: %s", msg))
+
+            if self._camera.open():
+                # Restart capture loop
+                self._start_capture_loop(dispatch)
+            else:
+                logger.error("Failed to reopen camera with new settings")
 
         if self._settings_save_callback:
             self._settings_save_callback(settings)
@@ -523,6 +508,3 @@ class EffectExecutor:
 
         await self._close_camera()
         await self._close_audio()
-
-    def set_device_info(self, device_info: USBDeviceInfo) -> None:
-        self._device_info = device_info

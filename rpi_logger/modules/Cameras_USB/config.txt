@@ -1,4 +1,4 @@
-enabled = false
+enabled = true
 audio_enabled = auto
 audio_device = auto
 container_format = mp4
@@ -7,8 +7,8 @@ preview_scale = 0.25
 preview_divisor = 4
 sample_rate = 48000
 window_geometry = 320x200
-view.show_io_panel = true
-view.show_logger = true
+view.show_io_panel = false
+view.show_logger = false
 display_name = Cameras-USB
 preview_resolution = auto
-device_connected = false
+device_connected = true

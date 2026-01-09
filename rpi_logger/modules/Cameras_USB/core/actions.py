@@ -1,17 +1,22 @@
+"""Actions for USB camera state machine.
+
+Simplified: No fingerprints, no quick-verify, just assign → probe if needed → ready.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from .state import (
     USBDeviceInfo, USBAudioDevice, CameraCapabilities,
-    CameraFingerprint, CameraSettings, FrameMetrics
+    CameraSettings, FrameMetrics
 )
 
 
-# Discovery actions
+# Camera lifecycle
 
 @dataclass(frozen=True)
 class AssignDevice:
+    """Assign a USB camera device to this module."""
     dev_path: str
     stable_id: str
     vid_pid: str
@@ -21,190 +26,142 @@ class AssignDevice:
 
 
 @dataclass(frozen=True)
-class DeviceDiscovered:
-    device_info: USBDeviceInfo
-    cached_model_key: str | None
-    cached_fingerprint: str | None
-
-
-# Probing actions
-
-@dataclass(frozen=True)
-class StartProbing:
-    reason: str  # "unknown_camera" | "fingerprint_mismatch"
-
-
-@dataclass(frozen=True)
 class ProbingProgress:
+    """Update probing status message."""
     message: str
 
 
 @dataclass(frozen=True)
-class VideoProbingComplete:
-    capabilities: CameraCapabilities
-
-
-@dataclass(frozen=True)
-class AudioProbingComplete:
-    audio_device: USBAudioDevice | None
-
-
-@dataclass(frozen=True)
-class ProbingFailed:
-    error: str
-
-
-# Fingerprint actions
-
-@dataclass(frozen=True)
-class FingerprintComputed:
-    fingerprint: CameraFingerprint
-
-
-@dataclass(frozen=True)
-class QuickVerifyComplete:
-    model_key: str
-    capabilities: CameraCapabilities
-
-
-@dataclass(frozen=True)
-class QuickVerifyFailed:
-    error: str
-
-
-# Cache actions
-
-@dataclass(frozen=True)
-class StoreKnownCamera:
-    stable_id: str
-    model_key: str
-    fingerprint: str
-    capabilities: CameraCapabilities
-
-
-# Camera lifecycle
-
-@dataclass(frozen=True)
 class CameraReady:
-    is_known: bool
-
-
-@dataclass(frozen=True)
-class StartStreaming:
-    pass
-
-
-@dataclass(frozen=True)
-class StreamingStarted:
-    pass
-
-
-@dataclass(frozen=True)
-class StopStreaming:
-    pass
+    """Camera is ready with capabilities loaded."""
+    capabilities: CameraCapabilities
 
 
 @dataclass(frozen=True)
 class CameraError:
+    """Camera encountered an error."""
     message: str
 
 
 @dataclass(frozen=True)
 class UnassignCamera:
+    """Unassign the current camera."""
     pass
 
 
-# Audio actions
+# Streaming
+
+@dataclass(frozen=True)
+class StartStreaming:
+    """Start camera capture/preview."""
+    pass
+
+
+@dataclass(frozen=True)
+class StreamingStarted:
+    """Camera is now streaming."""
+    pass
+
+
+@dataclass(frozen=True)
+class StopStreaming:
+    """Stop camera capture/preview."""
+    pass
+
+
+# Audio
 
 @dataclass(frozen=True)
 class SetAudioMode:
+    """Set audio capture mode."""
     mode: str  # "auto" | "on" | "off"
 
 
 @dataclass(frozen=True)
-class AudioDeviceMatched:
-    device: USBAudioDevice
-
-
-@dataclass(frozen=True)
-class StartAudioCapture:
-    pass
+class AudioReady:
+    """Audio device matched and ready."""
+    device: USBAudioDevice | None
 
 
 @dataclass(frozen=True)
 class AudioCaptureStarted:
-    pass
-
-
-@dataclass(frozen=True)
-class StopAudioCapture:
+    """Audio capture has started."""
     pass
 
 
 @dataclass(frozen=True)
 class AudioError:
+    """Audio encountered an error."""
     message: str
 
 
-# Recording actions
+# Recording
 
 @dataclass(frozen=True)
 class StartRecording:
+    """Start recording video/audio."""
     session_dir: Path
     trial: int
 
 
 @dataclass(frozen=True)
 class RecordingStarted:
+    """Recording has started."""
     pass
 
 
 @dataclass(frozen=True)
 class StopRecording:
+    """Stop recording."""
     pass
 
 
 @dataclass(frozen=True)
 class RecordingStopped:
+    """Recording has stopped."""
     pass
 
 
-# Settings actions
+# Settings
 
 @dataclass(frozen=True)
 class ApplySettings:
+    """Apply new camera settings."""
     settings: CameraSettings
 
 
 @dataclass(frozen=True)
 class SettingsApplied:
+    """Settings have been applied."""
     settings: CameraSettings
 
 
-# Metrics and preview
+# Metrics
 
 @dataclass(frozen=True)
 class UpdateMetrics:
+    """Update frame metrics."""
     metrics: FrameMetrics
 
 
 @dataclass(frozen=True)
 class PreviewFrameReady:
+    """New preview frame available."""
     frame_data: bytes
 
 
+# Shutdown
+
 @dataclass(frozen=True)
 class Shutdown:
+    """Shutdown the module."""
     pass
 
 
 Action = (
-    AssignDevice | DeviceDiscovered |
-    StartProbing | ProbingProgress | VideoProbingComplete | AudioProbingComplete | ProbingFailed |
-    FingerprintComputed | QuickVerifyComplete | QuickVerifyFailed |
-    StoreKnownCamera |
-    CameraReady | StartStreaming | StreamingStarted | StopStreaming | CameraError | UnassignCamera |
-    SetAudioMode | AudioDeviceMatched | StartAudioCapture | AudioCaptureStarted | StopAudioCapture | AudioError |
+    AssignDevice | ProbingProgress | CameraReady | CameraError | UnassignCamera |
+    StartStreaming | StreamingStarted | StopStreaming |
+    SetAudioMode | AudioReady | AudioCaptureStarted | AudioError |
     StartRecording | RecordingStarted | StopRecording | RecordingStopped |
     ApplySettings | SettingsApplied |
     UpdateMetrics | PreviewFrameReady |

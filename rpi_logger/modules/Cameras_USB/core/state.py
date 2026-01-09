@@ -10,13 +10,11 @@ SAMPLE_RATE_OPTIONS = [22050, 44100, 48000]
 
 
 class CameraPhase(Enum):
-    IDLE = auto()
-    DISCOVERING = auto()
-    PROBING = auto()
-    VERIFYING = auto()
-    READY = auto()
-    STREAMING = auto()
-    ERROR = auto()
+    IDLE = auto()       # No camera assigned
+    PROBING = auto()    # Probing capabilities (first time only)
+    READY = auto()      # Camera ready, not streaming
+    STREAMING = auto()  # Camera actively capturing
+    ERROR = auto()      # Error state
 
 
 class AudioPhase(Enum):
@@ -60,12 +58,6 @@ class USBAudioDevice:
 
 
 @dataclass(frozen=True)
-class CameraFingerprint:
-    vid_pid: str
-    capability_hash: str
-
-
-@dataclass(frozen=True)
 class CameraCapabilities:
     camera_id: str
     modes: tuple[dict[str, Any], ...] = ()
@@ -93,9 +85,6 @@ class CameraSlot:
     phase: CameraPhase = CameraPhase.IDLE
     device_info: USBDeviceInfo | None = None
     capabilities: CameraCapabilities | None = None
-    fingerprint: CameraFingerprint | None = None
-    model_key: str | None = None
-    is_known: bool = False
     probing_progress: str = ""
     error_message: str | None = None
 

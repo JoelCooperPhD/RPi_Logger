@@ -1,68 +1,37 @@
+"""Effects for USB camera module.
+
+Effects are side-effects that the reducer requests to be performed.
+The effect executor handles these asynchronously.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .state import CameraSettings, CameraCapabilities
+from .state import CameraSettings
 
 
-# Discovery effects
+# Camera setup effects
 
 @dataclass(frozen=True)
-class LookupKnownCamera:
-    stable_id: str
+class EnsureCameraProbed:
+    """Ensure camera capabilities are known (probe if needed)."""
+    device: int | str
     vid_pid: str
+    display_name: str
 
 
 @dataclass(frozen=True)
-class ProbeVideoCapabilities:
-    device: int | str
-
-
-@dataclass(frozen=True)
-class QuickVerifyCamera:
-    device: int | str
-    cached_model_key: str
-    cached_fingerprint: str
-
-
-@dataclass(frozen=True)
-class ProbeAudioCapabilities:
+class ProbeAudio:
+    """Find matching audio device for the camera."""
     bus_path: str
 
 
-# Fingerprint effects
-
-@dataclass(frozen=True)
-class ComputeFingerprint:
-    vid_pid: str
-    capabilities: CameraCapabilities
-
-
-# Cache effects
-
-@dataclass(frozen=True)
-class PersistKnownCamera:
-    stable_id: str
-    model_key: str
-    fingerprint: str
-    capabilities: CameraCapabilities
-
-
-@dataclass(frozen=True)
-class LoadCachedSettings:
-    stable_id: str
-
-
-@dataclass(frozen=True)
-class PersistSettings:
-    stable_id: str
-    settings: dict[str, str]
-
-
-# Camera effects
+# Camera operation effects
 
 @dataclass(frozen=True)
 class OpenCamera:
+    """Open camera for capture."""
     device: int | str
     resolution: tuple[int, int]
     fps: float
@@ -70,21 +39,25 @@ class OpenCamera:
 
 @dataclass(frozen=True)
 class CloseCamera:
+    """Close camera."""
     pass
 
 
 @dataclass(frozen=True)
 class StartCapture:
+    """Start frame capture loop."""
     pass
 
 
 @dataclass(frozen=True)
 class StopCapture:
+    """Stop frame capture loop."""
     pass
 
 
 @dataclass(frozen=True)
 class ApplyCameraSettings:
+    """Apply new settings to camera."""
     settings: CameraSettings
 
 
@@ -92,6 +65,7 @@ class ApplyCameraSettings:
 
 @dataclass(frozen=True)
 class OpenAudioDevice:
+    """Open audio device for capture."""
     sounddevice_index: int
     sample_rate: int
     channels: int
@@ -100,16 +74,19 @@ class OpenAudioDevice:
 
 @dataclass(frozen=True)
 class CloseAudioDevice:
+    """Close audio device."""
     pass
 
 
 @dataclass(frozen=True)
 class StartAudioStream:
+    """Start audio capture."""
     pass
 
 
 @dataclass(frozen=True)
 class StopAudioStream:
+    """Stop audio capture."""
     pass
 
 
@@ -117,6 +94,7 @@ class StopAudioStream:
 
 @dataclass(frozen=True)
 class StartEncoder:
+    """Start video encoder."""
     video_path: Path
     fps: int
     resolution: tuple[int, int]
@@ -125,11 +103,13 @@ class StartEncoder:
 
 @dataclass(frozen=True)
 class StopEncoder:
+    """Stop video encoder."""
     pass
 
 
 @dataclass(frozen=True)
 class StartMuxer:
+    """Start audio/video muxer."""
     output_path: Path
     video_fps: int
     resolution: tuple[int, int]
@@ -139,16 +119,19 @@ class StartMuxer:
 
 @dataclass(frozen=True)
 class StopMuxer:
+    """Stop muxer."""
     pass
 
 
 @dataclass(frozen=True)
 class StartTimingWriter:
+    """Start timing file writer."""
     output_path: Path
 
 
 @dataclass(frozen=True)
 class StopTimingWriter:
+    """Stop timing file writer."""
     pass
 
 
@@ -156,26 +139,21 @@ class StopTimingWriter:
 
 @dataclass(frozen=True)
 class SendStatus:
+    """Send status to parent process."""
     status_type: str
     payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
-class NotifyUI:
-    event: str
-    payload: dict[str, Any]
-
-
-@dataclass(frozen=True)
 class CleanupResources:
+    """Clean up all resources on shutdown."""
     pass
 
 
 Effect = (
-    LookupKnownCamera | ProbeVideoCapabilities | QuickVerifyCamera | ProbeAudioCapabilities |
-    ComputeFingerprint | PersistKnownCamera | LoadCachedSettings | PersistSettings |
+    EnsureCameraProbed | ProbeAudio |
     OpenCamera | CloseCamera | StartCapture | StopCapture | ApplyCameraSettings |
     OpenAudioDevice | CloseAudioDevice | StartAudioStream | StopAudioStream |
     StartEncoder | StopEncoder | StartMuxer | StopMuxer | StartTimingWriter | StopTimingWriter |
-    SendStatus | NotifyUI | CleanupResources
+    SendStatus | CleanupResources
 )

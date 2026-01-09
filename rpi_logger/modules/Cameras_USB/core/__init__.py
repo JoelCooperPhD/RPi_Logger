@@ -1,6 +1,6 @@
 from .state import (
     CameraPhase, AudioPhase, RecordingPhase,
-    USBDeviceInfo, USBAudioDevice, CameraFingerprint,
+    USBDeviceInfo, USBAudioDevice,
     CameraCapabilities, CameraSettings,
     CameraSlot, AudioSlot, FrameMetrics,
     AppState, initial_state,
@@ -13,7 +13,7 @@ from .store import Store, create_store, EffectHandler
 
 __all__ = [
     "CameraPhase", "AudioPhase", "RecordingPhase",
-    "USBDeviceInfo", "USBAudioDevice", "CameraFingerprint",
+    "USBDeviceInfo", "USBAudioDevice",
     "CameraCapabilities", "CameraSettings",
     "CameraSlot", "AudioSlot", "FrameMetrics",
     "AppState", "initial_state",

@@ -432,6 +432,42 @@ class KnownCamerasCache:
             )
 
     # ------------------------------------------------------------------
+    # Capabilities caching (for resolution options)
+
+    async def get_capabilities(self, camera_key: str) -> Optional[Dict[str, Any]]:
+        """Get cached capabilities (modes, default resolution/fps) for a camera.
+
+        Returns dict with keys: modes, default_resolution, default_fps
+        or None if not cached.
+        """
+        await self.load()
+        entry = self._entries.get(camera_key)
+        if not entry:
+            return None
+        return entry.get("capabilities")
+
+    async def set_capabilities(
+        self, camera_key: str, capabilities: Dict[str, Any]
+    ) -> None:
+        """Store capabilities for a camera.
+
+        Args:
+            camera_key: The camera's stable identifier
+            capabilities: Dict with modes, default_resolution, default_fps
+        """
+        await self.load()
+        async with self._lock:
+            if camera_key not in self._entries:
+                self._entries[camera_key] = {"updated_at": time.time()}
+            self._entries[camera_key]["capabilities"] = capabilities
+            self._entries[camera_key]["updated_at"] = time.time()
+            await self._write_file(self._entries)
+            self._logger.debug(
+                "Stored capabilities for %s: %d modes",
+                camera_key, len(capabilities.get("modes", []))
+            )
+
+    # ------------------------------------------------------------------
     # IO helpers
 
     async def _read_file(self) -> Dict[str, dict]:
@@ -459,8 +495,8 @@ class KnownCamerasCache:
         for key, payload in entries.items():
             if not isinstance(payload, dict):
                 continue
-            # Accept entries that have state, settings, or model_key (from set_model_association)
-            if "state" not in payload and "settings" not in payload and "model_key" not in payload:
+            # Accept entries that have state, settings, model_key, or capabilities
+            if "state" not in payload and "settings" not in payload and "model_key" not in payload and "capabilities" not in payload:
                 continue
             valid[key] = payload
         return valid
