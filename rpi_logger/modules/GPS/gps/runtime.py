@@ -30,8 +30,8 @@ from gps_core.handlers import GPSHandler
 from gps_core.transports import SerialGPSTransport
 from gps_core.parsers.nmea_types import GPSFixSnapshot
 from gps_core.interfaces.gui import GPSMapRenderer
-from preferences import GPSPreferences
-from config import GPSConfig
+from rpi_logger.modules.GPS.preferences import GPSPreferences
+from rpi_logger.modules.GPS.config import GPSConfig
 
 
 class GPSModuleRuntime(ModuleRuntime):

@@ -74,6 +74,27 @@ def _setup_module_aliases() -> None:
     except ImportError as e:
         print(f"Warning: Could not register vog module aliases: {e}", file=sys.stderr)
 
+    # Register gps_core package and submodules (must be registered before gps.runtime imports it)
+    try:
+        from rpi_logger.modules.GPS import gps_core as gps_core_pkg
+        from rpi_logger.modules.GPS.gps_core import constants as gps_core_constants
+        from rpi_logger.modules.GPS.gps_core import handlers as gps_core_handlers
+        from rpi_logger.modules.GPS.gps_core import transports as gps_core_transports
+        from rpi_logger.modules.GPS.gps_core import parsers as gps_core_parsers
+        from rpi_logger.modules.GPS.gps_core.parsers import nmea_types as gps_core_nmea_types
+        from rpi_logger.modules.GPS.gps_core import interfaces as gps_core_interfaces
+        from rpi_logger.modules.GPS.gps_core.interfaces import gui as gps_core_gui
+        sys.modules['gps_core'] = gps_core_pkg
+        sys.modules['gps_core.constants'] = gps_core_constants
+        sys.modules['gps_core.handlers'] = gps_core_handlers
+        sys.modules['gps_core.transports'] = gps_core_transports
+        sys.modules['gps_core.parsers'] = gps_core_parsers
+        sys.modules['gps_core.parsers.nmea_types'] = gps_core_nmea_types
+        sys.modules['gps_core.interfaces'] = gps_core_interfaces
+        sys.modules['gps_core.interfaces.gui'] = gps_core_gui
+    except ImportError as e:
+        print(f"Warning: Could not register gps_core module aliases: {e}", file=sys.stderr)
+
     # Register gps package and submodules for GPS module
     try:
         from rpi_logger.modules.GPS import gps as gps_pkg
