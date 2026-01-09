@@ -434,6 +434,11 @@
         "record_resolution": "640x480"
       },
       "updated_at": 1767650063.3905468
+    },
+    "usb:usb3-3-2": {
+      "fingerprint": "-662736926859419546",
+      "model_key": "hd_pro_webcam_c920",
+      "updated_at": 1767930416.084906
     }
   },
   "schema": 2
