@@ -62,15 +62,14 @@ class FingerprintComputed:
 
 
 @dataclass(frozen=True)
-class FingerprintVerified:
+class QuickVerifyComplete:
     model_key: str
     capabilities: CameraCapabilities
 
 
 @dataclass(frozen=True)
-class FingerprintMismatch:
-    expected_hash: str
-    actual_hash: str
+class QuickVerifyFailed:
+    error: str
 
 
 # Cache actions
@@ -202,7 +201,7 @@ class Shutdown:
 Action = (
     AssignDevice | DeviceDiscovered |
     StartProbing | ProbingProgress | VideoProbingComplete | AudioProbingComplete | ProbingFailed |
-    FingerprintComputed | FingerprintVerified | FingerprintMismatch |
+    FingerprintComputed | QuickVerifyComplete | QuickVerifyFailed |
     StoreKnownCamera |
     CameraReady | StartStreaming | StreamingStarted | StopStreaming | CameraError | UnassignCamera |
     SetAudioMode | AudioDeviceMatched | StartAudioCapture | AudioCaptureStarted | StopAudioCapture | AudioError |

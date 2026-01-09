@@ -18,6 +18,7 @@ class InstanceState(Enum):
     STARTING = "starting"         # Process spawned, waiting for ready
     RUNNING = "running"           # Process running, no device assigned
     CONNECTING = "connecting"     # Device assignment sent, waiting for ack
+    INITIALIZING = "initializing" # ACK received, device initializing (no timeout)
     CONNECTED = "connected"       # Device connected and ready
     DISCONNECTING = "disconnecting"  # Unassign sent, waiting for ack
     STOPPING = "stopping"         # Quit sent, waiting for exit
@@ -28,7 +29,8 @@ VALID_TRANSITIONS = {
     InstanceState.STOPPED: {InstanceState.STARTING},
     InstanceState.STARTING: {InstanceState.RUNNING, InstanceState.CONNECTED, InstanceState.STOPPED},  # CONNECTED for internal modules
     InstanceState.RUNNING: {InstanceState.CONNECTING, InstanceState.STOPPING, InstanceState.STOPPED},
-    InstanceState.CONNECTING: {InstanceState.CONNECTED, InstanceState.RUNNING, InstanceState.STOPPING, InstanceState.STOPPED},
+    InstanceState.CONNECTING: {InstanceState.INITIALIZING, InstanceState.CONNECTED, InstanceState.RUNNING, InstanceState.STOPPING, InstanceState.STOPPED},
+    InstanceState.INITIALIZING: {InstanceState.CONNECTED, InstanceState.RUNNING, InstanceState.STOPPING, InstanceState.STOPPED},
     InstanceState.CONNECTED: {InstanceState.DISCONNECTING, InstanceState.STOPPING, InstanceState.STOPPED},
     InstanceState.DISCONNECTING: {InstanceState.RUNNING, InstanceState.STOPPING, InstanceState.STOPPED},
     InstanceState.STOPPING: {InstanceState.STOPPED},
@@ -93,6 +95,7 @@ class InstanceInfo:
         return self.state in {
             InstanceState.STARTING,
             InstanceState.CONNECTING,
+            InstanceState.INITIALIZING,
             InstanceState.DISCONNECTING,
             InstanceState.STOPPING,
         }

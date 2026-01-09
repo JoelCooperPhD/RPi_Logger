@@ -19,6 +19,13 @@ class ProbeVideoCapabilities:
 
 
 @dataclass(frozen=True)
+class QuickVerifyCamera:
+    device: int | str
+    cached_model_key: str
+    cached_fingerprint: str
+
+
+@dataclass(frozen=True)
 class ProbeAudioCapabilities:
     bus_path: str
 
@@ -27,13 +34,6 @@ class ProbeAudioCapabilities:
 
 @dataclass(frozen=True)
 class ComputeFingerprint:
-    vid_pid: str
-    capabilities: CameraCapabilities
-
-
-@dataclass(frozen=True)
-class VerifyFingerprint:
-    cached_fingerprint: str
     vid_pid: str
     capabilities: CameraCapabilities
 
@@ -95,6 +95,7 @@ class OpenAudioDevice:
     sounddevice_index: int
     sample_rate: int
     channels: int
+    supported_rates: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -171,9 +172,8 @@ class CleanupResources:
 
 
 Effect = (
-    LookupKnownCamera | ProbeVideoCapabilities | ProbeAudioCapabilities |
-    ComputeFingerprint | VerifyFingerprint |
-    PersistKnownCamera | LoadCachedSettings | PersistSettings |
+    LookupKnownCamera | ProbeVideoCapabilities | QuickVerifyCamera | ProbeAudioCapabilities |
+    ComputeFingerprint | PersistKnownCamera | LoadCachedSettings | PersistSettings |
     OpenCamera | CloseCamera | StartCapture | StopCapture | ApplyCameraSettings |
     OpenAudioDevice | CloseAudioDevice | StartAudioStream | StopAudioStream |
     StartEncoder | StopEncoder | StartMuxer | StopMuxer | StartTimingWriter | StopTimingWriter |

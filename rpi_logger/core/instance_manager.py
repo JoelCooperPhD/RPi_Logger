@@ -373,6 +373,27 @@ class InstanceStateManager:
                 else:
                     self._set_state(instance_id, InstanceState.RUNNING)
 
+        elif status_type == "device_ack":
+            # Phase 1: Module acknowledged the assignment, now initializing
+            device_id = data.get("device_id")
+            logger.info(
+                "device_ack received: device=%s, instance=%s, current_state=%s",
+                device_id, instance_id, info.state.value
+            )
+
+            # Remove from pending connections - no more timeout/retry needed
+            pending = self._pending_connections.pop(instance_id, None)
+            if pending:
+                logger.info(
+                    "ACK received for %s after %d attempt(s), waiting for device_ready",
+                    instance_id, pending.attempts
+                )
+
+            # Transition to INITIALIZING (waits indefinitely for device_ready)
+            if info.state == InstanceState.CONNECTING:
+                logger.info("Transitioning %s to INITIALIZING", instance_id)
+                self._set_state(instance_id, InstanceState.INITIALIZING)
+
         elif status_type == "device_ready":
             # Device successfully connected - this is the ACK we're waiting for
             device_id = data.get("device_id")
@@ -391,8 +412,8 @@ class InstanceStateManager:
             else:
                 logger.info("No pending connection found for %s (may have already completed)", instance_id)
 
-            # Transition to CONNECTED
-            if info.state in {InstanceState.CONNECTING, InstanceState.RUNNING}:
+            # Transition to CONNECTED from CONNECTING, INITIALIZING, or RUNNING
+            if info.state in {InstanceState.CONNECTING, InstanceState.INITIALIZING, InstanceState.RUNNING}:
                 logger.info("Transitioning %s to CONNECTED", instance_id)
                 self._set_state(instance_id, InstanceState.CONNECTED)
             else:
@@ -418,7 +439,7 @@ class InstanceStateManager:
             else:
                 # No more retries - fail the connection
                 self._pending_connections.pop(instance_id, None)
-                if info.state == InstanceState.CONNECTING:
+                if info.state in {InstanceState.CONNECTING, InstanceState.INITIALIZING}:
                     self._set_state(instance_id, InstanceState.RUNNING, error=error)
 
         elif status_type == "device_unassigned":

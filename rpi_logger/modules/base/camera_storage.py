@@ -454,13 +454,13 @@ class KnownCamerasCache:
         entries = parsed.get("entries") or {}
         if not isinstance(entries, dict):
             return {}
-        # Validate each entry structure - allow entries with state and/or settings
+        # Validate each entry structure - allow entries with state, settings, or model association
         valid: Dict[str, dict] = {}
         for key, payload in entries.items():
             if not isinstance(payload, dict):
                 continue
-            # Accept entries that have state or settings (or both)
-            if "state" not in payload and "settings" not in payload:
+            # Accept entries that have state, settings, or model_key (from set_model_association)
+            if "state" not in payload and "settings" not in payload and "model_key" not in payload:
                 continue
             valid[key] = payload
         return valid

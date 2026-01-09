@@ -9,7 +9,7 @@ from .actions import (
     Action,
     AssignDevice, DeviceDiscovered,
     StartProbing, ProbingProgress, VideoProbingComplete, AudioProbingComplete, ProbingFailed,
-    FingerprintComputed, FingerprintVerified, FingerprintMismatch,
+    FingerprintComputed, QuickVerifyComplete, QuickVerifyFailed,
     CameraReady, StartStreaming, StreamingStarted, StopStreaming, CameraError, UnassignCamera,
     SetAudioMode, AudioDeviceMatched, StartAudioCapture, AudioCaptureStarted, StopAudioCapture, AudioError,
     StartRecording, RecordingStarted, StopRecording, RecordingStopped,
@@ -19,8 +19,8 @@ from .actions import (
 )
 from .effects import (
     Effect,
-    LookupKnownCamera, ProbeVideoCapabilities, ProbeAudioCapabilities,
-    ComputeFingerprint, VerifyFingerprint,
+    LookupKnownCamera, ProbeVideoCapabilities, QuickVerifyCamera, ProbeAudioCapabilities,
+    ComputeFingerprint,
     PersistKnownCamera, LoadCachedSettings,
     OpenCamera, CloseCamera, StartCapture, StopCapture, ApplyCameraSettings,
     OpenAudioDevice, CloseAudioDevice, StartAudioStream, StopAudioStream,
@@ -71,7 +71,7 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 return (
                     replace(state, camera=new_camera),
                     [
-                        ProbeVideoCapabilities(device_info.dev_path),
+                        QuickVerifyCamera(device_info.dev_path, cached_model_key, cached_fingerprint),
                         LoadCachedSettings(device_info.stable_id),
                     ]
                 )
@@ -91,34 +91,27 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
             new_camera = replace(state.camera, probing_progress=message)
             return replace(state, camera=new_camera), []
 
-        # PROBING/VERIFYING -> handle video capabilities
+        # PROBING -> handle video capabilities (unknown cameras only)
         case VideoProbingComplete(capabilities):
             device_info = state.camera.device_info
             if not device_info:
                 return state, []
-
-            effects: list[Effect] = []
-
-            if state.camera.phase == CameraPhase.VERIFYING:
-                cached_fp = state.camera.fingerprint.capability_hash if state.camera.fingerprint else ""
-                effects.append(VerifyFingerprint(cached_fp, device_info.vid_pid, capabilities))
-            else:
-                effects.append(ComputeFingerprint(device_info.vid_pid, capabilities))
-                effects.append(ProbeAudioCapabilities(device_info.bus_path))
-
             new_camera = replace(
                 state.camera,
                 capabilities=capabilities,
-                probing_progress="Checking audio devices..." if state.camera.phase == CameraPhase.PROBING else "Verifying...",
+                probing_progress="Checking audio devices...",
             )
-            return replace(state, camera=new_camera), effects
+            return replace(state, camera=new_camera), [
+                ComputeFingerprint(device_info.vid_pid, capabilities),
+                ProbeAudioCapabilities(device_info.bus_path),
+            ]
 
         case FingerprintComputed(fingerprint):
             new_camera = replace(state.camera, fingerprint=fingerprint)
             return replace(state, camera=new_camera), []
 
-        # VERIFYING -> READY (match) or PROBING (mismatch)
-        case FingerprintVerified(model_key, capabilities):
+        # VERIFYING -> READY (quick verify for known cameras)
+        case QuickVerifyComplete(model_key, capabilities):
             device_info = state.camera.device_info
             if not device_info:
                 return state, []
@@ -138,24 +131,22 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 ]
             )
 
-        case FingerprintMismatch(expected_hash, actual_hash):
+        # VERIFYING -> PROBING (quick verify failed, fall back to full probe)
+        case QuickVerifyFailed(error):
             device_info = state.camera.device_info
             if not device_info:
                 return state, []
             new_camera = replace(
                 state.camera,
                 phase=CameraPhase.PROBING,
-                probing_progress="Camera changed, reprobing...",
+                probing_progress="Quick verify failed, full probing...",
                 is_known=False,
                 model_key=None,
                 fingerprint=None,
             )
             return (
                 replace(state, camera=new_camera),
-                [
-                    ProbeVideoCapabilities(device_info.dev_path),
-                    NotifyUI("fingerprint_mismatch", {"expected": expected_hash, "actual": actual_hash}),
-                ]
+                [ProbeVideoCapabilities(device_info.dev_path)]
             )
 
         case AudioProbingComplete(audio_device):
@@ -230,6 +221,7 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                         state.audio.device.sounddevice_index,
                         state.settings.sample_rate,
                         state.audio.device.channels,
+                        state.audio.device.sample_rates,
                     )
                 )
             new_camera = replace(state.camera, phase=CameraPhase.STREAMING)

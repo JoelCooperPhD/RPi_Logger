@@ -10,16 +10,15 @@ from ..core.state import (
 from ..core.actions import (
     Action,
     DeviceDiscovered, ProbingProgress, VideoProbingComplete, AudioProbingComplete,
-    ProbingFailed, FingerprintComputed, FingerprintVerified, FingerprintMismatch,
+    ProbingFailed, FingerprintComputed, QuickVerifyComplete, QuickVerifyFailed,
     StreamingStarted, CameraError, AudioCaptureStarted, AudioError,
     RecordingStarted, RecordingStopped, SettingsApplied,
     UpdateMetrics, PreviewFrameReady,
 )
 from ..core.effects import (
     Effect,
-    LookupKnownCamera, ProbeVideoCapabilities, ProbeAudioCapabilities,
-    ComputeFingerprint, VerifyFingerprint,
-    PersistKnownCamera, LoadCachedSettings, PersistSettings,
+    LookupKnownCamera, ProbeVideoCapabilities, QuickVerifyCamera, ProbeAudioCapabilities,
+    ComputeFingerprint, PersistKnownCamera, LoadCachedSettings, PersistSettings,
     OpenCamera, CloseCamera, StartCapture, StopCapture, ApplyCameraSettings,
     OpenAudioDevice, CloseAudioDevice, StartAudioStream, StopAudioStream,
     StartEncoder, StopEncoder, StartMuxer, StopMuxer, StartTimingWriter, StopTimingWriter,
@@ -28,9 +27,10 @@ from ..core.effects import (
 from ..capture import USBSource, AudioSource, CapturedFrame, AudioChunk
 from ..recording import RecordingSession
 from ..discovery import (
-    probe_video_capabilities, probe_video_quick,
+    probe_video_capabilities,
+    probe_video_quick,
     match_audio_to_camera,
-    compute_fingerprint as compute_fp, fingerprint_to_string, fingerprints_match,
+    compute_fingerprint as compute_fp,
 )
 
 
@@ -82,15 +82,15 @@ class EffectExecutor:
             case ProbeVideoCapabilities(device):
                 await self._probe_video(device, dispatch)
 
+            case QuickVerifyCamera(device, cached_model_key, cached_fingerprint):
+                await self._quick_verify_camera(device, cached_model_key, cached_fingerprint, dispatch)
+
             case ProbeAudioCapabilities(bus_path):
                 await self._probe_audio(bus_path, dispatch)
 
             case ComputeFingerprint(vid_pid, capabilities):
                 fp = compute_fp(vid_pid, capabilities)
                 await dispatch(FingerprintComputed(fp))
-
-            case VerifyFingerprint(cached_fingerprint, vid_pid, capabilities):
-                await self._verify_fingerprint(cached_fingerprint, vid_pid, capabilities, dispatch)
 
             case PersistKnownCamera(stable_id, model_key, fingerprint, capabilities):
                 await self._persist_known_camera(stable_id, model_key, fingerprint, capabilities)
@@ -117,8 +117,8 @@ class EffectExecutor:
             case ApplyCameraSettings(settings):
                 await self._apply_settings(settings, dispatch)
 
-            case OpenAudioDevice(sounddevice_index, sample_rate, channels):
-                await self._open_audio(sounddevice_index, sample_rate, channels)
+            case OpenAudioDevice(sounddevice_index, sample_rate, channels, supported_rates):
+                await self._open_audio(sounddevice_index, sample_rate, channels, supported_rates)
 
             case CloseAudioDevice():
                 await self._close_audio()
@@ -209,6 +209,23 @@ class EffectExecutor:
             logger.error("Video probing failed: %s", e)
             await dispatch(ProbingFailed(str(e)))
 
+    async def _quick_verify_camera(
+        self,
+        device: int | str,
+        cached_model_key: str,
+        cached_fingerprint: str,
+        dispatch: Callable[[Action], Awaitable[None]]
+    ) -> None:
+        try:
+            await dispatch(ProbingProgress("Quick verify..."))
+            capabilities = await probe_video_quick(device)
+            self._capabilities = capabilities
+            logger.info("Quick verify succeeded for %s", cached_model_key)
+            await dispatch(QuickVerifyComplete(cached_model_key, capabilities))
+        except Exception as e:
+            logger.warning("Quick verify failed for %s: %s", cached_model_key, e)
+            await dispatch(QuickVerifyFailed(str(e)))
+
     async def _probe_audio(
         self,
         bus_path: str,
@@ -223,27 +240,6 @@ class EffectExecutor:
         except Exception as e:
             logger.warning("Audio probing failed: %s", e)
             await dispatch(AudioProbingComplete(None))
-
-    async def _verify_fingerprint(
-        self,
-        cached_fingerprint: str,
-        vid_pid: str,
-        capabilities: CameraCapabilities,
-        dispatch: Callable[[Action], Awaitable[None]]
-    ) -> None:
-        current = compute_fp(vid_pid, capabilities)
-        current_fp_str = fingerprint_to_string(current)
-
-        if fingerprints_match(cached_fingerprint, current):
-            await dispatch(FingerprintVerified(
-                self._cached_model_key or "",
-                capabilities,
-            ))
-        else:
-            await dispatch(FingerprintMismatch(
-                cached_fingerprint,
-                current_fp_str,
-            ))
 
     async def _persist_known_camera(
         self,
@@ -424,6 +420,7 @@ class EffectExecutor:
         sounddevice_index: int,
         sample_rate: int,
         channels: int,
+        supported_rates: tuple[int, ...] = (),
     ) -> None:
         if self._audio:
             self._audio.close()
@@ -432,6 +429,7 @@ class EffectExecutor:
             device_index=sounddevice_index,
             sample_rate=sample_rate,
             channels=channels,
+            supported_rates=supported_rates,
         )
 
         def on_error(msg: str):

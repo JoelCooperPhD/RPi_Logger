@@ -16,8 +16,11 @@ class AudioSource:
         channels: int = 2,
         chunk_size: int = 1024,
         buffer_capacity: int = 16,
+        supported_rates: tuple[int, ...] = (),
     ):
         self._device_index = device_index
+        self._preferred_rate = sample_rate
+        self._supported_rates = supported_rates
         self._sample_rate = sample_rate
         self._channels = channels
         self._chunk_size = chunk_size
@@ -38,19 +41,39 @@ class AudioSource:
                 self._on_error("sounddevice not available")
             return False
 
+        rates_to_try = self._build_rate_priority()
+        for rate in rates_to_try:
+            if self._try_open_stream(rate):
+                self._sample_rate = rate
+                return True
+
+        if self._on_error:
+            self._on_error(f"No supported sample rate found (tried: {rates_to_try})")
+        return False
+
+    def _build_rate_priority(self) -> list[int]:
+        rates = [self._preferred_rate]
+        for r in self._supported_rates:
+            if r not in rates:
+                rates.append(r)
+        for r in (48000, 44100, 32000, 16000):
+            if r not in rates:
+                rates.append(r)
+        return rates
+
+    def _try_open_stream(self, rate: int) -> bool:
         try:
+            import sounddevice as sd
             self._stream = sd.InputStream(
                 device=self._device_index,
-                samplerate=self._sample_rate,
+                samplerate=rate,
                 channels=self._channels,
                 blocksize=self._chunk_size,
                 dtype=np.float32,
                 callback=self._audio_callback,
             )
             return True
-        except Exception as e:
-            if self._on_error:
-                self._on_error(f"Failed to open audio device: {e}")
+        except Exception:
             return False
 
     def close(self) -> None:
