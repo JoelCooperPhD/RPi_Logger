@@ -213,7 +213,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=None,
         baudrate=0,  # Not a serial device
         display_name="USB Camera",
-        module_id="Cameras",
+        module_id="cameras_usb",
     ),
 
     # Pi CSI Camera devices (discovered via Picamera2)
@@ -225,7 +225,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         pid=None,
         baudrate=0,  # Not a serial device
         display_name="Pi Camera",
-        module_id="CamerasCsi",
+        module_id="cameras_csi",
     ),
 
     # GPS devices (UART, discovered via fixed path check)

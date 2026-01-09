@@ -1,4 +1,4 @@
-enabled = false
+enabled = true
 audio_enabled = auto
 audio_device = auto
 container_format = mp4
