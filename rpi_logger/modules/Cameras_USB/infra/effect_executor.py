@@ -197,7 +197,7 @@ class EffectExecutor:
 
             def on_progress(msg: str):
                 loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(dispatch(ProbingProgress(msg)))
+                    lambda: loop.create_task(dispatch(ProbingProgress(msg)))
                 )
 
             capabilities = await probe_video_capabilities(device, on_progress=on_progress)

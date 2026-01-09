@@ -20,26 +20,36 @@ from ..devices import InterfaceType, DeviceFamily, DeviceCatalog
 from .timer_manager import TimerManager
 
 
+def _normalize_module_key(name: str) -> str:
+    """Normalize module name for consistent lookup.
+
+    Handles both module_id format (cameras_usb) and name format (CamerasUsb)
+    by uppercasing and removing underscores.
+    """
+    return name.upper().replace("_", "")
+
+
 def _get_device_based_modules() -> dict[str, tuple[InterfaceType, DeviceFamily]]:
     """Get the module-to-connection mapping from the device catalog.
 
     All modules are device-based - they show devices in the panel
     instead of auto-launching when their checkbox is toggled.
 
-    Keys are normalized to uppercase for case-insensitive lookup.
+    Keys are normalized (uppercase, no underscores) for consistent matching
+    between module_id format and name format.
     """
     raw_map = DeviceCatalog.get_module_connection_map()
-    # Normalize keys to uppercase for case-insensitive matching
-    return {k.upper(): v for k, v in raw_map.items()}
+    # Normalize keys for consistent matching
+    return {_normalize_module_key(k): v for k, v in raw_map.items()}
 
 
 def _lookup_device_module(module_name: str) -> tuple[InterfaceType, DeviceFamily] | None:
-    """Look up a module in DEVICE_BASED_MODULES (case-insensitive)."""
-    return DEVICE_BASED_MODULES.get(module_name.upper())
+    """Look up a module in DEVICE_BASED_MODULES (case-insensitive, underscore-insensitive)."""
+    return DEVICE_BASED_MODULES.get(_normalize_module_key(module_name))
 
 
 # Cached module connection map (derived from device registry)
-# Keys are uppercase for case-insensitive lookup
+# Keys are normalized (uppercase, no underscores) for consistent lookup
 DEVICE_BASED_MODULES = _get_device_based_modules()
 
 

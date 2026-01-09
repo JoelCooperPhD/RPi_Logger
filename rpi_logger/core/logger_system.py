@@ -349,9 +349,10 @@ class LoggerSystem:
 
     def _has_other_instances(self, module_name: str) -> bool:
         """Check if other instances of this module are still running."""
-        module_prefix = f"{module_name.upper()}:"
+        # Normalize: uppercase and remove underscores for consistent matching
+        normalized = module_name.upper().replace("_", "")
         return any(
-            inst_id.startswith(module_prefix)
+            inst_id.upper().replace("_", "").startswith(f"{normalized}:")
             for inst_id in self._device_instance_map.values()
         )
 
@@ -784,12 +785,13 @@ class LoggerSystem:
     # =========================================================================
 
     # Modules that support multiple simultaneous instances (one per device)
-    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS_USB", "CAMERAS_CSI"}
+    # Keys are normalized (uppercase, no underscores) for consistent matching
+    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERASUSB", "CAMERASCSI"}
 
     def _is_multi_instance_module(self, module_id: str) -> bool:
         """Check if a module supports multiple simultaneous instances."""
-        # Normalize to uppercase for comparison
-        normalized = module_id.upper()
+        # Normalize: uppercase and remove underscores for consistent matching
+        normalized = module_id.upper().replace("_", "")
         return normalized in self.MULTI_INSTANCE_MODULES
 
     def _make_instance_id(self, module_id: str, device_id: str) -> str:

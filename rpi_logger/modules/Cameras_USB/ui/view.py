@@ -55,6 +55,15 @@ class USBCameraView:
             logger.warning("Tk unavailable: %s", exc)
             return
 
+        # Check if the view is still valid
+        stub_frame = getattr(self._stub_view, "stub_frame", None)
+        if stub_frame:
+            try:
+                stub_frame.winfo_exists()
+            except tk.TclError:
+                logger.warning("View already destroyed, skipping attach")
+                return
+
         self._tk = tk
         self._ttk = ttk
         self._ui_thread = threading.current_thread()
@@ -257,5 +266,6 @@ class USBCameraView:
                 self._canvas_image_id = self._canvas.create_image(
                     cx, cy, image=self._photo, anchor="center"
                 )
+            self._frame_count += 1
         except Exception as e:
             logger.warning("Preview frame error: %s", e)

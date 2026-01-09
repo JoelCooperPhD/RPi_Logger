@@ -121,9 +121,44 @@ async def get_device_by_path(dev_path: str) -> Optional[USBVideoDevice]:
     return None
 
 
+def _normalize_stable_id(stable_id: str) -> str:
+    """Normalize stable ID for comparison.
+
+    Handles different formats:
+    - "usb:1-2.3" (module format with dots)
+    - "usb1-1-2" (core format with dashes)
+    - "1-2.3" (raw bus path)
+
+    Normalizes to lowercase, strips "usb:" prefix, converts dashes/dots.
+    """
+    s = stable_id.lower().strip()
+    # Remove "usb:" prefix
+    if s.startswith("usb:"):
+        s = s[4:]
+    # Remove leading "usb" (from core format like "usb1-1-2")
+    if s.startswith("usb"):
+        s = s[3:]
+    return s
+
+
 async def get_device_by_stable_id(stable_id: str) -> Optional[USBVideoDevice]:
+    """Find device by stable ID, handling multiple ID formats."""
     devices = await scan_usb_cameras()
+
+    # Try exact match first
     for device in devices:
         if device.stable_id == stable_id:
             return device
+
+    # Try normalized match
+    normalized_input = _normalize_stable_id(stable_id)
+    for device in devices:
+        if _normalize_stable_id(device.stable_id) == normalized_input:
+            return device
+
+    # Try matching bus_path directly
+    for device in devices:
+        if device.bus_path and _normalize_stable_id(device.bus_path) == normalized_input:
+            return device
+
     return None

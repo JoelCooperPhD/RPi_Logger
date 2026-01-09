@@ -135,11 +135,13 @@ class USBCamerasRuntime(ModuleRuntime):
             if hasattr(self.ctx.view, "set_data_subdir"):
                 self.ctx.view.set_data_subdir("Cameras_USB")
 
-        self.view.attach()
-        self.view.bind_dispatch(self.store.dispatch)
-        self.store.subscribe(self.view.render)
-
-        self.executor.set_preview_callback(self.view.set_preview_frame)
+        try:
+            self.view.attach()
+            self.view.bind_dispatch(self.store.dispatch)
+            self.store.subscribe(self.view.render)
+            self.executor.set_preview_callback(self.view.set_preview_frame)
+        except Exception as e:
+            self.logger.warning("View attach failed (headless mode): %s", e)
 
         self.logger.info("USB Cameras runtime ready")
         if StatusMessage:
@@ -197,16 +199,23 @@ class USBCamerasRuntime(ModuleRuntime):
         return False
 
     async def _handle_assign_device(self, command: Dict[str, Any]) -> bool:
-        device_path = command.get("device_path")
-        stable_id = command.get("stable_id") or command.get("device_id")
+        # Support both direct field names and camera-prefixed names from core logger
+        device_path = command.get("device_path") or command.get("camera_dev_path")
+        stable_id = (
+            command.get("stable_id")
+            or command.get("camera_stable_id")
+            or command.get("device_id")
+        )
         command_id = command.get("command_id")
+
+        self.logger.info("assign_device: device_path=%s, stable_id=%s", device_path, stable_id)
 
         if device_path:
             return await self._assign_device_by_path(device_path, command_id)
         elif stable_id:
             return await self._assign_device_by_stable_id(stable_id, command_id)
         else:
-            self.logger.warning("assign_device: no device_path or stable_id")
+            self.logger.warning("assign_device: no device_path or stable_id in command: %s", command)
             return False
 
     async def _assign_device_by_path(self, device_path: str, command_id: Optional[str]) -> bool:
@@ -280,8 +289,12 @@ class USBCamerasRuntime(ModuleRuntime):
                 if StatusMessage:
                     StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
 
+                # Always start streaming for preview
+                self.logger.info("Camera ready, auto-starting streaming for preview")
+                asyncio.create_task(self._auto_start_streaming())
+
                 if self._auto_record and self._session_dir:
-                    self.logger.info("Auto-starting streaming and recording")
+                    self.logger.info("Auto-starting recording")
                     asyncio.create_task(self._auto_start_recording())
 
         elif status_type == "error":
@@ -301,6 +314,16 @@ class USBCamerasRuntime(ModuleRuntime):
         elif status_type == "recording_stopped":
             if StatusMessage:
                 StatusMessage.send("recording_stopped", payload)
+
+    async def _auto_start_streaming(self) -> None:
+        try:
+            await asyncio.sleep(0.3)
+            state = self.store.state
+            if state.camera.phase != CameraPhase.READY:
+                return
+            await self.store.dispatch(StartStreaming())
+        except Exception as e:
+            self.logger.error("_auto_start_streaming failed: %s", e)
 
     async def _auto_start_recording(self) -> None:
         await asyncio.sleep(0.5)
