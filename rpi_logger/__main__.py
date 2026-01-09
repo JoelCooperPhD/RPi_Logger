@@ -117,9 +117,6 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
         if module_key == 'audio':
             from rpi_logger.modules.Audio.main_audio import main
             asyncio.run(main())
-        elif module_key == 'cameras':
-            from rpi_logger.modules.Cameras.main_cameras import main
-            asyncio.run(main())
         elif module_key == 'drt':
             from rpi_logger.modules.DRT.main_drt import main
             asyncio.run(main())
@@ -135,8 +132,11 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
         elif module_key == 'vog':
             from rpi_logger.modules.VOG.main_vog import main
             asyncio.run(main())
-        elif module_key == 'cameras_csi2':
-            from rpi_logger.modules.Cameras_CSI2.main_cameras_csi2 import main
+        elif module_key == 'cameras_csi':
+            from rpi_logger.modules.Cameras_CSI.main_cameras_csi import main
+            asyncio.run(main())
+        elif module_key == 'cameras_usb':
+            from rpi_logger.modules.Cameras_USB.main_cameras_usb import main
             asyncio.run(main())
         elif module_key == 'stub_codex':
             # Note: This module has a space in the directory name
@@ -144,7 +144,7 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
             print(f"Module stub_codex cannot be run in frozen mode", file=sys.stderr)
             sys.exit(1)
         else:
-            available = ['audio', 'cameras', 'cameras_csi2', 'drt', 'eye_tracker', 'gps', 'notes', 'vog']
+            available = ['audio', 'cameras_csi', 'cameras_usb', 'drt', 'eye_tracker', 'gps', 'notes', 'vog']
             print(f"Unknown module: {module_name}", file=sys.stderr)
             print(f"Available modules: {', '.join(available)}", file=sys.stderr)
             sys.exit(1)

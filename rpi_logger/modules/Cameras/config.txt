@@ -1,8 +1,0 @@
-enabled = false
-log_level = info
-view.show_io_panel = true
-view.show_logger = true
-display_name = Cameras-USB
-preview_resolution = auto
-device_connected = false
-window_geometry = 524x502+1648+723

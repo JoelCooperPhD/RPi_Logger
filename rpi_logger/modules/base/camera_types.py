@@ -1,7 +1,6 @@
 """Shared camera data types and serialization helpers.
 
 This module provides the common data models used by both USB and CSI camera modules.
-Extracted from modules/Cameras/camera_core/state.py and capture.py for shared use.
 """
 
 from __future__ import annotations
