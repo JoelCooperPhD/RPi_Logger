@@ -416,6 +416,8 @@ class EyeTrackerRuntime(ModuleRuntime):
             }, command_id=command_id)
             return False
 
+        StatusMessage.send("device_ack", {"device_id": device_id or "unknown"}, command_id=command_id)
+        self.logger.info("Sent device_ack for %s", device_id)
 
         # Store assigned device info
         self._assigned_device_id = device_id

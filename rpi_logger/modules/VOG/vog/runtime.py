@@ -162,6 +162,9 @@ class VOGModuleRuntime(ModuleRuntime):
             device_id, device_type, port, baudrate, is_wireless
         )
 
+        StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
+        self.logger.info("Sent device_ack for %s", device_id)
+
         try:
             # Determine device type for protocol selection
             device_type_lower = device_type.lower()

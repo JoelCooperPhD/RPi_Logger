@@ -61,6 +61,10 @@ class AudioRuntime(ModuleRuntime):
             return False
 
         self.logger.info("Assigning device: %s (index=%d, ch=%s, rate=%s)", device_id, sounddevice_index, audio_channels, audio_sample_rate)
+
+        StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
+        self.logger.info("Sent device_ack for %s", device_id)
+
         if self.app.state.device is not None:
             self.logger.info("Replacing existing device with new assignment")
             await self._unassign_current_device()

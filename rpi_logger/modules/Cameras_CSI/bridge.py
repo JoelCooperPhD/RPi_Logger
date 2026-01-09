@@ -192,6 +192,9 @@ class CSICamerasRuntime(ModuleRuntime):
         command_id = command.get("command_id")
         device_id = command.get("device_id", "")
 
+        StatusMessage.send("device_ack", {"device_id": device_id or "unknown"}, command_id=command_id)
+        self.logger.debug("Sent device_ack for %s", device_id)
+
         camera_index = 0
         if "camera_index" in command:
             camera_index = command["camera_index"]

@@ -251,6 +251,9 @@ class DRTModuleRuntime(ModuleRuntime):
             device_id, device_type, port, baudrate, is_wireless, display_name
         )
 
+        StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
+        self.logger.info("Sent device_ack for %s", device_id)
+
         try:
             # Parse device type string to enum
             drt_device_type = self._parse_device_type(device_type, is_wireless)

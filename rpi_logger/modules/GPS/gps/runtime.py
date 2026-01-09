@@ -281,6 +281,9 @@ class GPSModuleRuntime(ModuleRuntime):
             device_id, port, baudrate, display_name
         )
 
+        StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
+        self.logger.info("Sent device_ack for %s", device_id)
+
         try:
             # Create transport
             transport = SerialGPSTransport(port, baudrate)
