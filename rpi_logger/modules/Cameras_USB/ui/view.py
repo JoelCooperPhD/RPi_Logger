@@ -1,14 +1,10 @@
 import asyncio
 import threading
-from pathlib import Path
-from typing import Any, Callable, Awaitable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 import logging
 
-from ..core.state import (
-    AppState, CameraPhase, AudioPhase, RecordingPhase,
-    CameraSettings, FRAME_RATE_OPTIONS, SAMPLE_RATE_OPTIONS,
-)
-from ..core.actions import Action, ApplySettings, SetAudioMode
+from ..core.state import CameraState, CameraSettings, FRAME_RATE_OPTIONS, SAMPLE_RATE_OPTIONS
+from ..core.controller import CameraController
 
 try:
     from rpi_logger.core.ui.theme.colors import Colors
@@ -64,8 +60,8 @@ class USBCameraView:
         self._status_var = None
         self._audio_var = None
 
-        self._dispatch: Optional[Callable[[Action], Awaitable[None]]] = None
-        self._current_state: Optional[AppState] = None
+        self._controller: Optional[CameraController] = None
+        self._current_state: Optional[CameraState] = None
         self._settings_window = None
         self._frame_count = 0
 
@@ -80,7 +76,6 @@ class USBCameraView:
             logger.warning("Tk unavailable: %s", exc)
             return
 
-        # Check if the view is still valid
         stub_frame = getattr(self._stub_view, "stub_frame", None)
         if stub_frame:
             try:
@@ -103,8 +98,8 @@ class USBCameraView:
         self._has_ui = True
         logger.info("USB Camera view attached")
 
-    def bind_dispatch(self, dispatch: Callable[[Action], Awaitable[None]]) -> None:
-        self._dispatch = dispatch
+    def bind_controller(self, controller: CameraController) -> None:
+        self._controller = controller
 
     def _build_layout(self, parent, tk) -> None:
         parent.columnconfigure(0, weight=1)
@@ -183,13 +178,13 @@ class USBCameraView:
         from .widgets.settings_window import USBSettingsWindow
 
         state = self._current_state
-        caps = state.camera.capabilities if state else None
+        caps = state.capabilities if state else None
         settings = state.settings if state else CameraSettings()
-        audio_available = state.audio.device is not None if state else False
+        audio_available = state.audio_device is not None if state else False
 
         def on_apply(new_settings: CameraSettings):
-            if self._dispatch:
-                asyncio.create_task(self._dispatch(ApplySettings(new_settings)))
+            if self._controller:
+                asyncio.create_task(self._controller.apply_settings(new_settings))
 
         def on_close():
             self._settings_window = None
@@ -203,7 +198,7 @@ class USBCameraView:
             on_close=on_close,
         )
 
-    def render(self, state: AppState) -> None:
+    def render(self, state: CameraState) -> None:
         self._current_state = state
 
         if not self._has_ui:
@@ -217,25 +212,10 @@ class USBCameraView:
         self._update_metrics(state)
         self._update_preview(state)
 
-    def _update_metrics(self, state: AppState) -> None:
-        phase = state.camera.phase
-        recording = state.recording_phase
-
-        if phase == CameraPhase.IDLE:
-            status = "Idle"
-        elif phase == CameraPhase.PROBING:
-            status = state.camera.probing_progress or "Probing..."
-        elif phase == CameraPhase.READY:
-            status = "Ready"
-        elif phase == CameraPhase.STREAMING:
-            if recording == RecordingPhase.RECORDING:
-                status = "Recording"
-            else:
-                status = "Streaming"
-        elif phase == CameraPhase.ERROR:
-            status = f"Error: {state.camera.error_message or 'Unknown'}"
-        else:
-            status = phase.name
+    def _update_metrics(self, state: CameraState) -> None:
+        status = state.phase_display
+        if state.probing and state.probing_progress:
+            status = state.probing_progress
 
         if self._status_var:
             self._status_var.set(status)
@@ -247,7 +227,7 @@ class USBCameraView:
         cap_target = settings.frame_rate
         self._metrics_fields["cap_tgt"].set(f"{_format_fps(cap_actual)} / {_format_fps(cap_target)}")
 
-        if recording == RecordingPhase.RECORDING:
+        if state.recording:
             rec_actual = metrics.record_fps_actual
             self._metrics_fields["rec_tgt"].set(f"{_format_fps(rec_actual)} / {_format_fps(cap_target)}")
         else:
@@ -265,43 +245,26 @@ class USBCameraView:
                 except Exception:
                     pass
 
-        audio_phase = state.audio.phase
-        if audio_phase == AudioPhase.DISABLED:
+        # Audio status
+        if not state.audio_enabled:
             audio_status = "Off"
-        elif audio_phase == AudioPhase.UNAVAILABLE:
-            audio_status = "N/A"
-        elif audio_phase == AudioPhase.AVAILABLE:
-            audio_status = "Ready"
-        elif audio_phase == AudioPhase.CAPTURING:
-            audio_status = "On"
-        elif audio_phase == AudioPhase.ERROR:
+        elif state.audio_error:
             audio_status = "Error"
+        elif state.audio_capturing:
+            audio_status = "On"
+        elif state.audio_available:
+            audio_status = "Ready"
         else:
-            audio_status = "--"
+            audio_status = "N/A"
 
         if self._audio_var:
             self._audio_var.set(audio_status)
 
-    def _update_preview(self, state: AppState) -> None:
+    def _update_preview(self, state: CameraState) -> None:
         if not state.preview_frame or not self._canvas:
             return
 
-        try:
-            import tkinter as tk
-            self._photo = tk.PhotoImage(data=state.preview_frame)
-
-            if self._canvas_image_id:
-                self._canvas.itemconfig(self._canvas_image_id, image=self._photo)
-            else:
-                cx = self._canvas_width // 2
-                cy = self._canvas_height // 2
-                self._canvas_image_id = self._canvas.create_image(
-                    cx, cy, image=self._photo, anchor="center"
-                )
-
-            self._frame_count += 1
-        except Exception as e:
-            logger.warning("Preview update error: %s", e)
+        self._render_preview_frame(state.preview_frame)
 
     def set_preview_frame(self, frame_data: bytes) -> None:
         if not self._has_ui or not self._canvas:
@@ -312,6 +275,9 @@ class USBCameraView:
                 self._root.after(0, lambda: self.set_preview_frame(frame_data))
             return
 
+        self._render_preview_frame(frame_data)
+
+    def _render_preview_frame(self, frame_data: bytes) -> None:
         try:
             import tkinter as tk
             self._photo = tk.PhotoImage(data=frame_data)

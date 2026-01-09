@@ -1,36 +1,10 @@
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from pathlib import Path
-from typing import Any
-
+from typing import Any, Optional
 
 FRAME_RATE_OPTIONS = [1, 2, 5, 10, 15, 30]
 PREVIEW_DIVISOR_OPTIONS = [2, 4, 8]
 SAMPLE_RATE_OPTIONS = [22050, 44100, 48000]
-
-
-class CameraPhase(Enum):
-    IDLE = auto()       # No camera assigned
-    PROBING = auto()    # Probing capabilities (first time only)
-    READY = auto()      # Camera ready, not streaming
-    STREAMING = auto()  # Camera actively capturing
-    ERROR = auto()      # Error state
-
-
-class AudioPhase(Enum):
-    DISABLED = auto()
-    UNAVAILABLE = auto()
-    PROBING = auto()
-    AVAILABLE = auto()
-    CAPTURING = auto()
-    ERROR = auto()
-
-
-class RecordingPhase(Enum):
-    STOPPED = auto()
-    STARTING = auto()
-    RECORDING = auto()
-    STOPPING = auto()
 
 
 @dataclass(frozen=True)
@@ -72,28 +46,12 @@ class CameraSettings:
     frame_rate: int = 30
     preview_divisor: int = 4
     preview_scale: float = 0.25
-    audio_mode: str = "auto"  # auto, on, off
+    audio_mode: str = "auto"
     sample_rate: int = 48000
 
     @property
     def preview_fps(self) -> int:
         return max(1, self.frame_rate // self.preview_divisor)
-
-
-@dataclass(frozen=True)
-class CameraSlot:
-    phase: CameraPhase = CameraPhase.IDLE
-    device_info: USBDeviceInfo | None = None
-    capabilities: CameraCapabilities | None = None
-    probing_progress: str = ""
-    error_message: str | None = None
-
-
-@dataclass(frozen=True)
-class AudioSlot:
-    phase: AudioPhase = AudioPhase.UNAVAILABLE
-    device: USBAudioDevice | None = None
-    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,29 +67,57 @@ class FrameMetrics:
     preview_fps_actual: float = 0.0
 
 
-@dataclass(frozen=True)
-class AppState:
-    camera: CameraSlot = field(default_factory=CameraSlot)
-    audio: AudioSlot = field(default_factory=AudioSlot)
-    recording_phase: RecordingPhase = RecordingPhase.STOPPED
+@dataclass
+class CameraState:
+    # Camera flags (replaces CameraPhase enum)
+    assigned: bool = False
+    probing: bool = False
+    ready: bool = False
+    streaming: bool = False
+    camera_error: Optional[str] = None
+
+    # Camera data
+    device_info: Optional[USBDeviceInfo] = None
+    capabilities: Optional[CameraCapabilities] = None
+    probing_progress: str = ""
+
+    # Audio flags (replaces AudioPhase enum)
+    audio_enabled: bool = True
+    audio_available: bool = False
+    audio_capturing: bool = False
+    audio_error: Optional[str] = None
+    audio_device: Optional[USBAudioDevice] = None
+
+    # Recording flags (replaces RecordingPhase enum)
+    recording: bool = False
+
+    # Settings and metrics
     settings: CameraSettings = field(default_factory=CameraSettings)
     metrics: FrameMetrics = field(default_factory=FrameMetrics)
-    session_dir: Path | None = None
+    session_dir: Optional[Path] = None
     trial_number: int = 0
-    preview_frame: bytes | None = None
+    preview_frame: Optional[bytes] = None
 
+    @property
+    def can_stream(self) -> bool:
+        return self.ready and not self.streaming and not self.camera_error
 
-def initial_state(
-    frame_rate: int = 30,
-    preview_scale: float = 0.25,
-    preview_divisor: int = 4,
-    audio_mode: str = "auto",
-) -> AppState:
-    return AppState(
-        settings=CameraSettings(
-            frame_rate=frame_rate,
-            preview_scale=preview_scale,
-            preview_divisor=preview_divisor,
-            audio_mode=audio_mode,
-        )
-    )
+    @property
+    def can_record(self) -> bool:
+        return self.streaming and not self.recording
+
+    @property
+    def phase_display(self) -> str:
+        if self.camera_error:
+            return "Error"
+        if self.recording:
+            return "Recording"
+        if self.streaming:
+            return "Streaming"
+        if self.probing:
+            return "Probing"
+        if self.ready:
+            return "Ready"
+        if self.assigned:
+            return "Assigned"
+        return "Idle"
