@@ -143,11 +143,16 @@ class GPSTkinterGUI:
         self._zoom_out_btn = None
         self._telemetry_vars: Dict[str, tk.StringVar] = {}
         self._telemetry_labels: Dict[str, tk.Label] = {}
+        self._unit_labels: Dict[str, tk.Label] = {}
         self._zoom_callback: Optional[Callable] = None
+
+        # Capture stats variables (for Capture Stats panel)
+        self._stats_vars: Dict[str, tk.StringVar] = {}
 
         # Create UI
         if embedded_parent:
             self._build_ui(embedded_parent)
+            self._init_stats_vars()
 
     def _build_ui(self, parent: tk.Widget):
         bg = Colors.BG_DARK if HAS_THEME and Colors else "gray20"
@@ -304,6 +309,7 @@ class GPSTkinterGUI:
                 unit_lbl = tk.Label(row, text=unit, bg=bg_frame, fg=fg_sec,
                                    font=("TkDefaultFont", 8), width=4, anchor="w")
                 unit_lbl.pack(side=tk.RIGHT)
+                self._unit_labels[var_key] = unit_lbl
 
     def _on_zoom_in(self):
         if self._zoom_callback:
@@ -350,25 +356,57 @@ class GPSTkinterGUI:
         desc = FIX_QUALITY_DESC.get(quality, "?")
         return f"{quality} ({desc})"
 
+    def _convert_speed(self, speed_knots: Optional[float], unit: str) -> Optional[float]:
+        if speed_knots is None:
+            return None
+        if unit == "knots":
+            return speed_knots
+        elif unit == "mph":
+            return speed_knots * 1.15078
+        elif unit == "m/s":
+            return speed_knots * 0.5144
+        else:  # km/h
+            return speed_knots * 1.852
+
+    def _convert_altitude(self, alt_m: Optional[float], unit: str) -> Optional[float]:
+        if alt_m is None:
+            return None
+        if unit == "feet":
+            return alt_m * 3.28084
+        return alt_m
+
     # ------------------------------------------------------------------
     # Dashboard update
 
     def update_dashboard(self, fix) -> None:
         if fix is None:
-            # Reset to placeholders
             for var in self._telemetry_vars.values():
                 var.set("---")
             self._telemetry_vars["sats"].set("-- / --")
             self._telemetry_vars["gps_time"].set("--:--:-- Z")
             return
 
+        # Get unit preferences from runtime
+        prefs = getattr(self.system, 'preferences', None)
+        speed_unit = prefs.get_speed_unit() if prefs else "mph"
+        alt_unit = prefs.get_altitude_unit() if prefs else "feet"
+
         # Position
         self._telemetry_vars["lat"].set(self._format_coord(fix.latitude, is_lat=True))
         self._telemetry_vars["lon"].set(self._format_coord(fix.longitude, is_lat=False))
-        self._telemetry_vars["alt"].set(self._format_float(fix.altitude_m, 1))
 
-        # Motion
-        self._telemetry_vars["speed"].set(self._format_float(fix.speed_mph, 1))
+        # Altitude with unit conversion
+        alt_val = self._convert_altitude(fix.altitude_m, alt_unit)
+        self._telemetry_vars["alt"].set(self._format_float(alt_val, 1))
+        if "alt" in self._unit_labels:
+            self._unit_labels["alt"].configure(text="ft" if alt_unit == "feet" else "m")
+
+        # Speed with unit conversion
+        speed_val = self._convert_speed(fix.speed_knots, speed_unit)
+        self._telemetry_vars["speed"].set(self._format_float(speed_val, 1))
+        if "speed" in self._unit_labels:
+            self._unit_labels["speed"].configure(text=speed_unit)
+
         self._telemetry_vars["heading"].set(self._format_heading(fix.course_deg))
 
         # Signal quality
@@ -392,6 +430,41 @@ class GPSTkinterGUI:
             else:
                 color = Colors.ERROR if HAS_THEME and Colors else "#e74c3c"
             lbl.configure(fg=color)
+
+    def _init_stats_vars(self) -> None:
+        if not self._content_frame:
+            return
+        self._stats_vars = {
+            "fixes": tk.StringVar(value="0"),
+            "distance": tk.StringVar(value="0.0"),
+            "duration": tk.StringVar(value="00:00:00"),
+            "status": tk.StringVar(value="No Fix"),
+        }
+
+    def update_capture_stats(
+        self,
+        fixes: int = 0,
+        distance_m: float = 0.0,
+        duration_secs: float = 0.0,
+        status: str = "No Fix",
+    ) -> None:
+        if not self._stats_vars:
+            return
+        self._stats_vars["fixes"].set(str(fixes))
+        # Convert distance to km or mi based on preferences
+        prefs = getattr(self.system, 'preferences', None)
+        if prefs and prefs.get_speed_unit() == "mph":
+            dist_val = distance_m / 1609.34  # miles
+            dist_unit = "mi"
+        else:
+            dist_val = distance_m / 1000.0  # km
+            dist_unit = "km"
+        self._stats_vars["distance"].set(f"{dist_val:.2f} {dist_unit}")
+        # Format duration as HH:MM:SS
+        hrs, rem = divmod(int(duration_secs), 3600)
+        mins, secs = divmod(rem, 60)
+        self._stats_vars["duration"].set(f"{hrs:02d}:{mins:02d}:{secs:02d}")
+        self._stats_vars["status"].set(status)
 
     def get_content_frame(self) -> Optional[tk.Widget]:
         """Get the content frame for runtime to populate."""
@@ -659,7 +732,38 @@ class GPSView:
             gui._zoom_callback = self._handle_zoom_request
             self.logger.info("Applied pending runtime binding to GUI")
 
+        # Build capture stats panel after GUI is ready
+        self._build_capture_stats()
+
         return container
+
+    def _build_capture_stats(self) -> None:
+        if not self.gui or not self.gui._stats_vars:
+            return
+
+        def builder(parent: tk.Widget) -> None:
+            bg = Colors.BG_FRAME if HAS_THEME and Colors else "gray25"
+            fg = Colors.FG_PRIMARY if HAS_THEME and Colors else "white"
+            fg_sec = Colors.FG_SECONDARY if HAS_THEME and Colors else "gray70"
+
+            row_frame = ttk.Frame(parent) if ttk else tk.Frame(parent, bg=bg)
+            row_frame.pack(fill=tk.X, expand=True, padx=4, pady=2)
+
+            stats = [
+                ("Fixes:", self.gui._stats_vars["fixes"], 6),
+                ("Distance:", self.gui._stats_vars["distance"], 10),
+                ("Duration:", self.gui._stats_vars["duration"], 10),
+                ("Status:", self.gui._stats_vars["status"], 8),
+            ]
+            for label_text, var, width in stats:
+                if ttk:
+                    ttk.Label(row_frame, text=label_text).pack(side=tk.LEFT, padx=(8, 2))
+                    ttk.Label(row_frame, textvariable=var, width=width).pack(side=tk.LEFT)
+                else:
+                    tk.Label(row_frame, text=label_text, bg=bg, fg=fg_sec).pack(side=tk.LEFT, padx=(8, 2))
+                    tk.Label(row_frame, textvariable=var, bg=bg, fg=fg, width=width).pack(side=tk.LEFT)
+
+        self._stub_view.build_io_stub_content(builder)
 
     def bind_runtime(self, runtime) -> None:
         self._runtime = runtime
@@ -746,6 +850,23 @@ class GPSView:
             self.call_in_gui(self.gui.update_map_display, pil_image, info_str, fix)
         elif fix is not None:
             self.call_in_gui(self.gui.update_dashboard, fix)
+
+    def update_capture_stats(
+        self,
+        fixes: int = 0,
+        distance_m: float = 0.0,
+        duration_secs: float = 0.0,
+        status: str = "No Fix",
+    ) -> None:
+        if not self.gui:
+            return
+        self.call_in_gui(
+            self.gui.update_capture_stats,
+            fixes,
+            distance_m,
+            duration_secs,
+            status,
+        )
 
     def set_window_title(self, title: str) -> None:
         """Set the window title."""

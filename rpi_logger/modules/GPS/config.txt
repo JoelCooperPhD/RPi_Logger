@@ -1,5 +1,5 @@
 # GPS module configuration
-enabled = false
+enabled = true
 log_level = info
 
 # Display name shown in the module list
@@ -22,9 +22,9 @@ reconnect_delay_s = 3
 nmea_history = 30
 
 # UI visibility settings
-gui_io_stub_visible = false
+gui_io_stub_visible = true
 gui_logger_visible = false
-view.show_io_panel = false
+view.show_io_panel = true
 view.show_logger = true
 device_connected = true
 window_geometry = 850x681+1029+119

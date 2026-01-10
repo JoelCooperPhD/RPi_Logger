@@ -10,11 +10,12 @@ device assignments via assign_device commands.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Deque, Dict, Optional
+from typing import Any, Deque, Dict, Optional, Tuple
 
 # Map rendering throttle (seconds) - limits UI updates, not data logging
 _MAP_RENDER_THROTTLE = 0.2  # 200ms = max 5 renders per second
@@ -100,6 +101,7 @@ class GPSModuleRuntime(ModuleRuntime):
 
         # Map rendering state
         self._last_render_time: Dict[str, float] = {}  # device_id -> last render timestamp
+        self._last_ui_update_time: Dict[str, float] = {}  # device_id -> last UI update timestamp
         initial_zoom = float(getattr(self.args, "zoom", self.config.get("zoom", 13.0)))
         initial_lat = float(getattr(self.args, "center_lat", self.config.get("center_lat", 40.7608)))
         initial_lon = float(getattr(self.args, "center_lon", self.config.get("center_lon", -111.8910)))
@@ -113,6 +115,12 @@ class GPSModuleRuntime(ModuleRuntime):
         self._map_widget = None
         self._controls_overlay = None
         self._telemetry_vars: Dict[str, Any] = {}
+
+        # Capture stats tracking
+        self._stats_fix_count: int = 0
+        self._stats_distance_m: float = 0.0
+        self._stats_session_start: Optional[float] = None
+        self._stats_last_pos: Optional[Tuple[float, float]] = None
 
     # ------------------------------------------------------------------
     # Lifecycle hooks (VMC ModuleRuntime interface)
@@ -312,6 +320,10 @@ class GPSModuleRuntime(ModuleRuntime):
 
             self.logger.info("GPS device %s assigned and started", device_id)
 
+            # Reset stats on first device connection
+            if len(self.handlers) == 1:
+                self._reset_stats()
+
             # Update window title
             if self.view and display_name:
                 try:
@@ -439,30 +451,34 @@ class GPSModuleRuntime(ModuleRuntime):
         fix: GPSFixSnapshot,
         update: Dict[str, Any],
     ) -> None:
-        """Handle data from a GPS handler.
-
-        Args:
-            device_id: Device that produced the data
-            fix: Current GPS fix
-            update: Dictionary of updated values
-        """
         # Update map center if we have a valid position
         if fix.fix_valid and fix.latitude is not None and fix.longitude is not None:
             self._current_center = (fix.latitude, fix.longitude)
 
-            # Update trajectory
             renderer = self._map_renderers.get(device_id)
             if renderer:
                 renderer.add_position_to_trajectory(fix.latitude, fix.longitude)
                 renderer.set_center(fix.latitude, fix.longitude)
 
-        # Update NMEA history
+        # Update NMEA history (always)
         raw_sentence = update.get("raw_sentence", "")
         if raw_sentence:
             timestamp = datetime.now().strftime("%H:%M:%S")
             self._recent_sentences.append(f"[{timestamp}] {raw_sentence}")
 
-        # Render map and notify view (throttled to reduce CPU)
+        # Update stats tracking
+        self._update_stats(fix)
+
+        # Throttle UI updates based on update_rate_hz preference
+        update_rate_hz = self.preferences.get_update_rate_hz() if self.preferences else 1
+        ui_interval = 1.0 / max(1, update_rate_hz)
+        current_time = time.monotonic()
+        last_ui = self._last_ui_update_time.get(device_id, 0.0)
+        if current_time - last_ui < ui_interval:
+            return
+        self._last_ui_update_time[device_id] = current_time
+
+        # Render map and notify view
         if self.view:
             on_data = getattr(self.view, "on_gps_data", None)
             if callable(on_data):
@@ -470,7 +486,6 @@ class GPSModuleRuntime(ModuleRuntime):
                 info_str = ""
                 renderer = self._map_renderers.get(device_id)
                 if renderer:
-                    current_time = time.monotonic()
                     last_render = self._last_render_time.get(device_id, 0.0)
                     if current_time - last_render >= _MAP_RENDER_THROTTLE:
                         try:
@@ -479,6 +494,17 @@ class GPSModuleRuntime(ModuleRuntime):
                         except Exception as e:
                             self.logger.warning("Map render failed: %s", e)
                 on_data(device_id, fix, pil_image, info_str)
+
+            # Update capture stats panel
+            update_stats = getattr(self.view, "update_capture_stats", None)
+            if callable(update_stats):
+                duration = current_time - self._stats_session_start if self._stats_session_start else 0.0
+                update_stats(
+                    fixes=self._stats_fix_count,
+                    distance_m=self._stats_distance_m,
+                    duration_secs=duration,
+                    status=self._get_fix_status(fix),
+                )
 
     # ------------------------------------------------------------------
     # Session helpers
@@ -562,6 +588,63 @@ class GPSModuleRuntime(ModuleRuntime):
         if self.view and hasattr(self.view, "hide_window"):
             self.view.hide_window()
             self.logger.debug("GPS window hidden")
+
+    # ------------------------------------------------------------------
+    # Settings management
+
+    def apply_settings_change(self) -> None:
+        if not self.preferences:
+            return
+        enabled = self.preferences.get_enabled_sentences()
+        for handler in self.handlers.values():
+            parser = getattr(handler, '_parser', None)
+            if parser and hasattr(parser, 'set_enabled_sentences'):
+                parser.set_enabled_sentences(enabled)
+        self.logger.info("Applied settings: enabled_sentences=%s", enabled)
+
+    # ------------------------------------------------------------------
+    # Stats helpers
+
+    def _haversine_m(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 6371000  # Earth radius in meters
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlam = math.radians(lon2 - lon1)
+        a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+        return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def _reset_stats(self) -> None:
+        self._stats_fix_count = 0
+        self._stats_distance_m = 0.0
+        self._stats_session_start = time.monotonic()
+        self._stats_last_pos = None
+
+    def _update_stats(self, fix) -> None:
+        if self._stats_session_start is None:
+            self._stats_session_start = time.monotonic()
+
+        if fix.fix_valid and fix.latitude is not None and fix.longitude is not None:
+            self._stats_fix_count += 1
+            current_pos = (fix.latitude, fix.longitude)
+            if self._stats_last_pos is not None:
+                dist = self._haversine_m(
+                    self._stats_last_pos[0], self._stats_last_pos[1],
+                    current_pos[0], current_pos[1]
+                )
+                # Filter out GPS jitter (ignore movements < 1m)
+                if dist > 1.0:
+                    self._stats_distance_m += dist
+            self._stats_last_pos = current_pos
+
+    def _get_fix_status(self, fix) -> str:
+        if fix is None or not fix.fix_valid:
+            return "No Fix"
+        mode = fix.fix_mode or ""
+        if mode == "3D":
+            return "3D Fix"
+        elif mode == "2D":
+            return "2D Fix"
+        return "Acquiring"
 
     # ------------------------------------------------------------------
     # Utility methods
