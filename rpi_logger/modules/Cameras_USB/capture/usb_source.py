@@ -51,7 +51,10 @@ class USBSource:
 
         actual_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        actual_fps = self._cap.get(cv2.CAP_PROP_FPS)
         self._resolution = (actual_w, actual_h)
+        if actual_fps > 0:
+            self._fps = actual_fps
 
         return True
 

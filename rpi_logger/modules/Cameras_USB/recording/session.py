@@ -1,11 +1,15 @@
 from pathlib import Path
 import asyncio
-from typing import Optional, Callable, Awaitable
+import logging
+import time
+from typing import Optional, Callable, Awaitable, Union
 
 from ..capture.frame import CapturedFrame, AudioChunk
 from .encoder import VideoEncoder
-from .muxer import AVMuxer
+from .muxer import TimestampedMuxer, LegacyAVMuxer, HAS_AV
 from .timing_writer import TimingCSVWriter
+
+logger = logging.getLogger(__name__)
 
 
 class RecordingSession:
@@ -38,7 +42,7 @@ class RecordingSession:
         self._timing_path = self._output_dir / f"trial_{trial_number:03d}_timing.csv"
 
         self._encoder: Optional[VideoEncoder] = None
-        self._muxer: Optional[AVMuxer] = None
+        self._muxer: Optional[Union[TimestampedMuxer, LegacyAVMuxer]] = None
         self._timing_writer: Optional[TimingCSVWriter] = None
 
         self._running = False
@@ -53,13 +57,26 @@ class RecordingSession:
         await self._timing_writer.start()
 
         if self._with_audio:
-            self._muxer = AVMuxer(
-                self._video_path,
-                self._fps,
-                self._resolution,
-                self._audio_sample_rate,
-                self._audio_channels,
-            )
+            sync_ns = time.monotonic_ns()
+
+            if HAS_AV:
+                self._muxer = TimestampedMuxer(
+                    self._video_path,
+                    self._fps,
+                    self._resolution,
+                    self._audio_sample_rate,
+                    self._audio_channels,
+                    sync_ns=sync_ns,
+                )
+            else:
+                logger.warning("PyAV not available, audio sync may be imprecise")
+                self._muxer = LegacyAVMuxer(
+                    self._video_path,
+                    self._fps,
+                    self._resolution,
+                    self._audio_sample_rate,
+                    self._audio_channels,
+                )
             await self._muxer.start()
         else:
             self._encoder = VideoEncoder(

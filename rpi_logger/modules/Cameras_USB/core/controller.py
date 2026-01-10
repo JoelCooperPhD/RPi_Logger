@@ -88,8 +88,8 @@ class CameraController:
                 self._notify()
                 accessible = await verify_camera_accessible(device_info.device)
                 if accessible:
-                    logger.info("Known camera %s - using cached %d modes",
-                               device_info.vid_pid, len(profile.modes))
+                    logger.info("Known camera %s - using cached %d modes (has_audio=%s)",
+                               device_info.vid_pid, len(profile.modes), profile.has_audio)
                     await self._camera_ready(profile, device_info)
                     return
                 else:
@@ -105,15 +105,26 @@ class CameraController:
 
             probed_modes = await probe_camera_modes(device_info.device, on_progress=on_progress)
 
+            self._state.probing_progress = "Probing audio..."
+            self._notify()
+
+            audio_device = await match_audio_to_camera(device_info.bus_path)
+            has_audio = audio_device is not None
+            audio_sample_rates = audio_device.sample_rates if audio_device else ()
+            audio_channels = audio_device.channels if audio_device else 2
+
             profile = CameraKnowledge.create_profile_from_probe(
                 vid_pid=device_info.vid_pid,
                 display_name=device_info.display_name,
                 probed_modes=probed_modes,
+                has_audio=has_audio,
+                audio_sample_rates=audio_sample_rates,
+                audio_channels=audio_channels,
             )
             await self._knowledge.register(profile)
 
-            logger.info("Probed camera %s: %d modes (filtered from %d)",
-                       device_info.vid_pid, len(profile.modes), len(probed_modes))
+            logger.info("Probed camera %s: %d modes, has_audio=%s",
+                       device_info.vid_pid, len(profile.modes), has_audio)
             await self._camera_ready(profile, device_info)
 
         except Exception as e:
@@ -145,6 +156,16 @@ class CameraController:
                 sample_rate=self._state.settings.sample_rate,
             )
 
+        if profile.has_audio:
+            audio_device = await match_audio_to_camera(device_info.bus_path)
+            if audio_device:
+                self._state.audio_device = audio_device
+                self._state.audio_available = True
+                logger.info("Audio available: %s", audio_device.device_name)
+            else:
+                logger.warning("Profile says has_audio but no device found at bus_path %s",
+                              device_info.bus_path)
+
         self._state.probing = False
         self._state.ready = True
         self._state.capabilities = capabilities
@@ -152,17 +173,6 @@ class CameraController:
         self._notify()
 
         self._send_status("camera_ready", {"camera_id": device_info.stable_id})
-
-        asyncio.create_task(self._probe_audio(device_info.bus_path))
-
-    async def _probe_audio(self, bus_path: str) -> None:
-        try:
-            audio_device = await match_audio_to_camera(bus_path)
-            self._state.audio_device = audio_device
-            self._state.audio_available = audio_device is not None
-            self._notify()
-        except Exception as e:
-            logger.warning("Audio probe failed: %s", e)
 
     async def unassign(self) -> None:
         if self._state.streaming:
@@ -244,7 +254,6 @@ class CameraController:
         frame_count = 0
         record_count = 0
         preview_count = 0
-        preview_divisor = self._state.settings.preview_divisor
 
         capture_start_time = 0.0
         record_intervals: list[float] = []
@@ -274,6 +283,7 @@ class CameraController:
                             record_fps_actual = 1.0 / avg_interval if avg_interval > 0 else 0.0
                     last_record_time = now
 
+                preview_divisor = self._state.settings.preview_divisor
                 if self._preview_callback and frame_count % preview_divisor == 0:
                     preview_data = self._frame_to_ppm(frame)
                     if preview_data:
@@ -404,14 +414,20 @@ class CameraController:
         device_info = self._state.device_info
         device_id = device_info.stable_id if device_info else "usbcam0"
 
+        actual_fps = (
+            self._camera.fps if self._camera else self._state.settings.frame_rate
+        )
+        actual_sample_rate = (
+            self._audio.sample_rate if self._audio else self._state.settings.sample_rate
+        )
         self._recording = RecordingSession(
             session_dir=session_dir,
             device_id=device_id,
             trial_number=trial,
             resolution=self._state.settings.resolution,
-            fps=self._state.settings.frame_rate,
+            fps=int(actual_fps),
             with_audio=self._state.audio_capturing,
-            audio_sample_rate=self._state.settings.sample_rate,
+            audio_sample_rate=actual_sample_rate,
             audio_channels=self._state.audio_device.channels if self._state.audio_device else 2,
         )
         await self._recording.start()
@@ -448,10 +464,12 @@ class CameraController:
     async def apply_settings(self, settings: CameraSettings) -> None:
         old = self._state.settings
         self._state.settings = settings
+        self._state.audio_enabled = (settings.audio_mode != "off")
         self._notify()
 
         resolution_changed = old.resolution != settings.resolution
         fps_changed = old.frame_rate != settings.frame_rate
+        sample_rate_changed = old.sample_rate != settings.sample_rate
 
         if self._camera and self._state.streaming and (resolution_changed or fps_changed):
             if self._capture_task:
@@ -479,6 +497,25 @@ class CameraController:
                     self._capture_task = asyncio.create_task(self._capture_loop())
                 else:
                     logger.error("Failed to reopen camera with new settings")
+
+        if self._state.streaming:
+            audio_should_run = (
+                self._state.audio_available
+                and self._state.audio_enabled
+                and self._state.audio_device is not None
+            )
+            audio_is_running = self._state.audio_capturing
+
+            if audio_is_running and not audio_should_run:
+                await self._stop_audio()
+                self._state.audio_capturing = False
+                self._notify()
+            elif not audio_is_running and audio_should_run:
+                await self._start_audio()
+            elif audio_is_running and sample_rate_changed:
+                await self._stop_audio()
+                self._state.audio_capturing = False
+                await self._start_audio()
 
         if self._settings_save_callback:
             self._settings_save_callback(settings)
