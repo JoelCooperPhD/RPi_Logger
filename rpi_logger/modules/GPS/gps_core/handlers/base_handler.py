@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 from rpi_logger.core.connection import ReconnectingMixin, ReconnectConfig
 from rpi_logger.core.logging_utils import get_module_logger
+from ..constants import DEFAULT_STALE_THRESHOLD
 from ..parsers.nmea_parser import NMEAParser
 from ..parsers.nmea_types import GPSFixSnapshot
 from ..transports import BaseGPSTransport
@@ -41,11 +42,13 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
         device_id: str,
         output_dir: Path,
         transport: BaseGPSTransport,
+        stale_threshold: float = DEFAULT_STALE_THRESHOLD,
     ):
         """Initialize handler with device ID, output directory, and transport."""
         self.device_id = device_id
         self.output_dir = output_dir
         self.transport = transport
+        self._stale_threshold = stale_threshold
 
         self._parser = NMEAParser(on_fix_update=self._on_parser_update, validate_checksums=True)
         self._data_logger: Optional[GPSDataLogger] = None
@@ -55,6 +58,7 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
         self._read_task: Optional[asyncio.Task] = None
         self._trial_number: int = 1
         self._consecutive_errors = 0
+        self._logged_stale = False
         self._init_reconnect(device_id=device_id, config=ReconnectConfig.default())
         self._pending_tasks: Set[asyncio.Task] = set()
 
@@ -171,8 +175,11 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
                 line = await self.transport.read_line(timeout=1.0)
                 if line:
                     self._consecutive_errors = 0
+                    self._logged_stale = False
                     if line.startswith("$"):
                         self._process_sentence(line)
+
+                self._check_staleness()
                 await asyncio.sleep(0.01)
 
             except asyncio.CancelledError:
@@ -224,6 +231,19 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
         except Exception as e:
             logger.error("Error during GPS reconnect attempt for %s: %s", self.device_id, e)
             return False
+
+    def _check_staleness(self) -> None:
+        """Invalidate fix if no valid data received within threshold."""
+        fix = self._parser.fix
+        age = fix.age_seconds()
+        if age is not None and age > self._stale_threshold and fix.fix_valid:
+            fix.fix_valid = False
+            if not self._logged_stale:
+                self._logged_stale = True
+                logger.warning(
+                    "GPS %s data stale (%.1fs without valid NMEA) - fix invalidated",
+                    self.device_id, age
+                )
 
     @abstractmethod
     def _process_sentence(self, sentence: str) -> None:

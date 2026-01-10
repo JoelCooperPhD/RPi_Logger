@@ -134,12 +134,16 @@ class NMEAParser:
         self,
         on_fix_update: Optional[Callable[[GPSFixSnapshot, Dict[str, Any]], None]] = None,
         validate_checksums: bool = True,
+        enabled_sentences: Optional[set[str]] = None,
     ):
-        """Initialize parser with optional callback and checksum validation."""
         self._fix = GPSFixSnapshot()
         self._last_known_date: Optional[dt.date] = None
         self._on_fix_update = on_fix_update
         self._validate_checksums = validate_checksums
+        self._enabled_sentences = enabled_sentences
+
+    def set_enabled_sentences(self, sentences: Optional[set[str]]) -> None:
+        self._enabled_sentences = sentences
 
     @property
     def fix(self) -> GPSFixSnapshot:
@@ -177,6 +181,10 @@ class NMEAParser:
         # Get message type (last 3 chars of header, e.g., "RMC" from "GPRMC")
         header = parts[0]
         message_type = header[-3:].upper()
+
+        # Filter by enabled sentences
+        if self._enabled_sentences is not None and message_type not in self._enabled_sentences:
+            return None
 
         # Find and call appropriate parser method
         handler = getattr(self, f"_parse_{message_type.lower()}", None)

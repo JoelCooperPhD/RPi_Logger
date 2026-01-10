@@ -73,3 +73,21 @@ class GPSPreferences:
         """Set integer preference value."""
         if self.prefs:
             self.prefs.write_sync({key: value})
+
+    def get_speed_unit(self) -> str:
+        return self.get_str("speed_unit", "mph")
+
+    def get_altitude_unit(self) -> str:
+        return self.get_str("altitude_unit", "feet")
+
+    def get_update_rate_hz(self) -> int:
+        return self.get_int("update_rate_hz", 1)
+
+    def get_enabled_sentences(self) -> set[str]:
+        ALL_SENTENCES = {"GGA", "RMC", "VTG", "GSA", "GSV", "GLL"}
+        if not self.prefs:
+            return ALL_SENTENCES.copy()
+        raw = self.prefs.get("nmea_filters")
+        if raw is None:
+            return ALL_SENTENCES.copy()
+        return set(s.strip().upper() for s in str(raw).split(",") if s.strip())

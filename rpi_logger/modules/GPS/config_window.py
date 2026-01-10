@@ -66,8 +66,19 @@ class GPSConfigWindow:
         self.async_bridge = async_bridge
         self.logger = logger or get_module_logger(__name__)
 
-        # Get current settings from system
+        # Get current settings from preferences
         current_baud = getattr(system, 'baud_rate', 9600)
+        prefs = getattr(system, 'preferences', None)
+        if prefs:
+            self._initial_speed_unit = prefs.get_speed_unit()
+            self._initial_alt_unit = prefs.get_altitude_unit()
+            self._initial_update_rate = prefs.get_update_rate_hz()
+            self._initial_enabled_sentences = prefs.get_enabled_sentences()
+        else:
+            self._initial_speed_unit = "mph"
+            self._initial_alt_unit = "feet"
+            self._initial_update_rate = 1
+            self._initial_enabled_sentences = {"GGA", "RMC", "VTG", "GSA", "GSV", "GLL"}
 
         # Create dialog window
         self.dialog = tk.Toplevel(parent)
@@ -158,7 +169,7 @@ class GPSConfigWindow:
         ttk.Label(gps_lf, text="Update Rate:", style='Inframe.TLabel').grid(
             row=0, column=0, sticky="w", padx=8, pady=4
         )
-        self._update_rate_var = tk.StringVar(value="1")
+        self._update_rate_var = tk.StringVar(value=f"{self._initial_update_rate} Hz")
         rate_combo = ttk.Combobox(
             gps_lf,
             textvariable=self._update_rate_var,
@@ -185,7 +196,7 @@ class GPSConfigWindow:
         ]
 
         for i, (code, desc) in enumerate(sentences):
-            var = tk.BooleanVar(value=True)
+            var = tk.BooleanVar(value=(code in self._initial_enabled_sentences))
             self._nmea_vars[code] = var
             cb = ttk.Checkbutton(
                 nmea_lf,
@@ -204,7 +215,7 @@ class GPSConfigWindow:
         ttk.Label(display_lf, text="Speed Units:", style='Inframe.TLabel').grid(
             row=0, column=0, sticky="w", padx=8, pady=4
         )
-        self._speed_unit_var = tk.StringVar(value="km/h")
+        self._speed_unit_var = tk.StringVar(value=self._initial_speed_unit)
         speed_combo = ttk.Combobox(
             display_lf,
             textvariable=self._speed_unit_var,
@@ -218,7 +229,7 @@ class GPSConfigWindow:
         ttk.Label(display_lf, text="Altitude Units:", style='Inframe.TLabel').grid(
             row=1, column=0, sticky="w", padx=8, pady=4
         )
-        self._alt_unit_var = tk.StringVar(value="meters")
+        self._alt_unit_var = tk.StringVar(value=self._initial_alt_unit)
         alt_combo = ttk.Combobox(
             display_lf,
             textvariable=self._alt_unit_var,
@@ -271,28 +282,39 @@ class GPSConfigWindow:
             )
 
     def _on_apply(self) -> None:
-        """Apply configuration changes."""
         try:
-            # Collect settings
             baud = int(self._baud_var.get())
             speed_unit = self._speed_unit_var.get()
             alt_unit = self._alt_unit_var.get()
 
-            # Apply to system if possible
+            # Collect NMEA filters
+            enabled_sentences = {code for code, var in self._nmea_vars.items() if var.get()}
+
+            # Parse update rate
+            update_rate_str = self._update_rate_var.get()
+            update_rate = int(update_rate_str.split()[0])
+
+            # Save to preferences
             if hasattr(self.system, 'preferences') and self.system.preferences:
-                self.system.preferences.write_sync({
+                self.system.preferences.prefs.write_sync({
                     'baud_rate': baud,
                     'speed_unit': speed_unit,
                     'altitude_unit': alt_unit,
+                    'nmea_filters': ",".join(sorted(enabled_sentences)),
+                    'update_rate_hz': update_rate,
                 })
 
-            self.logger.info("GPS config applied: baud=%d, speed=%s, alt=%s",
-                             baud, speed_unit, alt_unit)
+            # Notify runtime to apply changes immediately
+            if hasattr(self.system, 'apply_settings_change'):
+                self.system.apply_settings_change()
+
+            self.logger.info("GPS config applied: baud=%d, speed=%s, alt=%s, rate=%dHz, sentences=%s",
+                             baud, speed_unit, alt_unit, update_rate, enabled_sentences)
 
             if messagebox:
                 messagebox.showinfo(
                     "Configuration Applied",
-                    "Settings have been saved.\nSome changes may require reconnection.",
+                    "Settings have been saved.",
                     parent=self.dialog
                 )
         except Exception as e:
@@ -305,13 +327,10 @@ class GPSConfigWindow:
                 )
 
     def _on_reset(self) -> None:
-        """Reset to default values."""
         self._baud_var.set("9600")
         self._update_rate_var.set("1 Hz")
-        self._speed_unit_var.set("km/h")
-        self._alt_unit_var.set("meters")
-
-        # Reset NMEA sentences
+        self._speed_unit_var.set("mph")
+        self._alt_unit_var.set("feet")
         for var in self._nmea_vars.values():
             var.set(True)
 
