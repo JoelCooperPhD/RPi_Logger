@@ -90,7 +90,37 @@ async def _get_audio_card_bus_path(card_index: int) -> Optional[str]:
 
 
 async def _probe_sample_rates(card_index: int) -> tuple[int, ...]:
-    standard_rates = (22050, 44100, 48000)
+    rates = await _read_rates_from_proc(card_index)
+    if rates:
+        return rates
+
+    rates = await _probe_rates_with_arecord(card_index)
+    return rates if rates else (48000,)
+
+
+async def _read_rates_from_proc(card_index: int) -> tuple[int, ...]:
+    proc_path = Path(f"/proc/asound/card{card_index}/stream0")
+    if not proc_path.exists():
+        return ()
+
+    try:
+        content = await asyncio.to_thread(proc_path.read_text)
+        rates = set()
+        for line in content.split("\n"):
+            line = line.strip()
+            if line.startswith("Rates:"):
+                rate_str = line.replace("Rates:", "").strip()
+                for part in rate_str.split(","):
+                    part = part.strip()
+                    if part.isdigit():
+                        rates.add(int(part))
+        return tuple(sorted(rates)) if rates else ()
+    except OSError:
+        return ()
+
+
+async def _probe_rates_with_arecord(card_index: int) -> tuple[int, ...]:
+    standard_rates = (16000, 22050, 24000, 32000, 44100, 48000)
     supported = []
 
     for rate in standard_rates:
@@ -111,7 +141,7 @@ async def _probe_sample_rates(card_index: int) -> tuple[int, ...]:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 
-    return tuple(supported) if supported else (48000,)
+    return tuple(supported)
 
 
 async def _get_sounddevice_index(card_index: int) -> int:

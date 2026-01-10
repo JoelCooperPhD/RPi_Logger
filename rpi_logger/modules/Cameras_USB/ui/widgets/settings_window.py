@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class USBSettingsWindow:
-    PREVIEW_SCALE_OPTIONS = ["1/2", "1/4", "1/8"]
+    PREVIEW_SCALE_OPTIONS = ["1", "1/2", "1/4", "1/8"]
 
     def __init__(
         self,
@@ -29,6 +29,7 @@ class USBSettingsWindow:
         audio_available: bool,
         on_apply: Callable[[CameraSettings], None],
         on_close: Callable[[], None],
+        audio_sample_rates: tuple[int, ...] = (),
     ):
         self._parent = parent
         self._capabilities = capabilities
@@ -36,6 +37,7 @@ class USBSettingsWindow:
         self._audio_available = audio_available
         self._on_apply = on_apply
         self._on_close = on_close
+        self._audio_sample_rates = audio_sample_rates if audio_sample_rates else SAMPLE_RATE_OPTIONS
 
         self._bg = Colors.BG_DARK if HAS_THEME else "#2b2b2b"
         self._bg_card = Colors.BG_FRAME if HAS_THEME else "#363636"
@@ -70,11 +72,14 @@ class USBSettingsWindow:
         self._fps_var = tk.StringVar(value=str(self._settings.frame_rate))
 
         divisor = self._settings.preview_divisor
-        divisor_map = {2: "1/2", 4: "1/4", 8: "1/8"}
+        divisor_map = {1: "1", 2: "1/2", 4: "1/4", 8: "1/8"}
         self._preview_scale_var = tk.StringVar(value=divisor_map.get(divisor, "1/4"))
 
         self._audio_enabled_var = tk.BooleanVar(value=self._settings.audio_mode != "off")
-        self._sample_rate_var = tk.StringVar(value=str(self._settings.sample_rate))
+        if self._settings.sample_rate in self._audio_sample_rates:
+            self._sample_rate_var = tk.StringVar(value=str(self._settings.sample_rate))
+        else:
+            self._sample_rate_var = tk.StringVar(value=str(self._audio_sample_rates[0]))
 
     def _setup_ui(self) -> None:
         main = tk.Frame(self._window, bg=self._bg, padx=16, pady=16)
@@ -169,7 +174,7 @@ class USBSettingsWindow:
         ).pack(side=tk.LEFT)
         sr_combo = ttk.Combobox(
             self._sample_rate_row, textvariable=self._sample_rate_var,
-            values=[str(r) for r in SAMPLE_RATE_OPTIONS], state="readonly", width=8
+            values=[str(r) for r in self._audio_sample_rates], state="readonly", width=8
         )
         sr_combo.pack(side=tk.RIGHT)
         tk.Label(
@@ -237,7 +242,7 @@ class USBSettingsWindow:
             fps = int(self._fps_var.get())
 
             scale_str = self._preview_scale_var.get()
-            divisor_map = {"1/2": 2, "1/4": 4, "1/8": 8}
+            divisor_map = {"1": 1, "1/2": 2, "1/4": 4, "1/8": 8}
             preview_divisor = divisor_map.get(scale_str, 4)
 
             audio_mode = "auto" if self._audio_enabled_var.get() else "off"

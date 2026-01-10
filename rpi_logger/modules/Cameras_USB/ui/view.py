@@ -181,6 +181,7 @@ class USBCameraView:
         caps = state.capabilities if state else None
         settings = state.settings if state else CameraSettings()
         audio_available = state.audio_device is not None if state else False
+        audio_sample_rates = state.audio_device.sample_rates if state and state.audio_device else ()
 
         def on_apply(new_settings: CameraSettings):
             if self._controller:
@@ -194,6 +195,7 @@ class USBCameraView:
             capabilities=caps,
             settings=settings,
             audio_available=audio_available,
+            audio_sample_rates=audio_sample_rates,
             on_apply=on_apply,
             on_close=on_close,
         )
