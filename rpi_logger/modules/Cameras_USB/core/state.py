@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 FRAME_RATE_OPTIONS = [1, 2, 5, 10, 15, 30]
-PREVIEW_DIVISOR_OPTIONS = [2, 4, 8]
+PREVIEW_DIVISOR_OPTIONS = [1, 2, 4, 8]
 SAMPLE_RATE_OPTIONS = [22050, 44100, 48000]
 
 

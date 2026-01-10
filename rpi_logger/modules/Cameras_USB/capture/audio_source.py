@@ -1,8 +1,23 @@
 import asyncio
+import contextlib
+import os
 import time
 from typing import AsyncIterator, Callable, Optional
 
 import numpy as np
+
+
+@contextlib.contextmanager
+def _suppress_stderr():
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    old_stderr_fd = os.dup(2)
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        os.dup2(old_stderr_fd, 2)
+        os.close(old_stderr_fd)
+        os.close(devnull_fd)
 
 from .frame import AudioChunk
 from .frame_buffer import AudioBuffer
@@ -64,14 +79,15 @@ class AudioSource:
     def _try_open_stream(self, rate: int) -> bool:
         try:
             import sounddevice as sd
-            self._stream = sd.InputStream(
-                device=self._device_index,
-                samplerate=rate,
-                channels=self._channels,
-                blocksize=self._chunk_size,
-                dtype=np.float32,
-                callback=self._audio_callback,
-            )
+            with _suppress_stderr():
+                self._stream = sd.InputStream(
+                    device=self._device_index,
+                    samplerate=rate,
+                    channels=self._channels,
+                    blocksize=self._chunk_size,
+                    dtype=np.float32,
+                    callback=self._audio_callback,
+                )
             return True
         except Exception:
             return False

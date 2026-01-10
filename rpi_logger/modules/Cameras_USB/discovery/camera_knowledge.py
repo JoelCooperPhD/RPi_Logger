@@ -30,6 +30,9 @@ class CameraProfile:
     default_resolution: tuple[int, int]
     default_fps: float
     probed_at: str = ""
+    has_audio: bool = False
+    audio_sample_rates: tuple[int, ...] = ()
+    audio_channels: int = 2
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +42,9 @@ class CameraProfile:
             "default_resolution": list(self.default_resolution),
             "default_fps": self.default_fps,
             "probed_at": self.probed_at,
+            "has_audio": self.has_audio,
+            "audio_sample_rates": list(self.audio_sample_rates),
+            "audio_channels": self.audio_channels,
         }
 
     @classmethod
@@ -52,6 +58,9 @@ class CameraProfile:
             default_resolution=tuple(data.get("default_resolution", [640, 480])),
             default_fps=data.get("default_fps", 30.0),
             probed_at=data.get("probed_at", ""),
+            has_audio=data.get("has_audio", False),
+            audio_sample_rates=tuple(data.get("audio_sample_rates", [])),
+            audio_channels=data.get("audio_channels", 2),
         )
 
 
@@ -145,6 +154,9 @@ class CameraKnowledge:
         vid_pid: str,
         display_name: str,
         probed_modes: list[dict],
+        has_audio: bool = False,
+        audio_sample_rates: tuple[int, ...] = (),
+        audio_channels: int = 2,
     ) -> CameraProfile:
         """Create a camera profile from probe results, applying resolution limits."""
         # Filter modes by known limits
@@ -172,4 +184,7 @@ class CameraKnowledge:
             default_resolution=default_resolution,
             default_fps=default_fps,
             probed_at=datetime.now().isoformat(),
+            has_audio=has_audio,
+            audio_sample_rates=audio_sample_rates,
+            audio_channels=audio_channels,
         )
