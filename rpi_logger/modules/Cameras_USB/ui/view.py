@@ -3,7 +3,10 @@ import threading
 from typing import Any, Callable, Dict, Optional
 import logging
 
-from ..core.state import CameraState, CameraSettings, FRAME_RATE_OPTIONS, SAMPLE_RATE_OPTIONS
+from ..core.state import (
+    CameraState, CameraSettings, CameraPhase, RecordingPhase,
+    FRAME_RATE_OPTIONS, SAMPLE_RATE_OPTIONS,
+)
 from ..core.controller import CameraController
 
 try:
@@ -216,7 +219,7 @@ class USBCameraView:
 
     def _update_metrics(self, state: CameraState) -> None:
         status = state.phase_display
-        if state.probing and state.probing_progress:
+        if state.phase == CameraPhase.PROBING and state.probing_progress:
             status = state.probing_progress
 
         if self._status_var:
@@ -229,7 +232,7 @@ class USBCameraView:
         cap_target = settings.frame_rate
         self._metrics_fields["cap_tgt"].set(f"{_format_fps(cap_actual)} / {_format_fps(cap_target)}")
 
-        if state.recording:
+        if state.recording_phase == RecordingPhase.RECORDING:
             rec_actual = metrics.record_fps_actual
             self._metrics_fields["rec_tgt"].set(f"{_format_fps(rec_actual)} / {_format_fps(cap_target)}")
         else:
@@ -250,8 +253,6 @@ class USBCameraView:
         # Audio status
         if not state.audio_enabled:
             audio_status = "Off"
-        elif state.audio_error:
-            audio_status = "Error"
         elif state.audio_capturing:
             audio_status = "On"
         elif state.audio_available:

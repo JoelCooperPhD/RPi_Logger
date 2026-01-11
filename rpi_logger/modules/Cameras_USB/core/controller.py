@@ -6,6 +6,7 @@ import logging
 from .state import (
     CameraState, CameraSettings, CameraCapabilities, FrameMetrics,
     USBDeviceInfo, USBAudioDevice,
+    CameraPhase, RecordingPhase, AudioPhase,
 )
 from ..capture import USBSource, AudioSource, CapturedFrame
 from ..recording import RecordingSession
@@ -68,11 +69,10 @@ class CameraController:
     # ================================================================
 
     async def assign(self, device_info: USBDeviceInfo) -> None:
-        if self._state.assigned:
+        if self._state.phase != CameraPhase.IDLE:
             return
 
-        self._state.assigned = True
-        self._state.probing = True
+        self._state.phase = CameraPhase.PROBING
         self._state.device_info = device_info
         self._state.probing_progress = "Checking camera..."
         self._notify()
@@ -129,8 +129,8 @@ class CameraController:
 
         except Exception as e:
             logger.error("Probe failed: %s", e)
-            self._state.probing = False
-            self._state.camera_error = str(e)
+            self._state.phase = CameraPhase.ERROR
+            self._state.error_message = str(e)
             self._notify()
             self._send_status("error", {"message": str(e)})
 
@@ -160,14 +160,12 @@ class CameraController:
             audio_device = await match_audio_to_camera(device_info.bus_path)
             if audio_device:
                 self._state.audio_device = audio_device
-                self._state.audio_available = True
                 logger.info("Audio available: %s", audio_device.device_name)
             else:
                 logger.warning("Profile says has_audio but no device found at bus_path %s",
                               device_info.bus_path)
 
-        self._state.probing = False
-        self._state.ready = True
+        self._state.phase = CameraPhase.READY
         self._state.capabilities = capabilities
         self._state.probing_progress = ""
         self._notify()
@@ -175,9 +173,9 @@ class CameraController:
         self._send_status("camera_ready", {"camera_id": device_info.stable_id})
 
     async def unassign(self) -> None:
-        if self._state.streaming:
+        if self._state.phase == CameraPhase.STREAMING:
             await self.stop_streaming()
-        if self._state.recording:
+        if self._state.recording_phase == RecordingPhase.RECORDING:
             await self.stop_recording()
 
         old_settings = self._state.settings
@@ -206,7 +204,8 @@ class CameraController:
         self._camera.set_error_callback(lambda msg: logger.error("Camera: %s", msg))
 
         if not self._camera.open():
-            self._state.camera_error = "Failed to open camera"
+            self._state.phase = CameraPhase.ERROR
+            self._state.error_message = "Failed to open camera"
             self._notify()
             return
 
@@ -216,16 +215,16 @@ class CameraController:
         if self._state.audio_available and self._state.audio_enabled and self._state.audio_device:
             await self._start_audio()
 
-        self._state.streaming = True
+        self._state.phase = CameraPhase.STREAMING
         self._notify()
 
         self._send_status("streaming_started", {"camera_id": device_info.stable_id})
 
     async def stop_streaming(self) -> None:
-        if not self._state.streaming:
+        if self._state.phase != CameraPhase.STREAMING:
             return
 
-        if self._state.recording:
+        if self._state.recording_phase == RecordingPhase.RECORDING:
             await self.stop_recording()
 
         if self._capture_task:
@@ -243,8 +242,8 @@ class CameraController:
 
         await self._stop_audio()
 
-        self._state.streaming = False
-        self._state.audio_capturing = False
+        self._state.phase = CameraPhase.READY
+        self._state.audio_phase = AudioPhase.IDLE
         self._notify()
 
     async def _capture_loop(self) -> None:
@@ -346,7 +345,6 @@ class CameraController:
     # ================================================================
 
     async def set_audio_mode(self, mode: str) -> None:
-        self._state.audio_enabled = (mode != "off")
         self._state.settings = CameraSettings(
             resolution=self._state.settings.resolution,
             frame_rate=self._state.settings.frame_rate,
@@ -373,7 +371,7 @@ class CameraController:
         self._audio.start_capture()
         self._audio_task = asyncio.create_task(self._audio_loop())
 
-        self._state.audio_capturing = True
+        self._state.audio_phase = AudioPhase.CAPTURING
         self._notify()
 
     async def _stop_audio(self) -> None:
@@ -432,7 +430,7 @@ class CameraController:
         )
         await self._recording.start()
 
-        self._state.recording = True
+        self._state.recording_phase = RecordingPhase.RECORDING
         self._state.session_dir = session_dir
         self._state.trial_number = trial
         self._notify()
@@ -445,14 +443,14 @@ class CameraController:
         })
 
     async def stop_recording(self) -> None:
-        if not self._state.recording:
+        if self._state.recording_phase != RecordingPhase.RECORDING:
             return
 
         if self._recording:
             await self._recording.stop()
             self._recording = None
 
-        self._state.recording = False
+        self._state.recording_phase = RecordingPhase.STOPPED
         self._notify()
 
         self._send_status("recording_stopped", {})
@@ -464,14 +462,13 @@ class CameraController:
     async def apply_settings(self, settings: CameraSettings) -> None:
         old = self._state.settings
         self._state.settings = settings
-        self._state.audio_enabled = (settings.audio_mode != "off")
         self._notify()
 
         resolution_changed = old.resolution != settings.resolution
         fps_changed = old.frame_rate != settings.frame_rate
         sample_rate_changed = old.sample_rate != settings.sample_rate
 
-        if self._camera and self._state.streaming and (resolution_changed or fps_changed):
+        if self._camera and self._state.phase == CameraPhase.STREAMING and (resolution_changed or fps_changed):
             if self._capture_task:
                 self._capture_task.cancel()
                 try:
@@ -498,23 +495,23 @@ class CameraController:
                 else:
                     logger.error("Failed to reopen camera with new settings")
 
-        if self._state.streaming:
+        if self._state.phase == CameraPhase.STREAMING:
             audio_should_run = (
                 self._state.audio_available
                 and self._state.audio_enabled
                 and self._state.audio_device is not None
             )
-            audio_is_running = self._state.audio_capturing
+            audio_is_running = self._state.audio_phase == AudioPhase.CAPTURING
 
             if audio_is_running and not audio_should_run:
                 await self._stop_audio()
-                self._state.audio_capturing = False
+                self._state.audio_phase = AudioPhase.IDLE
                 self._notify()
             elif not audio_is_running and audio_should_run:
                 await self._start_audio()
             elif audio_is_running and sample_rate_changed:
                 await self._stop_audio()
-                self._state.audio_capturing = False
+                self._state.audio_phase = AudioPhase.IDLE
                 await self._start_audio()
 
         if self._settings_save_callback:

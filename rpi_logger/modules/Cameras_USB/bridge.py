@@ -29,7 +29,7 @@ try:
 except ImportError:
     USER_MODULE_CONFIG_DIR = Path.home() / ".config" / "rpi_logger"
 
-from .core import CameraController, CameraSettings, CameraState, USBDeviceInfo
+from .core import CameraController, CameraSettings, CameraState, CameraPhase, USBDeviceInfo
 from .discovery import get_device_by_path, get_device_by_stable_id, CameraKnowledge
 from .ui.view import USBCameraView
 
@@ -244,7 +244,7 @@ class USBCamerasRuntime(ModuleRuntime):
 
     async def _handle_start_recording(self, command: Dict[str, Any]) -> bool:
         state = self.controller.state
-        if not state.streaming and state.ready:
+        if state.phase == CameraPhase.READY:
             await self.controller.start_streaming()
             await asyncio.sleep(0.5)
 
@@ -300,7 +300,7 @@ class USBCamerasRuntime(ModuleRuntime):
         try:
             await asyncio.sleep(0.3)
             state = self.controller.state
-            if not state.ready or state.streaming:
+            if state.phase != CameraPhase.READY:
                 return
             await self.controller.start_streaming()
         except Exception as e:

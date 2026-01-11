@@ -1,10 +1,29 @@
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Optional
 
 FRAME_RATE_OPTIONS = [1, 2, 5, 10, 15, 30]
 PREVIEW_DIVISOR_OPTIONS = [1, 2, 4, 8]
 SAMPLE_RATE_OPTIONS = [22050, 44100, 48000]
+
+
+class CameraPhase(Enum):
+    IDLE = auto()
+    PROBING = auto()
+    READY = auto()
+    STREAMING = auto()
+    ERROR = auto()
+
+
+class RecordingPhase(Enum):
+    STOPPED = auto()
+    RECORDING = auto()
+
+
+class AudioPhase(Enum):
+    IDLE = auto()
+    CAPTURING = auto()
 
 
 @dataclass(frozen=True)
@@ -69,29 +88,16 @@ class FrameMetrics:
 
 @dataclass
 class CameraState:
-    # Camera flags (replaces CameraPhase enum)
-    assigned: bool = False
-    probing: bool = False
-    ready: bool = False
-    streaming: bool = False
-    camera_error: Optional[str] = None
+    phase: CameraPhase = CameraPhase.IDLE
+    error_message: str = ""
+    recording_phase: RecordingPhase = RecordingPhase.STOPPED
+    audio_phase: AudioPhase = AudioPhase.IDLE
 
-    # Camera data
     device_info: Optional[USBDeviceInfo] = None
     capabilities: Optional[CameraCapabilities] = None
     probing_progress: str = ""
-
-    # Audio flags (replaces AudioPhase enum)
-    audio_enabled: bool = True
-    audio_available: bool = False
-    audio_capturing: bool = False
-    audio_error: Optional[str] = None
     audio_device: Optional[USBAudioDevice] = None
 
-    # Recording flags (replaces RecordingPhase enum)
-    recording: bool = False
-
-    # Settings and metrics
     settings: CameraSettings = field(default_factory=CameraSettings)
     metrics: FrameMetrics = field(default_factory=FrameMetrics)
     session_dir: Optional[Path] = None
@@ -100,24 +106,52 @@ class CameraState:
 
     @property
     def can_stream(self) -> bool:
-        return self.ready and not self.streaming and not self.camera_error
+        return self.phase == CameraPhase.READY
 
     @property
     def can_record(self) -> bool:
-        return self.streaming and not self.recording
+        return self.phase == CameraPhase.STREAMING and self.recording_phase == RecordingPhase.STOPPED
 
     @property
     def phase_display(self) -> str:
-        if self.camera_error:
+        if self.phase == CameraPhase.ERROR:
             return "Error"
-        if self.recording:
+        if self.recording_phase == RecordingPhase.RECORDING:
             return "Recording"
-        if self.streaming:
-            return "Streaming"
-        if self.probing:
-            return "Probing"
-        if self.ready:
-            return "Ready"
-        if self.assigned:
-            return "Assigned"
-        return "Idle"
+        return self.phase.name.capitalize()
+
+    @property
+    def audio_available(self) -> bool:
+        return self.audio_device is not None
+
+    @property
+    def audio_enabled(self) -> bool:
+        return self.settings.audio_mode != "off"
+
+    @property
+    def audio_capturing(self) -> bool:
+        return self.audio_phase == AudioPhase.CAPTURING
+
+    @property
+    def assigned(self) -> bool:
+        return self.phase != CameraPhase.IDLE
+
+    @property
+    def probing(self) -> bool:
+        return self.phase == CameraPhase.PROBING
+
+    @property
+    def ready(self) -> bool:
+        return self.phase == CameraPhase.READY
+
+    @property
+    def streaming(self) -> bool:
+        return self.phase == CameraPhase.STREAMING
+
+    @property
+    def recording(self) -> bool:
+        return self.recording_phase == RecordingPhase.RECORDING
+
+    @property
+    def has_error(self) -> bool:
+        return self.phase == CameraPhase.ERROR
