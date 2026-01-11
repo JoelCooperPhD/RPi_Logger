@@ -131,9 +131,6 @@ class AudioSource:
         if not self._running:
             return
 
-        if status:
-            pass
-
         mono_ns = time.monotonic_ns()
         wall_time = time.time()
 

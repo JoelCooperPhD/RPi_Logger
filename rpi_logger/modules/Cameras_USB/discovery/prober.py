@@ -140,8 +140,3 @@ async def verify_camera_accessible(device: int | str) -> bool:
             cap.release()
 
     return await asyncio.to_thread(_verify)
-
-
-# Keep old names for backwards compatibility during transition
-probe_video_capabilities = probe_camera_modes
-probe_video_quick = verify_camera_accessible

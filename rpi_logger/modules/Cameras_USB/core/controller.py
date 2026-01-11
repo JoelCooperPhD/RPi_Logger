@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Optional, Any
 import logging
@@ -40,6 +41,7 @@ class CameraController:
         self._capture_task: Optional[asyncio.Task] = None
         self._audio_task: Optional[asyncio.Task] = None
         self._preview_callback: Optional[Callable[[bytes], None]] = None
+        self._recording_lock = asyncio.Lock()
 
     @property
     def state(self) -> CameraState:
@@ -147,13 +149,10 @@ class CameraController:
         )
 
         if capabilities.default_resolution != self._state.settings.resolution:
-            self._state.settings = CameraSettings(
+            self._state.settings = replace(
+                self._state.settings,
                 resolution=capabilities.default_resolution,
                 frame_rate=int(capabilities.default_fps),
-                preview_divisor=self._state.settings.preview_divisor,
-                preview_scale=self._state.settings.preview_scale,
-                audio_mode=self._state.settings.audio_mode,
-                sample_rate=self._state.settings.sample_rate,
             )
 
         if profile.has_audio:
@@ -175,7 +174,7 @@ class CameraController:
     async def unassign(self) -> None:
         if self._state.phase == CameraPhase.STREAMING:
             await self.stop_streaming()
-        if self._state.recording_phase == RecordingPhase.RECORDING:
+        if self._state.is_recording:
             await self.stop_recording()
 
         old_settings = self._state.settings
@@ -204,6 +203,7 @@ class CameraController:
         self._camera.set_error_callback(lambda msg: logger.error("Camera: %s", msg))
 
         if not self._camera.open():
+            self._camera = None
             self._state.phase = CameraPhase.ERROR
             self._state.error_message = "Failed to open camera"
             self._notify()
@@ -213,7 +213,11 @@ class CameraController:
         self._capture_task = asyncio.create_task(self._capture_loop())
 
         if self._state.audio_available and self._state.audio_enabled and self._state.audio_device:
-            await self._start_audio()
+            try:
+                await self._start_audio()
+            except Exception as e:
+                logger.warning("Audio start failed, continuing without audio: %s", e)
+                self._state.audio_phase = AudioPhase.IDLE
 
         self._state.phase = CameraPhase.STREAMING
         self._notify()
@@ -224,7 +228,7 @@ class CameraController:
         if self._state.phase != CameraPhase.STREAMING:
             return
 
-        if self._state.recording_phase == RecordingPhase.RECORDING:
+        if self._state.is_recording:
             await self.stop_recording()
 
         if self._capture_task:
@@ -240,10 +244,14 @@ class CameraController:
             self._camera.close()
             self._camera = None
 
-        await self._stop_audio()
+        try:
+            await self._stop_audio()
+        except Exception as e:
+            logger.warning("Audio stop error: %s", e)
+        finally:
+            self._state.audio_phase = AudioPhase.IDLE
 
         self._state.phase = CameraPhase.READY
-        self._state.audio_phase = AudioPhase.IDLE
         self._notify()
 
     async def _capture_loop(self) -> None:
@@ -270,7 +278,8 @@ class CameraController:
                 if capture_start_time == 0.0:
                     capture_start_time = now
 
-                if self._recording:
+                # Only write during RECORDING phase (not STARTING/STOPPING) to avoid partial writes
+                if self._state.recording_phase == RecordingPhase.RECORDING and self._recording:
                     await self._recording.write_frame(frame)
                     record_count += 1
                     if last_record_time > 0:
@@ -345,14 +354,7 @@ class CameraController:
     # ================================================================
 
     async def set_audio_mode(self, mode: str) -> None:
-        self._state.settings = CameraSettings(
-            resolution=self._state.settings.resolution,
-            frame_rate=self._state.settings.frame_rate,
-            preview_divisor=self._state.settings.preview_divisor,
-            preview_scale=self._state.settings.preview_scale,
-            audio_mode=mode,
-            sample_rate=self._state.settings.sample_rate,
-        )
+        self._state.settings = replace(self._state.settings, audio_mode=mode)
         self._notify()
 
     async def _start_audio(self) -> None:
@@ -394,7 +396,8 @@ class CameraController:
 
         try:
             async for chunk in self._audio.chunks():
-                if self._recording:
+                # Only write during RECORDING phase (not STARTING/STOPPING) to avoid partial writes
+                if self._state.recording_phase == RecordingPhase.RECORDING and self._recording:
                     await self._recording.write_audio(chunk)
         except asyncio.CancelledError:
             raise
@@ -405,55 +408,110 @@ class CameraController:
     # RECORDING
     # ================================================================
 
+    def _reset_recording_state(self) -> None:
+        self._recording = None
+        self._state.recording_phase = RecordingPhase.STOPPED
+        self._state.session_dir = None
+        self._state.trial_number = None
+        self._notify()
+
     async def start_recording(self, session_dir: Path, trial: int) -> None:
+        try:
+            async with asyncio.timeout(30):
+                async with self._recording_lock:
+                    await self._start_recording_locked(session_dir, trial)
+        except asyncio.TimeoutError:
+            logger.error("Recording start timed out")
+            await self._cleanup_recording_on_timeout()
+            self._reset_recording_state()
+            self._send_status("error", {"message": "Recording start timed out"})
+
+    async def _start_recording_locked(self, session_dir: Path, trial: int) -> None:
         if not self._state.can_record:
             return
 
         device_info = self._state.device_info
         device_id = device_info.stable_id if device_info else "usbcam0"
 
-        actual_fps = (
-            self._camera.fps if self._camera else self._state.settings.frame_rate
-        )
-        actual_sample_rate = (
-            self._audio.sample_rate if self._audio else self._state.settings.sample_rate
-        )
-        self._recording = RecordingSession(
-            session_dir=session_dir,
-            device_id=device_id,
-            trial_number=trial,
-            resolution=self._state.settings.resolution,
-            fps=int(actual_fps),
-            with_audio=self._state.audio_capturing,
-            audio_sample_rate=actual_sample_rate,
-            audio_channels=self._state.audio_device.channels if self._state.audio_device else 2,
-        )
-        await self._recording.start()
-
-        self._state.recording_phase = RecordingPhase.RECORDING
+        self._state.recording_phase = RecordingPhase.STARTING
         self._state.session_dir = session_dir
         self._state.trial_number = trial
         self._notify()
 
-        self._send_status("recording_started", {
-            "trial": trial,
-            "device_id": device_id,
-            "video_path": str(self._recording.video_path),
-            "with_audio": self._recording.with_audio,
-        })
+        try:
+            actual_fps = (
+                self._camera.fps if self._camera else self._state.settings.frame_rate
+            )
+            actual_sample_rate = (
+                self._audio.sample_rate if self._audio else self._state.settings.sample_rate
+            )
+            self._recording = RecordingSession(
+                session_dir=session_dir,
+                device_id=device_id,
+                trial_number=trial,
+                resolution=self._state.settings.resolution,
+                fps=int(actual_fps),
+                with_audio=self._state.audio_capturing,
+                audio_sample_rate=actual_sample_rate,
+                audio_channels=self._state.audio_device.channels if self._state.audio_device else 2,
+            )
+            await self._recording.start()
+
+            self._state.recording_phase = RecordingPhase.RECORDING
+            self._notify()
+
+            self._send_status("recording_started", {
+                "trial": trial,
+                "device_id": device_id,
+                "video_path": str(self._recording.video_path),
+                "with_audio": self._recording.with_audio,
+            })
+        except Exception as e:
+            logger.error("Recording failed to start for %s trial %d: %s", device_id, trial, e)
+            self._reset_recording_state()
+            self._send_status("error", {
+                "message": f"Recording failed: {e}",
+                "device_id": device_id,
+                "trial": trial,
+            })
 
     async def stop_recording(self) -> None:
-        if self._state.recording_phase != RecordingPhase.RECORDING:
+        try:
+            async with asyncio.timeout(30):
+                async with self._recording_lock:
+                    await self._stop_recording_locked()
+        except asyncio.TimeoutError:
+            logger.error("Recording stop timed out")
+            await self._cleanup_recording_on_timeout()
+            self._reset_recording_state()
+            self._send_status("error", {"message": "Recording stop timed out"})
+
+    async def _stop_recording_locked(self) -> None:
+        if self._state.recording_phase not in (RecordingPhase.RECORDING, RecordingPhase.STARTING):
             return
 
-        if self._recording:
-            await self._recording.stop()
-            self._recording = None
-
-        self._state.recording_phase = RecordingPhase.STOPPED
+        self._state.recording_phase = RecordingPhase.STOPPING
         self._notify()
 
-        self._send_status("recording_stopped", {})
+        try:
+            if self._recording:
+                await self._recording.stop()
+        except Exception as e:
+            logger.error("Recording stop error: %s", e)
+        finally:
+            self._reset_recording_state()
+            self._send_status("recording_stopped", {})
+
+    async def _cleanup_recording_on_timeout(self) -> None:
+        if not self._recording:
+            return
+        try:
+            async with asyncio.timeout(5):
+                await self._recording.stop()
+        except Exception as e:
+            logger.warning("Recording cleanup failed: %s", e)
+        finally:
+            self._recording = None
 
     # ================================================================
     # SETTINGS

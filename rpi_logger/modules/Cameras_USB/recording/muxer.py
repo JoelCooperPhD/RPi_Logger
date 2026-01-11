@@ -310,10 +310,6 @@ class LegacyAVMuxer:
         return self._running
 
 
-# Backwards compatibility alias
-AVMuxer = LegacyAVMuxer
-
-
 class SimpleVideoOnlyEncoder:
     def __init__(
         self,

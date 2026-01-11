@@ -18,7 +18,9 @@ class CameraPhase(Enum):
 
 class RecordingPhase(Enum):
     STOPPED = auto()
+    STARTING = auto()
     RECORDING = auto()
+    STOPPING = auto()
 
 
 class AudioPhase(Enum):
@@ -113,11 +115,21 @@ class CameraState:
         return self.phase == CameraPhase.STREAMING and self.recording_phase == RecordingPhase.STOPPED
 
     @property
+    def is_recording(self) -> bool:
+        # True during STARTING/RECORDING - use for "should we stop?" checks
+        # For "should we write frames?" use recording_phase == RECORDING directly
+        return self.recording_phase in (RecordingPhase.STARTING, RecordingPhase.RECORDING)
+
+    @property
     def phase_display(self) -> str:
         if self.phase == CameraPhase.ERROR:
             return "Error"
         if self.recording_phase == RecordingPhase.RECORDING:
             return "Recording"
+        if self.recording_phase == RecordingPhase.STARTING:
+            return "Starting..."
+        if self.recording_phase == RecordingPhase.STOPPING:
+            return "Stopping..."
         return self.phase.name.capitalize()
 
     @property
