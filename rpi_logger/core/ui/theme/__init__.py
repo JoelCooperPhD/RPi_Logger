@@ -5,7 +5,7 @@ Provides color palette, TTK styles, and custom widgets for the dark theme.
 """
 
 from .colors import Colors
-from .styles import Theme
-from .widgets import RoundedButton
+from .styles import Theme, Fonts
+from .widgets import RoundedButton, MetricBar, RecordingBar
 
-__all__ = ['Colors', 'Theme', 'RoundedButton']
+__all__ = ['Colors', 'Theme', 'Fonts', 'RoundedButton', 'MetricBar', 'RecordingBar']

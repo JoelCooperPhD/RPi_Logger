@@ -22,7 +22,7 @@ from .timer_manager import TimerManager
 from .device_controller import DeviceUIController
 from .devices_panel import DevicesPanel
 from .theme.styles import Theme
-from .theme.widgets import RoundedButton
+from .theme.widgets import RoundedButton, MetricBar, RecordingBar
 
 
 class TextHandler(logging.Handler):
@@ -99,15 +99,17 @@ class MainWindow:
         self.session_button: Optional[RoundedButton] = None
         self.trial_button: Optional[RoundedButton] = None
 
-        self.current_time_label: Optional[ttk.Label] = None
-        self.session_status_label: Optional[ttk.Label] = None
         self.session_timer_label: Optional[ttk.Label] = None
         self.trial_timer_label: Optional[ttk.Label] = None
         self.trial_counter_label: Optional[ttk.Label] = None
-        self.session_path_label: Optional[ttk.Label] = None
         self.cpu_label: Optional[ttk.Label] = None
         self.ram_label: Optional[ttk.Label] = None
         self.disk_label: Optional[ttk.Label] = None
+
+        # MetricBar widgets for system metrics
+        self.cpu_bar: Optional[MetricBar] = None
+        self.ram_bar: Optional[MetricBar] = None
+        self.disk_bar: Optional[MetricBar] = None
 
         self.trial_label_var: Optional[tk.StringVar] = None
         self.trial_label_entry: Optional[ttk.Entry] = None
@@ -120,6 +122,9 @@ class MainWindow:
         # Device UI components
         self.devices_panel: Optional[DevicesPanel] = None
         self._main_frame: Optional[ttk.Frame] = None
+
+        # Recording bar (visible during trials)
+        self.recording_bar: Optional[RecordingBar] = None
 
         # Use set for O(1) removal and avoid race condition issues
         self._pending_tasks: set[asyncio.Task] = set()
@@ -176,12 +181,14 @@ class MainWindow:
         self.root.rowconfigure(0, weight=0)  # Header
         self.root.rowconfigure(1, weight=1)  # Main content (2-column: left controls, right devices)
         self.root.rowconfigure(2, weight=0)  # Logger frame
+        self.root.rowconfigure(3, weight=0)  # Recording bar (hidden by default, at bottom)
 
         self._build_menubar()
         self._build_header()
         self._build_main_content()
         self._build_devices_panel()
         self._build_logger_frame()
+        self._build_recording_bar()
 
         self.root.protocol("WM_DELETE_WINDOW", self.controller.on_shutdown)
 
@@ -198,10 +205,14 @@ class MainWindow:
             self.module_vars,
             self.session_button,
             self.trial_button,
-            self.session_status_label,
             self.trial_counter_label,
-            self.session_path_label,
             self.trial_label_var
+        )
+
+        # Wire recording bar to trial lifecycle
+        self.controller.set_recording_bar_callbacks(
+            on_trial_start=self.show_recording_bar,
+            on_trial_stop=self.hide_recording_bar
         )
 
         # Wire device system to logger_system callbacks
@@ -211,12 +222,14 @@ class MainWindow:
         self.logger_system.set_ui_root(self.root)
 
         self.timer_manager.set_labels(
-            self.current_time_label,
             self.session_timer_label,
             self.trial_timer_label,
-            self.cpu_label,
-            self.ram_label,
-            self.disk_label
+            cpu_label=self.cpu_label,
+            cpu_bar=self.cpu_bar,
+            ram_label=self.ram_label,
+            ram_bar=self.ram_bar,
+            disk_label=self.disk_label,
+            disk_bar=self.disk_bar,
         )
 
     def _build_menubar(self) -> None:
@@ -324,6 +337,21 @@ class MainWindow:
 
         self.device_system.set_on_disconnect_device(on_disconnect_device)
 
+    def _build_recording_bar(self) -> None:
+        self.recording_bar = RecordingBar(self.root)
+        # Initially hidden - shown when trial starts
+        # grid_remove() keeps the widget but removes from layout
+
+    def show_recording_bar(self) -> None:
+        if self.recording_bar:
+            self.recording_bar.grid(row=3, column=0, sticky=(tk.W, tk.E))
+            self.recording_bar.start()
+
+    def hide_recording_bar(self) -> None:
+        if self.recording_bar:
+            self.recording_bar.stop()
+            self.recording_bar.grid_remove()
+
     def _build_header(self) -> None:
         header_frame = ttk.Frame(self.root, height=80)
         header_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=(5, 0))
@@ -366,20 +394,23 @@ class MainWindow:
         left_column.columnconfigure(0, weight=1)
         left_column.rowconfigure(0, weight=0)  # Session/Trial buttons (fixed)
         left_column.rowconfigure(1, weight=0)  # Trial label entry (fixed)
-        left_column.rowconfigure(2, weight=1)  # Information panel (expandable)
+        left_column.rowconfigure(2, weight=1)  # Information cards (expandable)
 
         # Build left column contents (stacked vertically)
         self._build_session_trial_controls(left_column)
         self._build_info_panel(left_column)
 
     def _build_session_trial_controls(self, parent: ttk.Frame) -> None:
-        # Row 0: Session and Trial buttons side by side, left aligned
+        # Row 0: Session and Trial buttons side by side, equally weighted
         buttons_frame = ttk.Frame(parent)
-        buttons_frame.grid(row=0, column=0, sticky=(tk.W, tk.N), pady=(0, 8))
+        buttons_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N), pady=(0, 8))
+        buttons_frame.columnconfigure(0, weight=1)
+        buttons_frame.columnconfigure(1, weight=1)
 
         # Session section with label and button
         session_frame = ttk.Frame(buttons_frame)
-        session_frame.grid(row=0, column=0, sticky=(tk.W, tk.N), padx=(0, 10))
+        session_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N), padx=(0, 4))
+        session_frame.columnconfigure(0, weight=1)
 
         session_label = ttk.Label(session_frame, text="Session", font=('TkDefaultFont', 10, 'bold'))
         session_label.grid(row=0, column=0, sticky=tk.W, pady=(0, 4))
@@ -388,15 +419,15 @@ class MainWindow:
             session_frame,
             text="Start",
             style='success',
-            width=134,
             height=36,
             command=self.controller.on_toggle_session
         )
-        self.session_button.grid(row=1, column=0)
+        self.session_button.grid(row=1, column=0, sticky=(tk.W, tk.E))
 
         # Trial section with label and button
         trial_frame = ttk.Frame(buttons_frame)
-        trial_frame.grid(row=0, column=1, sticky=(tk.W, tk.N))
+        trial_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N), padx=(4, 0))
+        trial_frame.columnconfigure(0, weight=1)
 
         trial_label = ttk.Label(trial_frame, text="Trial", font=('TkDefaultFont', 10, 'bold'))
         trial_label.grid(row=0, column=0, sticky=tk.W, pady=(0, 4))
@@ -405,11 +436,10 @@ class MainWindow:
             trial_frame,
             text="Record",
             style='inactive',
-            width=134,
             height=36,
             command=self.controller.on_toggle_trial
         )
-        self.trial_button.grid(row=1, column=0)
+        self.trial_button.grid(row=1, column=0, sticky=(tk.W, tk.E))
 
         # Row 1: Trial label entry
         trial_label_frame = ttk.Frame(parent)
@@ -419,7 +449,6 @@ class MainWindow:
         trial_label_text = ttk.Label(trial_label_frame, text="Trial Label", font=('TkDefaultFont', 10, 'bold'))
         trial_label_text.grid(row=0, column=0, sticky=tk.W, padx=(0, 8))
 
-        # Load saved trial label from config
         config_manager = get_config_manager()
         config = config_manager.read_config(CONFIG_PATH)
         saved_label = config_manager.get_str(config, 'last_trial_label', default='')
@@ -433,115 +462,62 @@ class MainWindow:
         self.trial_label_entry.grid(row=0, column=1, sticky=(tk.W, tk.E))
 
     def _build_info_panel(self, parent: ttk.Frame) -> None:
-        # Row 2: Information panel (below trial label)
-        info_frame = ttk.LabelFrame(parent, text="Information", padding=(5, 5))
-        info_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 0))
-        info_frame.columnconfigure(0, weight=0)
-        info_frame.columnconfigure(1, weight=1)
+        # Container for all cards
+        cards_frame = ttk.Frame(parent)
+        cards_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        cards_frame.columnconfigure(0, weight=1)
 
-        ttk.Label(info_frame, text="Current Time:", anchor='w', style='Inframe.TLabel').grid(
-            row=0, column=0, sticky='w', pady=1
-        )
-        self.current_time_label = ttk.Label(
-            info_frame,
-            text="--:--:--",
-            anchor='e',
-            style='Inframe.TLabel'
-        )
-        self.current_time_label.grid(row=0, column=1, sticky='e', pady=0)
+        # === Session Card ===
+        session_card = ttk.LabelFrame(cards_frame, text="Session", style='Card.TLabelframe', padding=(8, 4))
+        session_card.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 4))
+        session_card.columnconfigure(1, weight=1)
 
-        ttk.Label(info_frame, text="Session Time:", anchor='w', style='Inframe.TLabel').grid(
-            row=1, column=0, sticky='w', pady=1
-        )
-        self.session_timer_label = ttk.Label(
-            info_frame,
-            text="--:--:--",
-            anchor='e',
-            style='Inframe.TLabel'
-        )
-        self.session_timer_label.grid(row=1, column=1, sticky='e', pady=0)
+        # Trial count (most relevant during recording)
+        ttk.Label(session_card, text="Trial", style='Card.TLabel').grid(row=0, column=0, sticky='w', pady=2)
+        self.trial_counter_label = ttk.Label(session_card, text="0", style='Card.TLabel')
+        self.trial_counter_label.grid(row=0, column=1, sticky='e', pady=2)
 
-        ttk.Label(info_frame, text="Trial Time:", anchor='w', style='Inframe.TLabel').grid(
-            row=2, column=0, sticky='w', pady=1
-        )
-        self.trial_timer_label = ttk.Label(
-            info_frame,
-            text="--:--:--",
-            anchor='e',
-            style='Inframe.TLabel'
-        )
-        self.trial_timer_label.grid(row=2, column=1, sticky='e', pady=0)
+        # Recording time (current trial)
+        ttk.Label(session_card, text="Recording", style='Card.TLabel').grid(row=1, column=0, sticky='w', pady=2)
+        self.trial_timer_label = ttk.Label(session_card, text="--:--:--", style='Card.TLabel')
+        self.trial_timer_label.grid(row=1, column=1, sticky='e', pady=2)
 
-        ttk.Label(info_frame, text="Trial Count:", anchor='w', style='Inframe.TLabel').grid(
-            row=3, column=0, sticky='w', pady=1
-        )
-        self.trial_counter_label = ttk.Label(
-            info_frame,
-            text="0",
-            anchor='e',
-            style='Inframe.TLabel'
-        )
-        self.trial_counter_label.grid(row=3, column=1, sticky='e', pady=0)
+        # Session elapsed time
+        ttk.Label(session_card, text="Elapsed", style='Card.TLabel').grid(row=2, column=0, sticky='w', pady=2)
+        self.session_timer_label = ttk.Label(session_card, text="--:--:--", style='Card.TLabel')
+        self.session_timer_label.grid(row=2, column=1, sticky='e', pady=2)
 
-        ttk.Label(info_frame, text="Status:", anchor='w', style='Inframe.TLabel').grid(
-            row=4, column=0, sticky='w', pady=1
-        )
-        self.session_status_label = ttk.Label(
-            info_frame,
-            text="Idle",
-            anchor='e',
-            style='Inframe.TLabel'
-        )
-        self.session_status_label.grid(row=4, column=1, sticky='e', pady=0)
+        # === System Card ===
+        system_card = ttk.LabelFrame(cards_frame, text="System", style='Card.TLabelframe', padding=(8, 4))
+        system_card.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 0))
+        system_card.columnconfigure(1, weight=1)
 
-        ttk.Label(info_frame, text="Path:", anchor='w', style='Inframe.Secondary.TLabel').grid(
-            row=5, column=0, sticky='w', pady=(2, 0)
-        )
-        session_info = self.logger_system.get_session_info()
-        self.session_path_label = ttk.Label(
-            info_frame,
-            text=f"{session_info['session_dir']}",
-            anchor='e',
-            style='Inframe.Secondary.TLabel'
-        )
-        self.session_path_label.grid(row=5, column=1, sticky='e', pady=(2, 0))
+        # CPU with MetricBar (label left, bar right)
+        ttk.Label(system_card, text="CPU", style='Card.TLabel').grid(row=0, column=0, sticky='w', pady=2)
+        cpu_frame = ttk.Frame(system_card, style='Card.TFrame')
+        cpu_frame.grid(row=0, column=1, sticky='e', pady=2)
+        self.cpu_label = ttk.Label(cpu_frame, text="--%", style='Card.TLabel', width=5, anchor='e')
+        self.cpu_label.pack(side=tk.LEFT, padx=(0, 6))
+        self.cpu_bar = MetricBar(cpu_frame, width=80, height=10, warning_threshold=80, critical_threshold=95)
+        self.cpu_bar.pack(side=tk.LEFT)
 
-        ttk.Separator(info_frame, orient='horizontal').grid(
-            row=6, column=0, columnspan=2, sticky='ew', pady=5
-        )
+        # RAM with MetricBar (label left, bar right)
+        ttk.Label(system_card, text="RAM", style='Card.TLabel').grid(row=1, column=0, sticky='w', pady=2)
+        ram_frame = ttk.Frame(system_card, style='Card.TFrame')
+        ram_frame.grid(row=1, column=1, sticky='e', pady=2)
+        self.ram_label = ttk.Label(ram_frame, text="--%", style='Card.TLabel', width=5, anchor='e')
+        self.ram_label.pack(side=tk.LEFT, padx=(0, 6))
+        self.ram_bar = MetricBar(ram_frame, width=80, height=10, warning_threshold=80, critical_threshold=95)
+        self.ram_bar.pack(side=tk.LEFT)
 
-        ttk.Label(info_frame, text="CPU:", anchor='w', style='Inframe.TLabel').grid(
-            row=7, column=0, sticky='w', pady=1
-        )
-        self.cpu_label = ttk.Label(
-            info_frame,
-            text="--",
-            anchor='e',
-            style='Inframe.TLabel'
-        )
-        self.cpu_label.grid(row=7, column=1, sticky='e', pady=0)
-
-        ttk.Label(info_frame, text="RAM:", anchor='w', style='Inframe.TLabel').grid(
-            row=8, column=0, sticky='w', pady=1
-        )
-        self.ram_label = ttk.Label(
-            info_frame,
-            text="--",
-            anchor='e',
-            style='Inframe.TLabel'
-        )
-        self.ram_label.grid(row=8, column=1, sticky='e', pady=0)
-
-        ttk.Label(info_frame, text="Free Disk:", anchor='w', style='Inframe.TLabel').grid(
-            row=9, column=0, sticky='w', pady=1
-        )
-        self.disk_label = ttk.Label(
-            info_frame,
-            text="--",
-            anchor='e',
-            style='Inframe.TLabel'
-        )
-        self.disk_label.grid(row=9, column=1, sticky='e', pady=0)
+        # Disk with MetricBar (label left, bar right, inverted - low is bad)
+        ttk.Label(system_card, text="Disk", style='Card.TLabel').grid(row=2, column=0, sticky='w', pady=2)
+        disk_frame = ttk.Frame(system_card, style='Card.TFrame')
+        disk_frame.grid(row=2, column=1, sticky='e', pady=2)
+        self.disk_label = ttk.Label(disk_frame, text="-- GB", style='Card.TLabel', width=9, anchor='e')
+        self.disk_label.pack(side=tk.LEFT, padx=(0, 6))
+        self.disk_bar = MetricBar(disk_frame, width=80, height=10, max_value=100, warning_threshold=20, critical_threshold=5, invert=True)
+        self.disk_bar.pack(side=tk.LEFT)
 
     def _build_devices_panel(self) -> None:
         """Build the devices panel in the right column using the new architecture."""

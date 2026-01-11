@@ -8,6 +8,11 @@ import tkinter as tk
 from .colors import Colors
 
 
+class Fonts:
+    HEADING = ('TkDefaultFont', 11, 'bold')
+    SMALL = ('TkDefaultFont', 8)
+
+
 class Theme:
     """Configure ttk styles for the dark theme."""
 
@@ -88,6 +93,29 @@ class Theme:
         style.configure(
             'Inframe.TFrame',
             background=Colors.BG_FRAME
+        )
+
+        # Card styles (for grouped info sections)
+        style.configure(
+            'Card.TLabelframe',
+            background=Colors.CARD_BG,
+            bordercolor=Colors.CARD_BORDER,
+            relief='solid'
+        )
+        style.configure(
+            'Card.TLabelframe.Label',
+            background=Colors.CARD_BG,
+            foreground=Colors.FG_SECONDARY,
+            font=Fonts.SMALL
+        )
+        style.configure(
+            'Card.TFrame',
+            background=Colors.CARD_BG
+        )
+        style.configure(
+            'Card.TLabel',
+            background=Colors.CARD_BG,
+            foreground=Colors.FG_PRIMARY
         )
 
         # Small button style (for compact buttons like Show)

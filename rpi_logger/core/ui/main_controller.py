@@ -8,7 +8,7 @@ import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional
+from typing import Optional, Callable
 
 from .theme.widgets import RoundedButton
 from ..logger_system import LoggerSystem
@@ -66,9 +66,7 @@ class MainController:
         self.session_button: Optional[RoundedButton] = None
         self.trial_button: Optional[RoundedButton] = None
 
-        self.session_status_label: Optional[ttk.Label] = None
         self.trial_counter_label: Optional[ttk.Label] = None
-        self.session_path_label: Optional[ttk.Label] = None
 
         self.trial_label_var: Optional[tk.StringVar] = None
 
@@ -78,24 +76,32 @@ class MainController:
 
         self._pending_tasks: list[asyncio.Task] = []
 
+        # Recording bar callbacks
+        self._on_trial_start: Optional[Callable[[], None]] = None
+        self._on_trial_stop: Optional[Callable[[], None]] = None
+
+    def set_recording_bar_callbacks(
+        self,
+        on_trial_start: Callable[[], None],
+        on_trial_stop: Callable[[], None]
+    ) -> None:
+        self._on_trial_start = on_trial_start
+        self._on_trial_stop = on_trial_stop
+
     def set_widgets(
         self,
         root: tk.Tk,
         module_vars: dict[str, tk.BooleanVar],
         session_button: RoundedButton,
         trial_button: RoundedButton,
-        session_status_label: ttk.Label,
         trial_counter_label: ttk.Label,
-        session_path_label: ttk.Label,
         trial_label_var: tk.StringVar
     ) -> None:
         self.root = root
         self.module_vars = module_vars
         self.session_button = session_button
         self.trial_button = trial_button
-        self.session_status_label = session_status_label
         self.trial_counter_label = trial_counter_label
-        self.session_path_label = session_path_label
         self.trial_label_var = trial_label_var
 
     def _schedule_task(self, coro) -> None:
@@ -181,9 +187,6 @@ class MainController:
 
             self.session_button.configure(text="Stop", style='danger')
             self.trial_button.configure(style='success')
-
-            self.session_status_label.config(text="Active")
-            self.session_path_label.config(text=f"{full_session_dir}")
             self.trial_counter_label.config(text="0")
 
             await self.timer_manager.start_session_timer()
@@ -217,8 +220,6 @@ class MainController:
             self.session_button.configure(text="Start", style='success')
             self.trial_button.configure(style='inactive')
 
-            self.session_status_label.config(text="Idle")
-
             await self.timer_manager.stop_session_timer()
 
             self.logger.info("Session stopped")
@@ -235,14 +236,17 @@ class MainController:
             # Update button immediately for responsive UI
             self.trial_button.configure(text="Pause", style='danger')
 
+            # Increment counter on Record click (shows trial in progress)
+            self.trial_counter += 1
+            self.trial_counter_label.config(text=f"{self.trial_counter}")
+
             trial_label = self.trial_label_var.get() if self.trial_label_var else ""
-            next_trial_num = self.trial_counter + 1
 
             if self.logger_system.event_logger:
-                await self.logger_system.event_logger.log_button_press("trial_record", f"trial={next_trial_num}")
-                await self.logger_system.event_logger.log_trial_start(next_trial_num, trial_label)
+                await self.logger_system.event_logger.log_button_press("trial_record", f"trial={self.trial_counter}")
+                await self.logger_system.event_logger.log_trial_start(self.trial_counter, trial_label)
 
-            results = await self.logger_system.record_all(next_trial_num, trial_label)
+            results = await self.logger_system.record_all(self.trial_counter, trial_label)
 
             failed = [name for name, success in results.items() if not success]
             if failed:
@@ -252,6 +256,10 @@ class MainController:
                 )
 
             self.trial_active = True
+
+            # Show recording bar
+            if self._on_trial_start:
+                self._on_trial_start()
 
             await self.timer_manager.start_trial_timer()
 
@@ -278,13 +286,14 @@ class MainController:
                 )
 
             self.trial_active = False
-            self.trial_counter += 1
+
+            # Hide recording bar
+            if self._on_trial_stop:
+                self._on_trial_stop()
 
             if self.logger_system.event_logger:
                 await self.logger_system.event_logger.log_button_press("trial_pause", f"trial={self.trial_counter}")
                 await self.logger_system.event_logger.log_trial_stop(self.trial_counter)
-
-            self.trial_counter_label.config(text=f"{self.trial_counter}")
 
             await self.timer_manager.stop_trial_timer()
 

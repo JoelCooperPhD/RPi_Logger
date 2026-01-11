@@ -66,3 +66,17 @@ class Colors:
     # Border colors
     BORDER = "#404055"
     BORDER_LIGHT = "#505068"
+
+    # Recording mode colors
+    RECORDING_BG = "#8b1a1a"
+    RECORDING_DOT = "#ff4444"
+
+    # Card backgrounds
+    CARD_BG = "#323232"
+    CARD_BORDER = "#454545"
+
+    # Metric thresholds
+    METRIC_NORMAL = "#2ecc71"
+    METRIC_WARNING = "#f39c12"
+    METRIC_CRITICAL = "#e74c3c"
+    METRIC_BG = "#1e1e1e"
