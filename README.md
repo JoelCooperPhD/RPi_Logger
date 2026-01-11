@@ -2,7 +2,7 @@
 
 **Synchronized Multi-Sensor Data Collection for Research**
 
-A professional data acquisition platform designed for automotive and human factors research on Raspberry Pi. Capture synchronized video, audio, eye tracking, and behavioral task data in a single unified system.
+A cross-platform data acquisition system for automotive and human factors research. Capture synchronized video, audio, eye tracking, and behavioral task data. Runs on Windows, macOS, Linux, and Raspberry Pi.
 
 ---
 
@@ -41,15 +41,23 @@ All modules record with **frame-level synchronization** (~30ms accuracy) and exp
 ### Install
 
 ```bash
-git clone https://github.com/JoelCooperPhD/RPi_Logger.git
-cd RPi_Logger
+git clone https://github.com/JoelCooperPhD/Logger.git
+cd Logger
 uv sync
+```
+
+#### Raspberry Pi (CSI Camera Support)
+
+On Raspberry Pi, install `picamera2` for CSI camera support:
+
+```bash
+uv add picamera2
 ```
 
 ### Run
 
 ```bash
-python -m rpi_logger
+uv run rpi-logger
 ```
 
 ### Workflow
@@ -117,11 +125,17 @@ python -m rpi_logger.tools.muxing_tool
 
 | Requirement | Specification |
 |-------------|---------------|
-| Platform | Raspberry Pi 5 (Pi 4 compatible) |
-| OS | Raspberry Pi OS Bookworm |
+| Platform | Windows, macOS, Linux, Raspberry Pi |
 | Python | 3.11+ |
 | RAM | 4GB minimum, 8GB recommended |
-| Storage | USB 3.0 SSD recommended |
+| Storage | SSD recommended for video recording |
+
+### Platform Notes
+
+- **Raspberry Pi**: Full feature support including CSI cameras (requires `picamera2`)
+- **Linux**: USB cameras, audio, eye tracking, serial devices
+- **macOS**: USB cameras, audio, eye tracking
+- **Windows**: USB cameras, audio, eye tracking
 
 ---
 
