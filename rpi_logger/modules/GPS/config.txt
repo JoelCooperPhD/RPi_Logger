@@ -1,5 +1,5 @@
 # GPS module configuration
-enabled = true
+enabled = false
 log_level = info
 
 # Display name shown in the module list
@@ -26,5 +26,5 @@ gui_io_stub_visible = true
 gui_logger_visible = false
 view.show_io_panel = true
 view.show_logger = true
-device_connected = true
+device_connected = false
 window_geometry = 850x681+1029+119
