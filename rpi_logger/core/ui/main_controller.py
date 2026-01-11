@@ -6,9 +6,10 @@ import subprocess
 import sys
 import tkinter as tk
 import webbrowser
+from concurrent.futures import Future
 from pathlib import Path
 from tkinter import ttk, messagebox, filedialog
-from typing import Optional, Callable
+from typing import Optional, Callable, TYPE_CHECKING
 
 from .theme.widgets import RoundedButton
 from ..logger_system import LoggerSystem
@@ -18,6 +19,9 @@ from ..paths import CONFIG_PATH, MASTER_LOG_FILE
 from ..shutdown_coordinator import get_shutdown_coordinator
 from ..devices import InterfaceType, DeviceFamily, DeviceCatalog
 from .timer_manager import TimerManager
+
+if TYPE_CHECKING:
+    from ..async_bridge import AsyncBridge
 
 
 def _normalize_module_key(name: str) -> str:
@@ -74,11 +78,17 @@ class MainController:
         self.session_active = False
         self.trial_active = False
 
-        self._pending_tasks: list[asyncio.Task] = []
+        self._pending_tasks: list[Future] = []
+
+        # AsyncBridge for scheduling async work from UI thread
+        self._bridge: Optional["AsyncBridge"] = None
 
         # Recording bar callbacks
         self._on_trial_start: Optional[Callable[[], None]] = None
         self._on_trial_stop: Optional[Callable[[], None]] = None
+
+    def set_bridge(self, bridge: "AsyncBridge") -> None:
+        self._bridge = bridge
 
     def set_recording_bar_callbacks(
         self,
@@ -105,9 +115,12 @@ class MainController:
         self.trial_label_var = trial_label_var
 
     def _schedule_task(self, coro) -> None:
-        task = asyncio.create_task(coro)
-        self._pending_tasks.append(task)
-        task.add_done_callback(lambda t: self._pending_tasks.remove(t) if t in self._pending_tasks else None)
+        if self._bridge:
+            future = self._bridge.run_coroutine(coro)
+            self._pending_tasks.append(future)
+            future.add_done_callback(lambda f: self._pending_tasks.remove(f) if f in self._pending_tasks else None)
+        else:
+            self.logger.warning("Cannot schedule task - bridge not initialized")
 
     def on_toggle_session(self) -> None:
         if self.session_active:
@@ -327,7 +340,26 @@ class MainController:
 
         shutdown_coordinator = get_shutdown_coordinator()
 
-        self._schedule_task(shutdown_coordinator.initiate_shutdown("UI button"))
+        async def shutdown_and_quit():
+            # Stop timer tasks before shutdown cleanup
+            await self.timer_manager.stop_all()
+
+            await shutdown_coordinator.initiate_shutdown("UI button")
+
+            # After cleanup completes, quit the mainloop from the GUI thread
+            try:
+                if self._bridge and self.root:
+                    self._bridge.call_in_gui(self.root.quit)
+            except Exception as e:
+                self.logger.debug("Could not quit mainloop via bridge: %s", e)
+                # Fallback: try direct quit if bridge failed
+                if self.root:
+                    try:
+                        self.root.quit()
+                    except Exception:
+                        pass
+
+        self._schedule_task(shutdown_and_quit())
 
     async def _status_callback(self, module_name: str, state: ModuleState, status) -> None:
         """Handle module state changes - log only, no UI checkboxes to update."""

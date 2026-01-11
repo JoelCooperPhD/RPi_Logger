@@ -64,9 +64,7 @@ class AsyncBridge:
         """
         if self.loop is None:
             raise RuntimeError("AsyncIO loop not started")
-        logger.warning("AsyncBridge: scheduling coroutine %s on loop %s", coro, self.loop)
         future = asyncio.run_coroutine_threadsafe(coro, self.loop)
-        logger.warning("AsyncBridge: coroutine scheduled future=%s", future)
         return future
 
     def call_in_gui(self, func, *args, **kwargs) -> None:

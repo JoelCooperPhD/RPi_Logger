@@ -155,54 +155,76 @@ async def _setup_api_server(
     return server
 
 
-async def run_gui(args, logger_system: LoggerSystem) -> None:
-    """Run in GUI mode with Tkinter interface."""
+def run_gui(args, logger_system: LoggerSystem, api_server: Optional[APIServer] = None) -> None:
+    """Run in GUI mode with Tkinter interface.
+
+    This function runs the Tkinter mainloop on the main thread.
+    Async operations run in a background thread via AsyncBridge.
+    """
     logger.info("Starting in GUI mode")
 
     ui = MainWindow(logger_system)
-    shutdown_coordinator = get_shutdown_coordinator()
-    shutdown_task: Optional[asyncio.Task] = None
+    shutdown_requested = False
 
-    async def cleanup_ui():
+    def cleanup_ui_sync():
         ui._cancel_geometry_save_handle(flush=True)
         ui.cleanup_log_handler()
-        await ui.timer_manager.stop_all()
         if ui.root:
-            ui.root.destroy()
+            try:
+                ui.root.destroy()
+            except Exception:
+                pass
 
-    shutdown_coordinator.register_cleanup(
-        lambda: _cleanup_logger_system(logger_system)
-    )
-    shutdown_coordinator.register_cleanup(cleanup_ui)
+    def signal_handler(signum, frame):
+        nonlocal shutdown_requested
+        if not shutdown_requested:
+            shutdown_requested = True
+            logger.info("Signal %s received, initiating shutdown", signum)
+            # Trigger proper async shutdown via controller (same as X button)
+            # This ensures cleanup runs before quit
+            if ui.controller:
+                ui.controller.on_shutdown()
+            elif ui.root:
+                # Fallback if controller not available
+                try:
+                    ui.root.quit()
+                except Exception:
+                    pass
 
-    # Start API server if enabled (cleanup registered inside _setup_api_server)
-    await _setup_api_server(args, logger_system, shutdown_coordinator)
-
-    loop = asyncio.get_running_loop()
-
-    def signal_handler():
-        nonlocal shutdown_task
-        if shutdown_task is None or shutdown_task.done():
-            shutdown_task = asyncio.create_task(
-                shutdown_coordinator.initiate_shutdown("signal")
-            )
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, signal_handler)
-        except NotImplementedError:
-            pass  # Windows doesn't support add_signal_handler
+    # Install signal handlers
+    old_sigint = signal.signal(signal.SIGINT, signal_handler)
+    old_sigterm = signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        await ui.run()
+        # Run the UI (blocks until window closes)
+        ui.run()
     except KeyboardInterrupt:
-        await shutdown_coordinator.initiate_shutdown("keyboard interrupt")
+        logger.info("Keyboard interrupt received")
     except Exception as e:
         logger.error("Unexpected error: %s", e, exc_info=True)
-        await shutdown_coordinator.initiate_shutdown("exception")
     finally:
-        if not shutdown_coordinator.is_complete:
-            await shutdown_coordinator.initiate_shutdown("finally block")
+        # Restore original signal handlers
+        signal.signal(signal.SIGINT, old_sigint)
+        signal.signal(signal.SIGTERM, old_sigterm)
+
+        # Cleanup UI synchronously
+        cleanup_ui_sync()
+
+
+async def _async_cleanup(logger_system: LoggerSystem, api_server: Optional[APIServer] = None) -> None:
+    """Run async cleanup after GUI closes."""
+    shutdown_coordinator = get_shutdown_coordinator()
+
+    # Stop API server if running
+    if api_server:
+        try:
+            await api_server.stop()
+        except Exception as e:
+            logger.error("Error stopping API server: %s", e)
+
+    # Run the standard cleanup
+    if not shutdown_coordinator.is_complete:
+        await _cleanup_logger_system(logger_system)
 
 
 async def main(argv: Optional[list[str]] = None) -> None:
@@ -262,7 +284,16 @@ async def main(argv: Optional[list[str]] = None) -> None:
     for module in modules:
         logger.info("  - %s: %s", module.name, module.entry_point)
 
-    await run_gui(args, logger_system)
+    # Start API server if enabled (async)
+    shutdown_coordinator = get_shutdown_coordinator()
+    api_server = await _setup_api_server(args, logger_system, shutdown_coordinator)
+
+    # Run GUI (synchronous - blocks until window closes)
+    # AsyncBridge handles async operations in background thread
+    run_gui(args, logger_system, api_server)
+
+    # Async cleanup after GUI closes
+    await _async_cleanup(logger_system, api_server)
 
     logger.info("=" * 60)
     logger.info("Logger - Master System Stopped")

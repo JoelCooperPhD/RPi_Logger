@@ -9,6 +9,7 @@ from ..system_monitor import SystemMonitor
 
 if TYPE_CHECKING:
     from .theme.widgets import MetricBar
+    from ..async_bridge import AsyncBridge
 
 
 class TimerManager:
@@ -35,6 +36,19 @@ class TimerManager:
 
         self.running = False
         self.system_monitor = SystemMonitor()
+
+        # AsyncBridge for thread-safe UI updates
+        self._bridge: Optional["AsyncBridge"] = None
+
+    def set_bridge(self, bridge: "AsyncBridge") -> None:
+        self._bridge = bridge
+
+    def _update_ui(self, func, *args, **kwargs) -> None:
+        """Thread-safe UI update via AsyncBridge."""
+        if self._bridge:
+            self._bridge.call_in_gui(func, *args, **kwargs)
+        else:
+            func(*args, **kwargs)
 
     def set_labels(
         self,
@@ -74,7 +88,7 @@ class TimerManager:
             self.session_timer_task.cancel()
             self.session_timer_task = None
         if self.session_timer_label:
-            self.session_timer_label.config(text="--:--:--")
+            self._update_ui(self.session_timer_label.config, text="--:--:--")
 
     async def start_trial_timer(self) -> None:
         self.trial_start_time = datetime.datetime.now()
@@ -88,7 +102,7 @@ class TimerManager:
             self.trial_timer_task.cancel()
             self.trial_timer_task = None
         if self.trial_timer_label:
-            self.trial_timer_label.config(text="--:--:--")
+            self._update_ui(self.trial_timer_label.config, text="--:--:--")
 
     async def stop_all(self) -> None:
         self.running = False
@@ -111,7 +125,8 @@ class TimerManager:
                 seconds = int(elapsed.total_seconds() % 60)
 
                 if self.session_timer_label:
-                    self.session_timer_label.config(text=f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+                    text = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    self._update_ui(self.session_timer_label.config, text=text)
 
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
@@ -126,7 +141,8 @@ class TimerManager:
                 seconds = int(elapsed.total_seconds() % 60)
 
                 if self.trial_timer_label:
-                    self.trial_timer_label.config(text=f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+                    text = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    self._update_ui(self.trial_timer_label.config, text=text)
 
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
@@ -141,20 +157,20 @@ class TimerManager:
                     total_gb, used_gb, free_gb = await asyncio.to_thread(self.system_monitor.get_disk_space)
 
                     if self.cpu_label:
-                        self.cpu_label.config(text=f"{cpu_percent:.1f}%")
+                        self._update_ui(self.cpu_label.config, text=f"{cpu_percent:.1f}%")
                     if self.cpu_bar:
-                        self.cpu_bar.set_value(cpu_percent)
+                        self._update_ui(self.cpu_bar.set_value, cpu_percent)
 
                     if self.ram_label:
-                        self.ram_label.config(text=f"{ram_percent:.1f}%")
+                        self._update_ui(self.ram_label.config, text=f"{ram_percent:.1f}%")
                     if self.ram_bar:
-                        self.ram_bar.set_value(ram_percent)
+                        self._update_ui(self.ram_bar.set_value, ram_percent)
 
                     if self.disk_label:
-                        self.disk_label.config(text=f"{free_gb:.1f} GB")
+                        self._update_ui(self.disk_label.config, text=f"{free_gb:.1f} GB")
                     if self.disk_bar:
                         disk_percent = (free_gb / total_gb) * 100 if total_gb > 0 else 0
-                        self.disk_bar.set_value(disk_percent)
+                        self._update_ui(self.disk_bar.set_value, disk_percent)
                 except Exception as e:
                     self.logger.warning("System monitor update failed: %s", e)
 

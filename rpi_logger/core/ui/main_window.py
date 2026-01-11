@@ -2,6 +2,7 @@
 import asyncio
 import logging
 from collections import deque
+from concurrent.futures import Future
 from rpi_logger.core.logging_config import LOG_FORMAT, LOG_DATEFMT
 from rpi_logger.core.logging_utils import get_module_logger
 import tkinter as tk
@@ -16,6 +17,7 @@ from ..logger_system import LoggerSystem
 from ..config_manager import get_config_manager
 from ..paths import CONFIG_PATH, LOGO_PATH, ICON_PATH
 from ..update_checker import check_for_updates
+from ..async_bridge import AsyncBridge
 from .. import __version__
 from .main_controller import MainController
 from .timer_manager import TimerManager
@@ -127,12 +129,15 @@ class MainWindow:
         self.recording_bar: Optional[RecordingBar] = None
 
         # Use set for O(1) removal and avoid race condition issues
-        self._pending_tasks: set[asyncio.Task] = set()
+        self._pending_tasks: set[Future] = set()
+
+        # AsyncBridge for running asyncio in background thread
+        self.bridge: Optional[AsyncBridge] = None
 
         # Geometry tracking for continuous persistence
         self._last_geometry: Optional[str] = None
-        self._geometry_save_handle: Optional[asyncio.Handle] = None
-        self._geometry_save_delay: float = 0.25  # seconds
+        self._geometry_save_pending: bool = False
+        self._geometry_save_delay_ms: int = 250  # milliseconds
 
     def build_ui(self) -> None:
         self.root = tk.Tk()
@@ -322,18 +327,22 @@ class MainWindow:
             )
 
     def _wire_device_system(self) -> None:
-        """Wire the device system to application callbacks."""
-        # Device connect callback
-        async def on_connect_device(device_id: str):
+        """Wire the device system to application callbacks.
+
+        These callbacks are invoked from UI thread clicks, so they need
+        to schedule async work via the bridge.
+        """
+        # Device connect callback - schedules async work via bridge
+        def on_connect_device(device_id: str):
             self.logger.info("Connect request for device: %s", device_id)
-            await self.logger_system.connect_and_start_device(device_id)
+            self._schedule_task(self.logger_system.connect_and_start_device(device_id))
 
         self.device_system.set_on_connect_device(on_connect_device)
 
-        # Device disconnect callback
-        async def on_disconnect_device(device_id: str):
+        # Device disconnect callback - schedules async work via bridge
+        def on_disconnect_device(device_id: str):
             self.logger.info("Disconnect request for device: %s", device_id)
-            await self.logger_system.stop_and_disconnect_device(device_id)
+            self._schedule_task(self.logger_system.stop_and_disconnect_device(device_id))
 
         self.device_system.set_on_disconnect_device(on_disconnect_device)
 
@@ -581,9 +590,12 @@ class MainWindow:
             self.log_handler = None
 
     def _schedule_task(self, coro) -> None:
-        task = asyncio.create_task(coro)
-        self._pending_tasks.add(task)
-        task.add_done_callback(lambda t: self._pending_tasks.discard(t))
+        if self.bridge:
+            future = self.bridge.run_coroutine(coro)
+            self._pending_tasks.add(future)
+            future.add_done_callback(lambda f: self._pending_tasks.discard(f))
+        else:
+            self.logger.warning("Cannot schedule task - bridge not initialized")
 
     async def _check_for_updates(self) -> None:
         """Check for available updates and show dialog if found."""
@@ -631,17 +643,16 @@ class MainWindow:
 
     def _schedule_geometry_persist(self) -> None:
         """Schedule debounced geometry save to avoid excessive writes during drag."""
-        self._cancel_geometry_save_handle()
+        if self._geometry_save_pending:
+            return  # Already scheduled
+        self._geometry_save_pending = True
+        if self.root:
+            self.root.after(self._geometry_save_delay_ms, self._do_geometry_save)
 
-        try:
-            loop = asyncio.get_event_loop()
-            self._geometry_save_handle = loop.call_later(
-                self._geometry_save_delay,
-                self.save_window_geometry
-            )
-        except RuntimeError:
-            # No event loop available, save immediately
-            self.save_window_geometry()
+    def _do_geometry_save(self) -> None:
+        """Execute the debounced geometry save."""
+        self._geometry_save_pending = False
+        self.save_window_geometry()
 
     def _cancel_geometry_save_handle(self, flush: bool = False) -> None:
         """Cancel any pending geometry save.
@@ -651,10 +662,7 @@ class MainWindow:
         """
         if flush:
             self.save_window_geometry()
-
-        if self._geometry_save_handle:
-            self._geometry_save_handle.cancel()
-            self._geometry_save_handle = None
+        self._geometry_save_pending = False
 
     def save_window_geometry(self) -> None:
         """Save main window geometry to instance geometry store."""
@@ -689,11 +697,44 @@ class MainWindow:
         except Exception as e:
             self.logger.error("Error saving window geometry: %s", e, exc_info=True)
 
-    async def run(self) -> None:
-        from async_tkinter_loop import main_loop
+    def run(self) -> None:
+        """Run the main window with AsyncBridge for background async tasks.
 
+        This runs Tkinter's native mainloop on the main thread while
+        asyncio tasks run in a background thread via AsyncBridge.
+        This provides true parallelism and keeps the UI responsive.
+        """
         self.build_ui()
 
+        # Create and start the AsyncBridge for background async work
+        self.bridge = AsyncBridge(self.root)
+        self.bridge.start()
+        self.logger.info("AsyncBridge started - asyncio running in background thread")
+
+        # Pass bridge to timer manager and controller for thread-safe operations
+        self.timer_manager.set_bridge(self.bridge)
+        self.controller.set_bridge(self.bridge)
+
+        # Schedule initial async startup tasks
+        self._schedule_task(self._async_startup())
+
+        try:
+            # Run Tkinter's native mainloop (blocks until window closes)
+            self.root.mainloop()
+        except tk.TclError:
+            pass
+        except Exception as e:
+            self.logger.error("UI mainloop error: %s", e)
+        finally:
+            # Stop the AsyncBridge when window closes
+            if self.bridge:
+                self.bridge.stop()
+                self.bridge = None
+
+        self.logger.info("UI stopped")
+
+    async def _async_startup(self) -> None:
+        """Perform async initialization after bridge is ready."""
         await self.timer_manager.start_clock()
 
         # Check for updates (non-blocking, silent on error)
@@ -706,12 +747,3 @@ class MainWindow:
 
         # Now start modules - instance manager is ready
         self._schedule_task(self.controller.auto_start_modules())
-
-        try:
-            await main_loop(self.root)
-        except tk.TclError:
-            pass
-        except Exception as e:
-            self.logger.error("UI loop error: %s", e)
-
-        self.logger.info("UI stopped")
