@@ -1,4 +1,5 @@
 enabled = false
+platforms = raspberry_pi
 log_level = info
 console_output = false
 view.show_io_panel = true
