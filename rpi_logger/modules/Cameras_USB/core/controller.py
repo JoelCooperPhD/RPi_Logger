@@ -445,6 +445,7 @@ class CameraController:
             actual_sample_rate = (
                 self._audio.sample_rate if self._audio else self._state.settings.sample_rate
             )
+            display_name = device_info.display_name if device_info else ""
             self._recording = RecordingSession(
                 session_dir=session_dir,
                 device_id=device_id,
@@ -454,6 +455,7 @@ class CameraController:
                 with_audio=self._state.audio_capturing,
                 audio_sample_rate=actual_sample_rate,
                 audio_channels=self._state.audio_device.channels if self._state.audio_device else 2,
+                display_name=display_name,
             )
             await self._recording.start()
 

@@ -1,6 +1,8 @@
 from dataclasses import replace
 from pathlib import Path
 
+from rpi_logger.modules.base.storage_utils import module_filename_prefix
+
 from .state import AppState, CameraStatus, RecordingStatus, FrameMetrics
 from .actions import (
     Action, AssignCamera, CameraAssigned, CameraError, UnassignCamera,
@@ -91,8 +93,10 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                 return state, []
             camera_idx = state.camera_index if state.camera_index is not None else 0
             camera_dir = session_dir / f"picam{camera_idx}"
-            video_path = camera_dir / f"trial_{trial:03d}.avi"
-            timing_path = camera_dir / f"trial_{trial:03d}_timing.csv"
+            prefix = module_filename_prefix(session_dir, "Cameras_CSI", trial, code="CSI")
+            device_name = f"picam{camera_idx}"
+            video_path = camera_dir / f"{prefix}_{device_name}.avi"
+            timing_path = camera_dir / f"{prefix}_{device_name}_timing.csv"
             return (
                 replace(
                     state,

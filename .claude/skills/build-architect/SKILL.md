@@ -8,7 +8,7 @@ globs:
 
 # Build Architect Skill
 
-Guide for creating documentation structures for Logger modules. All modules use **Elm/Redux architecture** for consistency and testability.
+Guide for creating documentation structures for Logger modules. New modules should use **Elm/Redux architecture** for consistency and testability. Cameras_CSI is the reference implementation. Legacy modules (Cameras_USB, Audio) use different patterns.
 
 ## When to Use
 
@@ -144,4 +144,19 @@ Standalone:
 - `rpi_logger/modules/stub (codex)/vmc/` - StubCodexSupervisor, ModuleRuntime
 
 ### Example Module
-- `rpi_logger/modules/Cameras_CSI2/` - Reference Elm/Redux implementation
+- `rpi_logger/modules/Cameras_CSI/` - Reference Elm/Redux implementation
+
+---
+
+## Module Architecture Status
+
+| Module | Architecture | Notes |
+|--------|-------------|-------|
+| Cameras_CSI | Elm/Redux | Reference implementation |
+| Cameras_USB | Async Controller | Direct async pattern, not Redux |
+| Audio | Service Layer | Application/service pattern |
+| DRT | Legacy | |
+| VOG | Legacy | |
+| EyeTracker | Legacy | |
+| GPS | Legacy | |
+| Notes | Legacy | |

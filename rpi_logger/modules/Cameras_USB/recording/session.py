@@ -4,6 +4,8 @@ import logging
 import time
 from typing import Optional, Callable, Awaitable, Union
 
+from rpi_logger.modules.base.storage_utils import module_filename_prefix
+
 from ..capture.frame import CapturedFrame, AudioChunk
 from .encoder import VideoEncoder
 from .muxer import TimestampedMuxer, LegacyAVMuxer, HAS_AV
@@ -23,6 +25,7 @@ class RecordingSession:
         with_audio: bool = False,
         audio_sample_rate: int = 48000,
         audio_channels: int = 2,
+        display_name: str = "",
     ):
         self._session_dir = session_dir
         self._device_id = device_id
@@ -38,8 +41,10 @@ class RecordingSession:
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
         ext = "mp4" if with_audio else "avi"
-        self._video_path = self._output_dir / f"trial_{trial_number:03d}.{ext}"
-        self._timing_path = self._output_dir / f"trial_{trial_number:03d}_timing.csv"
+        prefix = module_filename_prefix(session_dir, "Cameras_USB", trial_number, code="CAM")
+        safe_name = display_name.replace(" ", "-").replace(":", "").lower() if display_name else safe_device_id
+        self._video_path = self._output_dir / f"{prefix}_{safe_name}.{ext}"
+        self._timing_path = self._output_dir / f"{prefix}_{safe_name}_timing.csv"
 
         self._encoder: Optional[VideoEncoder] = None
         self._muxer: Optional[Union[TimestampedMuxer, LegacyAVMuxer]] = None

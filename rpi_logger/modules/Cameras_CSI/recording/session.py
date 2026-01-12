@@ -2,6 +2,8 @@ from pathlib import Path
 from dataclasses import dataclass
 import time
 
+from rpi_logger.modules.base.storage_utils import module_filename_prefix
+
 from capture.frame import CapturedFrame
 from .timing_writer import TimingCSVWriter
 from .encoder import VideoEncoder
@@ -32,11 +34,10 @@ class RecordingSession:
         self._fps = fps
         self._label = label
 
-        video_name = f"trial_{trial_number:03d}.avi"
-        timing_name = f"trial_{trial_number:03d}_timing.csv"
-
-        self._video_path = session_dir / video_name
-        self._timing_path = session_dir / timing_name
+        prefix = module_filename_prefix(session_dir, "Cameras_CSI", trial_number, code="CSI")
+        safe_name = label.replace(" ", "-").replace(":", "").lower() if label else device_id.replace(":", "_")
+        self._video_path = session_dir / f"{prefix}_{safe_name}.avi"
+        self._timing_path = session_dir / f"{prefix}_{safe_name}_timing.csv"
 
         self._encoder = VideoEncoder(self._video_path, resolution, fps)
         self._timing_writer = TimingCSVWriter(self._timing_path, trial_number, device_id, label)
