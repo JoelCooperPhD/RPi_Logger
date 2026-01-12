@@ -6,6 +6,7 @@ Follows the same pattern as USBScanner and NetworkScanner for consistency.
 """
 
 import asyncio
+import sys
 from dataclasses import dataclass
 from typing import Callable, Optional, Dict, Set, Awaitable, TYPE_CHECKING
 
@@ -156,7 +157,23 @@ class AudioScanner:
                     logger.error(f"Error re-announcing device: {e}")
 
     async def _scan_loop(self) -> None:
-        """Main scanning loop."""
+        """Main scanning loop.
+
+        On Windows, the USBHotplugMonitor triggers force_scan() when USB
+        devices change, so we don't need to continuously poll.
+
+        On Linux, we continue polling since sounddevice query is lightweight.
+        """
+        # Windows: Don't continuously poll - wait for hotplug events
+        if sys.platform == "win32":
+            while self._running:
+                try:
+                    await asyncio.sleep(60)  # Heartbeat - no active scanning
+                except asyncio.CancelledError:
+                    break
+            return
+
+        # Linux/macOS: Continue polling
         while self._running:
             try:
                 await asyncio.sleep(self._scan_interval)

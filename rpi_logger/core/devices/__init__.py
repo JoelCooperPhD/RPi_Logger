@@ -63,6 +63,11 @@ from .csi_scanner import (
     PICAMERA2_AVAILABLE,
 )
 
+from .usb_hotplug import (
+    USBHotplugMonitor,
+    count_usb_devices,
+)
+
 from .uart_scanner import (
     UARTScanner,
     DiscoveredUARTDevice,
@@ -130,6 +135,9 @@ __all__ = [
     "CSIScanner",
     "DiscoveredCSICamera",
     "PICAMERA2_AVAILABLE",
+    # USB Hotplug Monitor
+    "USBHotplugMonitor",
+    "count_usb_devices",
     # UART Scanner (fixed path serial devices)
     "UARTScanner",
     "DiscoveredUARTDevice",

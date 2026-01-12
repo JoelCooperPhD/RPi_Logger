@@ -926,6 +926,7 @@ class LoggerSystem:
                 camera_dev_path=device.get_meta("camera_dev_path"),
                 camera_hw_model=device.get_meta("camera_hw_model"),
                 camera_location=device.get_meta("camera_location"),
+                camera_index=device.get_meta("camera_index"),
                 # Audio sibling info for webcams with built-in microphones
                 camera_audio_index=device.get_meta("camera_audio_index"),
                 camera_audio_channels=device.get_meta("camera_audio_channels"),

@@ -108,44 +108,84 @@ class StubCodexController:
             self.logger.debug("Unhandled user action: %s", action)
 
     async def _listen_for_commands(self) -> None:
-        """Listen for commands from stdin using select-based polling.
+        """Listen for commands from stdin using platform-appropriate polling.
 
-        Uses select.select() to poll stdin without modifying its file descriptor
-        state. This avoids interference with libcamera's internal threading that
-        was caused by asyncio's connect_read_pipe() setting stdin to non-blocking.
+        On Linux/macOS: Uses select.select() to poll stdin without modifying
+        its file descriptor state. This avoids interference with libcamera's
+        internal threading that was caused by asyncio's connect_read_pipe()
+        setting stdin to non-blocking.
+
+        On Windows: select.select() doesn't work with file handles (only sockets),
+        so we use blocking read in a thread. For piped stdin (subprocess mode),
+        this works because the parent process sends commands that unblock the read.
         """
-        import select
+        is_windows = sys.platform == "win32"
 
-        def poll_stdin_line(timeout: float = 0.2) -> Optional[str]:
-            """Poll stdin using select and read one line if available."""
+        if is_windows:
+            # On Windows, we can't use select() on stdin.
+            # For subprocess mode (piped stdin), blocking readline is fine since
+            # the parent will send commands that unblock the read.
+            def read_stdin_line() -> str:
+                """Blocking read of one line from stdin."""
+                try:
+                    return sys.stdin.readline()
+                except Exception:
+                    return ""
+
             try:
-                readable, _, _ = select.select([sys.stdin], [], [], timeout)
-                if not readable:
-                    return None
-                return sys.stdin.readline()
-            except Exception:
-                return ""
+                while not self.model.shutdown_event.is_set():
+                    # Run blocking readline in a thread so we don't block the event loop
+                    line = await asyncio.to_thread(read_stdin_line)
 
-        try:
-            while not self.model.shutdown_event.is_set():
-                line = await asyncio.to_thread(poll_stdin_line, 0.2)
+                    if line == "":
+                        # EOF - stdin was closed
+                        break
+                    if not line.strip():
+                        continue
 
-                if line is None:
-                    continue
-                if line == "":
-                    break
-                if not line.strip():
-                    continue
+                    command = CommandMessage.parse(line)
+                    if not command:
+                        self.logger.debug("Failed to parse command: %s", line[:100])
+                        continue
 
-                command = CommandMessage.parse(line)
-                if not command:
-                    self.logger.debug("Failed to parse command: %s", line[:100])
-                    continue
+                    self.logger.info("Received command: %s", command.get("command", "unknown"))
+                    await self._process_command(command)
+            finally:
+                self._stdin_shutdown.set()
+        else:
+            # On Unix, use select-based polling
+            import select
 
-                self.logger.info("Received command: %s", command.get("command", "unknown"))
-                await self._process_command(command)
-        finally:
-            self._stdin_shutdown.set()
+            def poll_stdin_line(timeout: float = 0.2) -> Optional[str]:
+                """Poll stdin using select and read one line if available."""
+                try:
+                    readable, _, _ = select.select([sys.stdin], [], [], timeout)
+                    if not readable:
+                        return None
+                    return sys.stdin.readline()
+                except Exception:
+                    return ""
+
+            try:
+                while not self.model.shutdown_event.is_set():
+                    line = await asyncio.to_thread(poll_stdin_line, 0.2)
+
+                    if line is None:
+                        continue
+                    if line == "":
+                        break
+                    if not line.strip():
+                        continue
+
+                    command = CommandMessage.parse(line)
+                    if not command:
+                        self.logger.debug("Failed to parse command: %s", line[:100])
+                        continue
+
+                    self.logger.info("Received command: %s", command.get("command", "unknown"))
+                    await self._process_command(command)
+            finally:
+                self._stdin_shutdown.set()
 
     async def request_shutdown(self, reason: str) -> None:
         await self._begin_shutdown(reason)

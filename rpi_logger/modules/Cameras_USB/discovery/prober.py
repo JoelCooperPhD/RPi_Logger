@@ -55,7 +55,16 @@ def _probe_modes_sync(
     except ImportError:
         raise RuntimeError("OpenCV (cv2) is required for USB camera probing")
 
-    cap = cv2.VideoCapture(device)
+    # Windows requires integer camera indices and DirectShow backend
+    import sys
+    if isinstance(device, str) and device.isdigit():
+        device = int(device)
+
+    if sys.platform == "win32":
+        cap = cv2.VideoCapture(device, cv2.CAP_DSHOW)
+    else:
+        cap = cv2.VideoCapture(device)
+
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open device {device}")
 
@@ -129,7 +138,18 @@ async def verify_camera_accessible(device: int | str) -> bool:
         except ImportError:
             return False
 
-        cap = cv2.VideoCapture(device)
+        import sys
+
+        # Windows requires integer camera indices and DirectShow backend
+        dev = device
+        if isinstance(dev, str) and dev.isdigit():
+            dev = int(dev)
+
+        if sys.platform == "win32":
+            cap = cv2.VideoCapture(dev, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(dev)
+
         if not cap.isOpened():
             return False
 

@@ -1,5 +1,6 @@
 import asyncio
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -114,6 +115,18 @@ def _find_usb_device_dir(sysfs_path: str) -> Optional[str]:
 
 
 async def get_device_by_path(dev_path: str) -> Optional[USBVideoDevice]:
+    # Windows: camera indices are just integers, no sysfs
+    if sys.platform != "linux" and dev_path.isdigit():
+        return USBVideoDevice(
+            dev_path=dev_path,
+            stable_id=dev_path,
+            vid_pid="",
+            display_name=f"USB Camera {dev_path}",
+            sysfs_path="",
+            bus_path="",
+        )
+
+    # Linux: scan sysfs for device info
     devices = await scan_usb_cameras()
     for device in devices:
         if device.dev_path == dev_path:
@@ -143,6 +156,18 @@ def _normalize_stable_id(stable_id: str) -> str:
 
 async def get_device_by_stable_id(stable_id: str) -> Optional[USBVideoDevice]:
     """Find device by stable ID, handling multiple ID formats."""
+    # Windows: camera indices are just integers, no sysfs
+    if sys.platform != "linux" and stable_id.isdigit():
+        return USBVideoDevice(
+            dev_path=stable_id,
+            stable_id=stable_id,
+            vid_pid="",
+            display_name=f"USB Camera {stable_id}",
+            sysfs_path="",
+            bus_path="",
+        )
+
+    # Linux: scan sysfs for device info
     devices = await scan_usb_cameras()
 
     # Try exact match first

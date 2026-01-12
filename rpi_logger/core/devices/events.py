@@ -231,6 +231,9 @@ def discovered_camera_device(
     dev_path: str | None = None,
     hw_model: str | None = None,
     location_hint: str | None = None,
+    # Camera-specific fields
+    camera_index: int | None = None,
+    usb_bus_path: str | None = None,
     # Audio sibling fields (for webcams with built-in microphones)
     audio_sibling_index: int | None = None,
     audio_sibling_channels: int | None = None,
@@ -249,6 +252,8 @@ def discovered_camera_device(
         dev_path: /dev/video* path for USB cameras
         hw_model: Hardware model identifier
         location_hint: Physical location (USB port, CSI connector)
+        camera_index: Integer index for cv2.VideoCapture (for Windows)
+        usb_bus_path: USB bus path for audio sibling matching
         audio_sibling_index: sounddevice index for built-in mic (if present)
         audio_sibling_channels: Number of input channels for built-in mic
         audio_sibling_sample_rate: Sample rate for built-in mic
@@ -267,6 +272,14 @@ def discovered_camera_device(
         "camera_hw_model": hw_model,
         "camera_location": location_hint,
     }
+
+    # Add camera index for OpenCV (especially important for Windows)
+    if camera_index is not None:
+        metadata["camera_index"] = camera_index
+
+    # Add USB bus path for audio sibling matching
+    if usb_bus_path is not None:
+        metadata["usb_bus_path"] = usb_bus_path
 
     # Add audio sibling info if present
     if audio_sibling_index is not None:

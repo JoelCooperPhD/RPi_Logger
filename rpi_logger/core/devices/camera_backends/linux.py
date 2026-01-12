@@ -106,6 +106,7 @@ class LinuxCameraBackend:
                 location_hint=str(device_root),
                 usb_bus_path=stable_id,
                 audio_sibling=audio_sibling,
+                camera_index=index,
             ))
 
         logger.debug(f"Discovered {len(cameras)} USB cameras on Linux")

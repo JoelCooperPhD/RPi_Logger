@@ -39,7 +39,18 @@ class USBSource:
                 self._on_error("OpenCV (cv2) not available")
             return False
 
-        self._cap = cv2.VideoCapture(self._device)
+        import sys
+
+        # Windows requires integer camera indices and DirectShow backend
+        device = self._device
+        if isinstance(device, str) and device.isdigit():
+            device = int(device)
+
+        if sys.platform == "win32":
+            self._cap = cv2.VideoCapture(device, cv2.CAP_DSHOW)
+        else:
+            self._cap = cv2.VideoCapture(device)
+
         if not self._cap.isOpened():
             if self._on_error:
                 self._on_error(f"Failed to open {self._device}")

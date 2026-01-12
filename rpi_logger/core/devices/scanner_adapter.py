@@ -301,6 +301,8 @@ class ScannerEventAdapter:
             dev_path=getattr(camera, 'dev_path', None),
             hw_model=getattr(camera, 'hw_model', None),
             location_hint=getattr(camera, 'location_hint', None),
+            camera_index=getattr(camera, 'camera_index', None),
+            usb_bus_path=usb_bus_path,
             audio_sibling_index=audio_sibling_index,
             audio_sibling_channels=audio_sibling_channels,
             audio_sibling_sample_rate=audio_sibling_sample_rate,

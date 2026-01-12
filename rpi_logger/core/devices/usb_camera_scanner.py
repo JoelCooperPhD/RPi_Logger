@@ -10,6 +10,7 @@ This is separate from the CSI scanner which handles Pi cameras.
 """
 
 import asyncio
+import sys
 from typing import Callable, Dict, Awaitable, Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
@@ -41,7 +42,9 @@ class USBCameraScanner:
     - Windows: WindowsCameraBackend (OpenCV)
     """
 
-    DEFAULT_SCAN_INTERVAL = 2.0  # Scan every 2 seconds
+    # Windows: OpenCV VideoCapture activates camera hardware, causing lights to flash.
+    # Use longer interval on Windows to reduce flashing and Orbbec sensor noise.
+    DEFAULT_SCAN_INTERVAL = 30.0 if sys.platform == "win32" else 2.0
     MAX_USB_DEVICES = 16
 
     def __init__(
@@ -127,7 +130,26 @@ class USBCameraScanner:
                     logger.error(f"Error re-announcing USB camera: {e}")
 
     async def _scan_loop(self) -> None:
-        """Main scanning loop."""
+        """Main scanning loop.
+
+        On Windows, we don't continuously poll - the USBHotplugMonitor
+        calls force_scan() when USB devices change. This prevents camera
+        lights from flashing and cameras disappearing when in use.
+
+        On Linux/macOS, we continue polling since sysfs/AVFoundation
+        are lightweight and don't have these issues.
+        """
+        # Windows: Don't continuously poll - wait for hotplug events
+        if sys.platform == "win32":
+            # Just keep the task alive, actual scanning triggered by hotplug
+            while self._running:
+                try:
+                    await asyncio.sleep(60)  # Heartbeat - no active scanning
+                except asyncio.CancelledError:
+                    break
+            return
+
+        # Linux/macOS: Continue polling (sysfs/AVFoundation are lightweight)
         while self._running:
             try:
                 await asyncio.sleep(self._scan_interval)
@@ -160,6 +182,12 @@ class USBCameraScanner:
         # Detect lost devices
         lost = set(self._known_devices.keys()) - set(current_devices.keys())
         for device_id in lost:
+            # On Windows, cameras in use can't be opened by VideoCapture.
+            # Don't remove them - they're likely in use, not unplugged.
+            if sys.platform == "win32":
+                logger.debug(f"USB camera {device_id} not visible - likely in use by module")
+                continue
+
             camera = self._known_devices.pop(device_id)
             logger.info(f"USB camera lost: {camera.friendly_name} ({device_id})")
             if self._on_device_lost:

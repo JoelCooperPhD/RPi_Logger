@@ -7,6 +7,7 @@ Replaces scanning in:
 """
 
 import asyncio
+import sys
 from dataclasses import dataclass
 from typing import Callable, Optional, Dict, Set, Awaitable
 import serial.tools.list_ports
@@ -120,7 +121,24 @@ class USBScanner:
                     logger.error(f"Error re-announcing USB device: {e}")
 
     async def _scan_loop(self) -> None:
-        """Main scanning loop."""
+        """Main scanning loop.
+
+        On Windows, the USBHotplugMonitor triggers force_scan() when USB
+        devices change, so we don't need to continuously poll.
+        This is more efficient and matches the event-driven architecture.
+
+        On Linux, we continue polling since it's lightweight.
+        """
+        # Windows: Don't continuously poll - wait for hotplug events
+        if sys.platform == "win32":
+            while self._running:
+                try:
+                    await asyncio.sleep(60)  # Heartbeat - no active scanning
+                except asyncio.CancelledError:
+                    break
+            return
+
+        # Linux/macOS: Continue polling (comports() is lightweight)
         while self._running:
             try:
                 await asyncio.sleep(self._scan_interval)

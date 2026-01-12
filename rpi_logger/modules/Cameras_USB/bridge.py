@@ -30,7 +30,7 @@ except ImportError:
     USER_MODULE_CONFIG_DIR = Path.home() / ".config" / "rpi_logger"
 
 from .core import CameraController, CameraSettings, CameraState, CameraPhase, USBDeviceInfo
-from .discovery import get_device_by_path, get_device_by_stable_id, CameraKnowledge
+from .discovery import CameraKnowledge
 from .ui.view import USBCameraView
 
 try:
@@ -134,10 +134,27 @@ class USBCamerasRuntime(ModuleRuntime):
         if StatusMessage:
             StatusMessage.send("ready")
 
-        device_path = getattr(self.ctx.args, "device", None)
-        if device_path:
-            self.logger.info("Auto-assigning USB camera %s via CLI arg", device_path)
-            await self._assign_device_by_path(device_path, "cli_auto_assign")
+        device_arg = getattr(self.ctx.args, "device", None)
+        if device_arg:
+            # CLI arg can be an integer index (Windows) or device path (Linux)
+            self.logger.info("Auto-assigning USB camera %s via CLI arg", device_arg)
+            try:
+                camera_index = int(device_arg)
+                device = camera_index
+            except ValueError:
+                device = device_arg
+                camera_index = None
+
+            device_info = USBDeviceInfo(
+                device=device,
+                stable_id=str(device_arg),
+                display_name=f"USB Camera ({device_arg})",
+                vid_pid="",
+                sysfs_path="",
+                bus_path="",
+            )
+            self._pending_device_ready = (str(device_arg), "cli_auto_assign")
+            await self.controller.assign(device_info)
         else:
             self.logger.info("Waiting for assign_device command")
 
@@ -186,61 +203,63 @@ class USBCamerasRuntime(ModuleRuntime):
         return False
 
     async def _handle_assign_device(self, command: Dict[str, Any]) -> bool:
-        device_path = command.get("device_path") or command.get("camera_dev_path")
-        stable_id = (
-            command.get("stable_id")
-            or command.get("camera_stable_id")
-            or command.get("device_id")
-        )
+        """Handle assign_device command using data directly from command.
+
+        The Logger's core DeviceSystem already discovered this camera and sent
+        all relevant metadata. We use that data directly instead of re-scanning
+        hardware, which avoids camera light flashes on Windows.
+        """
         command_id = command.get("command_id")
 
-        self.logger.info("assign_device: device_path=%s, stable_id=%s", device_path, stable_id)
+        # Extract device identification from command
+        # camera_index is preferred on Windows (integer for cv2.VideoCapture)
+        # camera_dev_path is preferred on Linux (/dev/video* path)
+        camera_index = command.get("camera_index")
+        camera_dev_path = command.get("camera_dev_path") or command.get("device_path")
+        stable_id = (
+            command.get("camera_stable_id")
+            or command.get("stable_id")
+            or command.get("device_id", "")
+        )
+        display_name = command.get("display_name") or f"USB Camera ({stable_id})"
 
+        self.logger.info(
+            "assign_device: camera_index=%s, dev_path=%s, stable_id=%s, display_name=%s",
+            camera_index, camera_dev_path, stable_id, display_name
+        )
+
+        # Acknowledge command receipt
         if StatusMessage:
-            device_id = stable_id or device_path or "unknown"
+            device_id = stable_id or str(camera_index) or camera_dev_path or "unknown"
             StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
 
-        if device_path:
-            return await self._assign_device_by_path(device_path, command_id)
-        elif stable_id:
-            return await self._assign_device_by_stable_id(stable_id, command_id)
+        # Determine the device identifier for cv2.VideoCapture
+        # On Windows: use camera_index (int)
+        # On Linux: use camera_dev_path (str like "/dev/video0")
+        if camera_index is not None:
+            device = camera_index
+        elif camera_dev_path:
+            device = camera_dev_path
         else:
-            self.logger.warning("assign_device: no device_path or stable_id")
+            self.logger.error("assign_device: no camera_index or camera_dev_path provided")
             if StatusMessage:
-                StatusMessage.send("device_error", {"error": "Missing device_path or stable_id"}, command_id=command_id)
+                StatusMessage.send("device_error", {"error": "Missing camera_index or camera_dev_path"}, command_id=command_id)
             return False
 
-    async def _assign_device_by_path(self, device_path: str, command_id: Optional[str]) -> bool:
-        device = await get_device_by_path(device_path)
-        if not device:
-            self.logger.error("Device not found: %s", device_path)
-            if StatusMessage:
-                StatusMessage.send("device_error", {"error": "Device not found"}, command_id=command_id)
-            return False
+        self._pending_device_ready = (stable_id or str(device), command_id)
 
-        self._pending_device_ready = (device.stable_id, command_id)
-
+        # Build USBDeviceInfo from command data (no hardware re-scanning)
         device_info = USBDeviceInfo(
-            device=device.dev_path,
-            stable_id=device.stable_id,
-            display_name=device.display_name,
-            vid_pid=device.vid_pid,
-            sysfs_path=device.sysfs_path,
-            bus_path=device.bus_path,
+            device=device,
+            stable_id=stable_id or str(device),
+            display_name=display_name,
+            vid_pid=command.get("camera_hw_model", ""),  # hw_model often contains vid:pid
+            sysfs_path="",  # Not available from command, not critical
+            bus_path=command.get("camera_location", ""),  # USB port location
         )
 
         await self.controller.assign(device_info)
         return True
-
-    async def _assign_device_by_stable_id(self, stable_id: str, command_id: Optional[str]) -> bool:
-        device = await get_device_by_stable_id(stable_id)
-        if not device:
-            self.logger.error("Device not found: %s", stable_id)
-            if StatusMessage:
-                StatusMessage.send("device_error", {"error": "Device not found"}, command_id=command_id)
-            return False
-
-        return await self._assign_device_by_path(device.dev_path, command_id)
 
     async def _handle_start_recording(self, command: Dict[str, Any]) -> bool:
         state = self.controller.state

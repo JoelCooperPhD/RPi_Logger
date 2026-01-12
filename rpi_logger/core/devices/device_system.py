@@ -31,6 +31,7 @@ Usage:
 """
 
 import asyncio
+import sys
 from typing import Callable, Awaitable, Any, Optional
 
 from rpi_logger.core.asyncio_utils import create_logged_task
@@ -51,6 +52,7 @@ from .internal_scanner import InternalDeviceScanner
 from .usb_camera_scanner import USBCameraScanner, CV2_AVAILABLE
 from .csi_scanner import CSIScanner, PICAMERA2_AVAILABLE
 from .uart_scanner import UARTScanner
+from .usb_hotplug import USBHotplugMonitor
 
 logger = get_module_logger("DeviceSystem")
 
@@ -177,6 +179,12 @@ class DeviceSystem:
             on_device_found=self._adapter.on_uart_device_found,
             on_device_lost=self._adapter.on_uart_device_lost,
         )
+
+        # USB Hotplug Monitor - on Windows, scanners subscribe to this
+        # instead of continuously polling (which causes camera lights to flash)
+        self._usb_hotplug: Optional[USBHotplugMonitor] = None
+        if sys.platform == "win32":
+            self._usb_hotplug = USBHotplugMonitor()
 
         # Scanner registry: maps (interface, family) to the scanner that handles it
         # This enables generic reannouncement when connections are enabled
@@ -517,6 +525,34 @@ class DeviceSystem:
         if self._on_devices_changed:
             self._on_devices_changed()
 
+    async def _on_usb_hotplug_event(self) -> None:
+        """Called when USB devices are plugged/unplugged (Windows only).
+
+        This triggers a rescan of all USB-related device scanners instead of
+        having them continuously poll. This prevents camera lights from flashing
+        and avoids cameras disappearing when they're in use.
+        """
+        logger.debug("USB hotplug event - triggering device rescans")
+
+        # Trigger rescan on all USB-related scanners
+        # Run force_scan on each scanner that supports it
+        try:
+            await self._usb_scanner.force_scan()
+        except Exception as e:
+            logger.error(f"Error rescanning USB devices: {e}")
+
+        if self._usb_camera_scanner:
+            try:
+                await self._usb_camera_scanner.force_scan()
+            except Exception as e:
+                logger.error(f"Error rescanning USB cameras: {e}")
+
+        if self._audio_scanner:
+            try:
+                await self._audio_scanner.force_scan()
+            except Exception as e:
+                logger.error(f"Error rescanning audio devices: {e}")
+
     def _handle_ui_connection_toggle(
         self,
         interface: InterfaceType,
@@ -630,6 +666,13 @@ class DeviceSystem:
         self._scanning_enabled = True
         logger.info("Starting device scanning")
 
+        # On Windows, start the USB hotplug monitor and subscribe scanners
+        # This replaces continuous polling with event-driven discovery
+        if self._usb_hotplug:
+            # Subscribe scanners to hotplug events
+            self._usb_hotplug.subscribe(self._on_usb_hotplug_event)
+            await self._usb_hotplug.start()
+
         # Start USB scanner
         await self._usb_scanner.start()
 
@@ -671,6 +714,11 @@ class DeviceSystem:
 
         self._scanning_enabled = False
         logger.info("Stopping device scanning")
+
+        # Stop USB hotplug monitor first (on Windows)
+        if self._usb_hotplug:
+            self._usb_hotplug.unsubscribe(self._on_usb_hotplug_event)
+            await self._usb_hotplug.stop()
 
         # Stop USB scanner
         await self._usb_scanner.stop()

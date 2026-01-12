@@ -1,8 +1,8 @@
 from .usb_scanner import (
     USBVideoDevice,
-    scan_usb_cameras,
-    get_device_by_path,
-    get_device_by_stable_id,
+    # Note: scan_usb_cameras, get_device_by_path, get_device_by_stable_id are
+    # deprecated - the core DeviceSystem handles discovery, modules receive
+    # device info via assign_device command
 )
 from .audio_matcher import (
     match_audio_to_camera,
@@ -25,9 +25,6 @@ from .camera_knowledge import (
 
 __all__ = [
     "USBVideoDevice",
-    "scan_usb_cameras",
-    "get_device_by_path",
-    "get_device_by_stable_id",
     "match_audio_to_camera",
     "list_all_audio_devices",
     "probe_camera_modes",

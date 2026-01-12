@@ -57,7 +57,12 @@ async def probe_video_devices_opencv() -> list[VideoDevice]:
     def _probe():
         result = []
         for idx in range(10):
-            cap = cv2.VideoCapture(idx)
+            # Use DirectShow on Windows to avoid MSMF/Orbbec issues
+            if sys.platform == "win32":
+                cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+            else:
+                cap = cv2.VideoCapture(idx)
+
             if cap.isOpened():
                 backend = cap.getBackendName()
                 result.append(VideoDevice(
@@ -66,6 +71,9 @@ async def probe_video_devices_opencv() -> list[VideoDevice]:
                     platform_id=str(idx),
                 ))
                 cap.release()
+            else:
+                cap.release()
+                break
         return result
 
     devices = await asyncio.to_thread(_probe)

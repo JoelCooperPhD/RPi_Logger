@@ -34,7 +34,7 @@ class WindowsCameraBackend:
     to get actual device names similar to how macOS uses AVFoundation.
     """
 
-    def discover_cameras(self, max_devices: int = 16) -> list[DiscoveredUSBCamera]:
+    def discover_cameras(self, max_devices: int = 4) -> list[DiscoveredUSBCamera]:
         """Discover cameras on Windows using OpenCV enumeration."""
         if not CV2_AVAILABLE:
             logger.debug("OpenCV not available, skipping camera discovery")
@@ -43,7 +43,8 @@ class WindowsCameraBackend:
         cameras: list[DiscoveredUSBCamera] = []
 
         for index in range(max_devices):
-            cap = cv2.VideoCapture(index)
+            # Use DirectShow backend to avoid MSMF/Orbbec issues
+            cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
             if cap and cap.isOpened():
                 cap.release()
                 cameras.append(DiscoveredUSBCamera(
@@ -53,6 +54,7 @@ class WindowsCameraBackend:
                     friendly_name=f"USB Camera {index}",
                     hw_model="USB Camera",
                     location_hint=None,
+                    camera_index=index,
                 ))
                 logger.debug(f"Discovered Windows camera at index {index}")
             else:

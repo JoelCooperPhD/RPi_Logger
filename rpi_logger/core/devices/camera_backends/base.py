@@ -46,6 +46,8 @@ class DiscoveredUSBCamera:
             video and audio interfaces on the same physical device
         audio_sibling: If this webcam has a built-in microphone, contains the
             audio device details. None if no audio sibling was found.
+        camera_index: Integer index for cv2.VideoCapture (primarily for Windows).
+            On Linux this is extracted from dev_path (e.g., /dev/video0 -> 0).
     """
 
     device_id: str
@@ -56,6 +58,7 @@ class DiscoveredUSBCamera:
     location_hint: Optional[str]
     usb_bus_path: Optional[str] = None
     audio_sibling: Optional[AudioSiblingInfo] = None
+    camera_index: Optional[int] = None
 
 
 class CameraBackend(Protocol):

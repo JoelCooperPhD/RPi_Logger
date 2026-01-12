@@ -150,6 +150,7 @@ class CommandMessage:
         camera_dev_path: str = None,
         camera_hw_model: str = None,
         camera_location: str = None,
+        camera_index: int = None,
         display_name: str = None,
         # Camera audio sibling fields (for webcams with built-in microphones)
         camera_audio_index: int = None,
@@ -221,6 +222,8 @@ class CommandMessage:
             kwargs["camera_hw_model"] = camera_hw_model
         if camera_location:
             kwargs["camera_location"] = camera_location
+        if camera_index is not None:
+            kwargs["camera_index"] = camera_index
         if display_name:
             kwargs["display_name"] = display_name
         # Camera audio sibling fields

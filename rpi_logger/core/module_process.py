@@ -180,7 +180,12 @@ class ModuleProcess:
             return False
 
     def _find_venv_python(self) -> Optional[str]:
-        venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
+        # Use platform-appropriate path for venv Python
+        if sys.platform == "win32":
+            venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+        else:
+            venv_python = PROJECT_ROOT / ".venv" / "bin" / "python"
+
         if venv_python.exists():
             return str(venv_python)
 
