@@ -1,12 +1,11 @@
-from .encoder import VideoEncoder
-from .muxer import LegacyAVMuxer, SimpleVideoOnlyEncoder
-from .timing_writer import TimingCSVWriter
-from .session import RecordingSession
+"""Recording module - video/audio output."""
+
+from .recorder import VideoRecorder
+from .timing import TimingWriter
+from .muxer import AVMuxer
 
 __all__ = [
-    "VideoEncoder",
-    "LegacyAVMuxer",
-    "SimpleVideoOnlyEncoder",
-    "TimingCSVWriter",
-    "RecordingSession",
+    "VideoRecorder",
+    "TimingWriter",
+    "AVMuxer",
 ]

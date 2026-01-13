@@ -1,169 +1,64 @@
+"""State definitions for USB camera module."""
+
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any, Optional
-
-FRAME_RATE_OPTIONS = [1, 2, 5, 10, 15, 30]
-PREVIEW_DIVISOR_OPTIONS = [1, 2, 4, 8]
-SAMPLE_RATE_OPTIONS = [22050, 44100, 48000]
+from typing import Optional
 
 
-class CameraPhase(Enum):
+class Phase(Enum):
+    """Camera lifecycle phase."""
+
     IDLE = auto()
-    PROBING = auto()
-    READY = auto()
+    STARTING = auto()
     STREAMING = auto()
     ERROR = auto()
 
 
 class RecordingPhase(Enum):
+    """Recording state."""
+
     STOPPED = auto()
-    STARTING = auto()
     RECORDING = auto()
-    STOPPING = auto()
-
-
-class AudioPhase(Enum):
-    IDLE = auto()
-    CAPTURING = auto()
 
 
 @dataclass(frozen=True)
-class USBDeviceInfo:
-    device: int | str
-    stable_id: str
-    display_name: str
-    vid_pid: str = ""
-    sysfs_path: str = ""
-    bus_path: str = ""
+class Settings:
+    """User settings - immutable."""
 
-    @property
-    def dev_path(self) -> str:
-        return str(self.device) if isinstance(self.device, int) else self.device
-
-
-@dataclass(frozen=True)
-class USBAudioDevice:
-    card_index: int
-    device_name: str
-    bus_path: str
-    channels: int
-    sample_rates: tuple[int, ...]
-    sounddevice_index: int
-
-
-@dataclass(frozen=True)
-class CameraCapabilities:
-    camera_id: str
-    modes: tuple[dict[str, Any], ...] = ()
-    controls: dict[str, tuple[Any, Any, Any]] = field(default_factory=dict)
-    default_resolution: tuple[int, int] = (640, 480)
-    default_fps: float = 30.0
-
-
-@dataclass(frozen=True)
-class CameraSettings:
     resolution: tuple[int, int] = (640, 480)
-    frame_rate: int = 30
-    preview_divisor: int = 4
-    preview_scale: float = 0.25
-    audio_mode: str = "auto"
+    frame_rate: int = 30  # Target record/display rate
+    preview_divisor: int = 4  # Preview at frame_rate / divisor
+    preview_scale: float = 0.25  # Preview image scale
+    audio_enabled: bool = False
+    audio_device_index: Optional[int] = None
     sample_rate: int = 48000
-
-    @property
-    def preview_fps(self) -> int:
-        return max(1, self.frame_rate // self.preview_divisor)
+    audio_channels: int = 1
 
 
 @dataclass(frozen=True)
-class FrameMetrics:
-    frames_captured: int = 0
-    frames_recorded: int = 0
-    frames_previewed: int = 0
-    frames_dropped: int = 0
-    audio_chunks_captured: int = 0
-    last_frame_time: float = 0.0
-    capture_fps_actual: float = 0.0
-    record_fps_actual: float = 0.0
-    preview_fps_actual: float = 0.0
+class Metrics:
+    """Runtime metrics - immutable snapshot."""
+
+    hardware_fps: float = 0.0  # What camera actually delivers
+    record_fps: float = 0.0  # Actual recording rate
+    preview_fps: float = 0.0  # Actual preview rate
+    frames_captured: int = 0  # Total from hardware
+    frames_recorded: int = 0  # Written to video
+    frames_dropped: int = 0  # Buffer overflows
+    audio_chunks: int = 0  # Audio chunks captured
 
 
 @dataclass
 class CameraState:
-    phase: CameraPhase = CameraPhase.IDLE
-    error_message: str = ""
+    """Mutable camera state."""
+
+    phase: Phase = Phase.IDLE
     recording_phase: RecordingPhase = RecordingPhase.STOPPED
-    audio_phase: AudioPhase = AudioPhase.IDLE
-
-    device_info: Optional[USBDeviceInfo] = None
-    capabilities: Optional[CameraCapabilities] = None
-    probing_progress: str = ""
-    audio_device: Optional[USBAudioDevice] = None
-
-    settings: CameraSettings = field(default_factory=CameraSettings)
-    metrics: FrameMetrics = field(default_factory=FrameMetrics)
+    settings: Settings = field(default_factory=Settings)
+    metrics: Metrics = field(default_factory=Metrics)
+    error: str = ""
     session_dir: Optional[Path] = None
     trial_number: int = 0
-    preview_frame: Optional[bytes] = None
-
-    @property
-    def can_stream(self) -> bool:
-        return self.phase == CameraPhase.READY
-
-    @property
-    def can_record(self) -> bool:
-        return self.phase == CameraPhase.STREAMING and self.recording_phase == RecordingPhase.STOPPED
-
-    @property
-    def is_recording(self) -> bool:
-        # True during STARTING/RECORDING - use for "should we stop?" checks
-        # For "should we write frames?" use recording_phase == RECORDING directly
-        return self.recording_phase in (RecordingPhase.STARTING, RecordingPhase.RECORDING)
-
-    @property
-    def phase_display(self) -> str:
-        if self.phase == CameraPhase.ERROR:
-            return "Error"
-        if self.recording_phase == RecordingPhase.RECORDING:
-            return "Recording"
-        if self.recording_phase == RecordingPhase.STARTING:
-            return "Starting..."
-        if self.recording_phase == RecordingPhase.STOPPING:
-            return "Stopping..."
-        return self.phase.name.capitalize()
-
-    @property
-    def audio_available(self) -> bool:
-        return self.audio_device is not None
-
-    @property
-    def audio_enabled(self) -> bool:
-        return self.settings.audio_mode != "off"
-
-    @property
-    def audio_capturing(self) -> bool:
-        return self.audio_phase == AudioPhase.CAPTURING
-
-    @property
-    def assigned(self) -> bool:
-        return self.phase != CameraPhase.IDLE
-
-    @property
-    def probing(self) -> bool:
-        return self.phase == CameraPhase.PROBING
-
-    @property
-    def ready(self) -> bool:
-        return self.phase == CameraPhase.READY
-
-    @property
-    def streaming(self) -> bool:
-        return self.phase == CameraPhase.STREAMING
-
-    @property
-    def recording(self) -> bool:
-        return self.recording_phase == RecordingPhase.RECORDING
-
-    @property
-    def has_error(self) -> bool:
-        return self.phase == CameraPhase.ERROR
+    device_name: str = ""
+    has_audio: bool = False

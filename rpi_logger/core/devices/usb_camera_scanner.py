@@ -10,8 +10,14 @@ This is separate from the CSI scanner which handles Pi cameras.
 """
 
 import asyncio
+import os
 import sys
 from typing import Callable, Dict, Awaitable, Optional
+
+# Disable MSMF hardware transforms on Windows to fix slow camera initialization.
+# Must be set BEFORE importing cv2. See: https://github.com/opencv/opencv/issues/17687
+if sys.platform == "win32":
+    os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 
 from rpi_logger.core.logging_utils import get_module_logger
 
@@ -132,15 +138,14 @@ class USBCameraScanner:
     async def _scan_loop(self) -> None:
         """Main scanning loop.
 
-        On Windows, we don't continuously poll - the USBHotplugMonitor
-        calls force_scan() when USB devices change. This prevents camera
-        lights from flashing and cameras disappearing when in use.
+        On Windows and macOS, we don't continuously poll - the USBHotplugMonitor
+        calls force_scan() when USB devices change. On Windows this prevents
+        camera lights from flashing; on macOS it provides consistent behavior.
 
-        On Linux/macOS, we continue polling since sysfs/AVFoundation
-        are lightweight and don't have these issues.
+        On Linux, we continue polling since sysfs is lightweight.
         """
-        # Windows: Don't continuously poll - wait for hotplug events
-        if sys.platform == "win32":
+        # Windows/macOS: Don't continuously poll - wait for hotplug events
+        if sys.platform in ("win32", "darwin"):
             # Just keep the task alive, actual scanning triggered by hotplug
             while self._running:
                 try:
@@ -149,7 +154,7 @@ class USBCameraScanner:
                     break
             return
 
-        # Linux/macOS: Continue polling (sysfs/AVFoundation are lightweight)
+        # Linux: Continue polling (sysfs is lightweight)
         while self._running:
             try:
                 await asyncio.sleep(self._scan_interval)

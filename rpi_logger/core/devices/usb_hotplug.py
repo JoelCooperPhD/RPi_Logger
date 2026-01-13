@@ -30,10 +30,13 @@ def count_usb_devices() -> int:
 
     This does NOT interact with hardware - it just counts enumerated devices.
     On Windows, this uses serial port enumeration which is very fast.
+    On macOS, this uses ioreg to query the IO Registry (also fast).
     On Linux, this reads /sys/bus/usb/devices which is also lightweight.
     """
     if sys.platform == "win32":
         return _count_usb_devices_windows()
+    elif sys.platform == "darwin":
+        return _count_usb_devices_macos()
     else:
         return _count_usb_devices_linux()
 
@@ -53,6 +56,53 @@ def _count_usb_devices_windows() -> int:
     except Exception as e:
         logger.debug(f"Error counting Windows USB devices: {e}")
         return 0
+
+
+def _count_usb_devices_macos() -> int:
+    """Count USB devices on macOS via IORegistry.
+
+    Uses ioreg to query the IOUSB plane of the IO Registry, which is fast
+    (~20ms) and doesn't interact with hardware directly. This provides a
+    lightweight way to detect when USB devices are plugged/unplugged.
+
+    Falls back to serial port enumeration if ioreg fails.
+    """
+    import subprocess
+    try:
+        # ioreg -p IOUSB lists all USB devices in the IO Registry
+        # -w0 disables line wrapping for consistent parsing
+        result = subprocess.run(
+            ["ioreg", "-p", "IOUSB", "-w0"],
+            capture_output=True,
+            text=True,
+            timeout=5.0
+        )
+        if result.returncode == 0:
+            # Count lines with "@" which indicate device nodes
+            # Filter out hub entries to count actual leaf devices
+            lines = result.stdout.splitlines()
+            device_count = sum(
+                1 for line in lines
+                if "@" in line and "Hub" not in line
+            )
+            return device_count
+    except FileNotFoundError:
+        logger.debug("ioreg not available on this system")
+    except subprocess.TimeoutExpired:
+        logger.debug("ioreg command timed out")
+    except Exception as e:
+        logger.debug(f"ioreg failed, falling back to comports: {e}")
+
+    # Fallback: use serial ports like Windows
+    try:
+        import serial.tools.list_ports
+        return len(list(serial.tools.list_ports.comports()))
+    except ImportError:
+        logger.debug("serial.tools.list_ports not available")
+    except Exception as e:
+        logger.debug(f"Fallback comports failed: {e}")
+
+    return 0
 
 
 def _count_usb_devices_linux() -> int:

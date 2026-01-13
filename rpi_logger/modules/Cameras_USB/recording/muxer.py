@@ -1,389 +1,200 @@
-from fractions import Fraction
-from pathlib import Path
+"""Audio/Video muxer using PyAV."""
+
 import asyncio
-import subprocess
-import tempfile
-import threading
-import wave
-from typing import Optional, IO
+import logging
+from pathlib import Path
+from typing import Optional, TYPE_CHECKING
 
-import numpy as np
+if TYPE_CHECKING:
+    from ..capture import CapturedFrame, AudioChunk
 
-try:
-    import av
-    HAS_AV = True
-except ImportError:
-    HAS_AV = False
-
-from ..capture.frame import CapturedFrame, AudioChunk
+logger = logging.getLogger(__name__)
 
 
-class TimestampedMuxer:
+class AVMuxer:
+    """Muxes video and audio streams using PyAV.
+
+    Creates MP4 files with H.264 video and AAC audio.
+    Cross-platform compatible (Windows/Mac/Linux/Pi).
+    """
+
     def __init__(
         self,
-        output_path: Path,
-        video_fps: int,
+        path: Path,
         resolution: tuple[int, int],
-        audio_sample_rate: int,
+        video_fps: int,
+        sample_rate: int,
         audio_channels: int,
-        sync_ns: int,
     ):
-        if not HAS_AV:
-            raise RuntimeError("PyAV required for synchronized audio recording")
+        """Initialize muxer.
 
-        self._output_path = output_path
-        self._video_fps = video_fps
+        Args:
+            path: Output file path (.mp4)
+            resolution: Video resolution (width, height)
+            video_fps: Video frame rate
+            sample_rate: Audio sample rate (Hz)
+            audio_channels: Number of audio channels
+        """
+        self._path = path
         self._resolution = resolution
-        self._audio_sample_rate = audio_sample_rate
+        self._video_fps = video_fps
+        self._sample_rate = sample_rate
         self._audio_channels = audio_channels
-        self._sync_ns = sync_ns
 
-        self._container: Optional["av.Container"] = None
+        self._container = None
         self._video_stream = None
         self._audio_stream = None
-        self._lock = threading.Lock()
-        self._running = False
-        self._frame_count = 0
-        self._audio_samples = 0
-        self._frames_dropped = 0
-        self._chunks_dropped = 0
+
+        self._video_frame_count = 0
+        self._audio_sample_count = 0
+        self._lock = asyncio.Lock()
 
     async def start(self) -> None:
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._container = await asyncio.to_thread(
-            av.open, str(self._output_path), 'w'
-        )
-
-        self._video_stream = self._container.add_stream('libx264', rate=self._video_fps)
-        self._video_stream.width, self._video_stream.height = self._resolution
-        self._video_stream.pix_fmt = 'yuv420p'
-        self._video_stream.time_base = Fraction(1, self._video_fps)
-        self._video_stream.options = {'preset': 'ultrafast', 'crf': '23'}
-
-        self._audio_stream = self._container.add_stream('aac', rate=self._audio_sample_rate)
-        self._audio_stream.layout = 'stereo' if self._audio_channels == 2 else 'mono'
-        self._audio_stream.time_base = Fraction(1, self._audio_sample_rate)
-
-        self._running = True
-        self._frame_count = 0
-        self._audio_samples = 0
-
-    async def write_video_frame(self, frame: CapturedFrame) -> None:
-        if not self._running or not self._container:
-            return
-
-        if frame.monotonic_ns < self._sync_ns:
-            self._frames_dropped += 1
-            return
-
-        pts = self._frame_count
-
-        data = frame.data
-        if frame.color_format == "RGB":
-            import cv2
-            data = cv2.cvtColor(data, cv2.COLOR_RGB2BGR)
-
-        if data.shape[1] != self._resolution[0] or data.shape[0] != self._resolution[1]:
-            import cv2
-            data = cv2.resize(data, self._resolution, interpolation=cv2.INTER_LINEAR)
-
-        def encode_frame():
-            av_frame = av.VideoFrame.from_ndarray(data, format='bgr24')
-            av_frame.pts = pts
-            with self._lock:
-                for packet in self._video_stream.encode(av_frame):
-                    self._container.mux(packet)
-
-        await asyncio.to_thread(encode_frame)
-        self._frame_count += 1
-
-    async def write_audio_chunk(self, chunk: AudioChunk) -> None:
-        if not self._running or not self._container:
-            return
-
-        if chunk.monotonic_ns < self._sync_ns:
-            self._chunks_dropped += 1
-            return
-
-        pts = self._audio_samples
-
-        def encode_chunk():
-            audio_data = np.ascontiguousarray(chunk.data.T, dtype=np.float32)
-            layout = 'stereo' if self._audio_channels == 2 else 'mono'
-            av_frame = av.AudioFrame.from_ndarray(audio_data, format='fltp', layout=layout)
-            av_frame.sample_rate = chunk.sample_rate
-            av_frame.pts = pts
-            with self._lock:
-                for packet in self._audio_stream.encode(av_frame):
-                    self._container.mux(packet)
-
-        await asyncio.to_thread(encode_chunk)
-        self._audio_samples += chunk.samples
-
-    async def stop(self) -> None:
-        self._running = False
-        if self._container:
-            def finalize():
-                with self._lock:
-                    for packet in self._video_stream.encode():
-                        self._container.mux(packet)
-                    for packet in self._audio_stream.encode():
-                        self._container.mux(packet)
-                    self._container.close()
-            await asyncio.to_thread(finalize)
-            self._container = None
-
-    @property
-    def frame_count(self) -> int:
-        return self._frame_count
-
-    @property
-    def audio_samples(self) -> int:
-        return self._audio_samples
-
-    @property
-    def is_running(self) -> bool:
-        return self._running
-
-
-class LegacyAVMuxer:
-    def __init__(
-        self,
-        output_path: Path,
-        video_fps: int,
-        resolution: tuple[int, int],
-        audio_sample_rate: int,
-        audio_channels: int,
-    ):
-        self._output_path = output_path
-        self._video_fps = video_fps
-        self._resolution = resolution
-        self._audio_sample_rate = audio_sample_rate
-        self._audio_channels = audio_channels
-
-        self._temp_dir: Optional[tempfile.TemporaryDirectory] = None
-        self._temp_video_path: Optional[Path] = None
-        self._temp_audio_path: Optional[Path] = None
-
-        self._video_process: Optional[asyncio.subprocess.Process] = None
-        self._audio_file: Optional[IO[bytes]] = None
-
-        self._running = False
-        self._frame_count = 0
-        self._audio_samples = 0
-
-    async def start(self) -> None:
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        self._temp_dir = tempfile.TemporaryDirectory(prefix="usbcam_mux_")
-        temp_path = Path(self._temp_dir.name)
-
-        self._temp_video_path = temp_path / "video.mp4"
-        self._temp_audio_path = temp_path / "audio.wav"
-
-        width, height = self._resolution
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "rawvideo",
-            "-pix_fmt", "bgr24",
-            "-s", f"{width}x{height}",
-            "-r", str(self._video_fps),
-            "-i", "pipe:0",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "23",
-            str(self._temp_video_path),
-        ]
-
-        self._video_process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-
-        self._audio_file = await asyncio.to_thread(self._open_wav_file)
-
-        self._running = True
-        self._frame_count = 0
-        self._audio_samples = 0
-
-    def _open_wav_file(self) -> IO[bytes]:
-        wf = wave.open(str(self._temp_audio_path), 'wb')
-        wf.setnchannels(self._audio_channels)
-        wf.setsampwidth(2)
-        wf.setframerate(self._audio_sample_rate)
-        return wf
-
-    async def write_video_frame(self, frame: CapturedFrame) -> None:
-        if not self._running or not self._video_process or not self._video_process.stdin:
-            return
-
-        data = frame.data
-        if frame.color_format == "RGB":
-            import cv2
-            data = cv2.cvtColor(data, cv2.COLOR_RGB2BGR)
-
-        if data.shape[1] != self._resolution[0] or data.shape[0] != self._resolution[1]:
-            import cv2
-            data = cv2.resize(data, self._resolution, interpolation=cv2.INTER_LINEAR)
-
-        self._video_process.stdin.write(data.tobytes())
-        await self._video_process.stdin.drain()
-        self._frame_count += 1
-
-    async def write_audio_chunk(self, chunk: AudioChunk) -> None:
-        if not self._running or not self._audio_file:
-            return
-
-        audio_float = chunk.data.astype(np.float32)
-        audio_int16 = (audio_float * 32767).astype(np.int16)
-        await asyncio.to_thread(self._audio_file.writeframes, audio_int16.tobytes())
-        self._audio_samples += chunk.samples
-
-    async def stop(self) -> None:
-        self._running = False
-
-        if self._video_process:
-            if self._video_process.stdin:
-                self._video_process.stdin.close()
-                await self._video_process.stdin.wait_closed()
-            try:
-                await asyncio.wait_for(self._video_process.wait(), timeout=10.0)
-            except asyncio.TimeoutError:
-                self._video_process.kill()
-                await self._video_process.wait()
-            self._video_process = None
-
-        if self._audio_file:
-            await asyncio.to_thread(self._audio_file.close)
-            self._audio_file = None
-
-        await self._final_mux()
-
-        if self._temp_dir:
-            self._temp_dir.cleanup()
-            self._temp_dir = None
-
-    async def _final_mux(self) -> None:
-        if not self._temp_video_path or not self._temp_audio_path:
-            return
-
-        if not self._temp_video_path.exists():
-            return
-
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-i", str(self._temp_video_path),
-            "-i", str(self._temp_audio_path),
-            "-c:v", "copy",
-            "-c:a", "aac", "-b:a", "128k",
-            "-shortest",
-            str(self._output_path),
-        ]
-
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-
+        """Open output file and initialize streams."""
         try:
-            await asyncio.wait_for(proc.wait(), timeout=30.0)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+            import av
+        except ImportError:
+            raise RuntimeError("PyAV not installed. Install with: pip install av")
 
-    @property
-    def frame_count(self) -> int:
-        return self._frame_count
+        self._container = av.open(str(self._path), mode="w")
 
-    @property
-    def audio_samples(self) -> int:
-        return self._audio_samples
+        from fractions import Fraction
 
-    @property
-    def output_path(self) -> Path:
-        return self._output_path
+        # Video stream - H.264
+        self._video_stream = self._container.add_stream("libx264", rate=self._video_fps)
+        self._video_stream.width = self._resolution[0]
+        self._video_stream.height = self._resolution[1]
+        self._video_stream.pix_fmt = "yuv420p"
+        # Use high-resolution time_base for precise timestamps (codec may change it)
+        self._video_stream.codec_context.time_base = Fraction(1, self._video_fps)
+        # Fast encoding preset for real-time
+        self._video_stream.options = {"preset": "ultrafast", "tune": "zerolatency"}
 
-    @property
-    def is_running(self) -> bool:
-        return self._running
+        # Audio stream - AAC (rate must be int, not float)
+        # Set layout to configure channels (channels property is read-only in newer PyAV)
+        sample_rate_int = int(self._sample_rate)
+        self._audio_stream = self._container.add_stream("aac", rate=sample_rate_int)
+        self._audio_stream.layout = "mono" if self._audio_channels == 1 else "stereo"
+        self._audio_stream.codec_context.time_base = Fraction(1, sample_rate_int)
 
+        self._video_frame_count = 0
+        self._audio_sample_count = 0
 
-class SimpleVideoOnlyEncoder:
-    def __init__(
-        self,
-        output_path: Path,
-        video_fps: int,
-        resolution: tuple[int, int],
-    ):
-        self._output_path = output_path
-        self._video_fps = video_fps
-        self._resolution = resolution
-        self._process: Optional[asyncio.subprocess.Process] = None
-        self._running = False
-        self._frame_count = 0
-
-    async def start(self) -> None:
-        self._output_path.parent.mkdir(parents=True, exist_ok=True)
-
-        width, height = self._resolution
-        cmd = [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "rawvideo",
-            "-pix_fmt", "bgr24",
-            "-s", f"{width}x{height}",
-            "-r", str(self._video_fps),
-            "-i", "pipe:0",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "23",
-            str(self._output_path),
-        ]
-
-        self._process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+        logger.info(
+            "AVMuxer started: %s (video=%dx%d@%dfps, audio=%dHz/%dch)",
+            self._path,
+            *self._resolution,
+            self._video_fps,
+            self._sample_rate,
+            self._audio_channels,
         )
-        self._running = True
-        self._frame_count = 0
 
-    async def write_frame(self, frame: CapturedFrame) -> None:
-        if not self._running or not self._process or not self._process.stdin:
+    async def write_video(self, frame: "CapturedFrame") -> None:
+        """Write a video frame.
+
+        Args:
+            frame: Captured video frame (BGR format)
+        """
+        if not self._container or not self._video_stream:
             return
 
-        data = frame.data
-        if frame.color_format == "RGB":
-            import cv2
-            data = cv2.cvtColor(data, cv2.COLOR_RGB2BGR)
+        async with self._lock:
+            await asyncio.to_thread(self._write_video_sync, frame)
 
-        if data.shape[1] != self._resolution[0] or data.shape[0] != self._resolution[1]:
-            import cv2
-            data = cv2.resize(data, self._resolution, interpolation=cv2.INTER_LINEAR)
+    def _write_video_sync(self, frame: "CapturedFrame") -> None:
+        """Synchronous video write (runs in thread)."""
+        import av
+        import cv2
 
-        self._process.stdin.write(data.tobytes())
-        await self._process.stdin.drain()
-        self._frame_count += 1
+        # Convert BGR to RGB
+        rgb = cv2.cvtColor(frame.data, cv2.COLOR_BGR2RGB)
+
+        # Create PyAV frame with pts in codec time_base units
+        av_frame = av.VideoFrame.from_ndarray(rgb, format="rgb24")
+        av_frame.pts = self._video_frame_count
+        av_frame.time_base = self._video_stream.codec_context.time_base
+
+        # Encode and write
+        for packet in self._video_stream.encode(av_frame):
+            self._container.mux(packet)
+
+        self._video_frame_count += 1
+
+    async def write_audio(self, chunk: "AudioChunk") -> None:
+        """Write an audio chunk.
+
+        Args:
+            chunk: Audio chunk (float32 samples)
+        """
+        if not self._container or not self._audio_stream:
+            return
+
+        async with self._lock:
+            await asyncio.to_thread(self._write_audio_sync, chunk)
+
+    def _write_audio_sync(self, chunk: "AudioChunk") -> None:
+        """Synchronous audio write (runs in thread)."""
+        import av
+        import numpy as np
+
+        # Audio data is float32, reshape for channels
+        audio_data = chunk.data
+        if audio_data.ndim == 1:
+            audio_data = audio_data.reshape(-1, 1)
+
+        # Transpose to (channels, samples) for PyAV and ensure C-contiguous
+        audio_data = np.ascontiguousarray(audio_data.T)
+
+        # Create PyAV frame with pts in codec time_base units
+        av_frame = av.AudioFrame.from_ndarray(audio_data, format="fltp", layout=self._audio_stream.layout.name)
+        av_frame.sample_rate = chunk.sample_rate
+        av_frame.pts = self._audio_sample_count
+        av_frame.time_base = self._audio_stream.codec_context.time_base
+
+        # Encode and write
+        for packet in self._audio_stream.encode(av_frame):
+            self._container.mux(packet)
+
+        self._audio_sample_count += chunk.samples
 
     async def stop(self) -> None:
-        self._running = False
-        if self._process:
-            if self._process.stdin:
-                self._process.stdin.close()
-                await self._process.stdin.wait_closed()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=10.0)
-            except asyncio.TimeoutError:
-                self._process.kill()
-                await self._process.wait()
-            self._process = None
+        """Flush streams and close file."""
+        if not self._container:
+            return
+
+        async with self._lock:
+            await asyncio.to_thread(self._stop_sync)
+
+    def _stop_sync(self) -> None:
+        """Synchronous stop (runs in thread)."""
+        # Flush video stream
+        if self._video_stream:
+            for packet in self._video_stream.encode():
+                self._container.mux(packet)
+
+        # Flush audio stream
+        if self._audio_stream:
+            for packet in self._audio_stream.encode():
+                self._container.mux(packet)
+
+        self._container.close()
+        self._container = None
+        self._video_stream = None
+        self._audio_stream = None
+
+        logger.info(
+            "AVMuxer stopped: %s (%d video frames, %d audio samples)",
+            self._path,
+            self._video_frame_count,
+            self._audio_sample_count,
+        )
 
     @property
-    def frame_count(self) -> int:
-        return self._frame_count
+    def video_frame_count(self) -> int:
+        """Number of video frames written."""
+        return self._video_frame_count
 
     @property
-    def is_running(self) -> bool:
-        return self._running
+    def audio_sample_count(self) -> int:
+        """Number of audio samples written."""
+        return self._audio_sample_count

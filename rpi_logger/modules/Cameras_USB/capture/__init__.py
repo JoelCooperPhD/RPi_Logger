@@ -1,13 +1,15 @@
+"""Capture module - video and audio acquisition."""
+
 from .frame import CapturedFrame, AudioChunk
-from .frame_buffer import FrameBuffer, AudioBuffer
-from .usb_source import USBSource
-from .audio_source import AudioSource
+from .ring_buffer import FrameRingBuffer, AudioRingBuffer
+from .camera import USBCamera
+from .audio import AudioCapture
 
 __all__ = [
     "CapturedFrame",
     "AudioChunk",
-    "FrameBuffer",
-    "AudioBuffer",
-    "USBSource",
-    "AudioSource",
+    "FrameRingBuffer",
+    "AudioRingBuffer",
+    "USBCamera",
+    "AudioCapture",
 ]

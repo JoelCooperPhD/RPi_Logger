@@ -1,17 +1,15 @@
-from .state import (
-    USBDeviceInfo, USBAudioDevice,
-    CameraCapabilities, CameraSettings,
-    FrameMetrics, CameraState,
-    CameraPhase, RecordingPhase, AudioPhase,
-    FRAME_RATE_OPTIONS, PREVIEW_DIVISOR_OPTIONS, SAMPLE_RATE_OPTIONS,
-)
+"""Core module - state management and controller."""
+
+from .state import CameraState, Settings, Metrics, Phase, RecordingPhase
 from .controller import CameraController
+from .fps_meter import FPSMeter
 
 __all__ = [
-    "USBDeviceInfo", "USBAudioDevice",
-    "CameraCapabilities", "CameraSettings",
-    "FrameMetrics", "CameraState",
-    "CameraPhase", "RecordingPhase", "AudioPhase",
-    "FRAME_RATE_OPTIONS", "PREVIEW_DIVISOR_OPTIONS", "SAMPLE_RATE_OPTIONS",
+    "CameraState",
+    "Settings",
+    "Metrics",
+    "Phase",
+    "RecordingPhase",
     "CameraController",
+    "FPSMeter",
 ]

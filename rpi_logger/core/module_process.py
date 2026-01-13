@@ -494,6 +494,7 @@ class ModuleProcess:
         finally:
             self.shutdown_event.set()
             await self._cleanup_reader_tasks()
+            await self._close_subprocess_transport()
             self._shutdown_coordinator = None
             self.process = None
             self.state = ModuleState.STOPPED
@@ -510,6 +511,32 @@ class ModuleProcess:
                     pass
                 except Exception as e:
                     self.logger.debug("Error cleaning up task: %s", e)
+
+    async def _close_subprocess_transport(self) -> None:
+        """Close subprocess transport and pipes to prevent ResourceWarning.
+
+        On Windows, asyncio subprocess transports need explicit cleanup to avoid
+        'ValueError: I/O operation on closed pipe' during garbage collection.
+        """
+        if not self.process:
+            return
+
+        # Close stdin first (if open) to signal EOF to subprocess
+        if self.process.stdin:
+            try:
+                self.process.stdin.close()
+                await self.process.stdin.wait_closed()
+            except Exception:
+                pass  # Already closed or broken pipe
+
+        # Close the subprocess transport explicitly
+        # This prevents ResourceWarning about unclosed transport during GC
+        transport = getattr(self.process, '_transport', None)
+        if transport and not transport.is_closing():
+            try:
+                transport.close()
+            except Exception:
+                pass  # Already closed
 
     async def kill(self) -> None:
         """Force kill the module process without graceful shutdown."""
@@ -529,6 +556,7 @@ class ModuleProcess:
         finally:
             self.shutdown_event.set()
             await self._cleanup_reader_tasks()
+            await self._close_subprocess_transport()
             self.process = None
             self.state = ModuleState.STOPPED
             self.logger.info("Module killed: %s", self.module_info.name)

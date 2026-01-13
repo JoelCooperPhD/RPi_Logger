@@ -180,10 +180,11 @@ class DeviceSystem:
             on_device_lost=self._adapter.on_uart_device_lost,
         )
 
-        # USB Hotplug Monitor - on Windows, scanners subscribe to this
-        # instead of continuously polling (which causes camera lights to flash)
+        # USB Hotplug Monitor - on Windows and macOS, scanners subscribe to this
+        # instead of continuously polling. On Windows this prevents camera lights
+        # from flashing; on macOS it provides more responsive device detection.
         self._usb_hotplug: Optional[USBHotplugMonitor] = None
-        if sys.platform == "win32":
+        if sys.platform in ("win32", "darwin"):
             self._usb_hotplug = USBHotplugMonitor()
 
         # Scanner registry: maps (interface, family) to the scanner that handles it
@@ -193,6 +194,8 @@ class DeviceSystem:
 
         # Scanning state
         self._scanning_enabled = False
+        # Track which scanners have been started (scanners start lazily when connection enabled)
+        self._started_scanners: set[Any] = set()
 
         # Application callbacks
         self._on_connection_changed: Callable[[InterfaceType, DeviceFamily, bool], Awaitable[None] | None] | None = None
@@ -394,15 +397,23 @@ class DeviceSystem:
         interface: InterfaceType,
         family: DeviceFamily
     ) -> None:
-        """Reannounce devices when a connection type is enabled.
+        """Start scanner and announce devices when a connection type is enabled.
 
-        This ensures devices discovered before the connection was enabled
-        get properly added to the lifecycle manager.
+        Scanners are started lazily - only when their connection type is enabled.
+        This avoids scanning for devices the user doesn't need (e.g., no camera
+        scanning if user only wants DRT).
         """
         scanner = self._scanner_registry.get((interface, family))
         if scanner:
-            logger.info(f"Reannouncing devices after enabling {interface.value}:{family.value}")
-            await scanner.reannounce_devices()
+            # Start scanner if not already started
+            if scanner not in self._started_scanners:
+                logger.info(f"Starting scanner for {interface.value}:{family.value}")
+                await self._start_scanner(scanner)
+                self._started_scanners.add(scanner)
+            else:
+                # Scanner already running, just reannounce existing devices
+                logger.info(f"Reannouncing devices for {interface.value}:{family.value}")
+                await scanner.reannounce_devices()
 
     def get_enabled_connections(self) -> set[ConnectionKey]:
         """Get all enabled connection keys."""
@@ -526,28 +537,28 @@ class DeviceSystem:
             self._on_devices_changed()
 
     async def _on_usb_hotplug_event(self) -> None:
-        """Called when USB devices are plugged/unplugged (Windows only).
+        """Called when USB devices are plugged/unplugged (Windows and macOS).
 
-        This triggers a rescan of all USB-related device scanners instead of
-        having them continuously poll. This prevents camera lights from flashing
-        and avoids cameras disappearing when they're in use.
+        This triggers a rescan of all USB-related device scanners that have been
+        started. Scanners that haven't been started (because their connection
+        type isn't enabled) are skipped.
         """
         logger.debug("USB hotplug event - triggering device rescans")
 
-        # Trigger rescan on all USB-related scanners
-        # Run force_scan on each scanner that supports it
-        try:
-            await self._usb_scanner.force_scan()
-        except Exception as e:
-            logger.error(f"Error rescanning USB devices: {e}")
+        # Only rescan scanners that have been started
+        if self._usb_scanner in self._started_scanners:
+            try:
+                await self._usb_scanner.force_scan()
+            except Exception as e:
+                logger.error(f"Error rescanning USB devices: {e}")
 
-        if self._usb_camera_scanner:
+        if self._usb_camera_scanner and self._usb_camera_scanner in self._started_scanners:
             try:
                 await self._usb_camera_scanner.force_scan()
             except Exception as e:
                 logger.error(f"Error rescanning USB cameras: {e}")
 
-        if self._audio_scanner:
+        if self._audio_scanner and self._audio_scanner in self._started_scanners:
             try:
                 await self._audio_scanner.force_scan()
             except Exception as e:
@@ -658,54 +669,50 @@ class DeviceSystem:
     # Scanning Lifecycle
     # =========================================================================
 
+    async def _start_scanner(self, scanner: Any) -> None:
+        """Start an individual scanner.
+
+        Handles scanner-specific ordering requirements (e.g., camera before audio
+        for webcam mic filtering).
+        """
+        # Camera scanner must start before audio scanner so webcam mics
+        # are registered in MasterDeviceRegistry before AudioScanner sees them
+        if scanner == self._audio_scanner:
+            # Ensure camera scanners are started first if they're going to be used
+            if self._usb_camera_scanner and self._usb_camera_scanner not in self._started_scanners:
+                # Check if camera connection will be enabled
+                if self._selection.is_connection_enabled(InterfaceType.USB, DeviceFamily.CAMERA_USB):
+                    logger.debug("Starting camera scanner before audio (for webcam mic filtering)")
+                    await self._usb_camera_scanner.start()
+                    self._started_scanners.add(self._usb_camera_scanner)
+
+        await scanner.start()
+
     async def start_scanning(self) -> None:
-        """Start all device scanners."""
+        """Initialize the scanning infrastructure.
+
+        Note: Individual scanners are NOT started here. They start lazily when
+        their connection type is enabled. This avoids scanning for devices the
+        user doesn't need (e.g., no camera scanning if only using DRT).
+        """
         if self._scanning_enabled:
             return
 
         self._scanning_enabled = True
-        logger.info("Starting device scanning")
+        logger.info("Device scanning infrastructure ready (scanners start on demand)")
 
-        # On Windows, start the USB hotplug monitor and subscribe scanners
-        # This replaces continuous polling with event-driven discovery
+        # On Windows/macOS, start the USB hotplug monitor
+        # Scanners subscribe to this for event-driven discovery
         if self._usb_hotplug:
-            # Subscribe scanners to hotplug events
             self._usb_hotplug.subscribe(self._on_usb_hotplug_event)
             await self._usb_hotplug.start()
 
-        # Start USB scanner
-        await self._usb_scanner.start()
-
-        # Start USB camera scanner BEFORE audio scanner
-        # This ensures webcam mics are registered in MasterDeviceRegistry
-        # before AudioScanner tries to discover them
-        if self._usb_camera_scanner:
-            await self._usb_camera_scanner.start()
-
-        # Start CSI camera scanner
-        if self._csi_scanner:
-            await self._csi_scanner.start()
-
-        # Start audio scanner AFTER camera scanners
-        # (webcam mics are filtered out via MasterDeviceRegistry)
-        if self._audio_scanner:
-            await self._audio_scanner.start()
-
-        # Start internal device scanner
-        await self._internal_scanner.start()
-
-        # Start UART scanner
-        await self._uart_scanner.start()
-
-        # Start network scanner
-        if self._network_scanner:
-            await self._network_scanner.start()
-
-        # Start XBee manager (for wireless wVOG/wDRT devices)
+        # XBee manager runs independently - it scans for the coordinator dongle
+        # which then enables wireless device discovery
         if self._xbee_manager:
             await self._xbee_manager.start()
 
-        logger.info("Device scanning started")
+        logger.info("Device scanning infrastructure started")
 
     async def stop_scanning(self) -> None:
         """Stop all device scanners."""
@@ -715,40 +722,23 @@ class DeviceSystem:
         self._scanning_enabled = False
         logger.info("Stopping device scanning")
 
-        # Stop USB hotplug monitor first (on Windows)
+        # Stop USB hotplug monitor first (on Windows/macOS)
         if self._usb_hotplug:
             self._usb_hotplug.unsubscribe(self._on_usb_hotplug_event)
             await self._usb_hotplug.stop()
-
-        # Stop USB scanner
-        await self._usb_scanner.stop()
 
         # Stop XBee manager
         if self._xbee_manager:
             await self._xbee_manager.stop()
 
-        # Stop audio scanner
-        if self._audio_scanner:
-            await self._audio_scanner.stop()
+        # Stop only scanners that were actually started
+        for scanner in list(self._started_scanners):
+            try:
+                await scanner.stop()
+            except Exception as e:
+                logger.error(f"Error stopping scanner: {e}")
 
-        # Stop internal scanner
-        await self._internal_scanner.stop()
-
-        # Stop USB camera scanner
-        if self._usb_camera_scanner:
-            await self._usb_camera_scanner.stop()
-
-        # Stop CSI camera scanner
-        if self._csi_scanner:
-            await self._csi_scanner.stop()
-
-        # Stop UART scanner
-        await self._uart_scanner.stop()
-
-        # Stop network scanner
-        if self._network_scanner:
-            await self._network_scanner.stop()
-
+        self._started_scanners.clear()
         logger.info("Device scanning stopped")
 
     # =========================================================================
