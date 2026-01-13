@@ -27,10 +27,9 @@ logger = logging.getLogger(__name__)
 class CameraController:
     """Controls USB camera lifecycle and frame routing.
 
-    Implements "Capture Fast, Record Slow" pattern:
-    - Capture runs at hardware speed
-    - Consumer throttles to user's frame_rate
-    - Video FPS = actual recorded rate for correct playback
+    Records ALL frames from camera without rate limiting. The camera is
+    configured for the desired FPS via fps_hint, and we record everything
+    it delivers. Preview is throttled via preview_divisor to reduce UI load.
     """
 
     def __init__(self):
@@ -55,7 +54,6 @@ class CameraController:
 
         # Recording state
         self._frames_recorded = 0
-        self._record_fps_target = 30
 
     def subscribe(self, callback: Callable[[CameraState], None]) -> None:
         """Subscribe to state changes."""
@@ -281,17 +279,15 @@ class CameraController:
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Determine actual recording FPS
+        # Determine FPS for video container metadata
+        # Use min of requested and measured hardware FPS for accurate playback speed
         requested_fps = self._state.settings.frame_rate
         hardware_fps = self._camera.hardware_fps if self._camera else requested_fps
-
-        # Use min of requested and hardware (with buffer for measurement noise)
         if hardware_fps > 1:
             actual_fps = min(requested_fps, max(1, int(hardware_fps + 0.5)))
         else:
             actual_fps = requested_fps
 
-        self._record_fps_target = actual_fps
         self._frames_recorded = 0
 
         # Import recording modules
@@ -383,9 +379,11 @@ class CameraController:
         logger.info("Recording stopped: %d frames", self._frames_recorded)
 
     async def _consumer_loop(self) -> None:
-        """Consume frames from capture buffer, throttle to target rates.
+        """Consume frames from capture buffer and route to recording/preview.
 
-        Uses monotonic time for all throttling to avoid drift from wall clock.
+        Records ALL frames from camera - no rate limiting. The camera is already
+        configured for the desired FPS via fps_hint. Preview is throttled via
+        preview_divisor to reduce UI overhead.
         """
         if not self._frame_buffer:
             return
@@ -395,13 +393,12 @@ class CameraController:
         if self._audio_buffer and self._audio:
             audio_task = asyncio.create_task(self._audio_consumer_loop())
 
-        # Timing state - all monotonic, initialized on first frame
-        record_next = 0.0
+        # Timing state for preview and metrics (wall-clock based)
         preview_next = 0.0
         metrics_next = 0.0
 
         # FPS tracking via timestamp lists
-        record_times: list[float] = []
+        record_frame_times: list[float] = []
         preview_times: list[float] = []
 
         frame_count = 0
@@ -422,26 +419,22 @@ class CameraController:
                 # Initialize timing on first frame
                 if frame_count == 1:
                     logger.info("First frame: %dx%d", frame.size[0], frame.size[1])
-                    record_next = now
                     preview_next = now
                     metrics_next = now + 1.0
 
-                # Get current timing intervals from settings
+                # Preview interval from settings
                 settings = self._state.settings
-                record_interval = 1.0 / settings.frame_rate if settings.frame_rate > 0 else 1.0 / 30
-                preview_interval = record_interval * settings.preview_divisor
+                base_interval = 1.0 / settings.frame_rate if settings.frame_rate > 0 else 1.0 / 30
+                preview_interval = base_interval * settings.preview_divisor
 
-                # Record frame if due
+                # Record ALL frames - no rate limiting
                 if self._state.recording_phase == RecordingPhase.RECORDING:
-                    if now >= record_next:
-                        await self._record_frame(frame)
-                        self._frames_recorded += 1
-                        record_times.append(now)
-                        if len(record_times) > 30:
-                            record_times.pop(0)
-                        record_next += record_interval
-                        if record_next < now:
-                            record_next = now + record_interval
+                    await self._record_frame(frame)
+                    self._frames_recorded += 1
+                    frame_time = frame.timestamp_ns / 1e9
+                    record_frame_times.append(frame_time)
+                    if len(record_frame_times) > 30:
+                        record_frame_times.pop(0)
 
                 # Preview frame if due
                 if self._preview_callback and now >= preview_next:
@@ -460,7 +453,7 @@ class CameraController:
                     metrics_next = now + 1.0
                     self._state.metrics = Metrics(
                         hardware_fps=self._camera.hardware_fps if self._camera else 0.0,
-                        record_fps=calc_fps(record_times),
+                        record_fps=calc_fps(record_frame_times),
                         preview_fps=calc_fps(preview_times),
                         frames_captured=self._camera.frame_count if self._camera else 0,
                         frames_recorded=self._frames_recorded,

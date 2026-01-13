@@ -390,7 +390,7 @@ class DevicesPanel(ttk.LabelFrame):
 
         self._scrollable.bind(
             "<Configure>",
-            lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+            self._on_scrollable_configure
         )
 
         self._canvas_window = self._canvas.create_window(
@@ -432,6 +432,27 @@ class DevicesPanel(ttk.LabelFrame):
     def _on_canvas_configure(self, event) -> None:
         """Update scrollable frame width when canvas resizes."""
         self._canvas.itemconfig(self._canvas_window, width=event.width)
+        # Also update scroll region to ensure content stays at top
+        self._update_scroll_region()
+
+    def _on_scrollable_configure(self, event) -> None:
+        """Update scroll region when scrollable frame content changes."""
+        self._update_scroll_region()
+
+    def _update_scroll_region(self) -> None:
+        """Update scroll region to fit content while keeping it anchored to top.
+
+        When content is shorter than the canvas viewport, we set the scroll
+        region height to match the canvas height. This prevents the content
+        from floating or centering within the viewport.
+        """
+        bbox = self._canvas.bbox("all")
+        if bbox:
+            x1, y1, x2, y2 = bbox
+            canvas_height = self._canvas.winfo_height()
+            # Scroll region should be at least as tall as the canvas
+            scroll_height = max(y2, canvas_height)
+            self._canvas.configure(scrollregion=(0, 0, x2, scroll_height))
 
     def _on_mousewheel(self, event) -> None:
         """Handle mouse wheel scrolling."""
@@ -444,16 +465,20 @@ class DevicesPanel(ttk.LabelFrame):
         """Build the panel from controller data."""
         sections_data = self._controller.get_panel_data()
 
-        # Create sections
-        for section_data in sections_data:
-            section = DeviceSection(self._scrollable, section_data.label)
-            self._sections[section_data.label] = section
-
-        # Update with current data
+        # Update with current data (sections created on-demand)
         self._update_sections(sections_data)
 
+        # Ensure canvas starts at top
+        self._canvas.yview_moveto(0)
+
     def _update_sections(self, sections_data: list[DeviceSectionData]) -> None:
-        """Update all sections with new data."""
+        """Update all sections with new data.
+
+        Sections are created on-demand when they become visible for the first
+        time, rather than pre-creating all sections upfront. This ensures only
+        visible sections exist as children of the scrollable frame, preventing
+        layout issues from invisible widgets.
+        """
         has_any_visible = any(s.visible for s in sections_data)
 
         # Start row index - XBee banner takes row 0 if visible
@@ -470,16 +495,21 @@ class DevicesPanel(ttk.LabelFrame):
             self._empty_label.grid_remove()
 
             for section_data in sections_data:
-                section = self._sections.get(section_data.label)
-                if not section:
-                    continue
-
                 if section_data.visible:
+                    # Create section on-demand if it doesn't exist
+                    section = self._sections.get(section_data.label)
+                    if not section:
+                        section = DeviceSection(self._scrollable, section_data.label)
+                        self._sections[section_data.label] = section
+
                     section.update_devices(section_data.devices)
                     section.grid(row=row_idx, column=0, sticky="ew", pady=(0, 4))
                     row_idx += 1
                 else:
-                    section.grid_remove()
+                    # Remove from grid if exists but not visible
+                    section = self._sections.get(section_data.label)
+                    if section:
+                        section.grid_remove()
         else:
             for section in self._sections.values():
                 section.grid_remove()

@@ -23,8 +23,8 @@ logger = logging.getLogger(__name__)
 class USBCamera:
     """USB camera capture using OpenCV.
 
-    Captures at hardware speed (no throttling).
-    Consumer is responsible for rate limiting.
+    Captures at hardware speed configured via fps_hint.
+    All frames are recorded without rate limiting.
     """
 
     def __init__(

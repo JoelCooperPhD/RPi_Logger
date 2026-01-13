@@ -708,6 +708,21 @@ class USBCamerasRuntime(ModuleRuntime):
         # Brief pause to let hardware settle
         await asyncio.sleep(0.2)
 
+        # Re-detect audio if audio is now enabled but device_info lacks audio
+        settings = self.controller.state.settings
+        if settings.audio_enabled and not self._current_device_info.get("has_audio"):
+            self.logger.info("Audio enabled, re-detecting audio device...")
+            # Only re-detect if device is an integer camera index
+            if isinstance(device, int):
+                audio_info = self._discover_camera_audio_sibling(device)
+                if audio_info and audio_info.get("has_audio"):
+                    self._current_device_info.update(audio_info)
+                    self.logger.info(
+                        "Audio device found: index=%s, channels=%s",
+                        audio_info.get("audio_device_index"),
+                        audio_info.get("audio_channels"),
+                    )
+
         self.logger.info("Restarting stream with new settings...")
         await self._start_camera(device, self._current_device_info)
 
