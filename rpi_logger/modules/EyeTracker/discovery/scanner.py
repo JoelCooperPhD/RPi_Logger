@@ -2,7 +2,6 @@
 Network device scanner using mDNS/Zeroconf.
 
 Discovers Pupil Labs eye trackers (Neon, Invisible) on the local network.
-Follows the same pattern as USBScanner for consistency.
 """
 
 import asyncio
@@ -46,15 +45,6 @@ class NetworkScanner:
 
     Currently discovers Pupil Labs eye trackers that advertise via mDNS.
     Service pattern: "PI monitor:<device_name>:<hardware_id>._http._tcp.local."
-
-    Usage:
-        scanner = NetworkScanner(
-            on_device_found=handle_found,
-            on_device_lost=handle_lost,
-        )
-        await scanner.start()
-        # ... later ...
-        await scanner.stop()
     """
 
     # Pupil Labs uses _http._tcp.local. for service discovery
@@ -158,14 +148,7 @@ class NetworkScanner:
                     logger.error(f"Error re-announcing network device: {e}")
 
     def _on_service_state_change(self, **kwargs) -> None:
-        """Handle mDNS service state changes.
-
-        This is called from the zeroconf thread, so we schedule
-        the actual handling on the asyncio event loop.
-
-        Note: zeroconf >= 0.132 changed to keyword-only arguments.
-        Using **kwargs for compatibility with both old and new versions.
-        """
+        """Handle mDNS service state changes."""
         if self._loop is None:
             return
 
@@ -294,3 +277,12 @@ class NetworkScanner:
     def get_device(self, device_id: str) -> Optional[DiscoveredNetworkDevice]:
         """Get a specific device by ID."""
         return self._known_devices.get(device_id)
+
+
+__all__ = [
+    "NetworkScanner",
+    "DiscoveredNetworkDevice",
+    "NetworkDeviceFoundCallback",
+    "NetworkDeviceLostCallback",
+    "ZEROCONF_AVAILABLE",
+]

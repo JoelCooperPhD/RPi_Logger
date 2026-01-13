@@ -21,7 +21,7 @@ if sys.platform == "win32":
 
 from rpi_logger.core.logging_utils import get_module_logger
 
-from .camera_backends import get_camera_backend, DiscoveredUSBCamera, CameraBackend
+from .backends import get_camera_backend, DiscoveredUSBCamera, CameraBackend
 
 logger = get_module_logger("USBCameraScanner")
 
@@ -38,7 +38,7 @@ USBCameraFoundCallback = Callable[[DiscoveredUSBCamera], Awaitable[None]]
 USBCameraLostCallback = Callable[[str], Awaitable[None]]  # device_id
 
 
-class USBCameraScanner:
+class CameraScanner:
     """
     Continuously scans for USB camera devices.
 
@@ -213,8 +213,12 @@ class USBCameraScanner:
         return self._known_devices.get(device_id)
 
 
+# Alias for backwards compatibility with core/devices imports
+USBCameraScanner = CameraScanner
+
 __all__ = [
-    "USBCameraScanner",
+    "CameraScanner",
+    "USBCameraScanner",  # Backwards-compatible alias
     "DiscoveredUSBCamera",
     "USBCameraFoundCallback",
     "USBCameraLostCallback",

@@ -15,7 +15,7 @@ from typing import Callable, Set
 from enum import Enum
 
 from rpi_logger.core.logging_utils import get_module_logger
-from .device_registry import DeviceFamily, InterfaceType
+from .types import DeviceFamily, InterfaceType
 
 logger = get_module_logger("DeviceSelectionModel")
 

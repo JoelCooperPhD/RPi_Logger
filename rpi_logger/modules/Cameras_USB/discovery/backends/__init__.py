@@ -18,7 +18,7 @@ Licensed under the Apache License, Version 2.0
 from rpi_logger.core.platform_info import get_platform_info
 from rpi_logger.core.logging_utils import get_module_logger
 
-from .base import CameraBackend, DiscoveredUSBCamera
+from .base import CameraBackend, DiscoveredUSBCamera, AudioSiblingInfo
 
 logger = get_module_logger("CameraBackends")
 
@@ -55,4 +55,5 @@ __all__ = [
     "get_camera_backend",
     "CameraBackend",
     "DiscoveredUSBCamera",
+    "AudioSiblingInfo",
 ]

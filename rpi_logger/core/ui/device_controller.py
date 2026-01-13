@@ -19,7 +19,7 @@ from rpi_logger.core.logging_utils import get_module_logger
 from ..devices.catalog import DeviceCatalog
 from ..devices.selection import DeviceSelectionModel
 from ..devices.lifecycle import DeviceLifecycleManager, DeviceInfo
-from ..devices.device_registry import DeviceFamily, InterfaceType
+from ..devices.types import DeviceFamily, InterfaceType
 
 logger = get_module_logger("DeviceUIController")
 

@@ -9,8 +9,8 @@ Copyright (C) 2024-2025 Red Scientific
 Licensed under the Apache License, Version 2.0
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from dataclasses import dataclass
+from typing import Optional, Protocol
 
 
 @dataclass

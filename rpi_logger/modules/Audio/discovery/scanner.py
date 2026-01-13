@@ -2,16 +2,12 @@
 Audio device scanner using sounddevice.
 
 Discovers USB microphones and other audio input devices.
-Follows the same pattern as USBScanner and NetworkScanner for consistency.
 """
 
 import asyncio
 import sys
 from dataclasses import dataclass
 from typing import Callable, Optional, Dict, Set, Awaitable, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .master_registry import MasterDeviceRegistry
 
 from rpi_logger.core.logging_utils import get_module_logger
 
@@ -49,15 +45,6 @@ class AudioScanner:
     Continuously scans for audio input devices using sounddevice.
 
     Discovers USB microphones by filtering for devices with "usb" in the name.
-
-    Usage:
-        scanner = AudioScanner(
-            on_device_found=handle_found,
-            on_device_lost=handle_lost,
-        )
-        await scanner.start()
-        # ... later ...
-        await scanner.stop()
     """
 
     DEFAULT_SCAN_INTERVAL = 2.0  # Scan every 2 seconds
@@ -143,11 +130,7 @@ class AudioScanner:
             await self._scan_devices()
 
     async def reannounce_devices(self) -> None:
-        """Re-emit discovery events for all known devices.
-
-        Call this when a connection type gets enabled to re-announce
-        devices that were previously discovered but ignored.
-        """
+        """Re-emit discovery events for all known devices."""
         logger.debug(f"Re-announcing {len(self._known_devices)} audio devices")
         for device in self._known_devices.values():
             if self._on_device_found:
@@ -157,13 +140,7 @@ class AudioScanner:
                     logger.error(f"Error re-announcing device: {e}")
 
     async def _scan_loop(self) -> None:
-        """Main scanning loop.
-
-        On Windows, the USBHotplugMonitor triggers force_scan() when USB
-        devices change, so we don't need to continuously poll.
-
-        On Linux, we continue polling since sounddevice query is lightweight.
-        """
+        """Main scanning loop."""
         # Windows: Don't continuously poll - wait for hotplug events
         if sys.platform == "win32":
             while self._running:
@@ -270,25 +247,15 @@ class AudioScanner:
         return self._known_devices.get(device_id)
 
     def set_exclude_filter(self, filter_fn: Optional[AudioIndexFilterCallback]) -> None:
-        """Set or update the exclusion filter.
-
-        This allows dynamically filtering out certain audio devices,
-        such as webcam microphones which are managed by the camera module.
-
-        Args:
-            filter_fn: Callback that returns True if an index should be excluded.
-                       Pass None to disable filtering.
-        """
+        """Set or update the exclusion filter."""
         self._exclude_filter = filter_fn
 
-    def set_registry_filter(self, registry: "MasterDeviceRegistry") -> None:
-        """Set up filtering using a MasterDeviceRegistry.
 
-        Automatically excludes audio devices that are webcam microphones,
-        based on the registry's knowledge of which devices are webcams.
-
-        Args:
-            registry: The MasterDeviceRegistry to check for webcam mics.
-        """
-        self._exclude_filter = registry.is_audio_index_webcam_mic
-        logger.debug("Audio scanner now filtering webcam mics via registry")
+__all__ = [
+    "AudioScanner",
+    "DiscoveredAudioDevice",
+    "AudioDeviceFoundCallback",
+    "AudioDeviceLostCallback",
+    "AudioIndexFilterCallback",
+    "SOUNDDEVICE_AVAILABLE",
+]

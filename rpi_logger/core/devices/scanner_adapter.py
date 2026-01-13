@@ -11,7 +11,8 @@ This allows gradual migration without rewriting all scanners at once.
 from typing import Callable, Awaitable, Any, Optional, TYPE_CHECKING
 
 from rpi_logger.core.logging_utils import get_module_logger
-from .device_registry import DeviceType, DeviceFamily, InterfaceType, get_spec
+from .types import DeviceType, DeviceFamily, InterfaceType
+from .device_registry import get_spec
 
 if TYPE_CHECKING:
     from .master_registry import MasterDeviceRegistry

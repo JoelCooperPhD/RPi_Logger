@@ -19,7 +19,7 @@ from typing import Optional
 from rpi_logger.core.logging_utils import get_module_logger
 
 from .base import AudioSiblingInfo, DiscoveredUSBCamera
-from ..physical_id import USBPhysicalIdResolver
+from ..audio_matching import USBPhysicalIdResolver
 
 logger = get_module_logger("LinuxCameraBackend")
 

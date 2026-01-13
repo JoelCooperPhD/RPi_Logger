@@ -40,19 +40,40 @@ from .catalog import DeviceCatalog
 from .selection import DeviceSelectionModel, ConnectionKey
 from .lifecycle import DeviceLifecycleManager, DeviceInfo
 from .scanner_adapter import ScannerEventAdapter
-from .device_registry import DeviceFamily, InterfaceType
+from .types import DeviceFamily, InterfaceType
 from .master_registry import MasterDeviceRegistry
 
-# Import scanners
+# Import scanners - core infrastructure
 from .usb_scanner import USBScanner
 from .xbee_manager import XBeeManager, XBEE_AVAILABLE
-from .network_scanner import NetworkScanner, ZEROCONF_AVAILABLE
-from .audio_scanner import AudioScanner, SOUNDDEVICE_AVAILABLE
 from .internal_scanner import InternalDeviceScanner
-from .usb_camera_scanner import USBCameraScanner, CV2_AVAILABLE
-from .csi_scanner import CSIScanner, PICAMERA2_AVAILABLE
 from .uart_scanner import UARTScanner
 from .usb_hotplug import USBHotplugMonitor
+
+# Import scanners from module discovery packages
+try:
+    from rpi_logger.modules.EyeTracker.discovery.scanner import NetworkScanner, ZEROCONF_AVAILABLE
+except ImportError:
+    NetworkScanner = None
+    ZEROCONF_AVAILABLE = False
+
+try:
+    from rpi_logger.modules.Audio.discovery.scanner import AudioScanner, SOUNDDEVICE_AVAILABLE
+except ImportError:
+    AudioScanner = None
+    SOUNDDEVICE_AVAILABLE = False
+
+try:
+    from rpi_logger.modules.Cameras_USB.discovery.scanner import USBCameraScanner, CV2_AVAILABLE
+except ImportError:
+    USBCameraScanner = None
+    CV2_AVAILABLE = False
+
+try:
+    from rpi_logger.modules.Cameras_CSI.discovery.scanner import CSIScanner, PICAMERA2_AVAILABLE
+except ImportError:
+    CSIScanner = None
+    PICAMERA2_AVAILABLE = False
 
 logger = get_module_logger("DeviceSystem")
 

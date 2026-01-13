@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Dict, List
 
 from rpi_logger.core.logging_utils import get_module_logger
-from .device_registry import DEVICE_REGISTRY, DeviceSpec, DeviceType
+from .types import DeviceType
+from .device_registry import DEVICE_REGISTRY, DeviceSpec
 
 logger = get_module_logger("InternalDeviceScanner")
 

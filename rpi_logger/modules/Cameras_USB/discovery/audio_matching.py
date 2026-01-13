@@ -19,14 +19,9 @@ Example:
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from rpi_logger.core.logging_utils import get_module_logger
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_module_logger("PhysicalIdResolver")
 

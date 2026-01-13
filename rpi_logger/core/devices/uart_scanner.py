@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Awaitable, Callable, Dict, List
 
 from rpi_logger.core.logging_utils import get_module_logger
-from .device_registry import DeviceSpec, DeviceType, get_uart_device_specs
+from .types import DeviceType
+from .device_registry import DeviceSpec, get_uart_device_specs
 
 logger = get_module_logger("UARTScanner")
 

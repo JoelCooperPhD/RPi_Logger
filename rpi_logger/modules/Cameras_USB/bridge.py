@@ -226,10 +226,10 @@ class USBCamerasRuntime(ModuleRuntime):
         try:
             import sys
             if sys.platform == "win32" or "microsoft" in sys.version.lower():
-                from rpi_logger.core.devices.camera_backends.windows import WindowsCameraBackend
+                from .discovery.backends.windows import WindowsCameraBackend
                 backend = WindowsCameraBackend()
             else:
-                from rpi_logger.core.devices.camera_backends.linux import LinuxCameraBackend
+                from .discovery.backends.linux import LinuxCameraBackend
                 backend = LinuxCameraBackend()
 
             cameras = backend.discover_cameras(max_devices=camera_index + 1)

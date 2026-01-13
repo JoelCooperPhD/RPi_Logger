@@ -16,6 +16,7 @@ from rpi_logger.core.logging_utils import get_module_logger
 
 logger = get_module_logger("CSIScanner")
 
+
 # Check which camera CLI tool is available (rpicam-hello or libcamera-hello)
 def _find_camera_cli() -> Optional[str]:
     for cmd in ["rpicam-hello", "libcamera-hello"]:
@@ -30,6 +31,7 @@ def _find_camera_cli() -> Optional[str]:
         except Exception:
             continue
     return None
+
 
 CAMERA_CLI = _find_camera_cli()
 LIBCAMERA_AVAILABLE = CAMERA_CLI is not None
@@ -172,12 +174,7 @@ class CSIScanner:
                     logger.error(f"Error in device lost callback: {e}")
 
     def _discover_via_cli(self) -> list[DiscoveredCSICamera]:
-        """Discover CSI cameras using libcamera-hello CLI.
-
-        This runs libcamera-hello as a subprocess, which fully releases
-        all libcamera resources when it exits. This prevents the parent
-        process from holding camera locks that would block child processes.
-        """
+        """Discover CSI cameras using libcamera-hello CLI."""
         cameras: list[DiscoveredCSICamera] = []
 
         if not CAMERA_CLI:
@@ -199,8 +196,6 @@ class CSIScanner:
             # -----------------
             # 0 : imx296 [1456x1088 10-bit MONO] (/base/axi/pcie@...)
             #     Modes: 'SBGGR10_CSI2P' : 1456x1088 [60.39 fps - (0, 0)/1456x1088 crop]
-            # 1 : imx296 [1456x1088 10-bit MONO] (/base/axi/pcie@...)
-            #     Modes: ...
 
             output = result.stdout + result.stderr  # Sometimes output goes to stderr
 

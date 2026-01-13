@@ -9,7 +9,8 @@ query this catalog rather than hardcoding enum values.
 from dataclasses import dataclass
 from typing import ClassVar
 
-from .device_registry import DeviceFamily, InterfaceType, DeviceType, DEVICE_REGISTRY
+from .types import DeviceFamily, InterfaceType, DeviceType
+from .device_registry import DEVICE_REGISTRY
 
 
 @dataclass(frozen=True)

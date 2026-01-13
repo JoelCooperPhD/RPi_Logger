@@ -9,7 +9,7 @@ scanning mechanism (USB, XBee, Network, etc.).
 from dataclasses import dataclass, field
 from typing import Any, Protocol, Callable, Awaitable
 
-from .device_registry import DeviceType, DeviceFamily, InterfaceType
+from .types import DeviceType, DeviceFamily, InterfaceType
 
 
 @dataclass

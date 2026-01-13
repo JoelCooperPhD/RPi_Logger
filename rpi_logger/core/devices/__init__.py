@@ -5,10 +5,15 @@ This package provides centralized device discovery and connection management,
 replacing the per-module scanning that was previously in VOG and DRT modules.
 """
 
-from .device_registry import (
+# Types - these are now in types.py
+from .types import (
     InterfaceType,
     DeviceFamily,
     DeviceType,
+)
+
+# Device registry - remaining items still in device_registry.py
+from .device_registry import (
     DeviceSpec,
     ConnectionKey,
     DEVICE_REGISTRY,
@@ -39,29 +44,50 @@ from .xbee_manager import (
     is_xbee_dongle,
 )
 
-from .network_scanner import (
-    NetworkScanner,
-    DiscoveredNetworkDevice,
-    ZEROCONF_AVAILABLE,
-)
+# Import scanners from module discovery packages
+try:
+    from rpi_logger.modules.EyeTracker.discovery.scanner import (
+        NetworkScanner,
+        DiscoveredNetworkDevice,
+        ZEROCONF_AVAILABLE,
+    )
+except ImportError:
+    NetworkScanner = None
+    DiscoveredNetworkDevice = None
+    ZEROCONF_AVAILABLE = False
 
-from .audio_scanner import (
-    AudioScanner,
-    DiscoveredAudioDevice,
-    SOUNDDEVICE_AVAILABLE,
-)
+try:
+    from rpi_logger.modules.Audio.discovery.scanner import (
+        AudioScanner,
+        DiscoveredAudioDevice,
+        SOUNDDEVICE_AVAILABLE,
+    )
+except ImportError:
+    AudioScanner = None
+    DiscoveredAudioDevice = None
+    SOUNDDEVICE_AVAILABLE = False
 
-from .usb_camera_scanner import (
-    USBCameraScanner,
-    DiscoveredUSBCamera,
-    CV2_AVAILABLE,
-)
+try:
+    from rpi_logger.modules.Cameras_USB.discovery.scanner import (
+        USBCameraScanner,
+        DiscoveredUSBCamera,
+        CV2_AVAILABLE,
+    )
+except ImportError:
+    USBCameraScanner = None
+    DiscoveredUSBCamera = None
+    CV2_AVAILABLE = False
 
-from .csi_scanner import (
-    CSIScanner,
-    DiscoveredCSICamera,
-    PICAMERA2_AVAILABLE,
-)
+try:
+    from rpi_logger.modules.Cameras_CSI.discovery.scanner import (
+        CSIScanner,
+        DiscoveredCSICamera,
+        PICAMERA2_AVAILABLE,
+    )
+except ImportError:
+    CSIScanner = None
+    DiscoveredCSICamera = None
+    PICAMERA2_AVAILABLE = False
 
 from .usb_hotplug import (
     USBHotplugMonitor,

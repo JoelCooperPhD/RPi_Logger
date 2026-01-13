@@ -18,9 +18,8 @@ import serial.tools.list_ports
 
 from rpi_logger.core.asyncio_utils import create_logged_task
 from rpi_logger.core.logging_utils import get_module_logger
+from .types import DeviceType, DeviceFamily
 from .device_registry import (
-    DeviceType,
-    DeviceFamily,
     XBEE_BAUDRATE,
     parse_wireless_node_id,
     get_spec,

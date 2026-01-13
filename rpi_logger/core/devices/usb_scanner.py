@@ -13,7 +13,8 @@ from typing import Callable, Optional, Dict, Set, Awaitable
 import serial.tools.list_ports
 
 from rpi_logger.core.logging_utils import get_module_logger
-from .device_registry import DeviceSpec, DeviceType, identify_usb_device
+from .types import DeviceType
+from .device_registry import DeviceSpec, identify_usb_device
 
 logger = get_module_logger("USBScanner")
 
