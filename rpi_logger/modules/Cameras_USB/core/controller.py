@@ -194,13 +194,11 @@ class CameraController:
         if self._state.recording_phase == RecordingPhase.RECORDING:
             await self.stop_recording()
 
-        # Cancel consumer task
+        # Cancel consumer task with timeout
         if self._consumer_task:
             self._consumer_task.cancel()
-            try:
-                await self._consumer_task
-            except asyncio.CancelledError:
-                pass
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(self._consumer_task, timeout=2.0)
             self._consumer_task = None
 
         await self._cleanup()
@@ -212,7 +210,20 @@ class CameraController:
         logger.info("Streaming stopped")
 
     async def _cleanup(self) -> None:
-        """Release all resources."""
+        """Release all resources with timeout protection."""
+        loop = asyncio.get_running_loop()
+        try:
+            await asyncio.wait_for(
+                loop.run_in_executor(None, self._cleanup_sync),
+                timeout=3.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Cleanup timed out after 3s - forcing resource release")
+            # Force cleanup even if it might leave resources in bad state
+            self._force_cleanup()
+
+    def _cleanup_sync(self) -> None:
+        """Synchronous cleanup (runs in thread to avoid blocking event loop)."""
         if self._frame_buffer:
             self._frame_buffer.stop()
             self._frame_buffer = None
@@ -228,6 +239,13 @@ class CameraController:
         if self._camera:
             self._camera.close()
             self._camera = None
+
+    def _force_cleanup(self) -> None:
+        """Force cleanup by nullifying references (used after timeout)."""
+        self._frame_buffer = None
+        self._audio_buffer = None
+        self._audio = None
+        self._camera = None
 
     def _sanitize_device_name(self, name: str) -> str:
         """Sanitize device name for use in filenames."""

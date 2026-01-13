@@ -349,8 +349,19 @@ class USBCamerasRuntime(ModuleRuntime):
         await self.controller.stop_streaming()
 
     async def cleanup(self) -> None:
-        """Cleanup resources."""
-        pass
+        """Cleanup resources before view is destroyed."""
+        # Mark view as shutting down to prevent UI updates to destroyed widgets
+        self.view.mark_shutdown()
+
+        # Clear preview callback to prevent frames being pushed to destroyed view
+        self.controller.set_preview_callback(None)
+
+        # Unsubscribe view from state updates
+        self.controller.unsubscribe(self.view.render)
+
+        # Ensure streaming is stopped (idempotent - may already be stopped by shutdown())
+        if self.controller.state.phase != Phase.IDLE:
+            await self.controller.stop_streaming()
 
     async def handle_command(self, command: Dict[str, Any]) -> bool:
         """Handle commands from Logger.

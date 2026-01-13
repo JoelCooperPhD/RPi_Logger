@@ -79,6 +79,18 @@ class USBCameraView:
         self._settings_window = None
         self._settings_callback: Optional[Callable] = None
         self._frame_count = 0
+        self._shutting_down = False
+
+    def mark_shutdown(self) -> None:
+        """Mark view as shutting down - prevents further UI updates."""
+        self._shutting_down = True
+        # Close settings window if open
+        if self._settings_window is not None:
+            try:
+                self._settings_window.destroy()
+            except Exception:
+                pass
+            self._settings_window = None
 
     def set_settings_callback(self, callback: Callable) -> None:
         """Set callback for settings changes.
@@ -424,7 +436,7 @@ class USBCameraView:
         Args:
             state: Current camera state
         """
-        if not self._has_ui:
+        if not self._has_ui or self._shutting_down:
             return
 
         self._current_state = state
@@ -524,8 +536,8 @@ class USBCameraView:
         Args:
             ppm_data: PPM format image data
         """
-        if not self._has_ui or not self._canvas:
-            if self._frame_count == 0:
+        if not self._has_ui or not self._canvas or self._shutting_down:
+            if self._frame_count == 0 and not self._shutting_down:
                 self._logger.warning("push_frame: no UI (has_ui=%s, canvas=%s)",
                                      self._has_ui, self._canvas is not None)
             return
