@@ -1,14 +1,17 @@
-enabled = false
-audio_enabled = auto
-audio_device = auto
-container_format = mp4
-frame_rate = 30
-preview_scale = 0.25
-preview_divisor = 4
-sample_rate = 48000
+enabled = true
+display_name = Cameras-USB
 window_geometry = 320x200
 view.show_io_panel = false
 view.show_logger = false
-display_name = Cameras-USB
 preview_resolution = auto
 device_connected = false
+container_format = mp4
+
+# Camera settings (persisted from settings dialog)
+resolution_width = 640
+resolution_height = 480
+frame_rate = 30
+preview_scale = 0.25
+preview_divisor = 4
+audio_enabled = false
+sample_rate = 48000

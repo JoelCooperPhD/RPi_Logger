@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 
 class Phase(Enum):
@@ -62,3 +62,86 @@ class CameraState:
     trial_number: int = 0
     device_name: str = ""
     has_audio: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Settings Persistence Helpers
+# ---------------------------------------------------------------------------
+
+
+def settings_to_persistable(settings: Settings) -> dict[str, str]:
+    """Convert Settings to dict for persistence.
+
+    Args:
+        settings: Settings object to serialize.
+
+    Returns:
+        Dict with string keys and values suitable for config file storage.
+    """
+    return {
+        "resolution_width": str(settings.resolution[0]),
+        "resolution_height": str(settings.resolution[1]),
+        "frame_rate": str(settings.frame_rate),
+        "preview_scale": str(settings.preview_scale),
+        "preview_divisor": str(settings.preview_divisor),
+        "audio_enabled": "true" if settings.audio_enabled else "false",
+        "sample_rate": str(settings.sample_rate),
+    }
+
+
+def settings_from_persistable(
+    data: dict[str, Any],
+    defaults: Optional[Settings] = None,
+) -> Settings:
+    """Restore Settings from persisted data.
+
+    Args:
+        data: Dict loaded from config file.
+        defaults: Default Settings to use for missing values.
+
+    Returns:
+        Settings object with values from data, falling back to defaults.
+    """
+    if defaults is None:
+        defaults = Settings()
+
+    def get_int(key: str, default: int) -> int:
+        val = data.get(key)
+        if val is None:
+            return default
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return default
+
+    def get_float(key: str, default: float) -> float:
+        val = data.get(key)
+        if val is None:
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+
+    def get_bool(key: str, default: bool) -> bool:
+        val = data.get(key)
+        if val is None:
+            return default
+        if isinstance(val, bool):
+            return val
+        return str(val).strip().lower() in {"true", "1", "yes", "on"}
+
+    return Settings(
+        resolution=(
+            get_int("resolution_width", defaults.resolution[0]),
+            get_int("resolution_height", defaults.resolution[1]),
+        ),
+        frame_rate=get_int("frame_rate", defaults.frame_rate),
+        preview_scale=get_float("preview_scale", defaults.preview_scale),
+        preview_divisor=get_int("preview_divisor", defaults.preview_divisor),
+        audio_enabled=get_bool("audio_enabled", defaults.audio_enabled),
+        sample_rate=get_int("sample_rate", defaults.sample_rate),
+        # Preserve runtime-only values from defaults
+        audio_device_index=defaults.audio_device_index,
+        audio_channels=defaults.audio_channels,
+    )

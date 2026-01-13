@@ -40,7 +40,15 @@ try:
 except ImportError:
     ensure_module_data_dir = None
 
-from .core import CameraController, CameraState, Settings, Phase, RecordingPhase
+from .core import (
+    CameraController,
+    CameraState,
+    Settings,
+    Phase,
+    RecordingPhase,
+    settings_to_persistable,
+    settings_from_persistable,
+)
 from .ui import USBCameraView
 
 try:
@@ -77,24 +85,10 @@ class USBCamerasRuntime(ModuleRuntime):
         self._preferences = (
             getattr(ctx.model, "preferences", None) if hasattr(ctx, "model") else None
         )
-        config = self._preferences.snapshot() if self._preferences else {}
 
-        # Create controller with initial settings from config
+        # Create controller with default settings, then restore from config
         self.controller = CameraController()
-
-        # Parse resolution from config
-        res_width = self._parse_int(config.get("resolution_width"), 640)
-        res_height = self._parse_int(config.get("resolution_height"), 480)
-
-        initial_settings = Settings(
-            resolution=(res_width, res_height),
-            frame_rate=self._parse_int(config.get("frame_rate"), 30),
-            preview_scale=self._parse_float(config.get("preview_scale"), 0.25),
-            preview_divisor=self._parse_int(config.get("preview_divisor"), 4),
-            audio_enabled=config.get("audio_mode", "auto") != "off",
-            sample_rate=self._parse_int(config.get("sample_rate"), 48000),
-        )
-        self.controller._state.settings = initial_settings
+        self._restore_settings_from_config()
 
         # State tracking
         self._pending_device_ready: Optional[tuple[str, Optional[str]]] = None
@@ -123,6 +117,26 @@ class USBCamerasRuntime(ModuleRuntime):
             return float(val)
         except (ValueError, TypeError):
             return default
+
+    def _restore_settings_from_config(self) -> None:
+        """Restore settings from preferences on startup."""
+        if not self._preferences:
+            self.logger.debug("No preferences available, using default settings")
+            return
+
+        try:
+            config = self._preferences.snapshot()
+            restored = settings_from_persistable(config, Settings())
+            self.controller._state.settings = restored
+            self.logger.info(
+                "Restored camera settings: %dx%d @ %dfps, audio=%s",
+                restored.resolution[0],
+                restored.resolution[1],
+                restored.frame_rate,
+                restored.audio_enabled,
+            )
+        except Exception as e:
+            self.logger.warning("Failed to restore camera settings: %s", e)
 
     def _detect_cli_audio_device(
         self,
@@ -346,6 +360,8 @@ class USBCamerasRuntime(ModuleRuntime):
     async def shutdown(self) -> None:
         """Shutdown the runtime."""
         self.logger.info("Shutting down USB Cameras runtime")
+        # Save current settings before shutdown
+        self._save_settings(self.controller.state.settings)
         await self.controller.stop_streaming()
 
     async def cleanup(self) -> None:
@@ -700,16 +716,12 @@ class USBCamerasRuntime(ModuleRuntime):
         if not self._preferences:
             return
 
-        updates = {
-            "resolution_width": str(settings.resolution[0]),
-            "resolution_height": str(settings.resolution[1]),
-            "frame_rate": str(settings.frame_rate),
-            "preview_scale": str(settings.preview_scale),
-            "preview_divisor": str(settings.preview_divisor),
-            "audio_mode": "on" if settings.audio_enabled else "off",
-            "sample_rate": str(settings.sample_rate),
-        }
-        self._preferences.write_sync(updates)
+        try:
+            updates = settings_to_persistable(settings)
+            self._preferences.write_sync(updates)
+            self.logger.debug("Saved camera settings to config")
+        except Exception as e:
+            self.logger.warning("Failed to save camera settings: %s", e)
 
 
 def factory(ctx: RuntimeContext) -> USBCamerasRuntime:
