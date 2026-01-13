@@ -3,7 +3,7 @@ from tkinter import ttk
 from typing import Callable, Awaitable
 import asyncio
 
-from core import (
+from ..core import (
     AppState, CameraStatus, RecordingStatus,
     Action, AssignCamera, UnassignCamera, StartRecording, StopRecording,
     ApplySettings, Shutdown,

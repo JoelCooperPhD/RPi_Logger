@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Callable, Awaitable, TextIO
 
-from core import (
+from ..core import (
     Action, AssignCamera, UnassignCamera,
     StartRecording, StopRecording, Shutdown,
     Store,

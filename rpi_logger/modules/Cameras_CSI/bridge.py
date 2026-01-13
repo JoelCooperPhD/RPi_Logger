@@ -8,27 +8,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import get_module_logger
 
-# Ensure module can find sibling packages
-_module_dir = Path(__file__).resolve().parent
-if str(_module_dir) not in sys.path:
-    sys.path.insert(0, str(_module_dir))
-
-from core import (
+from .core import (
     AppState, CameraStatus, RecordingStatus, CameraSettings,
     Action, AssignCamera, UnassignCamera, CameraAssigned, CameraError,
     StartRecording, StopRecording, RecordingStarted, RecordingStopped,
     Shutdown, FrameReceived, UpdateMetrics,
     create_store, Store, initial_state,
 )
-from infra import EffectExecutor
-from ui.view import CSICameraView
+from .infra import EffectExecutor
+from .ui.view import CSICameraView
 
 try:
     from vmc.runtime import ModuleRuntime, RuntimeContext

@@ -3,7 +3,7 @@ from tkinter import ttk
 from typing import Callable
 from dataclasses import replace
 
-from core import CameraSettings, CameraCapabilities
+from ...core import CameraSettings, CameraCapabilities
 
 try:
     from rpi_logger.core.ui.theme.colors import Colors

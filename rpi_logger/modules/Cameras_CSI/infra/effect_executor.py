@@ -1,16 +1,10 @@
 import asyncio
-import sys
 from pathlib import Path
 from typing import Callable, Awaitable, Optional
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
 
-# Ensure module can find sibling packages when run in various contexts
-_module_dir = Path(__file__).resolve().parent.parent
-if str(_module_dir) not in sys.path:
-    sys.path.insert(0, str(_module_dir))
-
-from core import (
+from ..core import (
     Action, Effect,
     CameraAssigned, CameraError, RecordingStarted, RecordingStopped,
     UpdateMetrics, PreviewFrameReady,
@@ -21,8 +15,8 @@ from core import (
     ApplyCameraSettings, SendStatus, CleanupResources,
     CameraCapabilities, FrameMetrics,
 )
-from capture import PicamSource, CapturedFrame, HAS_PICAMERA2
-from recording import RecordingSession
+from ..capture import PicamSource, CapturedFrame, HAS_PICAMERA2
+from ..recording import RecordingSession
 
 
 class EffectExecutor:

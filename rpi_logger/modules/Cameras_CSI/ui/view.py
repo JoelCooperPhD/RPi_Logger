@@ -7,9 +7,7 @@ Controls via CLI args (--camera-index, --record) and View menu (Settings).
 from __future__ import annotations
 
 import asyncio
-import sys
 import threading
-from pathlib import Path
 from typing import Any, Callable, Awaitable, Dict, Optional
 
 from rpi_logger.core.logging_utils import LoggerLike, ensure_structured_logger
@@ -21,11 +19,7 @@ except ImportError:
     HAS_THEME = False
     Colors = None
 
-_module_dir = Path(__file__).resolve().parent.parent
-if str(_module_dir) not in sys.path:
-    sys.path.insert(0, str(_module_dir))
-
-from core import (
+from ..core import (
     AppState, CameraStatus, RecordingStatus,
     Action, ApplySettings, CameraSettings,
 )
@@ -194,7 +188,7 @@ class CSICameraView:
         if self._root is None:
             return
 
-        from ui.widgets.settings_window import SettingsWindow
+        from .widgets.settings_window import SettingsWindow
 
         current_settings = CameraSettings()
         capabilities = None
