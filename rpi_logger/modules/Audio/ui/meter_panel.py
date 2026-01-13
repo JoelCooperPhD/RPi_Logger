@@ -7,11 +7,13 @@ import logging
 try:  # pragma: no cover - Tk unavailable on headless hosts
     import tkinter as tk
     from tkinter import ttk
-
-    from rpi_logger.core.ui.theme.colors import Colors
 except Exception:  # pragma: no cover
     tk = None  # type: ignore
     ttk = None  # type: ignore
+
+try:
+    from rpi_logger.core.ui.theme.colors import Colors
+except Exception:  # pragma: no cover
     Colors = None  # type: ignore
 
 from ..domain import DB_MAX, DB_MIN, DB_RED, DB_YELLOW, AudioSnapshot
