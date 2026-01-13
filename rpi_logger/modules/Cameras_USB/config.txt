@@ -11,4 +11,4 @@ view.show_io_panel = false
 view.show_logger = false
 display_name = Cameras-USB
 preview_resolution = auto
-device_connected = true
+device_connected = false
