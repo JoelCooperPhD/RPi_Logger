@@ -61,6 +61,7 @@ class ModuleProcess:
         self.stdout_task: Optional[asyncio.Task] = None
         self.stderr_task: Optional[asyncio.Task] = None
         self.monitor_task: Optional[asyncio.Task] = None
+        self.stdin_task: Optional[asyncio.Task] = None
 
         # Bounded queue to prevent memory exhaustion (100 commands should be plenty)
         self.command_queue: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -167,8 +168,7 @@ class ModuleProcess:
             self.stdout_task = asyncio.create_task(self._stdout_reader())
             self.stderr_task = asyncio.create_task(self._stderr_reader())
             self.monitor_task = asyncio.create_task(self._process_monitor())
-
-            asyncio.create_task(self._stdin_writer())
+            self.stdin_task = asyncio.create_task(self._stdin_writer())
 
             self._was_forcefully_stopped = False
             return True
@@ -502,7 +502,7 @@ class ModuleProcess:
 
     async def _cleanup_reader_tasks(self) -> None:
         """Clean up reader tasks with proper error handling."""
-        for task in [self.stdout_task, self.stderr_task, self.monitor_task]:
+        for task in [self.stdout_task, self.stderr_task, self.monitor_task, self.stdin_task]:
             if task and not task.done():
                 task.cancel()
                 try:

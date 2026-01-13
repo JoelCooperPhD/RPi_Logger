@@ -66,11 +66,14 @@ class USBCamera:
         hw_transforms = os.environ.get("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "not set")
         logger.info("Opening camera %s (MSMF_HW_TRANSFORMS=%s)", device, hw_transforms)
 
-        # Use default backend - let OpenCV choose the best one.
-        # On Windows, default typically uses MSMF which gets better FPS than DSHOW.
+        # Explicitly select backend to avoid "DSHOW can't capture by index" warnings.
+        # On Windows, use MSMF which gets better FPS than DSHOW.
         # DSHOW often ignores MJPG codec and gets stuck at lower FPS.
         start_time = time.time()
-        self._cap = cv2.VideoCapture(device)
+        if sys.platform == "win32":
+            self._cap = cv2.VideoCapture(device, cv2.CAP_MSMF)
+        else:
+            self._cap = cv2.VideoCapture(device)
         elapsed = time.time() - start_time
         logger.info("cv2.VideoCapture(%s) took %.2f seconds", device, elapsed)
 
