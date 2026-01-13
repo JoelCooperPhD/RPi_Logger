@@ -334,8 +334,8 @@ class USBCameraView:
         audio_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=6)
         row += 1
 
-        # Sample rate
-        rate_var = tk.StringVar(value=str(settings.sample_rate))
+        # Sample rate (ensure int for display - sounddevice returns floats)
+        rate_var = tk.StringVar(value=str(int(settings.sample_rate)))
         add_setting_row(row, "Sample Rate", rate_var,
                         ["44100", "48000", "96000"])
         row += 1
@@ -386,7 +386,7 @@ class USBCameraView:
                     preview_scale=preview_scale,
                     audio_enabled=audio_var.get(),
                     audio_device_index=settings.audio_device_index,
-                    sample_rate=int(rate_var.get()),
+                    sample_rate=int(float(rate_var.get())),
                     audio_channels=settings.audio_channels,
                 )
                 if self._settings_callback:
