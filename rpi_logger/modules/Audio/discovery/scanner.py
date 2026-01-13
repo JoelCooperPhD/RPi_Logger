@@ -5,9 +5,13 @@ Discovers USB microphones and other audio input devices.
 """
 
 import asyncio
+import csv
+import io
+import re
+import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Callable, Optional, Dict, Set, Awaitable, TYPE_CHECKING
+from typing import Callable, Optional, Dict, Set, Awaitable
 
 from rpi_logger.core.logging_utils import get_module_logger
 
@@ -39,12 +43,186 @@ AudioDeviceLostCallback = Callable[[str], Awaitable[None]]  # device_id
 # Filter callback type - returns True if audio index should be excluded
 AudioIndexFilterCallback = Callable[[int], bool]
 
+# Windows subprocess flag to hide console window
+_SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
+def _get_windows_webcam_audio_indices() -> Set[int]:
+    """
+    Get sounddevice indices of audio devices that belong to webcams (Windows only).
+
+    This queries WMI for USB video and audio devices, matches them by VID:PID,
+    and returns the sounddevice indices of audio devices that share a VID:PID
+    with any video device (i.e., webcam microphones).
+
+    Returns:
+        Set of sounddevice indices that are webcam microphones.
+    """
+    if sys.platform != "win32":
+        return set()
+
+    if not SOUNDDEVICE_AVAILABLE:
+        return set()
+
+    webcam_audio_indices: Set[int] = set()
+
+    try:
+        # Get VID:PIDs of all video/camera devices
+        video_vid_pids = _query_windows_video_vid_pids()
+        if not video_vid_pids:
+            logger.debug("No video devices found for webcam mic detection")
+            return set()
+
+        logger.debug(f"Found video device VID:PIDs: {video_vid_pids}")
+
+        # Get USB audio devices with their VID:PIDs
+        audio_devices = _query_windows_audio_devices()
+        if not audio_devices:
+            logger.debug("No USB audio devices found")
+            return set()
+
+        # Identify webcam audio devices (those with VID:PID matching video devices)
+        webcam_audio_names: list[str] = []
+        for audio_dev in audio_devices:
+            vid_pid = audio_dev.get("vid_pid", "")
+            if vid_pid and vid_pid in video_vid_pids:
+                webcam_audio_names.append(audio_dev.get("name", ""))
+                logger.debug(
+                    f"Webcam audio device: {audio_dev.get('name')} (VID:PID {vid_pid})"
+                )
+
+        if not webcam_audio_names:
+            logger.debug("No webcam audio devices found")
+            return set()
+
+        # Find ALL sounddevice indices that match webcam audio device names
+        sd_devices = sd.query_devices()
+
+        for sd_idx, sd_dev in enumerate(sd_devices):
+            if sd_dev.get("max_input_channels", 0) <= 0:
+                continue
+
+            sd_name = sd_dev.get("name", "")
+
+            # Check if this sounddevice matches any webcam audio device name
+            for webcam_name in webcam_audio_names:
+                if _names_match(sd_name, webcam_name):
+                    webcam_audio_indices.add(sd_idx)
+                    logger.info(
+                        f"Detected webcam mic: sounddevice {sd_idx} "
+                        f"'{sd_name}' matches '{webcam_name}'"
+                    )
+                    break
+
+    except Exception as e:
+        logger.warning(f"Error detecting webcam mics: {e}")
+
+    return webcam_audio_indices
+
+
+def _names_match(name1: str, name2: str) -> bool:
+    """Check if two device names likely refer to the same device."""
+    n1 = name1.lower()
+    n2 = name2.lower()
+
+    # Check if one name contains the other (common on Windows where
+    # sounddevice shows "Microphone (HD Pro Webcam C920)" and WMI shows "HD Pro Webcam C920")
+    if n2 in n1 or n1 in n2:
+        return True
+
+    # Extract significant words (4+ chars, excluding generic terms)
+    generic = {"microphone", "audio", "device", "usb", "input", "output", "sound"}
+    words1 = {w for w in re.findall(r'\b\w{4,}\b', n1) if w not in generic}
+    words2 = {w for w in re.findall(r'\b\w{4,}\b', n2) if w not in generic}
+
+    # If either has no significant words, can't match
+    if not words1 or not words2:
+        return False
+
+    # Check for overlapping words
+    return bool(words1 & words2)
+
+
+def _query_windows_video_vid_pids() -> Set[str]:
+    """Query Windows for VID:PIDs of all video/camera devices."""
+    vid_pids: Set[str] = set()
+
+    try:
+        # PowerShell query for Camera and Image class devices
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "Get-PnpDevice -Class Camera,Image -Status OK 2>$null | "
+                "Select-Object InstanceId | "
+                "ConvertTo-Csv -NoTypeInformation"
+            ],
+            capture_output=True, text=True, timeout=10,
+            creationflags=_SUBPROCESS_FLAGS
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            for line in result.stdout.strip().split("\n")[1:]:  # Skip header
+                line = line.strip().strip('"')
+                vid_pid = _extract_vid_pid(line)
+                if vid_pid:
+                    vid_pids.add(vid_pid)
+    except Exception as e:
+        logger.debug(f"PowerShell video query failed: {e}")
+
+    return vid_pids
+
+
+def _query_windows_audio_devices() -> list:
+    """Query Windows for USB audio devices with their VID:PIDs."""
+    devices = []
+
+    try:
+        # PowerShell query for MEDIA class USB devices
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "Get-PnpDevice -Class MEDIA -Status OK 2>$null | "
+                "Where-Object { $_.InstanceId -like '*VID_*' } | "
+                "Select-Object InstanceId,FriendlyName | "
+                "ConvertTo-Csv -NoTypeInformation"
+            ],
+            capture_output=True, text=True, timeout=10,
+            creationflags=_SUBPROCESS_FLAGS
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            lines = result.stdout.strip().split("\n")
+            if len(lines) > 1:
+                reader = csv.DictReader(io.StringIO("\n".join(lines)))
+                for row in reader:
+                    instance_id = row.get("InstanceId", "")
+                    friendly_name = row.get("FriendlyName", "")
+                    vid_pid = _extract_vid_pid(instance_id)
+                    if vid_pid:
+                        devices.append({
+                            "name": friendly_name,
+                            "vid_pid": vid_pid,
+                        })
+    except Exception as e:
+        logger.debug(f"PowerShell audio query failed: {e}")
+
+    return devices
+
+
+def _extract_vid_pid(device_id: str) -> str:
+    """Extract VID:PID from Windows device ID (e.g., USB\\VID_046D&PID_0825\\...)."""
+    match = re.search(r"VID_([0-9A-Fa-f]{4})&PID_([0-9A-Fa-f]{4})", device_id)
+    if match:
+        return f"{match.group(1).lower()}:{match.group(2).lower()}"
+    return ""
+
 
 class AudioScanner:
     """
     Continuously scans for audio input devices using sounddevice.
 
-    Discovers USB microphones by filtering for devices with "usb" in the name.
+    Discovers external USB microphones only, filtering out:
+    - Non-USB devices (must have "usb" in name)
+    - Webcam microphones (via VID:PID matching on Windows)
+    - Duplicate entries (same device via different audio APIs)
     """
 
     DEFAULT_SCAN_INTERVAL = 2.0  # Scan every 2 seconds
@@ -68,6 +246,9 @@ class AudioScanner:
         self._known_indices: Set[int] = set()
         self._scan_task: Optional[asyncio.Task] = None
         self._running = False
+
+        # Cache of webcam audio indices detected via VID:PID (Windows only)
+        self._webcam_audio_indices: Set[int] = set()
 
     @property
     def devices(self) -> Dict[str, DiscoveredAudioDevice]:
@@ -166,9 +347,23 @@ class AudioScanner:
             return
 
         try:
+            # On Windows, detect webcam mics via VID:PID matching
+            if sys.platform == "win32":
+                self._webcam_audio_indices = await asyncio.to_thread(
+                    _get_windows_webcam_audio_indices
+                )
+                if self._webcam_audio_indices:
+                    logger.debug(
+                        f"Windows webcam mic indices: {self._webcam_audio_indices}"
+                    )
+
             # Run blocking query_devices() in thread
             devices = await asyncio.to_thread(sd.query_devices)
             current_indices: Set[int] = set()
+
+            # Track seen device names to show only one entry per physical device
+            # (Windows exposes same device via multiple APIs: MME, DirectSound, WASAPI, WDM-KS)
+            seen_device_names: Set[str] = set()
 
             for index, info in enumerate(devices):
                 # Only interested in input devices
@@ -182,10 +377,23 @@ class AudioScanner:
                 if "usb" not in name.lower():
                     continue
 
-                # Check if this device should be excluded (e.g., webcam mic)
+                # Windows: Check if this is a webcam mic (detected via VID:PID)
+                if index in self._webcam_audio_indices:
+                    logger.debug(
+                        f"Excluding webcam mic {index} ({name}) - VID:PID matches camera"
+                    )
+                    continue
+
+                # Check if this device should be excluded (e.g., webcam mic on Linux)
                 if self._exclude_filter and self._exclude_filter(index):
                     logger.debug(f"Excluding audio device {index} ({name}) - filtered")
                     continue
+
+                # Only show one entry per physical device (first one wins, typically MME)
+                if name in seen_device_names:
+                    logger.debug(f"Skipping duplicate device {index} ({name})")
+                    continue
+                seen_device_names.add(name)
 
                 current_indices.add(index)
 
