@@ -85,17 +85,19 @@ class MacOSCameraBackend:
                     name, unique_id, model_id = av_devices[index]
                     friendly_name = name
                     hw_model = model_id or name
-                    stable_id = unique_id or str(index)
                 else:
                     friendly_name = f"USB Camera {index}"
                     hw_model = "USB Camera"
-                    stable_id = str(index)
 
                 # Try to find audio sibling using IOKit VID:PID matching
                 audio_sibling = None
                 vid_pid = None
                 if IOKIT_AVAILABLE:
                     audio_sibling, vid_pid = self._find_audio_sibling(friendly_name)
+
+                # Create human-readable stable_id from camera name + VID:PID
+                # e.g., "facetime_hd_camera" or "logitech_c920_046d_0825"
+                stable_id = self._create_stable_id(friendly_name, vid_pid, index)
 
                 cameras.append(DiscoveredUSBCamera(
                     device_id=f"usb:{index}",
@@ -220,6 +222,46 @@ class MacOSCameraBackend:
         except Exception as e:
             logger.warning(f"Audio sibling detection failed for '{camera_name}': {e}")
             return None, None
+
+    def _create_stable_id(
+        self, friendly_name: str, vid_pid: Optional[str], index: int
+    ) -> str:
+        """Create a human-readable stable ID for folder naming.
+
+        Creates IDs like:
+        - "facetime_hd_camera" (built-in camera)
+        - "logitech_c920_046d_0825" (USB webcam with VID:PID)
+        - "usb_camera_0" (fallback)
+
+        Args:
+            friendly_name: Camera name from AVFoundation
+            vid_pid: VID:PID string if available (e.g., "046d:0825")
+            index: Camera index as fallback
+
+        Returns:
+            Sanitized string suitable for directory names.
+        """
+        # Sanitize the friendly name
+        safe_name = friendly_name.lower()
+        # Replace special characters with underscores
+        for char in " -():,./'\"":
+            safe_name = safe_name.replace(char, "_")
+        # Remove consecutive underscores
+        while "__" in safe_name:
+            safe_name = safe_name.replace("__", "_")
+        safe_name = safe_name.strip("_")
+
+        # Append VID:PID if available (for USB cameras)
+        if vid_pid:
+            safe_vid_pid = vid_pid.replace(":", "_")
+            return f"{safe_name}_{safe_vid_pid}"
+
+        # For built-in cameras without VID:PID, just use the name
+        if safe_name:
+            return safe_name
+
+        # Fallback
+        return f"camera_{index}"
 
 
 __all__ = ["MacOSCameraBackend"]
