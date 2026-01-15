@@ -26,11 +26,14 @@ tasks, and annotations. All modules are controlled from a single interface.
 
    ▸ Navigate to: Modules menu
    ▸ Check the modules you need:
-     • Cameras         - Multi-camera video (up to 2x IMX296 @ 1-60 FPS)
-     • AudioRecorder   - Multi-microphone audio (8-192 kHz)
+     • Cameras         - System camera video recording (webcams, etc.)
+     • Cameras-CSI     - CSI camera video (Raspberry Pi only)
+     • Audio           - Multi-microphone audio recording
      • EyeTracker-Neon - Pupil Labs Neon gaze tracking with scene video
-     • Notes           - Stub-based annotations during sessions
-     • DRT             - DRT behavioral task devices
+     • Notes           - Timestamped session annotations
+     • DRT             - Detection Response Task devices
+     • VOG             - Visual Occlusion Glasses
+     • GPS             - Real-time location tracking (Raspberry Pi only)
 
    ▸ Modules launch automatically when checked
    ▸ Wait for green "● Ready" status before recording
@@ -96,25 +99,25 @@ tasks, and annotations. All modules are controlled from a single interface.
 ═══════════════════════════════════════════════════════════════════
 
 data/session_20251024_120000/
-├── master.log                                    # Main logger log
-├── 20251024_120000_SYNC_trial001.json           # Sync metadata
-├── 20251024_120000_AV_trial001.mp4              # Muxed audio+video
 ├── Cameras/
-│   ├── session.log
-│   ├── 20251024_120000_CAM_trial001_CAM0_1456x1088_30fps.mp4
-│   └── 20251024_120000_CAMTIMING_trial001_CAM0.csv
-├── AudioRecorder/
-│   ├── session.log
-│   ├── 20251024_120000_AUDIO_trial001_MIC0_usb-audio.wav
-│   └── 20251024_120000_AUDIOTIMING_trial001_MIC0.csv
+│   └── usb_1_2_3/
+│       ├── 120000_CAM_trial001_logitech-c920.mp4
+│       └── 120000_CAM_trial001_logitech-c920_timing.csv
+├── Audio/
+│   ├── 120000_AUD_trial001_MIC0_blue-yeti.wav
+│   └── 120000_AUD_trial001_MIC0_blue-yeti_timing.csv
 ├── EyeTracker-Neon/
-│   ├── session.log
-│   ├── scene_video_20251024_120000.mp4
-│   └── gaze_data_20251024_120000.csv
-├── Notes/
-│   └── session_notes.csv
-└── DRT/
-    └── DRT_dev_ttyACM0_20251024_120000.csv
+│   ├── 120000_EYE_trial001_WORLD_1280x720_30fps.mp4
+│   ├── 120000_EYE_trial001_GAZE.csv
+│   └── 120000_EYE_trial001_FRAME_timing.csv
+├── DRT/
+│   └── 120000_DRT_ttyacm0.csv
+├── VOG/
+│   └── 120000_VOG_ttyacm0.csv
+├── GPS/
+│   └── 120000_GPS_serial0.csv
+└── Notes/
+    └── 120000_NTS_trial001_notes.csv
 
 
 ═══════════════════════════════════════════════════════════════════
@@ -150,8 +153,8 @@ data/session_20251024_120000/
 Module won't start:
   1. Check green log panel at bottom for error messages
   2. Verify hardware connected: Help > System Information
-  3. Kill conflicting processes: $ pkill -f main_camera
-  4. Check module log: data/session_*/ModuleName/session.log
+  3. Kill conflicting processes: $ pkill -f main_cameras
+  4. Check module log in session directory
   5. Reset if needed: Help > Reset Settings
 
 Recording fails immediately:
