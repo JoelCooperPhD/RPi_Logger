@@ -25,6 +25,15 @@ except ImportError:
     SOUNDDEVICE_AVAILABLE = False
     logger.warning("sounddevice not available - audio device discovery disabled")
 
+# Try to import macOS CoreAudio utilities for USB device detection
+COREAUDIO_AVAILABLE = False
+if sys.platform == "darwin":
+    try:
+        from .coreaudio_utils import get_usb_audio_device_names, COREAUDIO_AVAILABLE
+        COREAUDIO_AVAILABLE = True
+    except ImportError as e:
+        logger.debug(f"CoreAudio utilities not available: {e}")
+
 
 @dataclass
 class DiscoveredAudioDevice:
@@ -219,8 +228,11 @@ class AudioScanner:
     """
     Continuously scans for audio input devices using sounddevice.
 
-    Discovers external USB microphones only, filtering out:
-    - Non-USB devices (must have "usb" in name)
+    Discovers hardware microphones, filtering out virtual/software devices:
+    - Windows/Linux: requires "usb" in device name
+    - macOS: uses CoreAudio transport type (USB + Built-in, excludes Virtual)
+
+    Also filters out:
     - Webcam microphones (via VID:PID matching on Windows)
     - Duplicate entries (same device via different audio APIs)
     """
@@ -249,6 +261,9 @@ class AudioScanner:
 
         # Cache of webcam audio indices detected via VID:PID (Windows only)
         self._webcam_audio_indices: Set[int] = set()
+
+        # Cache of USB audio device names detected via CoreAudio (macOS only)
+        self._macos_usb_device_names: Set[str] = set()
 
     @property
     def devices(self) -> Dict[str, DiscoveredAudioDevice]:
@@ -347,14 +362,25 @@ class AudioScanner:
             return
 
         try:
-            # On Windows, detect webcam mics via VID:PID matching
+            # Platform-specific USB device detection
             if sys.platform == "win32":
+                # On Windows, detect webcam mics via VID:PID matching
                 self._webcam_audio_indices = await asyncio.to_thread(
                     _get_windows_webcam_audio_indices
                 )
                 if self._webcam_audio_indices:
                     logger.debug(
                         f"Windows webcam mic indices: {self._webcam_audio_indices}"
+                    )
+            elif sys.platform == "darwin" and COREAUDIO_AVAILABLE:
+                # On macOS, use CoreAudio to identify hardware audio devices
+                # (USB + Built-in, excluding Virtual/Aggregate)
+                self._macos_usb_device_names = await asyncio.to_thread(
+                    get_usb_audio_device_names
+                )
+                if self._macos_usb_device_names:
+                    logger.debug(
+                        f"macOS hardware audio devices: {self._macos_usb_device_names}"
                     )
 
             # Run blocking query_devices() in thread
@@ -373,9 +399,15 @@ class AudioScanner:
 
                 name = str(info.get("name") or f"Device {index}")
 
-                # Filter for USB devices only
-                if "usb" not in name.lower():
-                    continue
+                # Filter for USB devices only (platform-specific)
+                if sys.platform == "darwin" and COREAUDIO_AVAILABLE:
+                    # macOS: Use CoreAudio transport type detection
+                    if name not in self._macos_usb_device_names:
+                        continue
+                else:
+                    # Windows/Linux: Check for "usb" in name
+                    if "usb" not in name.lower():
+                        continue
 
                 # Windows: Check if this is a webcam mic (detected via VID:PID)
                 if index in self._webcam_audio_indices:
