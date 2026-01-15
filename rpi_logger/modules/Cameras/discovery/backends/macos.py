@@ -82,7 +82,7 @@ class MacOSCameraBackend:
 
                 # Use AVFoundation info if available, otherwise generic names
                 if av_devices and index < len(av_devices):
-                    name, unique_id, model_id = av_devices[index]
+                    name, _, model_id = av_devices[index]  # unique_id not used
                     friendly_name = name
                     hw_model = model_id or name
                 else:
