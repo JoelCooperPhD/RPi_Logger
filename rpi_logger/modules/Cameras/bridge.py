@@ -1,4 +1,4 @@
-"""USB camera runtime - Logger integration bridge.
+"""Camera runtime - Logger integration bridge.
 
 Connects the simplified camera architecture to the Logger system.
 Uses stub (codex) view integration pattern from Cameras_CSI.
@@ -49,7 +49,7 @@ from .core import (
     settings_to_persistable,
     settings_from_persistable,
 )
-from .ui import USBCameraView
+from .ui import CameraView
 
 try:
     from vmc.runtime import ModuleRuntime, RuntimeContext
@@ -60,8 +60,8 @@ except Exception:
 logger = get_module_logger(__name__)
 
 
-class USBCamerasRuntime(ModuleRuntime):
-    """Logger runtime for USB cameras.
+class CamerasRuntime(ModuleRuntime):
+    """Logger runtime for cameras.
 
     Integrates the camera controller with Logger's command system
     and stub (codex) view framework.
@@ -75,7 +75,7 @@ class USBCamerasRuntime(ModuleRuntime):
         """
         self.ctx = ctx
         self.logger = (
-            ctx.logger.getChild("USBCameras")
+            ctx.logger.getChild("Cameras")
             if hasattr(ctx, "logger") and ctx.logger
             else logger
         )
@@ -98,7 +98,7 @@ class USBCamerasRuntime(ModuleRuntime):
         self._current_device_info: dict = {}
 
         # Create view with stub view from context
-        self.view = USBCameraView(ctx.view, logger_instance=self.logger)
+        self.view = CameraView(ctx.view, logger_instance=self.logger)
 
     @staticmethod
     def _parse_int(val: Any, default: int) -> int:
@@ -273,7 +273,7 @@ class USBCamerasRuntime(ModuleRuntime):
     async def start(self) -> None:
         """Start the runtime."""
         self.logger.info("=" * 60)
-        self.logger.info("USB CAMERAS RUNTIME STARTING")
+        self.logger.info("CAMERAS RUNTIME STARTING")
         self.logger.info("=" * 60)
 
         args = self.ctx.args
@@ -304,9 +304,9 @@ class USBCamerasRuntime(ModuleRuntime):
         # Setup stub view
         if self.ctx.view:
             with contextlib.suppress(Exception):
-                self.ctx.view.set_preview_title("USB Camera")
+                self.ctx.view.set_preview_title("Camera")
             if hasattr(self.ctx.view, "set_data_subdir"):
-                self.ctx.view.set_data_subdir("Cameras_USB")
+                self.ctx.view.set_data_subdir("Cameras")
 
         # Attach view to stub and connect callbacks
         self.view.attach()
@@ -314,14 +314,14 @@ class USBCamerasRuntime(ModuleRuntime):
         self.controller.set_preview_callback(self.view.push_frame)
         self.view.set_settings_callback(self._on_settings_changed)
 
-        self.logger.info("USB Cameras runtime ready")
+        self.logger.info("Cameras runtime ready")
         if StatusMessage:
             StatusMessage.send("ready")
 
         # Handle CLI device argument
         device_arg = getattr(self.ctx.args, "device", None)
         if device_arg:
-            self.logger.info("Auto-assigning USB camera %s via CLI arg", device_arg)
+            self.logger.info("Auto-assigning camera %s via CLI arg", device_arg)
             try:
                 device = int(device_arg)
             except ValueError:
@@ -337,7 +337,7 @@ class USBCamerasRuntime(ModuleRuntime):
 
             device_info = {
                 "device": device,
-                "name": f"USB Camera ({device_arg})",
+                "name": f"Camera ({device_arg})",
                 "stable_id": str(device_arg),
                 "has_audio": audio_info.get("has_audio", False),
                 "audio_device_index": audio_info.get("audio_device_index"),
@@ -359,7 +359,7 @@ class USBCamerasRuntime(ModuleRuntime):
 
     async def shutdown(self) -> None:
         """Shutdown the runtime."""
-        self.logger.info("Shutting down USB Cameras runtime")
+        self.logger.info("Shutting down Cameras runtime")
         # Save current settings before shutdown
         self._save_settings(self.controller.state.settings)
         await self.controller.stop_streaming()
@@ -458,7 +458,7 @@ class USBCamerasRuntime(ModuleRuntime):
             or command.get("stable_id")
             or command.get("device_id", "")
         )
-        display_name = command.get("display_name") or f"USB Camera ({stable_id})"
+        display_name = command.get("display_name") or f"Camera ({stable_id})"
 
         self.logger.info(
             "assign_device: camera_index=%s, dev_path=%s, stable_id=%s",
@@ -626,7 +626,7 @@ class USBCamerasRuntime(ModuleRuntime):
         if session_dir:
             self._session_dir = Path(session_dir)
         elif not self._session_dir:
-            self._session_dir = Path("/tmp/cameras_usb")
+            self._session_dir = Path("/tmp/cameras")
 
         trial = command.get("trial_number", self._trial_number)
 
@@ -739,6 +739,10 @@ class USBCamerasRuntime(ModuleRuntime):
             self.logger.warning("Failed to save camera settings: %s", e)
 
 
-def factory(ctx: RuntimeContext) -> USBCamerasRuntime:
+# Backwards compatibility alias
+USBCamerasRuntime = CamerasRuntime
+
+
+def factory(ctx: RuntimeContext) -> CamerasRuntime:
     """Factory function for Logger integration."""
-    return USBCamerasRuntime(ctx)
+    return CamerasRuntime(ctx)

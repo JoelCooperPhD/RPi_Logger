@@ -1,6 +1,6 @@
-# Cameras_USB Module
+# Cameras Module
 
-USB camera module with optional audio recording. Supports video-only or synchronized audio+video capture depending on camera capabilities and user preference.
+Camera module with optional audio recording. Supports video-only or synchronized audio+video capture depending on camera capabilities and user preference.
 
 ## Supported Platforms
 
@@ -27,9 +27,9 @@ The controller combines state management and side effects into a single class wi
 ### Module Structure
 
 ```
-Cameras_USB/
-├── main_cameras_usb.py   # Entry point
-├── bridge.py             # USBCamerasRuntime (ModuleRuntime interface)
+Cameras/
+├── main_cameras.py       # Entry point
+├── bridge.py             # CamerasRuntime (ModuleRuntime interface)
 ├── config.txt            # Module configuration
 ├── core/                 # State and controller
 │   ├── state.py          # CameraState (boolean flags), CameraSettings, device types
@@ -56,7 +56,7 @@ Cameras_USB/
 ├── infra/                # Command handling
 │   └── command_handler.py    # JSON stdin/stdout command interface
 ├── ui/                   # User interface
-│   ├── view.py           # USBCameraView (stub integration)
+│   ├── view.py           # CameraView (stub integration)
 │   └── widgets/
 │       └── settings_window.py  # Camera/audio settings dialog
 └── tests/                # Test suite
@@ -211,17 +211,17 @@ Runtime settings via Settings dialog:
 
 ```bash
 # Linux - device path or index
-python -m rpi_logger.modules.Cameras_USB.main_cameras_usb --device /dev/video0
-python -m rpi_logger.modules.Cameras_USB.main_cameras_usb --device 0
+python -m rpi_logger.modules.Cameras.main_cameras --device /dev/video0
+python -m rpi_logger.modules.Cameras.main_cameras --device 0
 
 # macOS/Windows - device index
-python -m rpi_logger.modules.Cameras_USB.main_cameras_usb --device 0
+python -m rpi_logger.modules.Cameras.main_cameras --device 0
 ```
 
 ### With Audio
 
 ```bash
-python -m rpi_logger.modules.Cameras_USB.main_cameras_usb \
+python -m rpi_logger.modules.Cameras.main_cameras \
     --device 0 \
     --audio auto \
     --record \
@@ -323,7 +323,7 @@ unassign() → reset to initial state (preserving settings)
 ## Testing
 
 ```bash
-pytest rpi_logger/modules/Cameras_USB/tests/
+pytest rpi_logger/modules/Cameras/tests/
 ```
 
 Test categories:

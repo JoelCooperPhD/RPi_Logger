@@ -1,4 +1,4 @@
-"""USB Camera view with preview and metrics.
+"""Camera view with preview and metrics.
 
 Stateless UI driven by state callbacks, attaches to stub (codex) view.
 """
@@ -49,7 +49,7 @@ def _fps_color(actual: Any, target: Any) -> Optional[str]:
     return Colors.FG_PRIMARY
 
 
-class USBCameraView:
+class CameraView:
     """Stateless view driven by state callbacks, attaches to stub (codex) view."""
 
     def __init__(self, stub_view: Any = None, *, logger_instance=None) -> None:
@@ -124,7 +124,7 @@ class USBCameraView:
         self._install_menus()
 
         self._has_ui = True
-        self._logger.info("USB Camera view attached")
+        self._logger.info("Camera view attached")
 
     def _build_layout(self, parent, tk) -> None:
         """Build the main preview canvas layout."""
@@ -240,7 +240,7 @@ class USBCameraView:
 
         # Create toplevel window
         win = tk.Toplevel(self._root)
-        win.title("USB Camera Settings")
+        win.title("Camera Settings")
         win.transient(self._root)
         win.resizable(False, False)
 
@@ -598,4 +598,7 @@ class USBCameraView:
             pass
 
 
-__all__ = ["USBCameraView"]
+# Backwards compatibility alias
+USBCameraView = CameraView
+
+__all__ = ["CameraView", "USBCameraView"]

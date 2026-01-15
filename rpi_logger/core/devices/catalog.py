@@ -62,9 +62,9 @@ class DeviceCatalog:
         ),
         FamilyMetadata(
             DeviceFamily.CAMERA_USB,
-            "Cameras-USB",
+            "Cameras",
             2,
-            "USB camera devices"
+            "Camera devices"
         ),
         FamilyMetadata(
             DeviceFamily.CAMERA_CSI,

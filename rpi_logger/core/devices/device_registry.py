@@ -157,7 +157,7 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         is_internal=True,
     ),
 
-    # USB Camera devices (discovered via /dev/video* enumeration)
+    # Camera devices (discovered via /dev/video* enumeration or platform APIs)
     DeviceType.USB_CAMERA: DeviceSpec(
         device_type=DeviceType.USB_CAMERA,
         family=DeviceFamily.CAMERA_USB,
@@ -165,8 +165,8 @@ DEVICE_REGISTRY: Dict[DeviceType, DeviceSpec] = {
         vid=None,  # Cameras discovered via /dev/video* enumeration, not VID/PID
         pid=None,
         baudrate=0,  # Not a serial device
-        display_name="USB Camera",
-        module_id="cameras_usb",
+        display_name="Camera",
+        module_id="cameras",
     ),
 
     # Pi CSI Camera devices (discovered via Picamera2)
@@ -353,7 +353,7 @@ def get_connection_display_name(family: DeviceFamily) -> str:
         DeviceFamily.EYE_TRACKER: "EyeTracker-Neon",
         DeviceFamily.AUDIO: "Microphone",
         DeviceFamily.INTERNAL: "Notes",
-        DeviceFamily.CAMERA_USB: "Cameras-USB",
+        DeviceFamily.CAMERA_USB: "Cameras",
         DeviceFamily.CAMERA_CSI: "Cameras-CSI",
         DeviceFamily.GPS: "GPS",
     }

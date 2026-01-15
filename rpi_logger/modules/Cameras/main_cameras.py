@@ -1,6 +1,6 @@
-"""Cameras_USB module entry point.
+"""Cameras module entry point.
 
-USB camera module with optional audio recording, using Elm/Redux architecture.
+Camera module with optional audio recording, using Elm/Redux architecture.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 if __package__ in {None, ""}:
-    __package__ = "rpi_logger.modules.Cameras_USB"
+    __package__ = "rpi_logger.modules.Cameras"
 
 STUB_ROOT = MODULE_DIR.parent / "stub (codex)"
 if STUB_ROOT.exists() and str(STUB_ROOT) not in sys.path:
@@ -67,8 +67,8 @@ except ImportError:
 
 from .bridge import factory
 
-DISPLAY_NAME = "Cameras-USB"
-MODULE_ID = "cameras_usb"
+DISPLAY_NAME = "Cameras"
+MODULE_ID = "cameras"
 
 logger = get_module_logger(__name__)
 
@@ -91,7 +91,7 @@ def parse_args(argv: Optional[list[str]] = None):
             config_ctx = resolve_module_config_path(MODULE_DIR, MODULE_ID, filename="config.txt")
 
     defaults = {
-        "output_dir": "cameras_usb",
+        "output_dir": "cameras",
         "session_prefix": MODULE_ID,
         "console_output": False,
         "log_level": "info",
@@ -176,7 +176,7 @@ async def main_async(argv: Optional[list[str]] = None) -> None:
             await supervisor.shutdown()
     else:
         logger.info("Running in standalone mode (no StubCodexSupervisor)")
-        from .bridge import USBCamerasRuntime
+        from .bridge import CamerasRuntime
 
         class SimpleContext:
             def __init__(self):
@@ -187,7 +187,7 @@ async def main_async(argv: Optional[list[str]] = None) -> None:
                 self.model = None
 
         ctx = SimpleContext()
-        runtime = USBCamerasRuntime(ctx)
+        runtime = CamerasRuntime(ctx)
         await runtime.start()
 
         try:

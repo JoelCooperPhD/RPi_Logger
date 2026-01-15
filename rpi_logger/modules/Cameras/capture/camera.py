@@ -1,4 +1,4 @@
-"""USB camera capture using OpenCV."""
+"""Camera capture using OpenCV."""
 
 import os
 import sys
@@ -20,8 +20,8 @@ from .ring_buffer import FrameRingBuffer
 logger = logging.getLogger(__name__)
 
 
-class USBCamera:
-    """USB camera capture using OpenCV.
+class Camera:
+    """Camera capture using OpenCV.
 
     Captures at hardware speed configured via fps_hint.
     All frames are recorded without rate limiting.
@@ -34,7 +34,7 @@ class USBCamera:
         fps_hint: float,
         buffer: FrameRingBuffer,
     ):
-        """Initialize USB camera.
+        """Initialize camera.
 
         Args:
             device: Camera device index or path
@@ -100,7 +100,7 @@ class USBCamera:
         fourcc_str = "".join([chr((fourcc_code >> 8 * i) & 0xFF) for i in range(4)])
 
         logger.info(
-            "USBCamera opened: device=%s, resolution=%dx%d, fps_hint=%.1f, fourcc=%s",
+            "Camera opened: device=%s, resolution=%dx%d, fps_hint=%.1f, fourcc=%s",
             self._device,
             *self._actual_resolution,
             self._fps_hint,
@@ -131,7 +131,7 @@ class USBCamera:
         if self._cap:
             self._cap.release()
             self._cap = None
-        logger.info("USBCamera closed")
+        logger.info("Camera closed")
 
     def _capture_loop(self) -> None:
         """Capture thread - runs at hardware speed, no throttling."""
@@ -192,3 +192,7 @@ class USBCamera:
     def is_running(self) -> bool:
         """True if capture thread is running."""
         return self._running
+
+
+# Backwards compatibility alias
+USBCamera = Camera

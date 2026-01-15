@@ -156,8 +156,8 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
         elif module_key == 'cameras_csi':
             from rpi_logger.modules.Cameras_CSI.main_cameras_csi import main
             asyncio.run(main())
-        elif module_key == 'cameras_usb':
-            from rpi_logger.modules.Cameras_USB.main_cameras_usb import main
+        elif module_key == 'cameras':
+            from rpi_logger.modules.Cameras.main_cameras import main
             asyncio.run(main())
         elif module_key == 'stub_codex':
             # Note: This module has a space in the directory name
@@ -165,7 +165,7 @@ def _run_module_subprocess(module_name: str, args: list[str]) -> None:
             print(f"Module stub_codex cannot be run in frozen mode", file=sys.stderr)
             sys.exit(1)
         else:
-            available = ['audio', 'cameras_csi', 'cameras_usb', 'drt', 'eye_tracker', 'gps', 'notes', 'vog']
+            available = ['audio', 'cameras', 'cameras_csi', 'drt', 'eye_tracker', 'gps', 'notes', 'vog']
             print(f"Unknown module: {module_name}", file=sys.stderr)
             print(f"Available modules: {', '.join(available)}", file=sys.stderr)
             sys.exit(1)

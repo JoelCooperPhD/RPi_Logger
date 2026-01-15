@@ -68,13 +68,17 @@ except ImportError:
     SOUNDDEVICE_AVAILABLE = False
 
 try:
-    from rpi_logger.modules.Cameras_USB.discovery.scanner import (
-        USBCameraScanner,
-        DiscoveredUSBCamera,
+    from rpi_logger.modules.Cameras.discovery.scanner import (
+        CameraScanner,
+        USBCameraScanner,  # Backwards compatibility alias
+        DiscoveredCamera,
+        DiscoveredUSBCamera,  # Backwards compatibility alias
         CV2_AVAILABLE,
     )
 except ImportError:
+    CameraScanner = None
     USBCameraScanner = None
+    DiscoveredCamera = None
     DiscoveredUSBCamera = None
     CV2_AVAILABLE = False
 
@@ -153,9 +157,11 @@ __all__ = [
     "AudioScanner",
     "DiscoveredAudioDevice",
     "SOUNDDEVICE_AVAILABLE",
-    # USB Camera Scanner
-    "USBCameraScanner",
-    "DiscoveredUSBCamera",
+    # Camera Scanner
+    "CameraScanner",
+    "USBCameraScanner",  # Backwards compatibility alias
+    "DiscoveredCamera",
+    "DiscoveredUSBCamera",  # Backwards compatibility alias
     "CV2_AVAILABLE",
     # CSI Scanner (Pi cameras)
     "CSIScanner",

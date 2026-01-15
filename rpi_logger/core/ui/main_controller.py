@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 def _normalize_module_key(name: str) -> str:
     """Normalize module name for consistent lookup.
 
-    Handles both module_id format (cameras_usb) and name format (CamerasUsb)
+    Handles both module_id format (cameras) and name format (Cameras)
     by uppercasing and removing underscores.
     """
     return name.upper().replace("_", "")

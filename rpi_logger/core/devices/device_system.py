@@ -64,9 +64,9 @@ except ImportError:
     SOUNDDEVICE_AVAILABLE = False
 
 try:
-    from rpi_logger.modules.Cameras_USB.discovery.scanner import USBCameraScanner, CV2_AVAILABLE
+    from rpi_logger.modules.Cameras.discovery.scanner import CameraScanner, CV2_AVAILABLE
 except ImportError:
-    USBCameraScanner = None
+    CameraScanner = None
     CV2_AVAILABLE = False
 
 try:
@@ -178,9 +178,9 @@ class DeviceSystem:
             on_device_lost=self._adapter.on_internal_device_lost,
         )
 
-        self._usb_camera_scanner: Optional[USBCameraScanner] = None
+        self._camera_scanner: Optional[CameraScanner] = None
         if CV2_AVAILABLE:
-            self._usb_camera_scanner = USBCameraScanner(
+            self._camera_scanner = CameraScanner(
                 on_device_found=self._adapter.on_usb_camera_found,
                 on_device_lost=self._adapter.on_usb_camera_lost,
             )
@@ -255,8 +255,8 @@ class DeviceSystem:
         if self._audio_scanner:
             self._scanner_registry[(InterfaceType.USB, DeviceFamily.AUDIO)] = self._audio_scanner
 
-        if self._usb_camera_scanner:
-            self._scanner_registry[(InterfaceType.USB, DeviceFamily.CAMERA_USB)] = self._usb_camera_scanner
+        if self._camera_scanner:
+            self._scanner_registry[(InterfaceType.USB, DeviceFamily.CAMERA_USB)] = self._camera_scanner
 
         # Network devices
         if self._network_scanner:
@@ -573,9 +573,9 @@ class DeviceSystem:
             except Exception as e:
                 logger.error(f"Error rescanning USB devices: {e}")
 
-        if self._usb_camera_scanner and self._usb_camera_scanner in self._started_scanners:
+        if self._camera_scanner and self._camera_scanner in self._started_scanners:
             try:
-                await self._usb_camera_scanner.force_scan()
+                await self._camera_scanner.force_scan()
             except Exception as e:
                 logger.error(f"Error rescanning USB cameras: {e}")
 
@@ -700,12 +700,12 @@ class DeviceSystem:
         # are registered in MasterDeviceRegistry before AudioScanner sees them
         if scanner == self._audio_scanner:
             # Ensure camera scanners are started first if they're going to be used
-            if self._usb_camera_scanner and self._usb_camera_scanner not in self._started_scanners:
+            if self._camera_scanner and self._camera_scanner not in self._started_scanners:
                 # Check if camera connection will be enabled
                 if self._selection.is_connection_enabled(InterfaceType.USB, DeviceFamily.CAMERA_USB):
                     logger.debug("Starting camera scanner before audio (for webcam mic filtering)")
-                    await self._usb_camera_scanner.start()
-                    self._started_scanners.add(self._usb_camera_scanner)
+                    await self._camera_scanner.start()
+                    self._started_scanners.add(self._camera_scanner)
 
         await scanner.start()
 

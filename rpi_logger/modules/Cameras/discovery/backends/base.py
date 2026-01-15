@@ -29,8 +29,8 @@ class AudioSiblingInfo:
 
 
 @dataclass
-class DiscoveredUSBCamera:
-    """Represents a discovered USB camera device.
+class DiscoveredCamera:
+    """Represents a discovered camera device.
 
     This is the common data structure returned by all camera backends.
     It contains all information needed to identify and use a camera.
@@ -61,6 +61,10 @@ class DiscoveredUSBCamera:
     camera_index: Optional[int] = None
 
 
+# Backwards compatibility alias
+DiscoveredUSBCamera = DiscoveredCamera
+
+
 class CameraBackend(Protocol):
     """Protocol for platform-specific camera discovery backends.
 
@@ -85,6 +89,7 @@ class CameraBackend(Protocol):
 
 __all__ = [
     "AudioSiblingInfo",
-    "DiscoveredUSBCamera",
+    "DiscoveredCamera",
+    "DiscoveredUSBCamera",  # Backwards compatibility alias
     "CameraBackend",
 ]

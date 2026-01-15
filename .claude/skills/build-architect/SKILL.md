@@ -8,7 +8,7 @@ globs:
 
 # Build Architect Skill
 
-Guide for creating documentation structures for Logger modules. New modules should use **Elm/Redux architecture** for consistency and testability. Cameras_CSI is the reference implementation. Legacy modules (Cameras_USB, Audio) use different patterns.
+Guide for creating documentation structures for Logger modules. New modules should use **Elm/Redux architecture** for consistency and testability. Cameras_CSI is the reference implementation. Legacy modules (Cameras, Audio) use different patterns.
 
 ## When to Use
 
@@ -153,7 +153,7 @@ Standalone:
 | Module | Architecture | Notes |
 |--------|-------------|-------|
 | Cameras_CSI | Elm/Redux | Reference implementation |
-| Cameras_USB | Async Controller | Direct async pattern, not Redux |
+| Cameras | Async Controller | Direct async pattern, not Redux |
 | Audio | Service Layer | Application/service pattern |
 | DRT | Legacy | |
 | VOG | Legacy | |

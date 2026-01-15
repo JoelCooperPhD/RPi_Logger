@@ -1,7 +1,7 @@
 """
-Cameras_USB module discovery package.
+Cameras module discovery package.
 
-Provides USB camera discovery using platform-specific backends:
+Provides camera discovery using platform-specific backends:
 - Linux: sysfs + OpenCV (with audio sibling detection via ALSA)
 - macOS: AVFoundation + OpenCV
 - Windows: OpenCV + WMI (with audio sibling detection via VID:PID)
@@ -15,12 +15,12 @@ from rpi_logger.core.devices.discovery_protocol import (
     DeviceLostCallback,
 )
 from .spec import DISCOVERY_SPEC
-from .scanner import CameraScanner, DiscoveredUSBCamera, CV2_AVAILABLE
+from .scanner import CameraScanner, DiscoveredCamera, DiscoveredUSBCamera, CV2_AVAILABLE
 from .backends import get_camera_backend, CameraBackend, AudioSiblingInfo
 
 
-class CamerasUSBDiscovery(BaseModuleDiscovery):
-    """Discovery handler for USB cameras."""
+class CamerasDiscovery(BaseModuleDiscovery):
+    """Discovery handler for cameras."""
 
     spec = DISCOVERY_SPEC
 
@@ -36,12 +36,17 @@ class CamerasUSBDiscovery(BaseModuleDiscovery):
         )
 
 
+# Backwards compatibility alias
+CamerasUSBDiscovery = CamerasDiscovery
+
 # Exports for discovery loader
 __all__ = [
-    "CamerasUSBDiscovery",
+    "CamerasDiscovery",
+    "CamerasUSBDiscovery",  # Backwards compatibility alias
     "DISCOVERY_SPEC",
     "CameraScanner",
-    "DiscoveredUSBCamera",
+    "DiscoveredCamera",
+    "DiscoveredUSBCamera",  # Backwards compatibility alias
     "AudioSiblingInfo",
     "get_camera_backend",
     "CameraBackend",

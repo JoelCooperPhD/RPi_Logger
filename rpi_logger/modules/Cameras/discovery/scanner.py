@@ -1,7 +1,7 @@
 """
-USB Camera device scanner.
+Camera device scanner.
 
-Discovers USB cameras using platform-specific backends:
+Discovers cameras using platform-specific backends:
 - Linux: sysfs + OpenCV (real device names from kernel)
 - macOS: AVFoundation + OpenCV (real device names via PyObjC)
 - Windows: OpenCV enumeration (generic names, could add WMI)
@@ -21,9 +21,9 @@ if sys.platform == "win32":
 
 from rpi_logger.core.logging_utils import get_module_logger
 
-from .backends import get_camera_backend, DiscoveredUSBCamera, CameraBackend
+from .backends import get_camera_backend, DiscoveredCamera, DiscoveredUSBCamera, CameraBackend
 
-logger = get_module_logger("USBCameraScanner")
+logger = get_module_logger("CameraScanner")
 
 # Check OpenCV availability for backwards compatibility
 try:
@@ -34,13 +34,17 @@ except ImportError:
 
 
 # Callback types
-USBCameraFoundCallback = Callable[[DiscoveredUSBCamera], Awaitable[None]]
-USBCameraLostCallback = Callable[[str], Awaitable[None]]  # device_id
+CameraFoundCallback = Callable[[DiscoveredCamera], Awaitable[None]]
+CameraLostCallback = Callable[[str], Awaitable[None]]  # device_id
+
+# Backwards compatibility aliases
+USBCameraFoundCallback = CameraFoundCallback
+USBCameraLostCallback = CameraLostCallback
 
 
 class CameraScanner:
     """
-    Continuously scans for USB camera devices.
+    Continuously scans for camera devices.
 
     Uses platform-specific backends for camera discovery:
     - Linux: LinuxCameraBackend (sysfs + OpenCV)
@@ -51,19 +55,19 @@ class CameraScanner:
     # Windows: OpenCV VideoCapture activates camera hardware, causing lights to flash.
     # Use longer interval on Windows to reduce flashing and Orbbec sensor noise.
     DEFAULT_SCAN_INTERVAL = 30.0 if sys.platform == "win32" else 2.0
-    MAX_USB_DEVICES = 16
+    MAX_DEVICES = 16
 
     def __init__(
         self,
         scan_interval: float = DEFAULT_SCAN_INTERVAL,
-        on_device_found: Optional[USBCameraFoundCallback] = None,
-        on_device_lost: Optional[USBCameraLostCallback] = None,
+        on_device_found: Optional[CameraFoundCallback] = None,
+        on_device_lost: Optional[CameraLostCallback] = None,
     ):
         self._scan_interval = scan_interval
         self._on_device_found = on_device_found
         self._on_device_lost = on_device_lost
 
-        self._known_devices: Dict[str, DiscoveredUSBCamera] = {}
+        self._known_devices: Dict[str, DiscoveredCamera] = {}
         self._scan_task: Optional[asyncio.Task] = None
         self._running = False
 
@@ -71,7 +75,7 @@ class CameraScanner:
         self._backend: CameraBackend = get_camera_backend()
 
     @property
-    def devices(self) -> Dict[str, DiscoveredUSBCamera]:
+    def devices(self) -> Dict[str, DiscoveredCamera]:
         """Get currently known devices (device_id -> device)."""
         return dict(self._known_devices)
 
@@ -81,7 +85,7 @@ class CameraScanner:
         return self._running
 
     async def start(self) -> None:
-        """Start USB camera device scanning."""
+        """Start camera device scanning."""
         if self._running:
             return
 
@@ -92,10 +96,10 @@ class CameraScanner:
 
         # Start continuous scanning
         self._scan_task = asyncio.create_task(self._scan_loop())
-        logger.info("USB camera scanner started")
+        logger.info("Camera scanner started")
 
     async def stop(self) -> None:
-        """Stop USB camera device scanning."""
+        """Stop camera device scanning."""
         if not self._running:
             return
 
@@ -118,7 +122,7 @@ class CameraScanner:
                     logger.error(f"Error in device lost callback: {e}")
 
         self._known_devices.clear()
-        logger.info("USB camera scanner stopped")
+        logger.info("Camera scanner stopped")
 
     async def force_scan(self) -> None:
         """Force an immediate scan."""
@@ -127,13 +131,13 @@ class CameraScanner:
 
     async def reannounce_devices(self) -> None:
         """Re-emit discovery events for all known devices."""
-        logger.debug(f"Re-announcing {len(self._known_devices)} USB cameras")
+        logger.debug(f"Re-announcing {len(self._known_devices)} cameras")
         for camera in self._known_devices.values():
             if self._on_device_found:
                 try:
                     await self._on_device_found(camera)
                 except Exception as e:
-                    logger.error(f"Error re-announcing USB camera: {e}")
+                    logger.error(f"Error re-announcing camera: {e}")
 
     async def _scan_loop(self) -> None:
         """Main scanning loop.
@@ -162,14 +166,14 @@ class CameraScanner:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in USB camera scan loop: {e}")
+                logger.error(f"Error in camera scan loop: {e}")
 
     async def _scan_devices(self) -> None:
-        """Scan for USB cameras and detect changes."""
-        current_devices: Dict[str, DiscoveredUSBCamera] = {}
+        """Scan for cameras and detect changes."""
+        current_devices: Dict[str, DiscoveredCamera] = {}
 
-        # Discover USB cameras (runs in thread to avoid blocking)
-        cameras = await asyncio.to_thread(self._discover_usb_sync)
+        # Discover cameras (runs in thread to avoid blocking)
+        cameras = await asyncio.to_thread(self._discover_cameras_sync)
         for cam in cameras:
             current_devices[cam.device_id] = cam
 
@@ -177,7 +181,7 @@ class CameraScanner:
         for device_id, camera in current_devices.items():
             if device_id not in self._known_devices:
                 self._known_devices[device_id] = camera
-                logger.info(f"USB camera found: {camera.friendly_name} ({device_id})")
+                logger.info(f"Camera found: {camera.friendly_name} ({device_id})")
                 if self._on_device_found:
                     try:
                         await self._on_device_found(camera)
@@ -190,37 +194,40 @@ class CameraScanner:
             # On Windows, cameras in use can't be opened by VideoCapture.
             # Don't remove them - they're likely in use, not unplugged.
             if sys.platform == "win32":
-                logger.debug(f"USB camera {device_id} not visible - likely in use by module")
+                logger.debug(f"Camera {device_id} not visible - likely in use by module")
                 continue
 
             camera = self._known_devices.pop(device_id)
-            logger.info(f"USB camera lost: {camera.friendly_name} ({device_id})")
+            logger.info(f"Camera lost: {camera.friendly_name} ({device_id})")
             if self._on_device_lost:
                 try:
                     await self._on_device_lost(device_id)
                 except Exception as e:
                     logger.error(f"Error in device lost callback: {e}")
 
-    def _discover_usb_sync(self) -> list[DiscoveredUSBCamera]:
-        """Synchronous USB camera discovery (runs in thread).
+    def _discover_cameras_sync(self) -> list[DiscoveredCamera]:
+        """Synchronous camera discovery (runs in thread).
 
         Delegates to the platform-specific backend for actual discovery.
         """
-        return self._backend.discover_cameras(self.MAX_USB_DEVICES)
+        return self._backend.discover_cameras(self.MAX_DEVICES)
 
-    def get_device(self, device_id: str) -> Optional[DiscoveredUSBCamera]:
+    def get_device(self, device_id: str) -> Optional[DiscoveredCamera]:
         """Get a specific device by ID."""
         return self._known_devices.get(device_id)
 
 
-# Alias for backwards compatibility with core/devices imports
+# Backwards compatibility alias
 USBCameraScanner = CameraScanner
 
 __all__ = [
     "CameraScanner",
-    "USBCameraScanner",  # Backwards-compatible alias
-    "DiscoveredUSBCamera",
-    "USBCameraFoundCallback",
-    "USBCameraLostCallback",
+    "USBCameraScanner",  # Backwards compatibility alias
+    "DiscoveredCamera",
+    "DiscoveredUSBCamera",  # Backwards compatibility alias
+    "CameraFoundCallback",
+    "CameraLostCallback",
+    "USBCameraFoundCallback",  # Backwards compatibility alias
+    "USBCameraLostCallback",  # Backwards compatibility alias
     "CV2_AVAILABLE",
 ]
