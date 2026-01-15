@@ -10,12 +10,13 @@ A cross-platform data acquisition system for automotive and human factors resear
 
 | Module | Capability |
 |--------|-----------|
-| **Cameras** | Multi-camera video with hardware-accelerated H.264 encoding |
-| **Audio** | Multi-channel USB microphone recording |
-| **Eye Tracker** | Pupil Labs Neon integration with gaze overlay |
+| **Cameras** | System camera video recording (webcams, etc.) |
+| **Cameras-CSI** | CSI camera video (Raspberry Pi only) |
+| **Audio** | Multi-channel microphone recording |
+| **EyeTracker-Neon** | Pupil Labs Neon gaze tracking with scene video |
 | **DRT** | Detection Response Task devices (wired & wireless) |
 | **VOG** | Visual Occlusion Glasses with experiment modes |
-| **GPS** | Real-time location with offline map support |
+| **GPS** | Real-time location tracking (Raspberry Pi only) |
 | **Notes** | Timestamped session annotations |
 
 All modules record with **frame-level synchronization** (~30ms accuracy) and export timestamped CSV data for analysis.
@@ -27,7 +28,7 @@ All modules record with **frame-level synchronization** (~30ms accuracy) and exp
 | Device | Connection |
 |--------|------------|
 | IMX296 Global Shutter Cameras | CSI |
-| USB Webcams | USB |
+| System Cameras (webcams, etc.) | USB/System |
 | USB Microphones | USB |
 | Pupil Labs Neon | Network |
 | Red Scientific DRT | USB Serial |
@@ -133,9 +134,9 @@ python -m rpi_logger.tools.muxing_tool
 ### Platform Notes
 
 - **Raspberry Pi**: Full feature support including CSI cameras (requires `picamera2`)
-- **Linux**: USB cameras, audio, eye tracking, serial devices
-- **macOS**: USB cameras, audio, eye tracking
-- **Windows**: USB cameras, audio, eye tracking
+- **Linux**: System cameras, audio, eye tracking, serial devices
+- **macOS**: System cameras, audio, eye tracking
+- **Windows**: System cameras, audio, eye tracking
 
 ---
 
