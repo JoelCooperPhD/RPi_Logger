@@ -449,14 +449,8 @@ class Encoder:
         self._fsync()
 
     def _fsync(self) -> None:
-        try:
-            fd = os.open(self.video_path, os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-        except Exception:
-            pass
+        from rpi_logger.core.file_sync_utils import fsync_path
+        fsync_path(self.video_path)
 
     def _apply_overlay(self, frame: np.ndarray, timestamp: float, frame_number: int) -> np.ndarray:
         from datetime import datetime, timezone

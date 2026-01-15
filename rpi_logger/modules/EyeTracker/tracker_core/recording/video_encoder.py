@@ -132,17 +132,8 @@ class VideoEncoder:
         if self._output_path is None:
             return
 
-        def _do_fsync(path: Path) -> None:
-            fd = os.open(str(path), os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-
-        try:
-            await asyncio.to_thread(_do_fsync, self._output_path)
-        except (OSError, FileNotFoundError):
-            pass  # File may not exist yet or be locked
+        from rpi_logger.core.file_sync_utils import fsync_path
+        await asyncio.to_thread(fsync_path, self._output_path)
 
     async def stop(self) -> None:
         if self.use_ffmpeg:

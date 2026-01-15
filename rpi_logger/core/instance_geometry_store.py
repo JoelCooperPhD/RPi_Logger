@@ -76,6 +76,7 @@ class InstanceGeometryStore:
                 for instance_id, geom in self._cache.items()
             }
 
+            from rpi_logger.core.file_sync_utils import fsync_file
             tmp_path: Optional[Path] = None
             try:
                 with tempfile.NamedTemporaryFile(
@@ -86,8 +87,7 @@ class InstanceGeometryStore:
                 ) as tmp:
                     tmp_path = Path(tmp.name)
                     json.dump(data, tmp, indent=2)
-                    tmp.flush()
-                    os.fsync(tmp.fileno())
+                    fsync_file(tmp)
 
                 os.replace(tmp_path, self._file_path)
             finally:

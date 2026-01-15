@@ -366,6 +366,7 @@ class ModuleStatePersistence:
                 def write_file():
                     tmp_path: Optional[Path] = None
                     try:
+                        from rpi_logger.core.file_sync_utils import fsync_file
                         with tempfile.NamedTemporaryFile(
                             "w",
                             dir=str(STATE_FILE.parent),
@@ -374,8 +375,7 @@ class ModuleStatePersistence:
                         ) as tmp:
                             tmp_path = Path(tmp.name)
                             json.dump(state, tmp, indent=2)
-                            tmp.flush()
-                            os.fsync(tmp.fileno())
+                            fsync_file(tmp)
 
                         os.replace(tmp_path, STATE_FILE)
                     finally:

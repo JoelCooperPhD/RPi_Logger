@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 import logging
@@ -626,7 +627,7 @@ class CamerasRuntime(ModuleRuntime):
         if session_dir:
             self._session_dir = Path(session_dir)
         elif not self._session_dir:
-            self._session_dir = Path("/tmp/cameras")
+            self._session_dir = Path(tempfile.gettempdir()) / "logger_cameras"
 
         trial = command.get("trial_number", self._trial_number)
 
