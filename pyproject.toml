@@ -18,6 +18,8 @@ dependencies = [
     "matplotlib>=3.7.0",
     "digi-xbee>=1.5.0",
     "zeroconf>=0.131.0",
+    # macOS: AVFoundation for camera names and audio sibling detection
+    "pyobjc-framework-AVFoundation>=10.0; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]

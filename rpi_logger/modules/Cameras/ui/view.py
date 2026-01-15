@@ -335,22 +335,29 @@ class CameraView:
         row += 1
 
         # --- AUDIO ---
-        add_section_header(row, "Audio")
-        row += 1
+        # Only show audio section if camera has a built-in microphone
+        has_audio = self._current_state.has_audio
+        if has_audio:
+            add_section_header(row, "Audio")
+            row += 1
 
-        # Audio enabled checkbox
-        audio_var = tk.BooleanVar(value=settings.audio_enabled)
-        audio_check = ttk.Checkbutton(
-            main, text="Enable audio recording", variable=audio_var
-        )
-        audio_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=6)
-        row += 1
+            # Audio enabled checkbox
+            audio_var = tk.BooleanVar(value=settings.audio_enabled)
+            audio_check = ttk.Checkbutton(
+                main, text="Enable audio recording", variable=audio_var
+            )
+            audio_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=6)
+            row += 1
 
-        # Sample rate (ensure int for display - sounddevice returns floats)
-        rate_var = tk.StringVar(value=str(int(settings.sample_rate)))
-        add_setting_row(row, "Sample Rate", rate_var,
-                        ["44100", "48000", "96000"])
-        row += 1
+            # Sample rate (ensure int for display - sounddevice returns floats)
+            rate_var = tk.StringVar(value=str(int(settings.sample_rate)))
+            add_setting_row(row, "Sample Rate", rate_var,
+                            ["44100", "48000", "96000"])
+            row += 1
+        else:
+            # No audio capability - create dummy vars with disabled values
+            audio_var = tk.BooleanVar(value=False)
+            rate_var = tk.StringVar(value=str(int(settings.sample_rate)))
 
         # Info text
         ttk.Separator(main, orient="horizontal").grid(
@@ -391,12 +398,15 @@ class CameraView:
                 div_display = div_var.get()
                 preview_divisor = div_reverse_map.get(div_display, settings.preview_divisor)
 
+                # Only enable audio if camera has built-in microphone
+                audio_enabled = audio_var.get() and has_audio
+
                 new_settings = Settings(
                     resolution=resolution,
                     frame_rate=int(fps_var.get()),
                     preview_divisor=preview_divisor,
                     preview_scale=preview_scale,
-                    audio_enabled=audio_var.get(),
+                    audio_enabled=audio_enabled,
                     audio_device_index=settings.audio_device_index,
                     sample_rate=int(float(rate_var.get())),
                     audio_channels=settings.audio_channels,

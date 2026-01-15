@@ -5,6 +5,9 @@ Discovers cameras on macOS using AVFoundation for device enumeration and
 OpenCV for capture verification. AVFoundation provides actual device names
 like "FaceTime HD Camera" instead of generic "USB Camera 0".
 
+Uses IOKit for USB VID:PID extraction to match webcam video interfaces
+with their audio siblings (built-in microphones).
+
 Requires PyObjC (pyobjc-framework-AVFoundation) for AVFoundation access.
 Falls back to generic names if PyObjC is not available.
 
@@ -17,9 +20,21 @@ from typing import Optional
 
 from rpi_logger.core.logging_utils import get_module_logger
 
-from .base import DiscoveredUSBCamera
+from .base import AudioSiblingInfo, DiscoveredUSBCamera
 
 logger = get_module_logger("MacOSCameraBackend")
+
+# Try to import IOKit utilities for VID:PID extraction and built-in matching
+try:
+    from .iokit_utils import (
+        find_audio_device_with_vid_pid,
+        find_builtin_audio_sibling,
+        get_vid_pid_for_camera_name,
+    )
+    IOKIT_AVAILABLE = True
+except ImportError as e:
+    IOKIT_AVAILABLE = False
+    logger.debug(f"IOKit utilities not available - audio sibling detection disabled: {e}")
 
 # Try to import OpenCV
 try:
@@ -46,7 +61,11 @@ class MacOSCameraBackend:
     """
 
     def discover_cameras(self, max_devices: int = 16) -> list[DiscoveredUSBCamera]:
-        """Discover cameras on macOS using AVFoundation + OpenCV."""
+        """Discover cameras on macOS using AVFoundation + OpenCV.
+
+        Also attempts to find audio siblings (built-in microphones) for each
+        camera by matching USB VID:PID using IOKit.
+        """
         if not CV2_AVAILABLE:
             logger.debug("OpenCV not available, skipping camera discovery")
             return []
@@ -72,15 +91,33 @@ class MacOSCameraBackend:
                     hw_model = "USB Camera"
                     stable_id = str(index)
 
+                # Try to find audio sibling using IOKit VID:PID matching
+                audio_sibling = None
+                vid_pid = None
+                if IOKIT_AVAILABLE:
+                    audio_sibling, vid_pid = self._find_audio_sibling(friendly_name)
+
                 cameras.append(DiscoveredUSBCamera(
                     device_id=f"usb:{index}",
                     stable_id=stable_id,
                     dev_path=str(index),
                     friendly_name=friendly_name,
                     hw_model=hw_model,
-                    location_hint=None,
+                    location_hint=vid_pid,
+                    usb_bus_path=vid_pid,
+                    audio_sibling=audio_sibling,
+                    camera_index=index,
                 ))
-                logger.debug(f"Discovered macOS camera at index {index}: {friendly_name}")
+
+                if audio_sibling:
+                    logger.info(
+                        f"Discovered macOS camera at index {index}: {friendly_name} "
+                        f"(audio: {audio_sibling.name})"
+                    )
+                else:
+                    logger.debug(
+                        f"Discovered macOS camera at index {index}: {friendly_name} (no audio)"
+                    )
             else:
                 if cap:
                     cap.release()
@@ -119,6 +156,70 @@ class MacOSCameraBackend:
         except Exception as e:
             logger.warning(f"Failed to enumerate AVFoundation devices: {e}")
             return None
+
+    def _find_audio_sibling(
+        self, camera_name: str
+    ) -> tuple[Optional[AudioSiblingInfo], Optional[str]]:
+        """Find an audio sibling for a camera.
+
+        Tries multiple strategies:
+        1. VID:PID matching for USB webcams (most reliable for external cameras)
+        2. Name-based matching for built-in cameras (FaceTime, iSight)
+
+        Args:
+            camera_name: Camera name from AVFoundation (e.g., "FaceTime HD Camera")
+
+        Returns:
+            Tuple of (AudioSiblingInfo, vid_pid_string) if found,
+            or (None, None) if no audio sibling found.
+        """
+        if not IOKIT_AVAILABLE:
+            return None, None
+
+        try:
+            # Strategy 1: VID:PID matching for USB webcams
+            vid_pid = get_vid_pid_for_camera_name(camera_name)
+            if vid_pid:
+                logger.debug(f"Camera '{camera_name}' has VID:PID {vid_pid}")
+
+                audio_info = find_audio_device_with_vid_pid(vid_pid)
+                if audio_info:
+                    audio_sibling = AudioSiblingInfo(
+                        sounddevice_index=audio_info["sounddevice_index"],
+                        alsa_card=None,  # Not applicable on macOS
+                        channels=audio_info.get("channels", 2),
+                        sample_rate=audio_info.get("sample_rate", 48000.0),
+                        name=audio_info.get("name", ""),
+                    )
+                    logger.info(
+                        f"Found USB audio sibling for '{camera_name}': "
+                        f"'{audio_sibling.name}' (index={audio_sibling.sounddevice_index})"
+                    )
+                    return audio_sibling, vid_pid
+
+            # Strategy 2: Built-in camera matching (FaceTime, iSight)
+            # On Apple Silicon, built-in cameras aren't USB devices
+            builtin_audio = find_builtin_audio_sibling(camera_name)
+            if builtin_audio:
+                audio_sibling = AudioSiblingInfo(
+                    sounddevice_index=builtin_audio["sounddevice_index"],
+                    alsa_card=None,
+                    channels=builtin_audio.get("channels", 1),
+                    sample_rate=builtin_audio.get("sample_rate", 48000.0),
+                    name=builtin_audio.get("name", ""),
+                )
+                logger.info(
+                    f"Found built-in audio sibling for '{camera_name}': "
+                    f"'{audio_sibling.name}' (index={audio_sibling.sounddevice_index})"
+                )
+                return audio_sibling, vid_pid
+
+            logger.debug(f"No audio sibling found for camera '{camera_name}'")
+            return None, vid_pid
+
+        except Exception as e:
+            logger.warning(f"Audio sibling detection failed for '{camera_name}': {e}")
+            return None, None
 
 
 __all__ = ["MacOSCameraBackend"]

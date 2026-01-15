@@ -103,6 +103,10 @@ class AVMuxer:
 
     def _write_video_sync(self, frame: "CapturedFrame") -> None:
         """Synchronous video write (runs in thread)."""
+        # Check again inside sync method - stop() may have run between check and here
+        if not self._container or not self._video_stream:
+            return
+
         import av
         import cv2
 
@@ -134,6 +138,10 @@ class AVMuxer:
 
     def _write_audio_sync(self, chunk: "AudioChunk") -> None:
         """Synchronous audio write (runs in thread)."""
+        # Check again inside sync method - stop() may have run between check and here
+        if not self._container or not self._audio_stream:
+            return
+
         import av
         import numpy as np
 
