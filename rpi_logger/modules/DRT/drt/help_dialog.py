@@ -103,36 +103,36 @@ Location
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 DRT CSV Columns (10 fields):
+   trial                 - Sequential stimulus count (1-based)
    module                - Module name ("DRT")
-   stim                  - Sequential stimulus count (1-based)
    device_id             - Device identifier (e.g., "DRT_dev_ttyacm0")
    label                 - Trial/condition label (blank if not set)
-   device_time_ms        - Device timestamp in ms since experiment start
-   device_time_unix      - Device absolute time (Unix seconds, if available)
    record_time_unix      - Host capture time (Unix seconds, 6 decimals)
    record_time_mono      - Host capture time (seconds, 9 decimals)
+   device_time_ms        - Device timestamp in ms since experiment start
+   device_time_unix      - Device absolute time (Unix seconds, if available)
    responses             - Button press count for this stimulus
    reaction_time_ms      - Response latency in ms (-1 = miss/timeout)
 
 wDRT CSV Columns (11 fields):
+   trial                 - Sequential stimulus count (1-based)
    module                - Module name ("DRT")
-   stim                  - Sequential stimulus count (1-based)
    device_id             - Device identifier (e.g., "wDRT_dev_ttyacm0")
    label                 - Trial/condition label (blank if not set)
-   device_time_ms        - Device timestamp in ms since experiment start
-   device_time_unix      - Device RTC timestamp (Unix seconds)
    record_time_unix      - Host capture time (Unix seconds, 6 decimals)
    record_time_mono      - Host capture time (seconds, 9 decimals)
+   device_time_ms        - Device timestamp in ms since experiment start
+   device_time_unix      - Device RTC timestamp (Unix seconds)
    responses             - Button press count for this stimulus
    reaction_time_ms      - Response latency in ms (-1 = miss/timeout)
    battery_percent       - Device battery level (0-100%)
 
 Example Rows:
    DRT:
-   DRT,1,DRT_dev_ttyacm0,,5000,,1733649120.123456,12345.678901234,1,342
+   1,DRT,DRT_dev_ttyacm0,,1733649120.123456,12345.678901234,5000,,1,342
 
    wDRT:
-   DRT,2,wDRT_dev_ttyacm0,,5500,1733649118,1733649120.456789,12345.678901234,1,287,85
+   2,DRT,wDRT_dev_ttyacm0,,1733649120.456789,12345.678901234,5500,1733649118,1,287,85
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

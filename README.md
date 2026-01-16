@@ -140,6 +140,51 @@ python -m rpi_logger.tools.muxing_tool
 
 ---
 
+## Debugging and Logging
+
+### Log Level Control
+
+Use **View > Log Level** in the main window to control log verbosity:
+
+| Level | What's shown |
+|-------|-------------|
+| Debug | All messages including internal diagnostics |
+| Info | Normal operation messages (default) |
+| Warning | Warnings and errors only |
+| Error | Errors only |
+| Critical | Only critical failures |
+
+Log files are always captured at DEBUG level in the `logs/` directory.
+
+### Debug API (Development)
+
+When running with the API server, debug endpoints are available:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/v1/debug/mode` | Check debug mode status |
+| `POST /api/v1/debug/mode` | Toggle debug mode |
+| `GET /api/v1/debug/modules` | Module state dump |
+| `GET /api/v1/debug/devices` | Device/connection state |
+| `GET /api/v1/debug/events` | Recent event log |
+| `GET /api/v1/debug/config` | Full config dump |
+| `GET /api/v1/debug/memory` | Memory usage by component |
+| `GET /api/v1/debug/routes` | List all API routes |
+
+### Troubleshooting
+
+**Check logs directory** for detailed diagnostics:
+```
+~/.local/share/rpi_logger/logs/
+```
+
+**System Information** available via Help > System Information shows:
+- Application version and platform
+- Module status (running/stopped)
+- Storage space and session directory
+
+---
+
 ## Support
 
 **Red Scientific**

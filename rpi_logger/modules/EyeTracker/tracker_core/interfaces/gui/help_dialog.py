@@ -95,79 +95,69 @@ Scene Video Format
 3.6. CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-GAZEDATA CSV (Extended Gaze - 11 fields):
-   Module              - Always "EyeTracker-Neon"
-   trial               - Trial number (integer)
-   gaze_timestamp      - Device timestamp (Unix seconds, 6 decimals)
-   norm_pos_x          - Normalized X position (0-1, float)
-   norm_pos_y          - Normalized Y position (0-1, float)
-   confidence          - Gaze confidence (0-1, float)
-   worn                - Glasses worn status (boolean)
-   pupil_left_diam     - Left pupil diameter (mm, float)
-   pupil_right_diam    - Right pupil diameter (mm, float)
-   record_time_unix    - System timestamp (Unix seconds, 6 decimals)
-   record_time_mono    - Monotonic time (seconds, 9 decimals)
+All CSVs use the standard prefix: trial, module, device_id, label,
+record_time_unix, record_time_mono followed by device-specific fields.
 
-GAZE CSV (Basic Gaze - 7 fields):
-   Module              - Always "EyeTracker-Neon"
-   trial               - Trial number (integer)
-   gaze_timestamp      - Device timestamp (Unix seconds, 6 decimals)
-   norm_pos_x          - Normalized X position (0-1, float)
-   norm_pos_y          - Normalized Y position (0-1, float)
-   confidence          - Gaze confidence (0-1, float)
-   worn                - Glasses worn status (boolean)
+GAZE CSV (36 fields):
+   trial               - Trial number (1-based)
+   module              - Module name ("EyeTracker")
+   device_id           - Device identifier ("eye_tracker")
+   label               - Optional trial label
+   record_time_unix    - System capture time (Unix seconds, 6 decimals)
+   record_time_mono    - Monotonic capture time (seconds, 9 decimals)
+   timestamp           - Device gaze timestamp (Unix seconds)
+   timestamp_ns        - Device timestamp in nanoseconds
+   stream_type         - Data stream type
+   worn                - Glasses worn status (0/1)
+   x, y                - Normalized gaze position (0-1)
+   left_x, left_y      - Left eye gaze (0-1)
+   right_x, right_y    - Right eye gaze (0-1)
+   pupil_diameter_left/right  - Pupil diameter (mm)
+   eyeball_center_*    - 3D eye center positions (x/y/z for left/right)
+   optical_axis_*      - 3D gaze direction vectors (x/y/z for left/right)
+   eyelid_angle_*      - Eyelid angles (top/bottom for left/right)
+   eyelid_aperture_*   - Eyelid openness (left/right)
 
-EVENT CSV (Eye Events - 9+ fields):
-   Module              - Always "EyeTracker-Neon"
-   trial               - Trial number (integer)
-   event_type          - Event type (fixation, blink, saccade)
-   start_timestamp     - Event start (Unix seconds, 6 decimals)
-   end_timestamp       - Event end (Unix seconds, 6 decimals)
-   duration_ms         - Event duration (milliseconds, float)
-   [Additional fields based on event type:]
-   For fixations: centroid_x, centroid_y, dispersion
-   For blinks: left_closed, right_closed
-   For saccades: amplitude, direction
+EVENTS CSV (24 fields):
+   trial               - Trial number (1-based)
+   module              - Module name ("EyeTracker")
+   device_id           - Device identifier ("eye_tracker")
+   label               - Optional trial label
+   record_time_unix    - System capture time (Unix seconds, 6 decimals)
+   record_time_mono    - Monotonic capture time (seconds, 9 decimals)
+   timestamp           - Device event timestamp (Unix seconds)
+   timestamp_ns        - Device timestamp in nanoseconds
+   event_type          - Event type: fixation, blink, or saccade
+   event_subtype       - Event category
+   confidence          - Event confidence (0-1)
+   duration            - Event duration (seconds)
+   start_time_ns, end_time_ns - Event time range
+   start_gaze_x/y, end_gaze_x/y - Gaze positions
+   mean_gaze_x/y       - Average gaze position
+   amplitude_pixels/angle_deg - Saccade amplitude
+   mean_velocity, max_velocity - Saccade velocity
 
-IMU CSV (Inertial Data - 10 fields):
-   Module              - Always "EyeTracker-Neon"
-   trial               - Trial number (integer)
-   timestamp           - Device timestamp (Unix seconds, 6 decimals)
-   accel_x             - Accelerometer X (m/s², float)
-   accel_y             - Accelerometer Y (m/s², float)
-   accel_z             - Accelerometer Z (m/s², float)
-   gyro_x              - Gyroscope X (rad/s, float)
-   gyro_y              - Gyroscope Y (rad/s, float)
-   gyro_z              - Gyroscope Z (rad/s, float)
-   record_time_mono    - Monotonic time (seconds, 9 decimals)
+IMU CSV (19 fields):
+   trial               - Trial number (1-based)
+   module              - Module name ("EyeTracker")
+   device_id           - Device identifier ("eye_tracker")
+   label               - Optional trial label
+   record_time_unix    - System capture time (Unix seconds, 6 decimals)
+   record_time_mono    - Monotonic capture time (seconds, 9 decimals)
+   timestamp           - Device IMU timestamp (Unix seconds)
+   timestamp_ns        - Device timestamp in nanoseconds
+   gyro_x/y/z          - Gyroscope (rad/s)
+   accel_x/y/z         - Accelerometer (m/s²)
+   quat_w/x/y/z        - Orientation quaternion
+   temperature         - Sensor temperature
 
-FRAME CSV (Frame Timing - 6 fields):
+FRAME CSV (6 fields):
    Module              - Always "EyeTracker-Neon"
-   trial               - Trial number (integer)
-   frame_index         - 1-based frame number
+   trial               - Trial number (1-based)
+   frame_index         - 1-based frame number in video
    capture_timestamp   - Device capture time (Unix seconds)
-   record_time_unix    - System time when recorded (Unix seconds)
+   record_time_unix    - System time when recorded
    record_time_mono    - Monotonic time (seconds, 9 decimals)
-
-AUDIO_TIMING CSV (8 fields):
-   Module              - Always "EyeTracker-Neon"
-   trial               - Trial number (integer)
-   chunk_index         - Sequential chunk number
-   write_time_unix     - System time (Unix seconds, 6 decimals)
-   write_time_mono     - Monotonic time (seconds, 9 decimals)
-   device_timestamp    - Device audio timestamp
-   frames              - Audio frames in chunk
-   total_frames        - Cumulative frame count
-
-DEVICESTATUS CSV (Telemetry - 8+ fields):
-   Module              - Always "EyeTracker-Neon"
-   trial               - Trial number (integer)
-   timestamp           - Sample time (Unix seconds, 6 decimals)
-   battery_level       - Battery percentage (0-100, float)
-   temperature_c       - Device temperature (Celsius, float)
-   worn                - Glasses worn status (boolean)
-   recording_active    - Device recording state (boolean)
-   [Additional device-specific fields]
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -93,27 +93,35 @@ Location
 3.6. CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-sVOG CSV Columns (7 fields):
-   Device ID             - Device identifier (e.g., "sVOG")
-   Label                 - Device port/label (e.g., "ttyACM0")
-   Unix time in UTC      - Event timestamp (Unix seconds, 6 decimals)
-   Milliseconds Since Record - Time since recording started (ms)
-   Trial Number          - Sequential trial count (1-based)
-   TSOT                  - Total Shutter Open Time (milliseconds)
-   TSCT                  - Total Shutter Close Time (milliseconds)
+sVOG CSV Columns (8 fields):
+   trial                 - Sequential trial count (1-based)
+   module                - Module name ("VOG")
+   device_id             - Device identifier (e.g., "sVOG")
+   label                 - Trial/condition label (blank if not set)
+   record_time_unix      - Host capture time (Unix seconds, 6 decimals)
+   record_time_mono      - Host capture time (seconds, 9 decimals)
+   shutter_open          - Total Shutter Open Time (milliseconds)
+   shutter_closed        - Total Shutter Close Time (milliseconds)
 
-wVOG CSV Columns (10 fields):
-   [Same first 7 columns as sVOG, plus:]
-   Lens                  - Lens state (Open/Closed/Left/Right)
-   Battery Percent       - Device battery level (0-100%)
-   DRT Reaction Time     - Reaction time if DRT synced (ms, or empty)
+wVOG CSV Columns (11 fields):
+   trial                 - Sequential trial count (1-based)
+   module                - Module name ("VOG")
+   device_id             - Device identifier (e.g., "wVOG")
+   label                 - Trial/condition label (blank if not set)
+   record_time_unix      - Host capture time (Unix seconds, 6 decimals)
+   record_time_mono      - Host capture time (seconds, 9 decimals)
+   shutter_open          - Total Shutter Open Time (milliseconds)
+   shutter_closed        - Total Shutter Close Time (milliseconds)
+   shutter_total         - Combined shutter time (milliseconds)
+   lens                  - Lens state (Open/Closed/Left/Right)
+   battery_percent       - Device battery level (0-100%)
 
 Example Rows:
    sVOG:
-   sVOG,ttyACM0,1733649120.123456,5000,1,1500,3500
+   1,VOG,sVOG,,1733649120.123456,12345.678901234,1500,3500
 
    wVOG:
-   wVOG,xbee_002,1733649120.456789,5500,2,3000,2500,Open,85,
+   2,VOG,wVOG,,1733649120.456789,12345.678901234,3000,2500,5500,Open,85
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
