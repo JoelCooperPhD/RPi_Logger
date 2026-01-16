@@ -41,7 +41,7 @@ class TimingCSVWriter:
     def _format_row(self, frame: CapturedFrame, frame_index: int) -> str:
         return (
             f"{self._trial},{self.MODULE},{self._device_id},{self._label},"
-            f"{frame.wall_time:.6f},{frame.monotonic_ns / 1e9:.9f},"
+            f"{frame.wall_time:.6f},{frame.monotonic_time:.9f},"
             f"{frame_index},{frame.sensor_timestamp_ns},{frame_index}\n"
         )
 

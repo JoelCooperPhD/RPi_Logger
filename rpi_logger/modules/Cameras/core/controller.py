@@ -422,7 +422,7 @@ class CameraController:
                 if self._state.recording_phase == RecordingPhase.RECORDING:
                     await self._record_frame(frame)
                     self._frames_recorded += 1
-                    frame_time = frame.timestamp_ns / 1e9
+                    frame_time = frame.monotonic_time
                     record_frame_times.append(frame_time)
                     if len(record_frame_times) > 30:
                         record_frame_times.pop(0)

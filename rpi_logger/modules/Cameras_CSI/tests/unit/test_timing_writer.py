@@ -12,7 +12,7 @@ from recording.timing_writer import TimingCSVWriter
 class MockFrame:
     """Mock frame for testing timing writer."""
     wall_time: float
-    monotonic_ns: int
+    monotonic_time: float  # time.perf_counter() for cross-module sync
     sensor_timestamp_ns: int
     data: bytes = b""
     size: tuple[int, int] = (100, 100)
@@ -58,7 +58,7 @@ class TestTimingWriterPersistence:
             # Write a frame
             frame = MockFrame(
                 wall_time=time.time(),
-                monotonic_ns=time.monotonic_ns(),
+                monotonic_time=time.perf_counter(),
                 sensor_timestamp_ns=12345678
             )
             await writer.write_frame(frame)
@@ -85,7 +85,7 @@ class TestTimingWriterPersistence:
             for i in range(5):
                 frame = MockFrame(
                     wall_time=time.time(),
-                    monotonic_ns=time.monotonic_ns(),
+                    monotonic_time=time.perf_counter(),
                     sensor_timestamp_ns=i * 1000000
                 )
                 await writer.write_frame(frame)
@@ -114,7 +114,7 @@ class TestTimingWriterPersistence:
             for i in range(3):
                 frame = MockFrame(
                     wall_time=time.time(),
-                    monotonic_ns=time.monotonic_ns(),
+                    monotonic_time=time.perf_counter(),
                     sensor_timestamp_ns=i * 1000000
                 )
                 await writer.write_frame(frame)
@@ -145,7 +145,7 @@ class TestTimingWriterContent:
 
             frame = MockFrame(
                 wall_time=1234567890.123456,
-                monotonic_ns=9876543210,
+                monotonic_time=9876.54321,  # seconds, matching perf_counter() format
                 sensor_timestamp_ns=111222333
             )
             await writer.write_frame(frame)
@@ -174,7 +174,7 @@ class TestTimingWriterContent:
             for i in range(3):
                 frame = MockFrame(
                     wall_time=time.time(),
-                    monotonic_ns=time.monotonic_ns(),
+                    monotonic_time=time.perf_counter(),
                     sensor_timestamp_ns=i
                 )
                 await writer.write_frame(frame)
@@ -200,7 +200,7 @@ class TestTimingWriterEdgeCases:
 
         frame = MockFrame(
             wall_time=time.time(),
-            monotonic_ns=time.monotonic_ns(),
+            monotonic_time=time.perf_counter(),
             sensor_timestamp_ns=0
         )
 

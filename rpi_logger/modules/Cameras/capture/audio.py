@@ -165,7 +165,7 @@ class AudioCapture:
         chunk = AudioChunk(
             data=indata.copy(),
             chunk_number=self._chunk_number,
-            timestamp_ns=time.monotonic_ns(),
+            monotonic_time=time.perf_counter(),
             wall_time=time.time(),
             sample_rate=self._sample_rate,
             channels=self._channels,

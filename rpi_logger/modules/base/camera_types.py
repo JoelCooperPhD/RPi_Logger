@@ -194,9 +194,8 @@ class CameraRuntimeState:
 class CaptureFrame:
     """Unified frame data from any camera backend."""
     data: np.ndarray
-    timestamp: float  # monotonic seconds
     frame_number: int
-    monotonic_ns: int
+    monotonic_time: float  # time.perf_counter() for cross-module sync
     sensor_timestamp_ns: Optional[int]
     wall_time: float
     color_format: str = "bgr"

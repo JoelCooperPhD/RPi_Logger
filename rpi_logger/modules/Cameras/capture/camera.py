@@ -161,7 +161,7 @@ class Camera:
             frame = CapturedFrame(
                 data=frame_data,
                 frame_number=self._frame_number,
-                timestamp_ns=time.monotonic_ns(),
+                monotonic_time=time.perf_counter(),
                 wall_time=time.time(),
                 size=(frame_data.shape[1], frame_data.shape[0]),
             )

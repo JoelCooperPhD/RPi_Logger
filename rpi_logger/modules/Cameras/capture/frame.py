@@ -10,7 +10,7 @@ class CapturedFrame:
 
     data: np.ndarray  # BGR image data
     frame_number: int  # Sequential frame number
-    timestamp_ns: int  # Monotonic timestamp (nanoseconds)
+    monotonic_time: float  # time.perf_counter() for cross-module sync
     wall_time: float  # Wall clock time (time.time())
     size: tuple[int, int]  # (width, height)
 
@@ -21,7 +21,7 @@ class AudioChunk:
 
     data: np.ndarray  # Audio samples (float32)
     chunk_number: int  # Sequential chunk number
-    timestamp_ns: int  # Monotonic timestamp (nanoseconds)
+    monotonic_time: float  # time.perf_counter() for cross-module sync
     wall_time: float  # Wall clock time
     sample_rate: int  # Sample rate (Hz)
     channels: int  # Number of channels

@@ -67,8 +67,8 @@ class TimingWriter:
         """Format a CSV row matching CSI timing format."""
         return (
             f"{self._trial},{self.MODULE},{self._device_id},{self._label},"
-            f"{frame.wall_time:.6f},{frame.timestamp_ns / 1e9:.9f},"
-            f"{frame_index},{frame.timestamp_ns},{frame_index}\n"
+            f"{frame.wall_time:.6f},{frame.monotonic_time:.9f},"
+            f"{frame_index},0,{frame_index}\n"  # USB cameras have no hardware sensor timestamp
         )
 
     async def stop(self) -> None:

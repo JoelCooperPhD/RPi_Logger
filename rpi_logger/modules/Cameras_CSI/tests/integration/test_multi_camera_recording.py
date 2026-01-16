@@ -18,7 +18,7 @@ from core import (
 class MockFrame:
     """Mock captured frame."""
     wall_time: float
-    monotonic_ns: int
+    monotonic_time: float  # time.perf_counter() for cross-module sync
     sensor_timestamp_ns: int
     data: bytes
     size: tuple[int, int]
@@ -230,7 +230,7 @@ class TestMultiCameraRecordingWithRealFiles:
                 frame_data = np.zeros((480, 640, 3), dtype=np.uint8)
                 frame = MockFrame(
                     wall_time=time.time(),
-                    monotonic_ns=time.monotonic_ns(),
+                    monotonic_time=time.perf_counter(),
                     sensor_timestamp_ns=i * 1000000,
                     data=frame_data,
                     size=(640, 480)

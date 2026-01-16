@@ -94,7 +94,7 @@ class PicamSource:
         while self._running and self._camera:
             try:
                 request = self._camera.capture_request()
-                mono_ns = time.monotonic_ns()
+                mono_time = time.perf_counter()
                 wall_time = time.time()
 
                 metadata = request.get_metadata()
@@ -108,7 +108,7 @@ class PicamSource:
                     data=array,
                     frame_number=self._frame_count,
                     sensor_timestamp_ns=sensor_ts,
-                    monotonic_ns=mono_ns,
+                    monotonic_time=mono_time,
                     wall_time=wall_time,
                     color_format="yuv420",
                     size=self._resolution,
