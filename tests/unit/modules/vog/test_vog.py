@@ -436,8 +436,9 @@ class TestSVOGPolymorphicMethods:
         assert "SVOG_dev_ttyUSB0" in row[2]  # device_id
         assert row[3] == "test_label"  # label
         assert "1700000000" in row[4]  # record_time_unix
-        assert row[6] == 3000  # shutter_open
-        assert row[7] == 1500  # shutter_closed
+        assert row[6] == ""  # device_time_unix (empty for sVOG)
+        assert row[7] == 3000  # shutter_open
+        assert row[8] == 1500  # shutter_closed
 
 
 # =============================================================================
@@ -792,11 +793,12 @@ class TestWVOGPolymorphicMethods:
         assert row[1] == "VOG"  # module
         assert "WVOG_dev_ttyACM0" in row[2]  # device_id
         assert row[3] == "test_label"  # label
-        assert row[6] == 2000  # shutter_open
-        assert row[7] == 1500  # shutter_closed
-        assert row[8] == 3500  # shutter_total
-        assert row[9] == "A"  # lens
-        assert row[10] == 85  # battery_percent
+        assert row[6] == 1733150423  # device_time_unix (from packet)
+        assert row[7] == 2000  # shutter_open
+        assert row[8] == 1500  # shutter_closed
+        assert row[9] == 3500  # shutter_total
+        assert row[10] == "A"  # lens
+        assert row[11] == 85  # battery_percent
 
 
 # =============================================================================
@@ -1131,13 +1133,13 @@ class TestCSVFormatValidation:
         """Test sVOG CSV header has correct number of columns."""
         header = svog_protocol.csv_header
         columns = header.split(",")
-        assert len(columns) == 8  # trial,module,device_id,label,unix,mono,open,closed
+        assert len(columns) == 9  # trial,module,device_id,label,unix,mono,device_time_unix,open,closed
 
     def test_wvog_csv_header_column_count(self, wvog_protocol):
         """Test wVOG CSV header has correct number of columns."""
         header = wvog_protocol.csv_header
         columns = header.split(",")
-        assert len(columns) == 11  # +shutter_total,lens,battery_percent
+        assert len(columns) == 12  # +device_time_unix,shutter_total,lens,battery_percent
 
     def test_svog_csv_row_matches_header(self, svog_protocol, sample_svog_data_packet):
         """Test that sVOG CSV row has same column count as header."""

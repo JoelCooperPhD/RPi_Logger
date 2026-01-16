@@ -95,7 +95,7 @@ class SVOGProtocol(BaseVOGProtocol):
         'Click': ResponseType.STIMULUS,
     }
 
-    CSV_HEADER_STRING = "trial,module,device_id,label,record_time_unix,record_time_mono,shutter_open,shutter_closed"
+    CSV_HEADER_STRING = "trial,module,device_id,label,record_time_unix,record_time_mono,device_time_unix,shutter_open,shutter_closed"
 
     def __init__(self):
         self.logger = get_module_logger("SVOGProtocol")
@@ -203,5 +203,6 @@ class SVOGProtocol(BaseVOGProtocol):
         return [
             packet.trial_number, "VOG", packet.device_id, label,
             f"{record_time_unix:.6f}", f"{record_time_mono:.9f}",
+            "",  # device_time_unix (sVOG has no RTC)
             packet.shutter_open, packet.shutter_closed
         ]

@@ -95,7 +95,7 @@ The timing CSV contains per-chunk timing data for precise synchronization with o
 | record_time_unix | Host capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Host capture time (seconds, 9 decimals) |
 | device_time_unix | Device absolute time (Unix seconds, if available) |
-| device_time_seconds | Hardware ADC timestamp if available (seconds) |
+| device_time_offset | Hardware ADC buffer offset if available (seconds) |
 | write_time_unix | Host write time (Unix seconds, 6 decimals) |
 | write_time_mono | Host write time (seconds, 9 decimals) |
 | chunk_index | Sequential chunk number (1-based) |
@@ -118,7 +118,7 @@ The timing CSV provides distinct capture and write timestamps for maximum flexib
 | write_time_unix | Disk write timing (useful for performance analysis) |
 | write_time_mono | Disk write timing (monotonic) |
 | device_time_unix | Device absolute time (Unix seconds, if available) |
-| device_time_seconds | Sample-accurate device timing (may be empty) |
+| device_time_offset | ADC buffer offset / sample-accurate device timing (may be empty) |
 
 ### Calculating Audio Position
 
@@ -169,6 +169,6 @@ duration_seconds = total_frames / sample_rate
 3. Verify the correct device is assigned
 4. Restart the module
 
-### Empty device_time_seconds in CSV
+### Empty device_time_offset in CSV
 
 This is normal - not all audio devices provide hardware timestamps. Use `record_time_mono` for synchronization instead.

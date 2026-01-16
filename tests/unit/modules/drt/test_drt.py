@@ -228,7 +228,8 @@ class TestSDRTProtocol:
         assert "label" in SDRT_CSV_HEADER
         assert "record_time_unix" in SDRT_CSV_HEADER
         assert "record_time_mono" in SDRT_CSV_HEADER
-        assert "device_time_ms" in SDRT_CSV_HEADER
+        assert "device_time_unix" in SDRT_CSV_HEADER
+        assert "device_time_offset" in SDRT_CSV_HEADER
         assert "responses" in SDRT_CSV_HEADER
         assert "reaction_time_ms" in SDRT_CSV_HEADER
         # sDRT does NOT have battery_percent
@@ -309,7 +310,8 @@ class TestWDRTProtocol:
         assert "label" in WDRT_CSV_HEADER
         assert "record_time_unix" in WDRT_CSV_HEADER
         assert "record_time_mono" in WDRT_CSV_HEADER
-        assert "device_time_ms" in WDRT_CSV_HEADER
+        assert "device_time_unix" in WDRT_CSV_HEADER
+        assert "device_time_offset" in WDRT_CSV_HEADER
         assert "responses" in WDRT_CSV_HEADER
         assert "reaction_time_ms" in WDRT_CSV_HEADER
         # wDRT DOES have battery_percent

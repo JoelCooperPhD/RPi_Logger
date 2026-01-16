@@ -3219,7 +3219,8 @@ async def _get_validation_schemas(self) -> Dict[str, Any]:
                 "columns": [
                     "trial", "module", "device_id", "label",
                     "record_time_unix", "record_time_mono",
-                    "device_time_ms", "responses", "reaction_time_ms",
+                    "device_time_unix", "device_time_offset",
+                    "responses", "reaction_time_ms",
                 ],
                 "required": ["trial", "module", "record_time_unix"],
                 "types": {
@@ -3231,7 +3232,7 @@ async def _get_validation_schemas(self) -> Dict[str, Any]:
                 "columns": [
                     "trial", "module", "device_id", "label",
                     "record_time_unix", "record_time_mono",
-                    "shutter_open", "shutter_closed",
+                    "device_time_unix", "shutter_open", "shutter_closed",
                 ],
                 "required": ["trial", "module", "record_time_unix"],
                 "types": {

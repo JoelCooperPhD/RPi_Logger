@@ -196,7 +196,7 @@ class DRTDataLogger:
                 row = [
                     trial_number, "DRT", device_id_csv, label,
                     f"{unix_time:.6f}", f"{record_time_mono:.9f}",
-                    device_timestamp, device_utc, clicks, reaction_time, battery
+                    device_utc, device_timestamp, clicks, reaction_time, battery
                 ]
             else:
                 # sDRT format
@@ -204,7 +204,7 @@ class DRTDataLogger:
                 row = [
                     trial_number, "DRT", device_id_csv, label,
                     f"{unix_time:.6f}", f"{record_time_mono:.9f}",
-                    device_timestamp, device_time_unix, clicks, reaction_time
+                    device_time_unix, device_timestamp, clicks, reaction_time
                 ]
 
             # Write using csv.writer for proper escaping of special characters

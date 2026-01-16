@@ -227,7 +227,7 @@ class AudioDeviceRecorder:
                 'record_time_unix',
                 'record_time_mono',
                 'device_time_unix',
-                'device_time_seconds',
+                'device_time_offset',
                 'write_time_unix',
                 'write_time_mono',
                 'chunk_index',

@@ -77,7 +77,7 @@ Each data point captures:
 
 Example: `20251208_143022_GPS_serial0.csv` (trial number is stored in the CSV data column)
 
-### GPS CSV Columns (26 fields)
+### GPS CSV Columns (25 fields)
 
 | Column | Description |
 |--------|-------------|
@@ -87,7 +87,6 @@ Example: `20251208_143022_GPS_serial0.csv` (trial number is stored in the CSV da
 | label | Optional label (blank if unused) |
 | record_time_unix | Host capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Host capture time (seconds, 9 decimals, `perf_counter`) |
-| device_time_iso | GPS UTC time (ISO 8601) |
 | device_time_unix | GPS UTC time (Unix seconds) |
 | latitude_deg | Latitude (decimal degrees, + = North) |
 | longitude_deg | Longitude (decimal degrees, + = East) |
@@ -110,7 +109,7 @@ Example: `20251208_143022_GPS_serial0.csv` (trial number is stored in the CSV da
 
 **Example row:**
 ```
-1,GPS,GPS:serial0,,1733665822.500000,12345.678901234,2024-12-08T14:30:22.500Z,1733665822.500000,-37.8136,144.9631,42.5,12.3,44.3,23.9,27.5,185.2,1,3,1,8,12,1.2,1.8,2.1,GGA,$GPGGA,...
+1,GPS,GPS:serial0,,1733665822.500000,12345.678901234,1733665822.500000,-37.8136,144.9631,42.5,12.3,44.3,23.9,27.5,185.2,1,3,1,8,12,1.2,1.8,2.1,GGA,$GPGGA,...
 ```
 
 ### Timing and Synchronization
@@ -119,8 +118,7 @@ Example: `20251208_143022_GPS_serial0.csv` (trial number is stored in the CSV da
 
 | Timestamp | Source | Use Case |
 |-----------|--------|----------|
-| device_time_iso | GPS satellites | Most accurate absolute time (atomic clock derived, ±100 ns) |
-| device_time_unix | GPS time as Unix seconds | Cross-system time reference |
+| device_time_unix | GPS satellites (Unix seconds) | Most accurate absolute time (atomic clock derived, ±100 ns) |
 | record_time_unix | Host wall clock | Cross-system time reference |
 | record_time_mono | Host monotonic clock | Cross-module synchronization |
 

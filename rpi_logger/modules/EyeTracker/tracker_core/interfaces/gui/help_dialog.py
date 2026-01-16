@@ -105,8 +105,8 @@ GAZE CSV (36 fields):
    label               - Optional trial label
    record_time_unix    - System capture time (Unix seconds, 6 decimals)
    record_time_mono    - Monotonic capture time (seconds, 9 decimals)
-   timestamp           - Device gaze timestamp (Unix seconds)
-   timestamp_ns        - Device timestamp in nanoseconds
+   device_time_unix    - Device gaze timestamp (Unix seconds)
+   device_time_ns      - Device timestamp in nanoseconds
    stream_type         - Data stream type
    worn                - Glasses worn status (0/1)
    x, y                - Normalized gaze position (0-1)
@@ -125,8 +125,8 @@ EVENTS CSV (24 fields):
    label               - Optional trial label
    record_time_unix    - System capture time (Unix seconds, 6 decimals)
    record_time_mono    - Monotonic capture time (seconds, 9 decimals)
-   timestamp           - Device event timestamp (Unix seconds)
-   timestamp_ns        - Device timestamp in nanoseconds
+   device_time_unix    - Device event timestamp (Unix seconds)
+   device_time_ns      - Device timestamp in nanoseconds
    event_type          - Event type: fixation, blink, or saccade
    event_subtype       - Event category
    confidence          - Event confidence (0-1)
@@ -144,8 +144,8 @@ IMU CSV (19 fields):
    label               - Optional trial label
    record_time_unix    - System capture time (Unix seconds, 6 decimals)
    record_time_mono    - Monotonic capture time (seconds, 9 decimals)
-   timestamp           - Device IMU timestamp (Unix seconds)
-   timestamp_ns        - Device timestamp in nanoseconds
+   device_time_unix    - Device IMU timestamp (Unix seconds)
+   device_time_ns      - Device timestamp in nanoseconds
    gyro_x/y/z          - Gyroscope (rad/s)
    accel_x/y/z         - Accelerometer (m/s²)
    quat_w/x/y/z        - Orientation quaternion

@@ -90,7 +90,7 @@ Location
 3.6. CSV FIELD REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-GPS CSV Columns (26 fields):
+GPS CSV Columns (25 fields):
 
    trial                 - Trial number (integer)
    module                - Module name ("GPS")
@@ -98,7 +98,6 @@ GPS CSV Columns (26 fields):
    label                 - Optional label (blank if unused)
    record_time_unix      - Host capture time (Unix seconds, 6 decimals)
    record_time_mono      - Host capture time (seconds, 9 decimals)
-   device_time_iso       - GPS UTC time (ISO 8601 format)
    device_time_unix      - GPS UTC time (Unix seconds)
    latitude_deg          - Latitude (decimal degrees, + = North)
    longitude_deg         - Longitude (decimal degrees, + = East)
@@ -120,7 +119,7 @@ GPS CSV Columns (26 fields):
    raw_sentence          - Raw NMEA sentence
 
 Example Row:
-   1,GPS,GPS:serial0,,1733665822.500000,12345.678901234,2024-12-08T14:30:22.500Z,1733665822.500000,
+   1,GPS,GPS:serial0,,1733665822.500000,12345.678901234,1733665822.500000,
    -37.8136,144.9631,42.5,12.3,44.3,23.9,27.5,185.2,1,3,1,
    8,12,1.2,1.8,2.1,GGA,$GPGGA,...
 
@@ -130,8 +129,7 @@ Example Row:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Timestamp Types:
-   device_time_iso       - GPS satellite time (most accurate)
-   device_time_unix      - GPS UTC time as Unix seconds
+   device_time_unix      - GPS UTC time as Unix seconds (most accurate, ±100 ns)
    record_time_unix      - Host wall clock (cross-system reference)
    record_time_mono      - Host monotonic clock
 

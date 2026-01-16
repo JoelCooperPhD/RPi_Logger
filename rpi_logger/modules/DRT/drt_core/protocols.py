@@ -35,7 +35,7 @@ SDRT_LINE_ENDING = '\n\r'
 
 SDRT_CSV_HEADER = (
     "trial,module,device_id,label,record_time_unix,record_time_mono,"
-    "device_time_ms,device_time_unix,responses,reaction_time_ms"
+    "device_time_unix,device_time_offset,responses,reaction_time_ms"
 )
 
 SDRT_ISO_PRESET = {
@@ -85,7 +85,7 @@ WDRT_LINE_ENDING = '\n'
 
 WDRT_CSV_HEADER = (
     "trial,module,device_id,label,record_time_unix,record_time_mono,"
-    "device_time_ms,device_time_unix,responses,reaction_time_ms,battery_percent"
+    "device_time_unix,device_time_offset,responses,reaction_time_ms,battery_percent"
 )
 
 WDRT_CONFIG_PARAMS = {

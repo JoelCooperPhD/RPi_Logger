@@ -83,7 +83,7 @@ Each trial captures:
 
 Example: `20251208_143022_VOG_ttyACM0.csv` (trial number is stored in the CSV data column)
 
-### sVOG CSV Columns (8 fields)
+### sVOG CSV Columns (9 fields)
 
 For wired VOG devices:
 
@@ -95,27 +95,37 @@ For wired VOG devices:
 | label | Trial/condition label (blank if not set) |
 | record_time_unix | Host capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Host capture time (seconds, 9 decimals) |
+| device_time_unix | Device absolute time (empty - sVOG has no RTC) |
 | shutter_open | Total Shutter Open Time (milliseconds) |
 | shutter_closed | Total Shutter Close Time (milliseconds) |
 
 **Example row:**
 ```
-1,VOG,sVOG,,1733649120.123456,12345.678901234,1500,3500
+1,VOG,sVOG,,1733649120.123456,12345.678901234,,1500,3500
 ```
 
-### wVOG CSV Columns (11 fields)
+### wVOG CSV Columns (12 fields)
 
-For wireless VOG devices (same first 8 columns as sVOG, plus):
+For wireless VOG devices (same first 7 columns as sVOG, plus device_time_unix and extended fields):
 
 | Column | Description |
 |--------|-------------|
+| trial | Sequential trial count (1-based) |
+| module | Module name ("VOG") |
+| device_id | Device identifier (e.g., "wVOG") |
+| label | Trial/condition label (blank if not set) |
+| record_time_unix | Host capture time (Unix seconds, 6 decimals) |
+| record_time_mono | Host capture time (seconds, 9 decimals) |
+| device_time_unix | Device RTC timestamp (Unix seconds) |
+| shutter_open | Total Shutter Open Time (milliseconds) |
+| shutter_closed | Total Shutter Close Time (milliseconds) |
 | shutter_total | Combined shutter time (milliseconds) |
 | lens | Lens state (Open/Closed/Left/Right) |
 | battery_percent | Device battery level (0-100%) |
 
 **Example row:**
 ```
-2,VOG,wVOG,,1733649120.456789,12345.678901234,3000,2500,5500,Open,85
+2,VOG,wVOG,,1733649120.456789,12345.678901234,1733649118,3000,2500,5500,Open,85
 ```
 
 ### Timing and Synchronization

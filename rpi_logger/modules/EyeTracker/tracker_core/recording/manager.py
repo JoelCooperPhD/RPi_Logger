@@ -34,7 +34,7 @@ logger = get_module_logger(__name__)
 # CSV Headers - Standard prefix: trial,module,device_id,label,record_time_unix,record_time_mono
 GAZE_HEADER = (
     "trial,module,device_id,label,record_time_unix,record_time_mono,"
-    "timestamp,timestamp_ns,stream_type,worn,x,y,"
+    "device_time_unix,device_time_ns,stream_type,worn,x,y,"
     "left_x,left_y,right_x,right_y,"
     "pupil_diameter_left,pupil_diameter_right,"
     "eyeball_center_left_x,eyeball_center_left_y,eyeball_center_left_z,"
@@ -47,13 +47,13 @@ GAZE_HEADER = (
 
 IMU_HEADER = (
     "trial,module,device_id,label,record_time_unix,record_time_mono,"
-    "timestamp,timestamp_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,"
+    "device_time_unix,device_time_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,"
     "quat_w,quat_x,quat_y,quat_z,temperature"
 )
 
 EVENTS_HEADER = (
     "trial,module,device_id,label,record_time_unix,record_time_mono,"
-    "timestamp,timestamp_ns,event_type,event_subtype,confidence,duration,"
+    "device_time_unix,device_time_ns,event_type,event_subtype,confidence,duration,"
     "start_time_ns,end_time_ns,start_gaze_x,start_gaze_y,end_gaze_x,end_gaze_y,"
     "mean_gaze_x,mean_gaze_y,amplitude_pixels,amplitude_angle_deg,"
     "mean_velocity,max_velocity"

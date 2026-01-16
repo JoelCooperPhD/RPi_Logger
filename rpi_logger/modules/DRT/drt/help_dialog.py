@@ -109,8 +109,8 @@ DRT CSV Columns (10 fields):
    label                 - Trial/condition label (blank if not set)
    record_time_unix      - Host capture time (Unix seconds, 6 decimals)
    record_time_mono      - Host capture time (seconds, 9 decimals)
-   device_time_ms        - Device timestamp in ms since experiment start
    device_time_unix      - Device absolute time (Unix seconds, if available)
+   device_time_offset    - Device timestamp in ms since experiment start
    responses             - Button press count for this stimulus
    reaction_time_ms      - Response latency in ms (-1 = miss/timeout)
 
@@ -121,18 +121,18 @@ wDRT CSV Columns (11 fields):
    label                 - Trial/condition label (blank if not set)
    record_time_unix      - Host capture time (Unix seconds, 6 decimals)
    record_time_mono      - Host capture time (seconds, 9 decimals)
-   device_time_ms        - Device timestamp in ms since experiment start
    device_time_unix      - Device RTC timestamp (Unix seconds)
+   device_time_offset    - Device timestamp in ms since experiment start
    responses             - Button press count for this stimulus
    reaction_time_ms      - Response latency in ms (-1 = miss/timeout)
    battery_percent       - Device battery level (0-100%)
 
 Example Rows:
    DRT:
-   1,DRT,DRT_dev_ttyacm0,,1733649120.123456,12345.678901234,5000,,1,342
+   1,DRT,DRT_dev_ttyacm0,,1733649120.123456,12345.678901234,,5000,1,342
 
    wDRT:
-   2,DRT,wDRT_dev_ttyacm0,,1733649120.456789,12345.678901234,5500,1733649118,1,287,85
+   2,DRT,wDRT_dev_ttyacm0,,1733649120.456789,12345.678901234,1733649118,5500,1,287,85
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -148,7 +148,7 @@ Reaction Time Measurement
 Timestamp Precision
    record_time_unix      - Seconds with microsecond precision (host system time)
    record_time_mono      - Seconds with nanosecond precision (host monotonic clock)
-   device_time_ms        - Integer milliseconds (device time)
+   device_time_offset    - Integer milliseconds (device time since experiment start)
    reaction_time_ms      - Integer milliseconds
 
 Miss Detection

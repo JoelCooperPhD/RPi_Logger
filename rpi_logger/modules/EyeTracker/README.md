@@ -112,8 +112,8 @@ Gaze data with standard prefix columns followed by device-specific measurements:
 | label | Optional trial label |
 | record_time_unix | System capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Monotonic capture time (seconds, 9 decimals) |
-| timestamp | Device gaze timestamp (Unix seconds) |
-| timestamp_ns | Device timestamp in nanoseconds |
+| device_time_unix | Device gaze timestamp (Unix seconds) |
+| device_time_ns | Device timestamp in nanoseconds |
 | stream_type | Data stream type |
 | worn | Glasses worn status (0/1) |
 | x, y | Normalized gaze position (0-1) |
@@ -138,8 +138,8 @@ Eye events with standard prefix columns:
 | label | Optional trial label |
 | record_time_unix | System capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Monotonic capture time (seconds, 9 decimals) |
-| timestamp | Device event timestamp (Unix seconds) |
-| timestamp_ns | Device timestamp in nanoseconds |
+| device_time_unix | Device event timestamp (Unix seconds) |
+| device_time_ns | Device timestamp in nanoseconds |
 | event_type | fixation, blink, or saccade |
 | event_subtype | Event category |
 | confidence | Event confidence (0-1) |
@@ -162,8 +162,8 @@ Head motion data with standard prefix columns:
 | label | Optional trial label |
 | record_time_unix | System capture time (Unix seconds, 6 decimals) |
 | record_time_mono | Monotonic capture time (seconds, 9 decimals) |
-| timestamp | Device IMU timestamp (Unix seconds) |
-| timestamp_ns | Device timestamp in nanoseconds |
+| device_time_unix | Device IMU timestamp (Unix seconds) |
+| device_time_ns | Device timestamp in nanoseconds |
 | gyro_x, gyro_y, gyro_z | Gyroscope (rad/s) |
 | accel_x, accel_y, accel_z | Accelerometer (m/s²) |
 | quat_w, quat_x, quat_y, quat_z | Orientation quaternion |

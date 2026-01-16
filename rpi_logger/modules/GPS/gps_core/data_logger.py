@@ -186,7 +186,7 @@ class GPSDataLogger:
         row = [
             self._trial_number, "GPS", self.device_id, self._trial_label,
             f"{record_time_unix:.6f}", f"{record_time_mono:.9f}",
-            fix.timestamp.isoformat() if fix.timestamp else "", device_time_unix,
+            device_time_unix,
             fix.latitude, fix.longitude, fix.altitude_m, speed_mps,
             fix.speed_kmh, fix.speed_knots, fix.speed_mph, fix.course_deg,
             fix.fix_quality, fix.fix_mode or "", 1 if fix.fix_valid else 0,
