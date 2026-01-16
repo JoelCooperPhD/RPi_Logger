@@ -509,11 +509,12 @@ class XBeeManager:
             # Parse node ID to determine device type (wVOG or wDRT)
             device_type = parse_wireless_node_id(node_id)
             if device_type is None:
-                logger.debug(f"Ignoring device with unrecognized node ID: {node_id}")
+                logger.warning(f"Ignoring device with unrecognized node ID: {node_id!r}")
                 return
 
             # Skip if already known
             if node_id in self._discovered_devices:
+                logger.debug(f"Device already known: {node_id}")
                 return
 
             spec = get_spec(device_type)
@@ -642,17 +643,20 @@ class XBeeManager:
             True if send was successful
         """
         if not self.is_connected:
+            logger.warning(f"Cannot send to {node_id}: XBee coordinator not connected")
             return False
 
         remote = self._remote_devices.get(node_id)
         if not remote:
-            logger.error(f"Unknown device: {node_id}")
+            logger.error(f"Unknown device: {node_id} (known devices: {list(self._remote_devices.keys())})")
             return False
 
         try:
+            logger.debug(f"Sending to {node_id}: {data!r}")
             await asyncio.to_thread(
                 self._coordinator.send_data, remote, data
             )
+            logger.debug(f"Successfully sent data to {node_id}")
             return True
         except Exception as e:
             logger.error(f"Failed to send to {node_id}: {e}")

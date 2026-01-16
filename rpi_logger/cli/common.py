@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple
 
 from rpi_logger.core.logging_config import configure_logging
-from rpi_logger.core.paths import USER_MODULE_LOGS_DIR
+from rpi_logger.core.paths import MODULE_LOGS_DIR
 from rpi_logger.core.logging_utils import get_module_logger
 
 
@@ -326,26 +326,30 @@ def _try_prepare_log_destination(directory: Path, filename: str) -> tuple[Path |
 
 
 def _prepare_log_file(module_dir: Path, module_name: str) -> tuple[Path, bool, str | None]:
-    """Select a writable log destination, falling back to the user state dir."""
+    """Prepare log file in centralized module logs directory.
 
+    All module logs go to the platform-specific centralized location:
+    {LOGS_DIR}/modules/{module_name}/{module_name}.log
+
+    Args:
+        module_dir: Legacy parameter, no longer used for log location.
+        module_name: Name of the module for log file naming.
+
+    Returns:
+        Tuple of (log_file_path, used_fallback, fallback_reason).
+        used_fallback is always False since we use a single centralized location.
+    """
     from rpi_logger.modules.base import sanitize_path_component
 
-    preferred_dir = module_dir / "logs"
+    sanitized_name = sanitize_path_component(module_name or "module")
+    log_dir = MODULE_LOGS_DIR / sanitized_name
     filename = f"{module_name}.log"
-    preferred_log, preferred_error = _try_prepare_log_destination(preferred_dir, filename)
-    if preferred_log:
-        return preferred_log, False, None
 
-    fallback_dir = USER_MODULE_LOGS_DIR / sanitize_path_component(module_name or "module")
-    fallback_log, fallback_error = _try_prepare_log_destination(fallback_dir, filename)
-    if fallback_log:
-        reason = f"{preferred_dir}: {preferred_error}" if preferred_error else str(preferred_dir)
-        return fallback_log, True, reason
+    log_file, error = _try_prepare_log_destination(log_dir, filename)
+    if log_file:
+        return log_file, False, None
 
-    raise PermissionError(
-        "Unable to create module log file in %s (error: %s) or fallback %s (error: %s)"
-        % (preferred_dir, preferred_error, fallback_dir, fallback_error)
-    )
+    raise PermissionError(f"Unable to create module log at {log_dir}/{filename}: {error}")
 
 
 def setup_module_logging(

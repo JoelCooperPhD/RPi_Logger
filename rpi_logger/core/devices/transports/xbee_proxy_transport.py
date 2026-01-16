@@ -80,10 +80,9 @@ class XBeeProxyTransport:
             return False
 
         try:
-            # Preserve line endings exactly as provided by the caller.
-            # Some device firmwares (notably MicroPython) are line-oriented and
-            # require '\n' terminators to process commands.
-            data_str = data.decode('utf-8', errors='replace')
+            # Strip newline - XBee doesn't need it (each send is a discrete packet).
+            # This matches XBeeTransport.write() behavior for consistency.
+            data_str = data.decode('utf-8', errors='replace').strip()
             logger.debug("XBee proxy sending to %s: %r", self.node_id, data_str)
             return await self._send_callback(self.node_id, data_str)
         except Exception as e:

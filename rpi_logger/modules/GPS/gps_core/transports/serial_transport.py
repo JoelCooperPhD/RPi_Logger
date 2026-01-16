@@ -139,6 +139,8 @@ class SerialGPSTransport(BaseGPSTransport):
             return None
 
         decoded = line.decode("ascii", errors="ignore").strip()
+        if decoded:
+            logger.debug("Read from %s: %s", self.port, decoded)
         return decoded if decoded else None
 
     async def read_sentences(self, timeout: float = 1.0):

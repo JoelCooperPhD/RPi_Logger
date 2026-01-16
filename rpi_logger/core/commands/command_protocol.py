@@ -287,6 +287,30 @@ class CommandMessage:
         """
         return CommandMessage.create("xbee_send_result", node_id=node_id, success=success)
 
+    # =========================================================================
+    # Logging Control Commands
+    # =========================================================================
+
+    @staticmethod
+    def set_log_level(level: str, target: str = "all") -> str:
+        """
+        Dynamically set log level for a module.
+
+        Args:
+            level: Log level name ("debug", "info", "warning", "error", "critical")
+            target: Which handler(s) to affect:
+                   - "console": stderr/stdout handler only
+                   - "ui": forwarded logs for master UI display only
+                   - "all": both console and UI handlers
+
+        Note: File logging always stays at DEBUG for full capture.
+        """
+        return CommandMessage.create(
+            "set_log_level",
+            level=level.lower(),
+            target=target,
+        )
+
 
 class StatusMessage:
 
@@ -470,6 +494,10 @@ class StatusType:
 
     # Device connection status (with correlation ID support)
     DEVICE_READY = "device_ready"        # Device successfully connected
+
+    # Logging control status
+    LOG_LEVEL_CHANGED = "log_level_changed"  # Module log level was changed
+    LOG_MESSAGE = "log_message"              # Forwarded log message for master UI
 
 
 if __name__ == "__main__":

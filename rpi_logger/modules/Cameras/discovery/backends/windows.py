@@ -148,8 +148,6 @@ class WindowsCameraBackend:
                     )
                 else:
                     logger.debug(f"No audio sibling found for {friendly_name}")
-
-                logger.debug(f"Discovered Windows camera at index {index}: {friendly_name}")
             else:
                 if cap:
                     cap.release()

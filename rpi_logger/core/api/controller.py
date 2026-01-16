@@ -820,20 +820,16 @@ class APIController:
 
     async def get_log_paths(self) -> Dict[str, Any]:
         """Get paths to log files."""
-        from rpi_logger.core.paths import LOGS_DIR, USER_MODULE_LOGS_DIR
+        from rpi_logger.core.paths import LOGS_DIR, MODULE_LOGS_DIR, MASTER_LOG_FILE
 
-        # Get module log paths
+        # Get module log paths from centralized location
         module_logs = {}
-        for module_info in self.logger_system.get_available_modules():
-            module_name = module_info.name.lower()
-            # Check both central logs dir and user module logs dir
-            central_log = LOGS_DIR / f"{module_name}.log"
-            user_log = USER_MODULE_LOGS_DIR / f"{module_name}.log"
-
-            if central_log.exists():
-                module_logs[module_info.name] = str(central_log)
-            elif user_log.exists():
-                module_logs[module_info.name] = str(user_log)
+        if MODULE_LOGS_DIR.exists():
+            for module_dir in MODULE_LOGS_DIR.iterdir():
+                if module_dir.is_dir():
+                    log_file = module_dir / f"{module_dir.name}.log"
+                    if log_file.exists():
+                        module_logs[module_dir.name] = str(log_file)
 
         return {
             "master_log": str(MASTER_LOG_FILE),
@@ -841,7 +837,7 @@ class APIController:
             "event_log": str(self.logger_system.event_logger.event_log_path)
                 if self.logger_system.event_logger else None,
             "logs_dir": str(LOGS_DIR),
-            "module_logs_dir": str(USER_MODULE_LOGS_DIR),
+            "module_logs_dir": str(MODULE_LOGS_DIR),
             "module_logs": module_logs,
         }
 
@@ -859,7 +855,7 @@ class APIController:
         Returns:
             Tuple of (is_valid, error_message, resolved_path)
         """
-        from rpi_logger.core.paths import LOGS_DIR, USER_MODULE_LOGS_DIR, PROJECT_ROOT
+        from rpi_logger.core.paths import LOGS_DIR, MODULE_LOGS_DIR
 
         try:
             # Resolve the path to handle any .. or symlinks
@@ -867,10 +863,10 @@ class APIController:
         except (ValueError, OSError) as e:
             return False, f"Invalid path: {e}", None
 
-        # Define allowed directories
+        # Define allowed directories (centralized logs only)
         allowed_dirs = [
             LOGS_DIR.resolve(),
-            USER_MODULE_LOGS_DIR.resolve(),
+            MODULE_LOGS_DIR.resolve(),
         ]
 
         # Add session logs directory if session is active
@@ -879,11 +875,6 @@ class APIController:
             allowed_dirs.append(session_logs)
             # Also allow the session directory itself for event logs
             allowed_dirs.append(self._session_dir.resolve())
-
-        # Add project root logs (for backwards compatibility)
-        project_logs = (PROJECT_ROOT / "logs").resolve()
-        if project_logs not in allowed_dirs:
-            allowed_dirs.append(project_logs)
 
         # Check if the resolved path is under any allowed directory
         for allowed_dir in allowed_dirs:
@@ -1137,7 +1128,7 @@ class APIController:
         self, module_name: str, offset: int = 0, limit: int = 100
     ) -> Dict[str, Any]:
         """Read a module-specific log file with pagination."""
-        from rpi_logger.core.paths import LOGS_DIR, USER_MODULE_LOGS_DIR
+        from rpi_logger.core.paths import MODULE_LOGS_DIR
 
         # Check if module exists
         module = await self.get_module(module_name)
@@ -1148,22 +1139,16 @@ class APIController:
                 "message": f"Module '{module_name}' not found",
             }
 
-        # Look for the module log file
-        module_name_lower = module_name.lower()
-        potential_paths = [
-            LOGS_DIR / f"{module_name_lower}.log",
-            USER_MODULE_LOGS_DIR / f"{module_name_lower}.log",
-            LOGS_DIR / f"{module_name}.log",
-            USER_MODULE_LOGS_DIR / f"{module_name}.log",
-        ]
+        # Look for the module log file in centralized location
+        module_log_dir = MODULE_LOGS_DIR / module_name
+        log_path = module_log_dir / f"{module_name}.log"
 
-        log_path = None
-        for path in potential_paths:
-            if path.exists():
-                log_path = path
-                break
+        if not log_path.exists():
+            # Try lowercase directory name
+            module_log_dir = MODULE_LOGS_DIR / module_name.lower()
+            log_path = module_log_dir / f"{module_name}.log"
 
-        if not log_path:
+        if not log_path.exists():
             return {
                 "success": False,
                 "error": "FILE_NOT_FOUND",

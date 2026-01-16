@@ -125,7 +125,6 @@ class MacOSCameraBackend:
                     cap.release()
                 break
 
-        logger.debug(f"Discovered {len(cameras)} cameras on macOS")
         return cameras
 
     def _get_avfoundation_devices(self) -> Optional[list[tuple[str, str, str]]]:

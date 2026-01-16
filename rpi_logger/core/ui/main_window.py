@@ -27,44 +27,180 @@ from .theme.styles import Theme
 from .theme.widgets import RoundedButton, MetricBar, RecordingBar
 
 
+class UILogFilter(logging.Filter):
+    """Filter for UI log display that suppresses high-frequency loggers.
+
+    This filter:
+    1. Respects the user-selected log level for the UI
+    2. Automatically suppresses high-frequency loggers (geometry, config, etc.)
+       to INFO level regardless of UI level selection
+    3. Uses pattern matching - no need to maintain exact logger names
+
+    This is the Pythonic way: use filters on handlers, don't modify logger levels.
+    Logger levels affect ALL handlers (file, console, UI). Filters only affect
+    the specific handler they're attached to.
+    """
+
+    # Patterns (case-insensitive) for loggers that flood the UI at DEBUG level
+    # These are matched against the logger name using 'in' operator
+    QUIET_PATTERNS = (
+        'geometry',       # InstanceGeometryStore, gui_utils geometry logging
+        'configmanager',  # ConfigManager
+        'gui_utils',      # Window configure events
+        'statemanager',   # ModuleStateManager - frequent state checks
+        'stateobserver',  # UIStateObserver - UI state sync
+        'asyncbridge',    # AsyncBridge internals
+        'update_checker', # Update check HTTP requests
+    )
+
+    def __init__(self):
+        super().__init__()
+        self._ui_level = logging.INFO
+        self._quiet_level = logging.INFO  # Minimum level for quiet loggers
+
+    @property
+    def ui_level(self) -> int:
+        return self._ui_level
+
+    @ui_level.setter
+    def ui_level(self, level: int) -> None:
+        self._ui_level = level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # First check if record meets UI level threshold
+        if record.levelno < self._ui_level:
+            return False
+
+        # For quiet loggers, enforce minimum INFO level even when UI is at DEBUG
+        logger_name_lower = record.name.lower()
+        for pattern in self.QUIET_PATTERNS:
+            if pattern in logger_name_lower:
+                return record.levelno >= self._quiet_level
+
+        return True
+
+
 class TextHandler(logging.Handler):
+    """Batched logging handler for Tk Text widgets.
+
+    Instead of updating the UI for every log message, this handler:
+    1. Buffers messages in a bounded deque (auto-drops oldest if full)
+    2. Flushes to UI periodically (default: every 200ms)
+    3. Shows indicator when messages are dropped due to rate limiting
+    4. Uses UILogFilter to suppress high-frequency loggers
+
+    This allows handling high-volume DEBUG logging without freezing the UI.
+    """
 
     def __init__(self, text_widget: ScrolledText):
         super().__init__()
         self.text_widget = text_widget
         self.max_lines = 500
         self._closed = False
-        # Use bounded deque to prevent unbounded memory growth during active logging
-        self._pending_after_ids: deque[str] = deque(maxlen=100)
+
+        # Batching configuration
+        self._flush_interval_ms = 200  # Flush every 200ms (5 times/sec max)
+        self._max_messages_per_flush = 20  # Limit messages per UI update
+        self._buffer: deque[str] = deque(maxlen=100)  # Auto-drops oldest if full
+        self._flush_scheduled = False
+        self._flush_after_id: Optional[str] = None
+        self._dropped_count = 0
+
         self.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFMT))
+
+        # Add filter for UI-specific log level control
+        self._ui_filter = UILogFilter()
+        self.addFilter(self._ui_filter)
+
+    @property
+    def ui_filter(self) -> UILogFilter:
+        """Access the UI filter to change log level."""
+        return self._ui_filter
 
     def emit(self, record: logging.LogRecord) -> None:
         if self._closed:
             return
         try:
             msg = self.format(record) + '\n'
-            after_id = self.text_widget.after(0, self._append_log, msg)
-            self._pending_after_ids.append(after_id)
+
+            # Track if we're dropping messages (deque at capacity)
+            if len(self._buffer) >= self._buffer.maxlen:
+                self._dropped_count += 1
+
+            # deque.append is thread-safe
+            self._buffer.append(msg)
+
+            # DON'T schedule flush here - let the periodic timer handle it
+            # This avoids calling text_widget.after() from background threads
         except Exception:
             pass  # Silent: logging should never crash the app
 
-    def _append_log(self, msg: str) -> None:
+    def start_flush_timer(self) -> None:
+        """Start the periodic flush timer. Must be called from main thread."""
+        if not self._flush_scheduled and not self._closed:
+            self._flush_scheduled = True
+            try:
+                self.text_widget.after(self._flush_interval_ms, self._flush)
+            except (RuntimeError, tk.TclError):
+                self._flush_scheduled = False
+
+    def _flush(self) -> None:
+        """Flush buffered messages to the text widget in a single UI update."""
+        self._flush_scheduled = False
+        self._flush_after_id = None
+
         if self._closed:
             return
+
         try:
             # Check if widget still exists
             if not self.text_widget.winfo_exists():
                 self._closed = True
                 return
-            self.text_widget.config(state='normal')
-            self.text_widget.insert(tk.END, msg)
-            self.text_widget.see(tk.END)
 
-            num_lines = int(self.text_widget.index('end-1c').split('.')[0])
-            if num_lines > self.max_lines:
-                self.text_widget.delete('1.0', f'{num_lines - self.max_lines}.0')
+            # Process any buffered messages
+            if self._buffer:
+                # Take only up to max_messages_per_flush from buffer
+                messages = []
+                for _ in range(min(self._max_messages_per_flush, len(self._buffer))):
+                    try:
+                        messages.append(self._buffer.popleft())
+                    except IndexError:
+                        break  # Buffer emptied by another thread
 
-            self.text_widget.config(state='disabled')
+                # Capture and reset dropped count
+                dropped = self._dropped_count
+                self._dropped_count = 0
+
+                # Prepend dropped message indicator if any were dropped
+                if dropped > 0:
+                    messages.insert(
+                        0,
+                        f"[... {dropped} messages dropped (rate limiting) ...]\n"
+                    )
+
+                if messages:
+                    # Single UI update for batch
+                    text = ''.join(messages)
+
+                    self.text_widget.config(state='normal')
+                    self.text_widget.insert(tk.END, text)
+                    self.text_widget.see(tk.END)
+
+                    # Prune if over max lines
+                    num_lines = int(self.text_widget.index('end-1c').split('.')[0])
+                    if num_lines > self.max_lines:
+                        self.text_widget.delete('1.0', f'{num_lines - self.max_lines}.0')
+
+                    self.text_widget.config(state='disabled')
+
+            # Always reschedule - this creates a continuous polling timer
+            if not self._closed:
+                self._flush_scheduled = True
+                self._flush_after_id = self.text_widget.after(
+                    self._flush_interval_ms, self._flush
+                )
+
         except tk.TclError:
             # Widget was destroyed
             self._closed = True
@@ -73,13 +209,14 @@ class TextHandler(logging.Handler):
 
     def close(self) -> None:
         self._closed = True
-        # Cancel any pending after callbacks
-        for after_id in self._pending_after_ids:
+        # Cancel pending flush
+        if self._flush_after_id:
             try:
-                self.text_widget.after_cancel(after_id)
+                self.text_widget.after_cancel(self._flush_after_id)
             except Exception:
                 pass  # Widget may already be destroyed
-        self._pending_after_ids.clear()
+        self._flush_after_id = None
+        self._buffer.clear()
         super().close()
 
 
@@ -592,13 +729,18 @@ class MainWindow:
 
         This deferred creation avoids potential Tk rendering issues that can occur
         when creating certain menu elements during initial window construction.
+
+        Log Level Control Architecture:
+        - The UI log level only affects what's shown in the GUI log panel
+        - File/console logging stays at startup-configured level
+        - Uses UILogFilter on TextHandler (not logger level changes)
+        - This is the Pythonic way: filters on handlers, not level manipulation
         """
         if not hasattr(self, '_view_menu') or self._view_menu is None:
             self.logger.warning("Cannot create log level menu - view menu not available")
             return
 
         # Read saved log level from config for menu selection display
-        # NOTE: We only use this for the IntVar (menu selection), NOT for setting handlers
         config_manager = get_config_manager()
         saved_level = logging.INFO
         if CONFIG_PATH.exists():
@@ -628,45 +770,41 @@ class MainWindow:
 
         self._view_menu.add_cascade(label="Log Level", menu=log_level_menu)
 
-        # Apply saved level to logging system
-        saved_level = self.log_level_var.get()
-        root_logger = logging.getLogger()
-        root_logger.setLevel(saved_level)
+        # Set app logger to DEBUG so all messages are created and can reach handlers
+        # Each handler's filter determines what it actually displays
+        app_logger = logging.getLogger('rpi_logger')
+        app_logger.setLevel(logging.DEBUG)
 
-        # Apply to file/stream handlers (not TextHandler)
-        for handler in root_logger.handlers:
-            if handler is not self.log_handler:
-                handler.setLevel(saved_level)
-
-        # TextHandler: apply level but floor at INFO to prevent DEBUG flooding
+        # Apply saved level to UI filter (not handler level - filter handles everything)
         if self.log_handler:
-            ui_level = max(saved_level, logging.INFO)
-            self.log_handler.setLevel(ui_level)
+            self.log_handler.ui_filter.ui_level = saved_level
 
-        self.logger.debug("Log level menu created, level: %s", logging.getLevelName(saved_level))
+        self.logger.debug("Log level menu created, UI level: %s", logging.getLevelName(saved_level))
 
     def _on_log_level_change(self) -> None:
-        """Handle log level selection change from View menu."""
+        """Handle log level selection change from View menu.
+
+        Updates the UI filter level and propagates to all running modules.
+        File logging in modules stays at DEBUG regardless of this setting.
+        """
         if self.log_level_var is None:
             return
 
         numeric_level = self.log_level_var.get()
+        level_name = logging.getLevelName(numeric_level).lower()
 
-        # Update root logger and file handlers only
-        # TextHandler stays at INFO minimum to avoid UI flooding from DEBUG spam
-        root_logger = logging.getLogger()
-        root_logger.setLevel(numeric_level)
-        for handler in root_logger.handlers:
-            if handler is not self.log_handler:
-                handler.setLevel(numeric_level)
-
-        # TextHandler (UI log) uses INFO as minimum to prevent flooding
+        # Update local UI filter level
         if self.log_handler:
-            ui_level = max(numeric_level, logging.INFO)
-            self.log_handler.setLevel(ui_level)
+            self.log_handler.ui_filter.ui_level = numeric_level
+
+        # Propagate to all running module subprocesses
+        # Uses "ui" target so only console/forwarding handlers are affected,
+        # file handlers stay at DEBUG for full diagnostic capture
+        self._schedule_task(
+            self.logger_system.set_all_modules_log_level(level_name, "ui")
+        )
 
         # Persist to config using after() to avoid blocking the UI
-        level_name = logging.getLevelName(numeric_level).lower()
         self.root.after(0, lambda: self._persist_log_level(level_name))
 
     def _persist_log_level(self, level_name: str) -> None:
@@ -681,23 +819,29 @@ class MainWindow:
 
         self.log_handler = TextHandler(self.logger_text)
 
-        # Use configured log level (IntVar stores numeric level directly)
-        if self.log_level_var:
-            numeric_level = self.log_level_var.get()
-            self.log_handler.setLevel(numeric_level)
-        else:
-            self.log_handler.setLevel(logging.INFO)
+        # Handler level is DEBUG so all messages reach the handler
+        # The UILogFilter controls what's actually displayed
+        self.log_handler.setLevel(logging.DEBUG)
 
-        root_logger = logging.getLogger()
-        root_logger.addHandler(self.log_handler)
+        # Apply initial UI level from config if available
+        if self.log_level_var:
+            self.log_handler.ui_filter.ui_level = self.log_level_var.get()
+
+        # Attach to rpi_logger logger (not root) to avoid flood from external
+        # libraries like PIL, asyncio, etc. that log at DEBUG level
+        app_logger = logging.getLogger('rpi_logger')
+        app_logger.addHandler(self.log_handler)
+
+        # Start the periodic flush timer (must be on main thread)
+        self.log_handler.start_flush_timer()
 
         self.logger.info("System log display initialized")
 
     def cleanup_log_handler(self) -> None:
         if self.log_handler:
             self.log_handler.close()
-            root_logger = logging.getLogger()
-            root_logger.removeHandler(self.log_handler)
+            app_logger = logging.getLogger('rpi_logger')
+            app_logger.removeHandler(self.log_handler)
             self.log_handler = None
 
     def _schedule_task(self, coro) -> None:

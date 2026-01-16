@@ -383,6 +383,15 @@ class ModuleProcess:
     async def take_snapshot(self) -> None:
         await self.send_command(CommandMessage.take_snapshot())
 
+    async def set_log_level(self, level: str, target: str = "all") -> None:
+        """Set the log level for this module subprocess.
+
+        Args:
+            level: Log level name (debug, info, warning, error, critical)
+            target: Which handler to adjust (console, ui, all)
+        """
+        await self.send_command(CommandMessage.set_log_level(level, target))
+
     # =========================================================================
     # XBee Wireless Communication
     # =========================================================================
@@ -404,13 +413,18 @@ class ModuleProcess:
             self.logger.warning("Invalid xbee_send payload: %s", payload)
             return
 
+        self.logger.debug("XBee send request: node_id=%s, data=%r", node_id, data)
+
         success = False
         if self._xbee_send_callback:
             try:
                 success = await self._xbee_send_callback(node_id, data.encode())
+                self.logger.debug("XBee send result for %s: %s", node_id, success)
             except Exception as e:
                 self.logger.error("XBee send callback error: %s", e)
                 success = False
+        else:
+            self.logger.warning("XBee send callback not set for module %s - command dropped", self.module_info.name)
 
         # Send result back to module
         await self.send_command(CommandMessage.xbee_send_result(node_id, success))

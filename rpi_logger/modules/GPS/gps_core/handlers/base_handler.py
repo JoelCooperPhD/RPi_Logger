@@ -177,6 +177,7 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
                     self._consecutive_errors = 0
                     self._logged_stale = False
                     if line.startswith("$"):
+                        logger.debug("GPS sentence from %s: %s", self.device_id, line)
                         self._process_sentence(line)
 
                 self._check_staleness()

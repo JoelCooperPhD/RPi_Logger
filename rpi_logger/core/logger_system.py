@@ -786,7 +786,7 @@ class LoggerSystem:
 
     # Modules that support multiple simultaneous instances (one per device)
     # Keys are normalized (uppercase, no underscores) for consistent matching
-    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERASUSB", "CAMERASCSI", "AUDIO"}
+    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS", "CAMERASCSI", "AUDIO"}
 
     def _is_multi_instance_module(self, module_id: str) -> bool:
         """Check if a module supports multiple simultaneous instances."""
@@ -1195,6 +1195,7 @@ class LoggerSystem:
         # Get the module process and forward the data
         module = self.module_manager.get_module(instance_id)
         if module and module.is_running():
+            self.logger.debug("Routing XBee data from %s to module %s", node_id, instance_id)
             await module.send_xbee_data(node_id, data)
         else:
             self.logger.debug("Module %s not running for XBee device %s", instance_id, node_id)
@@ -1205,10 +1206,66 @@ class LoggerSystem:
 
         Called when a module process sends an xbee_send status message.
         """
-        return await self.device_system.send_to_wireless_device(node_id, data)
+        self.logger.debug("Sending XBee data to %s: %r", node_id, data)
+        result = await self.device_system.send_to_wireless_device(node_id, data)
+        if not result:
+            self.logger.warning("XBee send to %s failed", node_id)
+        return result
 
     def _setup_xbee_send_callback(self, module_id: str) -> None:
         """Set up XBee send callback for a module."""
         module = self.module_manager.get_module(module_id)
         if module:
             module.set_xbee_send_callback(self._send_xbee_from_module)
+            self.logger.debug("XBee send callback set for module %s", module_id)
+        else:
+            self.logger.warning("Cannot set XBee send callback - module not found: %s", module_id)
+
+    # =========================================================================
+    # Log Level Control
+    # =========================================================================
+
+    async def set_all_modules_log_level(self, level: str, target: str = "all") -> None:
+        """Propagate log level change to all running modules.
+
+        Args:
+            level: Log level name (debug, info, warning, error, critical)
+            target: Which handler to adjust (console, ui, all)
+        """
+        self.logger.info("Setting log level for all modules: level=%s, target=%s", level, target)
+
+        # Update internal log level setting
+        self.log_level = level
+
+        # Send to all running module processes
+        tasks = []
+        for module_name, process in self.module_manager.module_processes.items():
+            if process.is_running():
+                self.logger.debug("Sending set_log_level to %s", module_name)
+                tasks.append(process.set_log_level(level, target))
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self.logger.info("Log level command sent to %d modules", len(tasks))
+
+    async def set_module_log_level(
+        self, module_name: str, level: str, target: str = "all"
+    ) -> bool:
+        """Set log level for a specific module.
+
+        Args:
+            module_name: Name or instance ID of the module
+            level: Log level name (debug, info, warning, error, critical)
+            target: Which handler to adjust (console, ui, all)
+
+        Returns:
+            True if command was sent successfully
+        """
+        process = self.module_manager.get_module(module_name)
+        if not process or not process.is_running():
+            self.logger.warning("Module %s not running, cannot set log level", module_name)
+            return False
+
+        await process.set_log_level(level, target)
+        self.logger.info("Set log level for %s: level=%s, target=%s", module_name, level, target)
+        return True

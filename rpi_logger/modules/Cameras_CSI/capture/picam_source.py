@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import time
 import threading
 from typing import AsyncIterator, Any
 
 from .frame import CapturedFrame
 from .frame_buffer import FrameBuffer
+
+logger = logging.getLogger(__name__)
 
 try:
     from picamera2 import Picamera2
@@ -41,6 +44,9 @@ class PicamSource:
         if self._running:
             return
 
+        logger.info("Opening CSI camera %d at %dx%d @ %d fps",
+                    self._camera_index, self._resolution[0], self._resolution[1], self._fps)
+
         self._camera = Picamera2(self._camera_index)
         self._camera_id = self._camera.camera_properties.get("Model", f"camera_{self._camera_index}")
 
@@ -59,11 +65,13 @@ class PicamSource:
 
         self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._capture_thread.start()
+        logger.info("CSI camera %s started", self._camera_id)
 
     async def stop(self) -> None:
         if not self._running:
             return
 
+        logger.debug("Stopping CSI camera %s", self._camera_id)
         self._running = False
         self._buffer.stop()
 
@@ -75,6 +83,9 @@ class PicamSource:
             self._camera.stop()
             self._camera.close()
             self._camera = None
+
+        logger.info("CSI camera %s stopped (frames=%d, drops=%d, fps=%.1f)",
+                    self._camera_id, self._frame_count, self.drop_count, self._hardware_fps)
 
     def _capture_loop(self) -> None:
         last_time = time.monotonic()
@@ -120,8 +131,9 @@ class PicamSource:
                     avg_interval = sum(frame_times) / len(frame_times)
                     self._hardware_fps = 1.0 / avg_interval if avg_interval > 0 else 0.0
 
-            except Exception:
+            except Exception as e:
                 if self._running:
+                    logger.debug("CSI capture error: %s", e)
                     time.sleep(0.001)
 
     async def frames(self) -> AsyncIterator[CapturedFrame]:

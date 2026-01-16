@@ -613,6 +613,14 @@ class MainController:
         except Exception as e:
             self.logger.error("Failed to open issue tracker: %s", e)
 
+    def export_logs(self) -> None:
+        """Open the Export Logs dialog."""
+        try:
+            from .dialogs.export_logs import ExportLogsDialog
+            ExportLogsDialog(self.root)
+        except Exception as e:
+            self.logger.error("Failed to show Export Logs dialog: %s", e)
+
     # =========================================================================
     # Device Connection Handlers
     # =========================================================================

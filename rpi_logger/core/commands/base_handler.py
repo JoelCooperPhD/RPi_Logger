@@ -1,3 +1,4 @@
+import logging
 
 from rpi_logger.core.logging_utils import get_module_logger
 from abc import ABC, abstractmethod
@@ -54,6 +55,9 @@ class BaseCommandHandler(ABC):
                 return True
             elif command == "hide_window":
                 await self.handle_hide_window(command_data)
+                return True
+            elif command == "set_log_level":
+                await self.handle_set_log_level(command_data)
                 return True
             else:
                 handled = await self.handle_custom_command(command, command_data)
@@ -345,6 +349,63 @@ class BaseCommandHandler(ABC):
             error_msg = f"Failed to {action} recording: {str(e)}"
             StatusMessage.send("error", {"message": error_msg})
             self.logger.error(error_msg, exc_info=True)
+
+    # =========================================================================
+    # Log Level Control
+    # =========================================================================
+
+    async def handle_set_log_level(self, command_data: Dict[str, Any]) -> None:
+        """
+        Handle dynamic log level change from master.
+
+        Expected command_data:
+            level: str - Log level name (debug, info, warning, error, critical)
+            target: str - Which handler to adjust (console, ui, all)
+        """
+        level_str = command_data.get("level", "info").upper()
+        target = command_data.get("target", "all")
+
+        self.logger.debug("set_log_level: level=%s, target=%s", level_str, target)
+
+        # Try to use ModuleLogManager if available (preferred)
+        try:
+            from rpi_logger.core.module_log_manager import get_module_log_manager
+
+            log_manager = get_module_log_manager()
+            if log_manager:
+                log_manager.handle_set_log_level(command_data)
+                StatusMessage.send("log_level_changed", {
+                    "level": level_str.lower(),
+                    "target": target,
+                })
+                return
+        except ImportError:
+            pass
+
+        # Fallback: directly adjust handler levels on root logger
+        level = getattr(logging, level_str, logging.INFO)
+        root_logger = logging.getLogger()
+
+        handlers_updated = 0
+        for handler in root_logger.handlers:
+            # Skip file handlers (should always stay at DEBUG)
+            if isinstance(handler, logging.FileHandler):
+                continue
+
+            # Adjust console/stream handlers
+            if target in ("console", "all") and isinstance(handler, logging.StreamHandler):
+                handler.setLevel(level)
+                handlers_updated += 1
+
+        self.logger.info(
+            "Log level updated: level=%s, target=%s, handlers=%d",
+            level_str, target, handlers_updated
+        )
+
+        StatusMessage.send("log_level_changed", {
+            "level": level_str.lower(),
+            "target": target,
+        })
 
     # =========================================================================
     # Device Assignment Commands (for centralized device discovery)

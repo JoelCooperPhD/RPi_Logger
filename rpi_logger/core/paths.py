@@ -48,6 +48,43 @@ def _is_frozen() -> bool:
     return _is_pyinstaller() or _is_nuitka()
 
 
+def _get_platform_log_directory() -> Path:
+    """Get platform-appropriate log directory following OS conventions.
+
+    Follows industry best practices for desktop applications:
+    - Linux: ~/.local/state/rpi_logger/logs/ (XDG Base Directory Specification)
+    - macOS: ~/Library/Logs/RPILogger/
+    - Windows: %LOCALAPPDATA%/RPILogger/logs/
+
+    The RPI_LOGGER_STATE_DIR environment variable overrides this behavior,
+    placing logs at {RPI_LOGGER_STATE_DIR}/logs/.
+
+    Returns:
+        Path to the log directory.
+    """
+    # Environment variable override takes precedence
+    state_env = os.environ.get("RPI_LOGGER_STATE_DIR")
+    if state_env:
+        return Path(state_env).expanduser() / "logs"
+
+    if sys.platform == "darwin":
+        # macOS: ~/Library/Logs/RPILogger/
+        return Path.home() / "Library" / "Logs" / "RPILogger"
+    elif sys.platform == "win32":
+        # Windows: %LOCALAPPDATA%/RPILogger/logs/
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / "RPILogger" / "logs"
+        # Fallback if LOCALAPPDATA not set
+        return Path.home() / "AppData" / "Local" / "RPILogger" / "logs"
+    else:
+        # Linux and others: ~/.local/state/rpi_logger/logs/ (XDG spec)
+        xdg_state = os.environ.get("XDG_STATE_HOME")
+        if xdg_state:
+            return Path(xdg_state) / "rpi_logger" / "logs"
+        return Path.home() / ".local" / "state" / "rpi_logger" / "logs"
+
+
 # Base path (handles frozen vs normal)
 _BASE_PATH = _get_base_path()
 
@@ -62,9 +99,10 @@ else:
 # Configuration
 CONFIG_PATH = PROJECT_ROOT / "config.txt"
 
-# Logging directories
-LOGS_DIR = PROJECT_ROOT / "logs"
+# Logging directories (platform-specific, user-writable)
+LOGS_DIR = _get_platform_log_directory()
 MASTER_LOG_FILE = LOGS_DIR / "master.log"
+MODULE_LOGS_DIR = LOGS_DIR / "modules"
 
 # Application state
 STATE_FILE = PROJECT_ROOT / "running_modules.json"
@@ -77,7 +115,6 @@ _USER_STATE_ENV = os.environ.get("RPI_LOGGER_STATE_DIR")
 USER_STATE_DIR = Path(_USER_STATE_ENV).expanduser() if _USER_STATE_ENV else (Path.home() / ".rpi_logger")
 USER_CONFIG_OVERRIDES_DIR = USER_STATE_DIR / "config_overrides"
 USER_MODULE_CONFIG_DIR = USER_STATE_DIR / "module_configs"
-USER_MODULE_LOGS_DIR = USER_STATE_DIR / "module_logs"
 
 # UI assets
 UI_DIR = Path(__file__).parent / "ui"
@@ -87,12 +124,11 @@ ICON_PATH = UI_DIR / "icon.png"  # Network graph icon for system tray
 
 def ensure_directories() -> None:
     """Create necessary directories if they don't exist."""
-
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    MODULE_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     USER_STATE_DIR.mkdir(parents=True, exist_ok=True)
     USER_CONFIG_OVERRIDES_DIR.mkdir(parents=True, exist_ok=True)
     USER_MODULE_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    USER_MODULE_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 __all__ = [
@@ -101,12 +137,12 @@ __all__ = [
     'CONFIG_PATH',
     'LOGS_DIR',
     'MASTER_LOG_FILE',
+    'MODULE_LOGS_DIR',
     'STATE_FILE',
     'MODULES_DIR',
     'USER_STATE_DIR',
     'USER_CONFIG_OVERRIDES_DIR',
     'USER_MODULE_CONFIG_DIR',
-    'USER_MODULE_LOGS_DIR',
     'UI_DIR',
     'LOGO_PATH',
     'ICON_PATH',

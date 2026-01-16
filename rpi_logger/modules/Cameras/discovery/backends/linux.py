@@ -109,7 +109,6 @@ class LinuxCameraBackend:
                 camera_index=index,
             ))
 
-        logger.debug(f"Discovered {len(cameras)} USB cameras on Linux")
         return cameras
 
     def _detect_from_dev_nodes(self) -> list[int]:
