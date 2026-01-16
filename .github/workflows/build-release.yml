@@ -39,11 +39,14 @@ jobs:
           cd dist
           Compress-Archive -Path "Logger" -DestinationPath "Logger-Windows.zip"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
         with:
-          name: Logger-Windows
-          path: dist/Logger-Windows.zip
+          files: dist/Logger-Windows.zip
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
     runs-on: macos-latest
@@ -69,11 +72,14 @@ jobs:
           cd dist
           zip -r "Logger-macOS.zip" "Logger.app"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
         with:
-          name: Logger-macOS
-          path: dist/Logger-macOS.zip
+          files: dist/Logger-macOS.zip
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -110,11 +116,14 @@ jobs:
           cd dist
           tar -czvf "Logger-Linux-x86_64.tar.gz" "logger"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
         with:
-          name: Logger-Linux-x86_64
-          path: dist/Logger-Linux-x86_64.tar.gz
+          files: dist/Logger-Linux-x86_64.tar.gz
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux-appimage:
     runs-on: ubuntu-22.04
@@ -194,11 +203,14 @@ jobs:
         run: |
           ARCH=x86_64 ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir Logger-x86_64.AppImage
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
         with:
-          name: Logger-Linux-AppImage
-          path: Logger-x86_64.AppImage
+          files: Logger-x86_64.AppImage
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-raspberry-pi:
     runs-on: ubuntu-22.04
@@ -241,36 +253,25 @@ jobs:
             cd dist
             tar -czvf "Logger-RaspberryPi-arm64.tar.gz" "logger"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
         with:
-          name: Logger-RaspberryPi-arm64
-          path: dist/Logger-RaspberryPi-arm64.tar.gz
+          files: dist/Logger-RaspberryPi-arm64.tar.gz
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  create-release:
+  finalize-release:
     needs: [build-windows, build-macos, build-linux, build-linux-appimage, build-raspberry-pi]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Display structure of downloaded files
-        run: ls -la artifacts/*/
-
-      - name: Create Release
+      - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          files: |
-            artifacts/Logger-Windows/Logger-Windows.zip
-            artifacts/Logger-macOS/Logger-macOS.zip
-            artifacts/Logger-Linux-x86_64/Logger-Linux-x86_64.tar.gz
-            artifacts/Logger-Linux-AppImage/Logger-x86_64.AppImage
-            artifacts/Logger-RaspberryPi-arm64/Logger-RaspberryPi-arm64.tar.gz
           body: |
             ## Logger ${{ github.ref_name }}
 
