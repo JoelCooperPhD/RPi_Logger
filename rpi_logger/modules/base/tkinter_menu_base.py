@@ -396,7 +396,7 @@ class TkinterMenuBase:
 
     def _report_issue(self):
         try:
-            url = "https://github.com/JoelCooperPhD/RPi_Logger/issues"
+            url = "https://github.com/JoelCooperPhD/Logger/issues"
             webbrowser.open(url)
             logger.info("Opened issue tracker: %s", url)
         except Exception as e:

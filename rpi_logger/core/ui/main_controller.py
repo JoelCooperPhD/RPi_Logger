@@ -606,7 +606,7 @@ class MainController:
 
     def report_issue(self) -> None:
         try:
-            url = "https://github.com/JoelCooperPhD/RPi_Logger/issues"
+            url = "https://github.com/JoelCooperPhD/Logger/issues"
             webbrowser.open(url)
             self.logger.debug("Opened issue tracker: %s", url)
         except Exception as e:

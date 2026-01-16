@@ -15,7 +15,7 @@ from .logging_utils import get_module_logger
 
 logger = get_module_logger(__name__)
 
-GITHUB_REPO = "JoelCooperPhD/RPi_Logger"
+GITHUB_REPO = "JoelCooperPhD/Logger"
 RELEASES_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
 
