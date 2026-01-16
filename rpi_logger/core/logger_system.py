@@ -39,6 +39,8 @@ from .devices import (
     DeviceSystem, InterfaceType, DeviceFamily,
     DeviceInfo,
 )
+from .instance_identity import InstanceIdentity, MULTI_INSTANCE_MODULES
+from .device_connection_coordinator import DeviceConnectionCoordinator
 
 if TYPE_CHECKING:
     from .event_logger import EventLogger
@@ -125,14 +127,25 @@ class LoggerSystem:
         self._gracefully_quitting_modules: set[str] = set()
         self._startup_modules: Set[str] = set()
 
-        # Device-to-instance mapping for multi-instance modules
-        # Maps device_id -> instance_id (e.g., "ACM0" -> "DRT:ACM0")
-        self._device_instance_map: Dict[str, str] = {}
+        # Instance identity manager - handles device-to-instance mapping
+        self._identity = InstanceIdentity(MULTI_INSTANCE_MODULES)
 
         # Instance state manager - single source of truth for instance lifecycle
         self.instance_manager = InstanceStateManager(
             module_manager=self.module_manager,
             ui_update_callback=self._on_instance_ui_update,
+        )
+
+        # Device connection coordinator - handles connection lifecycle
+        self._connection_coordinator = DeviceConnectionCoordinator(
+            device_system=self.device_system,
+            instance_manager=self.instance_manager,
+            module_manager=self.module_manager,
+            state_facade=self._state,
+            identity=self._identity,
+            session_dir_getter=lambda: self._session_dir,
+            geometry_loader=self._load_module_geometry,
+            xbee_callback_setter=self._setup_xbee_send_callback,
         )
 
     @property
@@ -261,9 +274,9 @@ class LoggerSystem:
                 )
 
                 # Unified cleanup - find device and clean up (same for all modules)
-                device_id = self._find_device_for_instance(effective_id)
+                device_id = self._identity.find_device_for_instance(effective_id)
                 if device_id:
-                    await self._cleanup_device_disconnect(device_id, module_name)
+                    await self._connection_coordinator.cleanup_device_disconnect(device_id, module_name)
                 else:
                     self.logger.debug(
                         "No device found for instance %s, cleanup skipped", effective_id
@@ -327,9 +340,9 @@ class LoggerSystem:
                     self.logger.warning("Module %s crashed/stopped unexpectedly", effective_id)
 
                     # Unified cleanup (is_crash=True skips normal persistence)
-                    device_id = self._find_device_for_instance(effective_id)
+                    device_id = self._identity.find_device_for_instance(effective_id)
                     if device_id:
-                        await self._cleanup_device_disconnect(device_id, module_name, is_crash=True)
+                        await self._connection_coordinator.cleanup_device_disconnect(device_id, module_name, is_crash=True)
 
                     await self._state.on_module_crash(module_name)
 
@@ -341,23 +354,6 @@ class LoggerSystem:
                 await self.ui_callback(effective_id, process.get_state(), status)
             except Exception as e:
                 self.logger.error("UI callback error: %s", e)
-
-    def _has_other_instances(self, module_name: str) -> bool:
-        """Check if other instances of this module are still running."""
-        # Normalize: uppercase and remove underscores for consistent matching
-        normalized = module_name.upper().replace("_", "")
-        return any(
-            inst_id.upper().replace("_", "").startswith(f"{normalized}:")
-            for inst_id in self._device_instance_map.values()
-        )
-
-    def _notify_device_connected(self, device_id: str, connected: bool) -> None:
-        """Update device connection state in device_system."""
-        self.device_system.set_device_connected(device_id, connected)
-
-    def _notify_device_connecting(self, device_id: str) -> None:
-        """Set device to CONNECTING state (yellow indicator)."""
-        self.device_system.set_device_connecting(device_id)
 
     async def _on_instance_ui_update(
         self, device_id: str, connected: bool, connecting: bool
@@ -758,384 +754,42 @@ class LoggerSystem:
         self.device_system.set_connection_enabled(interface, family, enabled)
 
     # =========================================================================
-    # Multi-Instance Module Support
+    # Multi-Instance Module Support (delegates to InstanceIdentity)
     # =========================================================================
 
     # Modules that support multiple simultaneous instances (one per device)
-    # Keys are normalized (uppercase, no underscores) for consistent matching
-    MULTI_INSTANCE_MODULES = {"DRT", "VOG", "CAMERAS", "CAMERASCSI", "AUDIO"}
-
-    def _is_multi_instance_module(self, module_id: str) -> bool:
-        """Check if a module supports multiple simultaneous instances."""
-        # Normalize: uppercase and remove underscores for consistent matching
-        normalized = module_id.upper().replace("_", "")
-        return normalized in self.MULTI_INSTANCE_MODULES
-
-    def _make_instance_id(self, module_id: str, device_id: str) -> str:
-        """Generate an instance ID for a device-specific module instance.
-
-        For multi-instance modules, returns "MODULE:ShortDeviceId" (e.g., "DRT:ACM0").
-        For single-instance modules, returns just the module_id.
-
-        The device_id is shortened by extracting just the device name from paths
-        like "/dev/ttyACM0" -> "ACM0".
-        """
-        if self._is_multi_instance_module(module_id):
-            # Extract short device ID from full path
-            short_id = self._extract_short_device_id(device_id)
-            return f"{module_id.upper()}:{short_id}"
-        return module_id
-
-    def _extract_short_device_id(self, device_id: str) -> str:
-        """Extract short device ID from full path.
-
-        Examples:
-            /dev/ttyACM0 -> ACM0
-            /dev/ttyUSB0 -> USB0
-            ACM0 -> ACM0 (already short)
-        """
-        if not device_id:
-            return ""
-        # Handle full paths like /dev/ttyACM0
-        if "/" in device_id:
-            short = device_id.split("/")[-1]
-            if short.startswith("tty"):
-                return short[3:]  # Remove "tty" prefix
-            return short
-        return device_id
-
-    def _parse_instance_id(self, instance_id: str) -> tuple[str, Optional[str]]:
-        """Parse an instance ID into (module_id, device_id).
-
-        Returns (module_id, device_id) for multi-instance IDs like "DRT:ACM0",
-        or (module_id, None) for single-instance IDs like "Notes".
-        """
-        if ":" in instance_id:
-            parts = instance_id.split(":", 1)
-            return parts[0], parts[1]
-        return instance_id, None
+    MULTI_INSTANCE_MODULES = MULTI_INSTANCE_MODULES
 
     def _get_instance_for_device(self, device_id: str) -> Optional[str]:
         """Get the instance ID for a device, if one is running."""
-        return self._device_instance_map.get(device_id)
+        return self._identity.get_instance_for_device(device_id)
 
-    def _register_device_instance(self, device_id: str, instance_id: str) -> None:
-        """Register a device-to-instance mapping."""
-        self._device_instance_map[device_id] = instance_id
-
-    def _unregister_device_instance(self, device_id: str) -> Optional[str]:
-        """Unregister a device-to-instance mapping. Returns the instance_id if found."""
-        return self._device_instance_map.pop(device_id, None)
-
-    def _find_device_for_instance(self, instance_id: str) -> Optional[str]:
-        """Find the device_id associated with an instance_id."""
-        for dev_id, inst_id in self._device_instance_map.items():
-            if inst_id == instance_id:
-                return dev_id
-        # Fallback: extract from instance_id format "MODULE:device"
-        _, extracted = self._parse_instance_id(instance_id)
-        return extracted
-
-    async def _cleanup_device_disconnect(
-        self, device_id: str, module_id: str, *, is_crash: bool = False
-    ) -> None:
-        """Unified cleanup after a device disconnects (from any path).
-
-        This is the single convergence point for all device disconnection:
-        - User clicks device label to disconnect
-        - User closes module window via X button
-        - Module crashes (is_crash=True)
-
-        Args:
-            device_id: The device that disconnected
-            module_id: The module that owns the device
-            is_crash: If True, skip normal persistence (crash uses on_module_crash separately)
-        """
-        # Get device info to check if internal
-        device = self.device_system.get_device(device_id)
-        is_internal = device.is_internal if device else False
-
-        self._unregister_device_instance(device_id)
-        self._notify_device_connected(device_id, False)
-
-        # Skip persistence for crash path (handled separately by on_module_crash)
-        if is_crash:
-            return
-
-        if not self._has_other_instances(module_id):
-            if is_internal:
-                # Internal modules (Notes, etc.): keep visible, just mark as not running
-                await self._state.on_internal_module_closed(module_id)
-            else:
-                # Hardware devices: disable the device type entirely
-                await self._state.on_user_disconnect(module_id)
-
-    def _build_assign_device_command_builder(self, device: DeviceInfo) -> Callable[[str], str]:
-        """Build a command builder function for assign_device.
-
-        Returns a function that takes a command_id and returns the full
-        command JSON string. This is used by the robust connection system
-        to inject correlation IDs for tracking.
-        """
-        session_dir_str = str(self.session_dir) if self.session_dir else None
-
-        def builder(command_id: str) -> str:
-            return CommandMessage.assign_device(
-                device_id=device.device_id,
-                device_type=device.device_type.value,
-                port=device.port or "",
-                baudrate=device.baudrate,
-                session_dir=session_dir_str,
-                is_wireless=device.is_wireless,
-                is_network=device.is_network,
-                network_address=device.get_meta("network_address"),
-                network_port=device.get_meta("network_port"),
-                sounddevice_index=device.get_meta("sounddevice_index"),
-                audio_channels=device.get_meta("audio_channels"),
-                audio_sample_rate=device.get_meta("audio_sample_rate"),
-                is_camera=device.is_camera,
-                camera_type=device.get_meta("camera_type"),
-                camera_stable_id=device.get_meta("camera_stable_id"),
-                camera_dev_path=device.get_meta("camera_dev_path"),
-                camera_hw_model=device.get_meta("camera_hw_model"),
-                camera_location=device.get_meta("camera_location"),
-                camera_index=device.get_meta("camera_index"),
-                # Audio sibling info for webcams with built-in microphones
-                camera_audio_index=device.get_meta("camera_audio_index"),
-                camera_audio_channels=device.get_meta("camera_audio_channels"),
-                camera_audio_sample_rate=device.get_meta("camera_audio_sample_rate"),
-                camera_audio_alsa_card=device.get_meta("camera_audio_alsa_card"),
-                display_name=device.display_name,
-                command_id=command_id,  # Inject correlation ID
-            )
-
-        return builder
+    # =========================================================================
+    # Device Connection API (delegates to DeviceConnectionCoordinator)
+    # =========================================================================
 
     async def connect_device(self, device_id: str) -> bool:
-        """Connect a device (called from UI).
-
-        This delegates to connect_and_start_device which handles the full
-        connection lifecycle including module startup.
-        """
-        return await self.connect_and_start_device(device_id)
+        """Connect a device (called from UI)."""
+        return await self._connection_coordinator.connect_device(device_id)
 
     async def disconnect_device(self, device_id: str) -> None:
-        """Disconnect a device (called from UI).
-
-        This delegates to stop_and_disconnect_device which handles the full
-        disconnection lifecycle including module shutdown.
-        """
-        await self.stop_and_disconnect_device(device_id)
+        """Disconnect a device (called from UI)."""
+        await self._connection_coordinator.disconnect_device(device_id)
 
     async def _load_pending_auto_connects(self) -> None:
-        """Load device connection states and mark modules for auto-connect.
-
-        Only marks modules for auto-connect if they are enabled (checked in
-        Modules menu). This ensures disabled modules don't auto-connect their
-        devices on startup.
-        """
+        """Load device connection states and mark modules for auto-connect."""
         modules = self.module_manager.get_available_modules()
-
-        for module_info in modules:
-            # Only auto-connect if the module is enabled
-            if not self.is_module_enabled(module_info.name):
-                continue
-
-            # Load persisted state
-            state = await self._state.load_module_state(module_info.name)
-
-            if state.device_connected:
-                self.logger.info("Module %s marked for auto-connect", module_info.name)
-                self.device_system.request_auto_connect(module_info.name)
-
-    # =========================================================================
-    # Device Connection & Visibility API
-    # =========================================================================
+        await self._connection_coordinator.load_pending_auto_connects(
+            modules, self.is_module_enabled
+        )
 
     async def connect_and_start_device(self, device_id: str) -> bool:
-        """Connect a device and start its module instance.
-
-        Called when user clicks the green dot or Connect button.
-        Window is shown automatically when module starts.
-
-        For multi-instance modules (DRT, VOG), each device gets its own
-        module process instance (e.g., DRT:ACM0, DRT:ACM1).
-
-        The connection flow uses the InstanceStateManager:
-        1. Start instance (STOPPED -> STARTING -> RUNNING)
-        2. Send assign_device command (RUNNING -> CONNECTING)
-        3. Module sends device_ready (CONNECTING -> CONNECTED)
-        4. UI updated via callback from InstanceStateManager
-
-        Returns:
-            True if device connection was initiated successfully.
-        """
-        self.logger.info("connect_and_start_device: %s", device_id)
-
-        # Check if this is a CSI camera
-        is_csi_camera = device_id.startswith("picam:")
-        camera_index: int | None = None
-        if is_csi_camera:
-            # Extract camera index from device_id (picam:0 → 0, picam:1 → 1)
-            try:
-                camera_index = int(device_id.split(":")[1])
-            except (IndexError, ValueError):
-                self.logger.error("Invalid CSI camera device_id format: %s", device_id)
-                return False
-
-        try:
-            device = self.device_system.get_device(device_id)
-            if not device:
-                self.logger.info("Device not found: %s", device_id)
-                return False
-
-            module_id = device.module_id
-            if not module_id:
-                self.logger.info("Device has no module_id: %s", device_id)
-                return False
-
-            # Generate instance ID for this device
-            instance_id = self._make_instance_id(module_id, device_id)
-            self.logger.info("Instance ID for device %s: %s", device_id, instance_id)
-
-            # Check if already connected or in progress
-            if self.instance_manager.is_instance_connected(instance_id):
-                self.logger.info("Instance %s already connected", instance_id)
-                return True
-            if self.instance_manager.is_instance_running(instance_id):
-                self.logger.info("Instance %s already starting/running", instance_id)
-                return True
-
-            # Load geometry for this instance (try instance-specific first for multi-instance)
-            window_geometry = await self._load_module_geometry(module_id, instance_id)
-
-            # Start instance via InstanceStateManager
-            # For CSI cameras, pass camera_index so module can init camera directly via CLI arg
-            success = await self.instance_manager.start_instance(
-                instance_id=instance_id,
-                module_id=module_id,
-                device_id=device_id,
-                window_geometry=window_geometry,
-                camera_index=camera_index,
-            )
-
-            if not success:
-                self.logger.error("Failed to start instance %s", instance_id)
-                return False
-
-            # Register device-to-instance mapping
-            self._register_device_instance(device_id, instance_id)
-
-            # Set up XBee send callback for the instance
-            self._setup_xbee_send_callback(instance_id)
-
-            # Wait for module to become ready before sending connection command
-            if not await self.instance_manager.wait_for_ready(instance_id, timeout=10.0):
-                self.logger.error("Instance %s failed to become ready", instance_id)
-                return False
-
-            self.logger.info("Instance %s is ready, proceeding with device connection", instance_id)
-
-            # Send assign_device command via InstanceStateManager (non-blocking)
-            # CSI cameras are special: they init via --camera-index CLI arg, not assign_device
-            if is_csi_camera:
-                # CSI cameras init on startup via CLI arg. The module sends device_ready
-                # when camera is initialized and frames are flowing.
-                await self._wait_for_csi_connected(instance_id, timeout=30.0)
-            elif not device.is_internal:
-                self.logger.info("Sending assign_device to non-internal device %s", device_id)
-                command_builder = self._build_assign_device_command_builder(device)
-                await self.instance_manager.connect_device(instance_id, command_builder)
-            else:
-                # Internal modules don't send device_ready (no hardware to connect)
-                await self._state.on_device_connected(module_id)
-
-            return True
-
-        except Exception as e:
-            self.logger.error("Failed to connect device %s: %s", device_id, e)
-            return False
-
-    async def _wait_for_csi_connected(self, instance_id: str, timeout: float = 30.0) -> bool:
-        """Wait for a CSI camera instance to reach CONNECTED state.
-
-        Args:
-            instance_id: The instance to wait for
-            timeout: Maximum time to wait in seconds (default 30s for camera init)
-
-        Returns:
-            True if instance reached CONNECTED state, False on timeout
-        """
-        from .instance_state import InstanceState
-
-        elapsed = 0.0
-        interval = 0.2
-
-        while elapsed < timeout:
-            info = self.instance_manager.get_instance(instance_id)
-            if not info:
-                return False
-
-            if info.state == InstanceState.CONNECTED:
-                return True
-
-            if info.state == InstanceState.STOPPED:
-                # Process died during init
-                return False
-
-            await asyncio.sleep(interval)
-            elapsed += interval
-
-        self.logger.warning(
-            "Timeout waiting for CSI camera %s to connect (%.1fs)",
-            instance_id, timeout
-        )
-        return False
+        """Connect a device and start its module instance."""
+        return await self._connection_coordinator.connect_and_start_device(device_id)
 
     async def stop_and_disconnect_device(self, device_id: str) -> bool:
-        """Stop module instance and disconnect device.
-
-        Called when user clicks the green dot (when on) or Disconnect button.
-
-        For multi-instance modules, stops only the instance associated with
-        this specific device, leaving other instances running.
-
-        Uses InstanceStateManager for state transitions:
-        CONNECTED -> STOPPING -> STOPPED
-
-        Returns:
-            True if device is now disconnected.
-        """
-        self.logger.info("stop_and_disconnect_device: %s", device_id)
-
-        device = self.device_system.get_device(device_id)
-        if not device:
-            self.logger.debug("Device not found: %s", device_id)
-            self._unregister_device_instance(device_id)
-            self._notify_device_connected(device_id, False)
-            return True
-
-        module_id = device.module_id
-        if not module_id:
-            self.logger.debug("Device has no module_id: %s", device_id)
-            self._unregister_device_instance(device_id)
-            self._notify_device_connected(device_id, False)
-            return True
-
-        # Get the instance ID for this device
-        instance_id = self._get_instance_for_device(device_id)
-        if not instance_id:
-            # Fall back to generating instance ID
-            instance_id = self._make_instance_id(module_id, device_id)
-
-        # Stop instance via InstanceStateManager
-        # This handles the STOPPING state and waiting for process exit
-        await self.instance_manager.stop_instance(instance_id)
-
-        # Unified cleanup: unregister, update UI, persist state
-        await self._cleanup_device_disconnect(device_id, module_id)
-
-        return True
+        """Stop module instance and disconnect device."""
+        return await self._connection_coordinator.stop_and_disconnect_device(device_id)
 
     # =========================================================================
     # XBee Wireless Communication Routing
