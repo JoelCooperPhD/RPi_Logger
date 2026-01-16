@@ -1636,15 +1636,13 @@ class APIController:
             "GPS", "get_fix", device_id=device_id
         )
 
-        if result:
+        if result and result.get("available"):
             return {
                 "available": True,
-                "device_id": device_id,
+                "device_id": result.get("device_id", device_id),
                 "fix_valid": result.get("fix_valid", False),
                 "fix_quality": result.get("fix_quality"),
-                "fix_quality_desc": _get_fix_quality_description(
-                    result.get("fix_quality")
-                ),
+                "fix_quality_desc": result.get("fix_quality_desc"),  # Now from module
                 "fix_mode": result.get("fix_mode"),
                 "age_seconds": result.get("age_seconds"),
                 "connected": result.get("connected", False),
@@ -2087,16 +2085,8 @@ class APIController:
                 device.device_id
             )
 
-            # Determine device type from metadata or display name
-            device_type = "unknown"
-            if device.metadata:
-                device_type = device.metadata.get("device_type", "unknown")
-            elif device.display_name:
-                name_lower = device.display_name.lower()
-                if "wdrt" in name_lower:
-                    device_type = "wDRT_Wireless" if device.is_wireless else "wDRT_USB"
-                elif "sdrt" in name_lower or "drt" in name_lower:
-                    device_type = "sDRT"
+            # Use device_type from discovery (already determined by device registry)
+            device_type = device.device_type.value if device.device_type else "unknown"
 
             devices.append({
                 "device_id": device.device_id,
@@ -2463,33 +2453,6 @@ class APIController:
             "devices": devices,
             "instances": instances,
         }
-
-def _get_fix_quality_description(quality: Optional[int]) -> Optional[str]:
-    """Get human-readable description for GPS fix quality.
-
-    Args:
-        quality: GPS fix quality value (0-8)
-
-    Returns:
-        Description string or None if quality is None
-    """
-    if quality is None:
-        return None
-
-    descriptions = {
-        0: "Invalid",
-        1: "GPS fix (SPS)",
-        2: "DGPS fix",
-        3: "PPS fix",
-        4: "Real Time Kinematic",
-        5: "Float RTK",
-        6: "Estimated (dead reckoning)",
-        7: "Manual input mode",
-        8: "Simulation mode",
-    }
-
-    return descriptions.get(quality, f"Unknown ({quality})")
-
 
 # =============================================================================
 # Notes Module Mixin Methods
@@ -2932,7 +2895,7 @@ async def _list_vog_devices(self) -> Dict[str, Any]:
     """List all discovered/connected VOG devices.
 
     Returns devices filtered to VOG family with their device types
-    (sVOG for wired, wVOG for wireless).
+    from discovery metadata.
 
     Returns:
         Dict with devices list containing device info.
@@ -2943,11 +2906,11 @@ async def _list_vog_devices(self) -> Dict[str, Any]:
     for device in all_devices:
         # Filter to VOG devices only
         if device.get("module_id", "").upper() == "VOG":
-            device_type = _determine_vog_device_type(device)
+            # Use device_type from discovery (returned as 'family' in list_devices)
             devices.append({
                 "device_id": device.get("device_id"),
                 "display_name": device.get("display_name"),
-                "device_type": device_type,
+                "device_type": device.get("family"),  # Already determined by discovery
                 "connected": device.get("connected", False),
                 "connecting": device.get("connecting", False),
                 "is_wireless": device.get("is_wireless", False),
@@ -2958,28 +2921,6 @@ async def _list_vog_devices(self) -> Dict[str, Any]:
         "devices": devices,
         "count": len(devices),
     }
-
-
-def _determine_vog_device_type(device: Dict[str, Any]) -> str:
-    """Determine VOG device type from device info.
-
-    Args:
-        device: Device info dictionary
-
-    Returns:
-        Device type string: 'sVOG', 'wVOG_USB', or 'wVOG_Wireless'
-    """
-    # Check if it's wireless
-    if device.get("is_wireless"):
-        return "wVOG_Wireless"
-
-    # Check metadata or display name for type hints
-    display_name = device.get("display_name", "").lower()
-    if "wvog" in display_name:
-        return "wVOG_USB"
-
-    # Default to sVOG for wired devices
-    return "sVOG"
 
 
 async def _get_vog_config(self, device_id: Optional[str] = None) -> Dict[str, Any]:
@@ -4308,6 +4249,7 @@ APIController.reset_module_settings = _reset_module_settings
 APIController.get_module_settings_schema = _get_module_settings_schema
 APIController.get_global_settings = _get_global_settings
 APIController.update_global_settings = _update_global_settings
+APIController._get_connection_types_internal = _get_connection_types_internal
 APIController.get_connection_types = _get_connection_types
 APIController.update_connection_types = _update_connection_types
 APIController.get_window_geometries = _get_window_geometries

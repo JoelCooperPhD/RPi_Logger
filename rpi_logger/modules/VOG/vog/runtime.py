@@ -362,12 +362,33 @@ class VOGModuleRuntime(ModuleRuntime):
             return True
 
         if action == "peek_open":
-            await self._peek_open_all()
+            lens = command.get("lens", "x")
+            await self._peek_open_all(lens)
             return True
 
         if action == "peek_close":
-            await self._peek_close_all()
+            lens = command.get("lens", "x")
+            await self._peek_close_all(lens)
             return True
+
+        # Data query commands (API endpoints)
+        if action == "get_config":
+            device_id = command.get("device_id")
+            return self._handle_get_config(device_id)
+
+        if action == "set_config":
+            device_id = command.get("device_id")
+            param = command.get("param", "")
+            value = command.get("value", "")
+            return await self._handle_set_config(device_id, param, value)
+
+        if action == "get_eye_position":
+            device_id = command.get("device_id")
+            return self._handle_get_eye_position(device_id)
+
+        if action == "get_battery":
+            device_id = command.get("device_id")
+            return self._handle_get_battery(device_id)
 
         if action == "show_window":
             self._show_window()
@@ -572,15 +593,23 @@ class VOGModuleRuntime(ModuleRuntime):
     # Peek control
     # ------------------------------------------------------------------
 
-    async def _peek_open_all(self) -> None:
-        """Send peek/open command to device."""
-        if self.handler:
-            await self.handler.peek_open()
+    async def _peek_open_all(self, lens: str = "x") -> None:
+        """Send peek/open command to device.
 
-    async def _peek_close_all(self) -> None:
-        """Send peek/close command to device."""
+        Args:
+            lens: Lens to open - 'a', 'b', or 'x' (both). Only used for wVOG.
+        """
         if self.handler:
-            await self.handler.peek_close()
+            await self.handler.peek_open(lens)
+
+    async def _peek_close_all(self, lens: str = "x") -> None:
+        """Send peek/close command to device.
+
+        Args:
+            lens: Lens to close - 'a', 'b', or 'x' (both). Only used for wVOG.
+        """
+        if self.handler:
+            await self.handler.peek_close(lens)
 
     # ------------------------------------------------------------------
     # Window visibility control
@@ -610,6 +639,132 @@ class VOGModuleRuntime(ModuleRuntime):
         """Request config from device."""
         if self.handler:
             await self.handler.get_device_config()
+
+    # ------------------------------------------------------------------
+    # API command handlers
+    # ------------------------------------------------------------------
+
+    def _handle_get_config(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_config command - return device configuration.
+
+        Args:
+            device_id: Optional device ID (currently single-device module)
+
+        Returns:
+            Dict with config data
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "config": {},
+                "error": "No device connected",
+            }
+
+        return {
+            "success": True,
+            "device_id": self.device_id,
+            "config": self.handler.get_config(),
+        }
+
+    async def _handle_set_config(
+        self, device_id: Optional[str], param: str, value: str
+    ) -> Dict[str, Any]:
+        """Handle set_config command - set a config parameter.
+
+        Args:
+            device_id: Optional device ID
+            param: Parameter name
+            value: Value to set
+
+        Returns:
+            Dict with success status
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "error": "No device connected",
+            }
+
+        if not param:
+            return {
+                "success": False,
+                "error": "Parameter name required",
+            }
+
+        success = await self.handler.set_config_value(param, value)
+        return {
+            "success": success,
+            "device_id": self.device_id,
+            "param": param,
+            "value": value,
+        }
+
+    def _handle_get_eye_position(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_eye_position command - return shutter timing data.
+
+        VOG devices track shutter open/closed timing rather than direct eye position.
+
+        Args:
+            device_id: Optional device ID
+
+        Returns:
+            Dict with shutter timing data
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "data": {},
+                "error": "No device connected",
+            }
+
+        # Get last shutter data from handler's config (populated by data responses)
+        config = self.handler.get_config()
+
+        return {
+            "success": True,
+            "device_id": self.device_id,
+            "device_type": self.handler.device_type if self.handler else None,
+            "data": {
+                "shutter_open": config.get("last_shutter_open"),
+                "shutter_closed": config.get("last_shutter_closed"),
+                "trial_number": self.active_trial_number,
+            },
+        }
+
+    def _handle_get_battery(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_battery command - return battery percentage.
+
+        Only applicable for wVOG devices.
+
+        Args:
+            device_id: Optional device ID
+
+        Returns:
+            Dict with battery data
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "battery_percent": None,
+                "error": "No device connected",
+            }
+
+        if not self.handler.supports_battery:
+            return {
+                "success": False,
+                "battery_percent": None,
+                "error": "Device does not support battery reporting (sVOG is wired)",
+            }
+
+        config = self.handler.get_config()
+        battery = config.get("battery", 0)
+
+        return {
+            "success": True,
+            "device_id": self.device_id,
+            "battery_percent": battery,
+            "supports_battery": True,
+        }
 
     # ------------------------------------------------------------------
     # Session directory management

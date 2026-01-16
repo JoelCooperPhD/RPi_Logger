@@ -441,6 +441,32 @@ class CamerasRuntime(ModuleRuntime):
             await self.shutdown()
             return True
 
+        # Data query commands (API endpoints)
+        if action == "get_preview":
+            camera_id = command.get("camera_id")
+            return await self._handle_get_preview(camera_id)
+
+        if action == "capture_snapshot":
+            camera_id = command.get("camera_id")
+            save_path = command.get("save_path")
+            format_type = command.get("format", "jpeg")
+            return await self._handle_capture_snapshot(camera_id, save_path, format_type)
+
+        if action == "get_status":
+            instance_id = command.get("instance_id")
+            return self._handle_get_status(instance_id)
+
+        if action == "set_resolution":
+            camera_id = command.get("camera_id")
+            width = command.get("width", 640)
+            height = command.get("height", 480)
+            return await self._handle_set_resolution(camera_id, width, height)
+
+        if action == "set_fps":
+            camera_id = command.get("camera_id")
+            fps = command.get("fps", 30.0)
+            return await self._handle_set_fps(camera_id, fps)
+
         return False
 
     async def _handle_assign_device(self, command: Dict[str, Any]) -> bool:
@@ -518,6 +544,237 @@ class CamerasRuntime(ModuleRuntime):
 
         await self._start_camera(device, device_info)
         return True
+
+    # ------------------------------------------------------------------
+    # API command handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_get_preview(self, camera_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_preview command - return current frame as bytes.
+
+        Args:
+            camera_id: Optional camera ID (single-camera module)
+
+        Returns:
+            Dict with frame data and metadata
+        """
+        import time
+
+        if self.controller.state.phase != Phase.STREAMING:
+            return {
+                "success": False,
+                "error": "Camera not streaming",
+            }
+
+        # Get the latest frame from the buffer
+        if not self.controller._frame_buffer:
+            return {
+                "success": False,
+                "error": "No frame buffer available",
+            }
+
+        try:
+            import cv2
+
+            # Try to get a frame from the buffer
+            frame = self.controller._frame_buffer.get_latest()
+            if frame is None:
+                return {
+                    "success": False,
+                    "error": "No frame available",
+                }
+
+            # Encode as JPEG
+            _, jpeg_data = cv2.imencode('.jpg', frame.data, [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+            return {
+                "success": True,
+                "frame_data": bytes(jpeg_data),
+                "format": "jpeg",
+                "width": frame.data.shape[1],
+                "height": frame.data.shape[0],
+                "timestamp": time.time(),
+            }
+        except Exception as e:
+            self.logger.error("Error getting preview: %s", e)
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    async def _handle_capture_snapshot(
+        self, camera_id: Optional[str], save_path: Optional[str], format_type: str
+    ) -> Dict[str, Any]:
+        """Handle capture_snapshot command - capture and optionally save a frame.
+
+        Args:
+            camera_id: Optional camera ID
+            save_path: Optional path to save the image
+            format_type: Image format (jpeg, png)
+
+        Returns:
+            Dict with snapshot result
+        """
+        import time
+        from pathlib import Path
+
+        if self.controller.state.phase != Phase.STREAMING:
+            return {
+                "success": False,
+                "error": "Camera not streaming",
+            }
+
+        if not self.controller._frame_buffer:
+            return {
+                "success": False,
+                "error": "No frame buffer available",
+            }
+
+        try:
+            import cv2
+
+            frame = self.controller._frame_buffer.get_latest()
+            if frame is None:
+                return {
+                    "success": False,
+                    "error": "No frame available",
+                }
+
+            # Determine encoding params
+            if format_type.lower() == "png":
+                ext = ".png"
+                encode_params = [cv2.IMWRITE_PNG_COMPRESSION, 6]
+            else:
+                ext = ".jpg"
+                encode_params = [cv2.IMWRITE_JPEG_QUALITY, 90]
+
+            _, encoded = cv2.imencode(ext, frame.data, encode_params)
+            frame_data = bytes(encoded)
+
+            result = {
+                "success": True,
+                "format": format_type,
+                "width": frame.data.shape[1],
+                "height": frame.data.shape[0],
+                "timestamp": time.time(),
+            }
+
+            if save_path:
+                save_file = Path(save_path)
+                save_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(save_file, "wb") as f:
+                    f.write(frame_data)
+                result["path"] = str(save_file)
+            else:
+                result["frame_data"] = frame_data
+
+            return result
+
+        except Exception as e:
+            self.logger.error("Error capturing snapshot: %s", e)
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    def _handle_get_status(self, instance_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_status command - return camera status.
+
+        Args:
+            instance_id: Optional instance ID
+
+        Returns:
+            Dict with status data
+        """
+        state = self.controller.state
+        settings = state.settings
+
+        return {
+            "success": True,
+            "recording": state.recording_phase == RecordingPhase.RECORDING,
+            "streaming": state.phase == Phase.STREAMING,
+            "resolution": f"{settings.resolution[0]}x{settings.resolution[1]}",
+            "fps": settings.frame_rate,
+            "frames_captured": state.metrics.frames_captured,
+            "frames_recorded": state.metrics.frames_recorded,
+            "device_name": state.device_name,
+            "has_audio": state.has_audio,
+        }
+
+    async def _handle_set_resolution(
+        self, camera_id: Optional[str], width: int, height: int
+    ) -> Dict[str, Any]:
+        """Handle set_resolution command - update camera resolution.
+
+        Note: Resolution changes may require restart.
+
+        Args:
+            camera_id: Optional camera ID
+            width: Resolution width
+            height: Resolution height
+
+        Returns:
+            Dict with success status
+        """
+        try:
+            current = self.controller.state.settings
+            new_settings = Settings(
+                resolution=(width, height),
+                frame_rate=current.frame_rate,
+                preview_divisor=current.preview_divisor,
+                preview_scale=current.preview_scale,
+                audio_enabled=current.audio_enabled,
+                sample_rate=current.sample_rate,
+            )
+            await self.controller.apply_settings(new_settings)
+
+            return {
+                "success": True,
+                "resolution": f"{width}x{height}",
+                "message": "Resolution updated (may require stream restart)",
+            }
+        except Exception as e:
+            self.logger.error("Error setting resolution: %s", e)
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    async def _handle_set_fps(
+        self, camera_id: Optional[str], fps: float
+    ) -> Dict[str, Any]:
+        """Handle set_fps command - update camera frame rate.
+
+        Args:
+            camera_id: Optional camera ID
+            fps: Frame rate
+
+        Returns:
+            Dict with success status
+        """
+        try:
+            current = self.controller.state.settings
+            new_settings = Settings(
+                resolution=current.resolution,
+                frame_rate=fps,
+                preview_divisor=current.preview_divisor,
+                preview_scale=current.preview_scale,
+                audio_enabled=current.audio_enabled,
+                sample_rate=current.sample_rate,
+            )
+            await self.controller.apply_settings(new_settings)
+
+            return {
+                "success": True,
+                "fps": fps,
+                "message": "Frame rate updated",
+            }
+        except Exception as e:
+            self.logger.error("Error setting FPS: %s", e)
+            return {
+                "success": False,
+                "error": str(e),
+            }
 
     async def _start_camera(self, device: int | str, device_info: dict) -> None:
         """Start camera with given device."""

@@ -53,3 +53,30 @@ DEFAULT_BAUD_RATE = 9600
 DEFAULT_RECONNECT_DELAY = 3.0
 DEFAULT_NMEA_HISTORY = 30
 DEFAULT_STALE_THRESHOLD = 5.0  # seconds without valid NMEA before fix_valid=False
+
+# GPS fix quality descriptions (GGA sentence, field 6)
+FIX_QUALITY_DESCRIPTIONS = {
+    0: "Invalid",
+    1: "GPS fix (SPS)",
+    2: "DGPS fix",
+    3: "PPS fix",
+    4: "Real Time Kinematic",
+    5: "Float RTK",
+    6: "Estimated (dead reckoning)",
+    7: "Manual input mode",
+    8: "Simulation mode",
+}
+
+
+def get_fix_quality_description(quality: int | None) -> str | None:
+    """Get human-readable description for GPS fix quality.
+
+    Args:
+        quality: GPS fix quality value (0-8) from GGA sentence
+
+    Returns:
+        Description string or None if quality is None
+    """
+    if quality is None:
+        return None
+    return FIX_QUALITY_DESCRIPTIONS.get(quality, f"Unknown ({quality})")

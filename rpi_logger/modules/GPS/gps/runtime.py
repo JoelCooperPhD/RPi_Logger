@@ -26,7 +26,7 @@ from rpi_logger.modules.base.storage_utils import ensure_module_data_dir
 from rpi_logger.core.commands import StatusMessage, StatusType
 from rpi_logger.core.logging_utils import ensure_structured_logger
 
-from gps_core.constants import DEFAULT_NMEA_HISTORY
+from gps_core.constants import DEFAULT_NMEA_HISTORY, get_fix_quality_description
 from gps_core.handlers import GPSHandler
 from gps_core.transports import SerialGPSTransport
 from gps_core.parsers.nmea_types import GPSFixSnapshot
@@ -226,6 +226,24 @@ class GPSModuleRuntime(ModuleRuntime):
         if action == "hide_window":
             self._hide_window()
             return True
+
+        # Data query commands (API endpoints)
+        if action == "get_position":
+            device_id = command.get("device_id")
+            return self._get_position(device_id)
+
+        if action == "get_satellites":
+            device_id = command.get("device_id")
+            return self._get_satellites(device_id)
+
+        if action == "get_fix":
+            device_id = command.get("device_id")
+            return self._get_fix(device_id)
+
+        if action == "get_nmea_raw":
+            device_id = command.get("device_id")
+            limit = command.get("limit", 0)
+            return self._get_nmea_raw(device_id, limit)
 
         return False
 
@@ -645,6 +663,127 @@ class GPSModuleRuntime(ModuleRuntime):
         elif mode == "2D":
             return "2D Fix"
         return "Acquiring"
+
+    # ------------------------------------------------------------------
+    # API data query methods
+
+    def _get_position(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get current GPS position data.
+
+        Args:
+            device_id: Optional specific device ID, or None for first available
+
+        Returns:
+            Dict with position data or error information
+        """
+        fix = self.get_current_fix(device_id)
+        if fix is None:
+            return {
+                "available": False,
+                "device_id": device_id,
+                "error": "No GPS device connected",
+            }
+
+        return {
+            "available": True,
+            "device_id": device_id or next(iter(self.handlers.keys()), None),
+            "latitude": fix.latitude,
+            "longitude": fix.longitude,
+            "altitude_m": fix.altitude_m,
+            "speed_knots": fix.speed_knots,
+            "speed_kmh": fix.speed_kmh,
+            "speed_mph": fix.speed_mph,
+            "course_deg": fix.course_deg,
+            "timestamp": fix.timestamp.isoformat() if fix.timestamp else None,
+            "fix_valid": fix.fix_valid,
+        }
+
+    def _get_satellites(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get satellite tracking information.
+
+        Args:
+            device_id: Optional specific device ID, or None for first available
+
+        Returns:
+            Dict with satellite and DOP data
+        """
+        fix = self.get_current_fix(device_id)
+        if fix is None:
+            return {
+                "available": False,
+                "device_id": device_id,
+                "error": "No GPS device connected",
+            }
+
+        return {
+            "available": True,
+            "device_id": device_id or next(iter(self.handlers.keys()), None),
+            "satellites_in_use": fix.satellites_in_use,
+            "satellites_in_view": fix.satellites_in_view,
+            "hdop": fix.hdop,
+            "vdop": fix.vdop,
+            "pdop": fix.pdop,
+        }
+
+    def _get_fix(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Get GPS fix quality and status information.
+
+        Args:
+            device_id: Optional specific device ID, or None for first available
+
+        Returns:
+            Dict with fix quality data
+        """
+        fix = self.get_current_fix(device_id)
+        actual_device_id = device_id or next(iter(self.handlers.keys()), None)
+
+        if fix is None:
+            return {
+                "available": False,
+                "device_id": actual_device_id,
+                "fix_valid": False,
+                "connected": False,
+                "error": "No GPS device connected",
+            }
+
+        return {
+            "available": True,
+            "device_id": actual_device_id,
+            "fix_valid": fix.fix_valid,
+            "fix_quality": fix.fix_quality,
+            "fix_quality_desc": get_fix_quality_description(fix.fix_quality),
+            "fix_mode": fix.fix_mode,
+            "age_seconds": fix.age_seconds(),
+            "connected": fix.connected,
+            "error": fix.error,
+        }
+
+    def _get_nmea_raw(
+        self, device_id: Optional[str] = None, limit: int = 0
+    ) -> Dict[str, Any]:
+        """Get raw NMEA sentences from the history buffer.
+
+        Args:
+            device_id: Optional specific device ID (currently uses shared history)
+            limit: Maximum sentences to return (0 = all available)
+
+        Returns:
+            Dict with NMEA sentence list
+        """
+        sentences = list(self._recent_sentences)
+        if limit > 0:
+            sentences = sentences[-limit:]
+
+        fix = self.get_current_fix(device_id)
+        last_sentence = fix.last_sentence if fix else None
+
+        return {
+            "available": True,
+            "device_id": device_id or next(iter(self.handlers.keys()), None),
+            "count": len(sentences),
+            "sentences": sentences,
+            "last_sentence": last_sentence,
+        }
 
     # ------------------------------------------------------------------
     # Utility methods

@@ -217,6 +217,27 @@ class EyeTrackerRuntime(ModuleRuntime):
             self._hide_window()
             return True
 
+        # Data query commands (API endpoints)
+        if action == "get_gaze_data":
+            return self._handle_get_gaze_data()
+        if action == "get_imu_data":
+            return self._handle_get_imu_data()
+        if action == "get_eye_events":
+            limit = command.get("limit", 10)
+            return self._handle_get_eye_events(limit)
+        if action == "get_metrics":
+            return self._handle_get_metrics()
+        if action == "start_calibration":
+            return await self._handle_start_calibration()
+        if action == "get_calibration_status":
+            return self._handle_get_calibration_status()
+        if action == "get_recording_status":
+            return self._handle_get_recording_status()
+        if action == "start_preview":
+            return self._handle_start_preview()
+        if action == "stop_preview":
+            return self._handle_stop_preview()
+
         return False
 
     def _show_window(self) -> None:
@@ -726,6 +747,140 @@ class EyeTrackerRuntime(ModuleRuntime):
             "fps_display": fps_display,
             "target_display_fps": self._tracker_config.preview_fps,
         }
+
+    # ------------------------------------------------------------------
+    # API command handlers
+
+    def _handle_get_gaze_data(self) -> Dict[str, Any]:
+        """Handle get_gaze_data command - return latest gaze sample."""
+        gaze = self._get_latest_gaze()
+        if gaze is None:
+            return {
+                "success": False,
+                "gaze_data": None,
+                "error": "No gaze data available",
+            }
+        return {
+            "success": True,
+            "gaze_data": gaze,
+        }
+
+    def _handle_get_imu_data(self) -> Dict[str, Any]:
+        """Handle get_imu_data command - return latest IMU sample."""
+        imu = self._get_latest_imu()
+        if imu is None:
+            return {
+                "success": False,
+                "imu_data": None,
+                "error": "No IMU data available",
+            }
+        return {
+            "success": True,
+            "imu_data": imu,
+        }
+
+    def _handle_get_eye_events(self, limit: int = 10) -> Dict[str, Any]:
+        """Handle get_eye_events command - return recent eye events."""
+        event = self._get_latest_event()
+        # Currently returns single latest event; could be extended to buffer
+        events = [event] if event else []
+        return {
+            "success": True,
+            "events": events[:limit],
+            "count": len(events),
+        }
+
+    def _handle_get_metrics(self) -> Dict[str, Any]:
+        """Handle get_metrics command - return FPS metrics."""
+        metrics = self._get_metrics()
+        return {
+            "success": True,
+            "metrics": metrics,
+        }
+
+    async def _handle_start_calibration(self) -> Dict[str, Any]:
+        """Handle start_calibration command - trigger Neon calibration."""
+        if not self._device_manager or not self._device_connected:
+            return {
+                "success": False,
+                "message": "Device not connected",
+            }
+
+        try:
+            # Neon calibration is triggered via the Companion app
+            # We can send a signal but user interaction is required
+            device = getattr(self._device_manager, "device", None)
+            if device and hasattr(device, "recording"):
+                # Neon API doesn't have direct calibration trigger
+                # Calibration must be done through Companion app
+                pass
+            return {
+                "success": True,
+                "message": "Calibration must be completed on Neon Companion app",
+            }
+        except Exception as e:
+            self.logger.error("Calibration error: %s", e)
+            return {
+                "success": False,
+                "message": str(e),
+            }
+
+    def _handle_get_calibration_status(self) -> Dict[str, Any]:
+        """Handle get_calibration_status command."""
+        # Neon calibration status would come from device status
+        if not self._device_manager:
+            return {
+                "success": False,
+                "calibrated": False,
+                "message": "Device manager not available",
+            }
+
+        return {
+            "success": True,
+            "calibrated": True,  # Assume calibrated if device connected
+            "message": "Calibration status from Neon Companion app",
+        }
+
+    def _handle_get_recording_status(self) -> Dict[str, Any]:
+        """Handle get_recording_status command."""
+        is_recording = (
+            self._recording_manager is not None
+            and self._recording_manager.is_recording
+        )
+
+        result = {
+            "success": True,
+            "is_recording": is_recording,
+            "session_dir": str(self._module_data_dir) if self._module_data_dir else None,
+        }
+
+        if is_recording and self._recording_manager:
+            stats = {
+                "frames_written": getattr(self._recording_manager, "_frame_count", 0),
+            }
+            result["stats"] = stats
+
+        return result
+
+    def _handle_start_preview(self) -> Dict[str, Any]:
+        """Handle start_preview command."""
+        if self.view and hasattr(self.view, "start_preview"):
+            try:
+                self.view.start_preview()
+                return {"success": True, "message": "Preview started"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        return {"success": False, "message": "View not available"}
+
+    def _handle_stop_preview(self) -> Dict[str, Any]:
+        """Handle stop_preview command."""
+        if self.view and hasattr(self.view, "stop_preview"):
+            try:
+                self.view.stop_preview()
+                return {"success": True, "message": "Preview stopped"}
+            except Exception as e:
+                return {"success": False, "message": str(e)}
+        return {"success": False, "message": "View not available"}
 
     @property
     def config(self) -> Optional["TrackerConfig"]:

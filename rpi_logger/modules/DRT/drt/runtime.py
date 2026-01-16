@@ -16,7 +16,6 @@ from rpi_logger.modules.DRT.drt_core.handlers import (
     BaseDRTHandler,
     SDRTHandler,
     WDRTUSBHandler,
-    WDRTWirelessHandler,
 )
 from rpi_logger.modules.DRT.drt_core.transports import USBTransport, XBeeProxyTransport
 from rpi_logger.core.commands import StatusMessage, StatusType
@@ -179,6 +178,39 @@ class DRTModuleRuntime(ModuleRuntime):
             success = command.get("success", False)
             self.logger.debug("XBee send result for %s: %s", node_id, success)
             return True
+
+        # Data query commands (API endpoints)
+        if action == "get_config":
+            device_id = command.get("device_id")
+            return await self._handle_get_config(device_id)
+
+        if action == "set_config_param":
+            device_id = command.get("device_id")
+            param = command.get("param", "")
+            value = command.get("value")
+            return await self._handle_set_config_param(device_id, param, value)
+
+        if action == "set_stimulus":
+            device_id = command.get("device_id")
+            on = command.get("on", True)
+            return await self._handle_set_stimulus(device_id, on)
+
+        if action == "get_battery":
+            device_id = command.get("device_id")
+            return await self._handle_get_battery(device_id)
+
+        if action == "get_status":
+            device_id = command.get("device_id")
+            return self._handle_get_status(device_id)
+
+        if action == "get_recent_responses":
+            device_id = command.get("device_id")
+            limit = command.get("limit", 10)
+            return self._handle_get_recent_responses(device_id, limit)
+
+        if action == "get_statistics":
+            device_id = command.get("device_id")
+            return self._handle_get_statistics(device_id)
 
         return False
 
@@ -584,6 +616,230 @@ class DRTModuleRuntime(ModuleRuntime):
             if hasattr(stub_view, 'hide_window'):
                 stub_view.hide_window()
                 self.logger.debug("DRT window hidden")
+
+    # ------------------------------------------------------------------
+    # API command handlers
+    # ------------------------------------------------------------------
+
+    async def _handle_get_config(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_config command - return device configuration.
+
+        Args:
+            device_id: Optional device ID (single-device module)
+
+        Returns:
+            Dict with config data
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "config": None,
+                "error": "No device connected",
+            }
+
+        config = await self.handler.get_config()
+        return {
+            "success": config is not None,
+            "device_id": self.device_id,
+            "config": config,
+        }
+
+    async def _handle_set_config_param(
+        self, device_id: Optional[str], param: str, value: Any
+    ) -> Dict[str, Any]:
+        """Handle set_config_param command - set a config parameter.
+
+        Args:
+            device_id: Optional device ID
+            param: Parameter name
+            value: Value to set
+
+        Returns:
+            Dict with success status
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "error": "No device connected",
+            }
+
+        if not param:
+            return {
+                "success": False,
+                "error": "Parameter name required",
+            }
+
+        # Convert value to appropriate type
+        try:
+            int_value = int(value)
+        except (TypeError, ValueError):
+            return {
+                "success": False,
+                "error": f"Invalid value for parameter '{param}'",
+            }
+
+        success = await self.handler.set_config_param(param, int_value)
+        return {
+            "success": success,
+            "device_id": self.device_id,
+            "param": param,
+            "value": int_value,
+        }
+
+    async def _handle_set_stimulus(
+        self, device_id: Optional[str], on: bool
+    ) -> Dict[str, Any]:
+        """Handle set_stimulus command - turn stimulus on/off.
+
+        Args:
+            device_id: Optional device ID
+            on: True to turn on, False to turn off
+
+        Returns:
+            Dict with success status
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "error": "No device connected",
+            }
+
+        success = await self.handler.set_stimulus(on)
+        return {
+            "success": success,
+            "device_id": self.device_id,
+            "stimulus_on": on,
+        }
+
+    async def _handle_get_battery(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_battery command - return battery percentage.
+
+        Only applicable for wDRT devices.
+
+        Args:
+            device_id: Optional device ID
+
+        Returns:
+            Dict with battery data
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "battery_percent": None,
+                "error": "No device connected",
+            }
+
+        # Check if handler supports battery (wDRT only)
+        if not hasattr(self.handler, 'get_battery'):
+            return {
+                "success": False,
+                "battery_percent": None,
+                "error": "Device does not support battery reporting (sDRT is wired)",
+            }
+
+        battery = await self.handler.get_battery()
+        return {
+            "success": battery is not None,
+            "device_id": self.device_id,
+            "battery_percent": battery,
+        }
+
+    def _handle_get_status(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_status command - return handler state.
+
+        Args:
+            device_id: Optional device ID
+
+        Returns:
+            Dict with status data
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "connected": False,
+                "error": "No device connected",
+            }
+
+        # Get click count if available
+        click_count = getattr(self.handler, '_click_count', 0)
+        trial_number = getattr(self.handler, '_trial_number', 0)
+
+        return {
+            "success": True,
+            "device_id": self.device_id,
+            "device_type": self.device_type.value if self.device_type else None,
+            "connected": self.handler.is_connected,
+            "running": self.handler.is_running,
+            "recording": self._recording_active,
+            "click_count": click_count,
+            "trial_number": trial_number,
+        }
+
+    def _handle_get_recent_responses(
+        self, device_id: Optional[str] = None, limit: int = 10
+    ) -> Dict[str, Any]:
+        """Handle get_recent_responses command - return recent data.
+
+        Note: Response buffering would need to be added to handlers for full support.
+        Currently returns empty list as placeholder.
+
+        Args:
+            device_id: Optional device ID
+            limit: Maximum responses to return
+
+        Returns:
+            Dict with response list
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "responses": [],
+                "error": "No device connected",
+            }
+
+        # Response buffering not yet implemented in handlers
+        # Would need to add a deque buffer to track recent responses
+        return {
+            "success": True,
+            "device_id": self.device_id,
+            "responses": [],
+            "count": 0,
+            "note": "Response buffering not yet implemented",
+        }
+
+    def _handle_get_statistics(self, device_id: Optional[str] = None) -> Dict[str, Any]:
+        """Handle get_statistics command - return experiment statistics.
+
+        Note: Statistics calculation would need to be added to handlers for full support.
+        Currently returns basic counts as placeholder.
+
+        Args:
+            device_id: Optional device ID
+
+        Returns:
+            Dict with statistics data
+        """
+        if not self.handler:
+            return {
+                "success": False,
+                "statistics": None,
+                "error": "No device connected",
+            }
+
+        # Basic stats from handler state
+        click_count = getattr(self.handler, '_click_count', 0)
+        trial_number = getattr(self.handler, '_trial_number', 0)
+
+        return {
+            "success": True,
+            "device_id": self.device_id,
+            "statistics": {
+                "total_clicks": click_count,
+                "total_trials": trial_number,
+                "recording_active": self._recording_active,
+            },
+            "note": "Extended statistics not yet implemented",
+        }
 
     # ------------------------------------------------------------------
     # Utility methods
