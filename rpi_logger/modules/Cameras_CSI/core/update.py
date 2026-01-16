@@ -86,7 +86,7 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
         case StopPreview():
             return state, [StopCapture()]
 
-        case StartRecording(session_dir, trial):
+        case StartRecording(session_dir, trial, label):
             if state.camera_status != CameraStatus.STREAMING:
                 return state, []
             if state.recording_status != RecordingStatus.STOPPED:
@@ -105,7 +105,7 @@ def update(state: AppState, action: Action) -> tuple[AppState, list[Effect]]:
                     trial_number=trial
                 ),
                 [
-                    StartEncoder(video_path, state.settings.frame_rate, state.settings.resolution),
+                    StartEncoder(video_path, state.settings.frame_rate, state.settings.resolution, label),
                     StartTimingWriter(timing_path)
                 ]
             )

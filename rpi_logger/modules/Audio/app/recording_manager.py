@@ -43,7 +43,7 @@ class RecordingManager:
         self.state.set_session_dir(session_dir)
         return session_dir
 
-    async def start(self, trial_number: int) -> bool:
+    async def start(self, trial_number: int, trial_label: str = "") -> bool:
         if self.state.recording or self._start_lock.locked():
             return False
 
@@ -62,7 +62,7 @@ class RecordingManager:
                 self._module_subdir,
             )
 
-            started = await self.recorder_service.begin_recording(module_dir, trial_number)
+            started = await self.recorder_service.begin_recording(module_dir, trial_number, trial_label)
             if not started:
                 self.logger.error("Recorder not ready; aborting start")
                 return False

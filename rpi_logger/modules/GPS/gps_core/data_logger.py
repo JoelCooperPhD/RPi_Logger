@@ -38,6 +38,7 @@ class GPSDataLogger:
         self._dropped_records = 0
         self._recording = False
         self._trial_number = 1
+        self._trial_label: str = ""
 
     @property
     def is_recording(self) -> bool:
@@ -70,7 +71,7 @@ class GPSDataLogger:
             filename = f"{token}_GPS_{device_safe}.csv"
         return self.output_dir / filename
 
-    def start_recording(self, trial_number: int = 1) -> Optional[Path]:
+    def start_recording(self, trial_number: int = 1, trial_label: str = "") -> Optional[Path]:
         """Open CSV file and start writer thread. Returns path or None if failed."""
         if self._recording:
             logger.debug("Recording already active for %s", self.device_id)
@@ -83,6 +84,7 @@ class GPSDataLogger:
         if trial_number <= 0:
             trial_number = 1
         self._trial_number = trial_number
+        self._trial_label = trial_label
         self._dropped_records = 0
 
         try:
@@ -184,7 +186,7 @@ class GPSDataLogger:
                 device_time_unix = ""
 
         row = [
-            self._trial_number, "GPS", self.device_id, "",
+            self._trial_number, "GPS", self.device_id, self._trial_label,
             f"{record_time_unix:.6f}", f"{record_time_mono:.9f}",
             fix.timestamp.isoformat() if fix.timestamp else "", device_time_unix,
             fix.latitude, fix.longitude, fix.altitude_m, speed_mps,

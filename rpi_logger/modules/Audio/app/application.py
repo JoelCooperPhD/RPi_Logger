@@ -152,10 +152,10 @@ class AudioApp:
     async def disable_device(self) -> bool:
         return await self.device_manager.disable_device()
 
-    async def start_recording(self, trial_number: int | None = None) -> bool:
+    async def start_recording(self, trial_number: int | None = None, trial_label: str = "") -> bool:
         if trial_number is None:
             trial_number = self._pending_trial
-        started = await self.recording_manager.start(trial_number)
+        started = await self.recording_manager.start(trial_number, trial_label)
         if started:
             self._pending_trial = trial_number + 1
         return started

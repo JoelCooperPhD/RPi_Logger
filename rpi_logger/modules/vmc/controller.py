@@ -225,7 +225,9 @@ class StubCodexController:
 
     async def _handle_start_recording(self, command: Dict[str, Any]) -> None:
         trial_number = int(command.get("trial_number", 1))
+        trial_label = command.get("trial_label", "")
         self.model.trial_number = trial_number
+        self.model.trial_label = trial_label
         self.model.recording = True
         self.logger.info("Recording started (trial %s)", trial_number)
         self._send_status_report("recording_started")

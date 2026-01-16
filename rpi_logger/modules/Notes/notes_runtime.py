@@ -110,7 +110,7 @@ class NotesArchive:
                 self.logger.debug("Error closing file handle")
         self._file_handle = self._csv_writer = None
 
-    async def add_note(self, text: str, modules: Sequence[str], *, posted_at: Optional[float] = None, trial_number: int) -> NoteRecord:
+    async def add_note(self, text: str, modules: Sequence[str], *, posted_at: Optional[float] = None, trial_number: int, trial_label: str = "") -> NoteRecord:
         if not self.recording:
             raise RuntimeError("Notes archive is not active")
         cleaned = text.strip()
@@ -122,11 +122,11 @@ class NotesArchive:
         if self._start_timestamp is None:
             self._start_timestamp = timestamp
 
-        await asyncio.to_thread(self._append_row, cleaned, timestamp, record_time_mono, trial_number)
+        await asyncio.to_thread(self._append_row, cleaned, timestamp, record_time_mono, trial_number, trial_label)
         self.note_count += 1
 
         modules_str = ";".join(sorted(modules)) if modules else ""
-        file_line = self._format_csv_line([trial_number, "Notes", "notes", "", f"{timestamp:.6f}", f"{record_time_mono:.9f}", "", cleaned])
+        file_line = self._format_csv_line([trial_number, "Notes", "notes", trial_label, f"{timestamp:.6f}", f"{record_time_mono:.9f}", "", cleaned])
         return NoteRecord(
             index=self.note_count,
             trial_number=trial_number,
@@ -216,10 +216,10 @@ class NotesArchive:
             self._start_timestamp = first_timestamp
         return count
 
-    def _append_row(self, text: str, record_time_unix: float, record_time_mono: float, trial_number: int) -> None:
+    def _append_row(self, text: str, record_time_unix: float, record_time_mono: float, trial_number: int, trial_label: str = "") -> None:
         if not self.file_path:
             raise RuntimeError("Archive file path not set")
-        row = [trial_number, "Notes", "notes", "", f"{record_time_unix:.6f}", f"{record_time_mono:.9f}", "", text]
+        row = [trial_number, "Notes", "notes", trial_label, f"{record_time_unix:.6f}", f"{record_time_mono:.9f}", "", text]
         if self._csv_writer and self._file_handle:
             self._csv_writer.writerow(row)
             self._file_handle.flush()
@@ -605,6 +605,7 @@ class NotesRuntime(ModuleRuntime):
                 await self._read_recording_modules(),
                 posted_at=posted_at,
                 trial_number=self._resolve_trial_number(),
+                trial_label=self._resolve_trial_label(),
             )
         except ValueError as exc:
             self.logger.debug("Cannot add note: %s", exc)
@@ -692,6 +693,9 @@ class NotesRuntime(ModuleRuntime):
         except (TypeError, ValueError):
             value = 0
         return max(1, value)
+
+    def _resolve_trial_label(self) -> str:
+        return getattr(self.model, "trial_label", "") or ""
 
     async def _ensure_archive_active(self) -> bool:
         if self.archive and self.archive.recording:

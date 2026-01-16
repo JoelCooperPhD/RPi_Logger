@@ -257,13 +257,14 @@ class CameraController:
         return safe.strip("-").lower() or "camera"
 
     async def start_recording(
-        self, output_dir: Path, trial: int, *, cameras_dir: Optional[Path] = None
+        self, output_dir: Path, trial: int, *, trial_label: str = "", cameras_dir: Optional[Path] = None
     ) -> bool:
         """Start recording to file.
 
         Args:
             output_dir: Directory for output files (e.g., session/Cameras/device_id/)
             trial: Trial number
+            trial_label: Optional trial label for CSV metadata
             cameras_dir: Optional module data directory for token derivation
                         (e.g., session/Cameras/). If not provided, uses output_dir.
 
@@ -341,7 +342,7 @@ class CameraController:
             self._muxer = None
 
         timing_path = output_dir / f"{video_base}_timing.csv"
-        self._timing = TimingWriter(timing_path, trial, safe_name)
+        self._timing = TimingWriter(timing_path, trial, safe_name, trial_label)
         await self._timing.start()
 
         self._state.recording_phase = RecordingPhase.RECORDING

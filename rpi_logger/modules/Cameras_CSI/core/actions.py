@@ -41,6 +41,7 @@ class StopPreview:
 class StartRecording:
     session_dir: Path
     trial: int
+    label: str = ""
 
 
 @dataclass(frozen=True)

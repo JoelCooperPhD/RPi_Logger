@@ -629,6 +629,7 @@ class CamerasRuntime(ModuleRuntime):
             self._session_dir = Path(tempfile.gettempdir()) / "logger_cameras"
 
         trial = command.get("trial_number", self._trial_number)
+        trial_label = command.get("trial_label", "")
 
         # Create proper directory structure: session_dir/Cameras/device_id/
         if ensure_module_data_dir:
@@ -644,7 +645,7 @@ class CamerasRuntime(ModuleRuntime):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         success = await self.controller.start_recording(
-            output_dir, trial, cameras_dir=cameras_dir
+            output_dir, trial, trial_label=trial_label, cameras_dir=cameras_dir
         )
         if success:
             self._trial_number = trial + 1

@@ -69,8 +69,8 @@ class EffectExecutor:
             case StopCapture():
                 await self._stop_capture_loop()
 
-            case StartEncoder(output_path, fps, resolution):
-                await self._start_recording(output_path, fps, resolution, dispatch)
+            case StartEncoder(output_path, fps, resolution, label):
+                await self._start_recording(output_path, fps, resolution, label, dispatch)
 
             case StopEncoder():
                 await self._stop_recording(dispatch)
@@ -326,6 +326,7 @@ class EffectExecutor:
         output_path: Path,
         fps: int,
         resolution: tuple[int, int],
+        label: str,
         dispatch: Callable[[Action], Awaitable[None]]
     ) -> None:
         session_dir = output_path.parent
@@ -337,6 +338,7 @@ class EffectExecutor:
             device_id=self._camera_id or "unknown",
             resolution=resolution,
             fps=fps,
+            label=label,
         )
         await self._recording.start()
         await dispatch(RecordingStarted())

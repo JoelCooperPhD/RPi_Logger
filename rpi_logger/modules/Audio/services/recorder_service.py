@@ -44,12 +44,12 @@ class RecorderService:
         except Exception as exc:
             self.logger.debug("Device stop raised: %s", exc)
 
-    async def begin_recording(self, session_dir: Path, trial_number: int) -> bool:
+    async def begin_recording(self, session_dir: Path, trial_number: int, trial_label: str = "") -> bool:
         if not self.recorder:
             self.logger.info("No recorder available for recording")
             return False
         try:
-            await asyncio.to_thread(self.recorder.begin_recording, session_dir, trial_number)
+            await asyncio.to_thread(self.recorder.begin_recording, session_dir, trial_number, trial_label)
             return True
         except Exception as exc:
             self.logger.error("Failed to prepare recorder: %s", exc)

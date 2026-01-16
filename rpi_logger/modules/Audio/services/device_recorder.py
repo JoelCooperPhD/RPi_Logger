@@ -29,6 +29,7 @@ class RecordingHandle:
     trial_number: int
     device_id: int
     device_name: str
+    trial_label: str = ""
     start_time_unix: float | None = None
     start_time_monotonic: float | None = None
 
@@ -115,7 +116,7 @@ class AudioDeviceRecorder:
             self.logger.debug("Stream close error: %s", exc)
         self.logger.info("Input stream stopped")
 
-    def begin_recording(self, session_dir: Path, trial_number: int) -> None:
+    def begin_recording(self, session_dir: Path, trial_number: int, trial_label: str = "") -> None:
         if self.recording:
             return
         session_dir.mkdir(parents=True, exist_ok=True)
@@ -137,6 +138,7 @@ class AudioDeviceRecorder:
             trial_number=trial_number,
             device_id=self.device.device_id,
             device_name=self.device.name,
+            trial_label=trial_label,
         )
         self._active_handle = handle
         self._writer_thread = threading.Thread(
@@ -246,7 +248,7 @@ class AudioDeviceRecorder:
                         handle.trial_number,
                         'Audio',
                         handle.device_id,
-                        "",
+                        handle.trial_label,
                         f"{chunk.unix_time:.6f}",
                         f"{chunk.monotonic_time:.9f}",
                         '',

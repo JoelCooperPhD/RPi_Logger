@@ -35,6 +35,7 @@ class StartEncoder:
     output_path: Path
     fps: int
     resolution: tuple[int, int]
+    label: str = ""
 
 
 @dataclass(frozen=True)

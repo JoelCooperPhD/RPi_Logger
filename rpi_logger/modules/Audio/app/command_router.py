@@ -20,7 +20,9 @@ class CommandRouter:
     async def handle_command(self, command: dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
         if action == "start_recording":
-            await self.app.start_recording(int(command.get("trial_number", self.app.pending_trial_number)))
+            trial_number = int(command.get("trial_number", self.app.pending_trial_number))
+            trial_label = command.get("trial_label", "")
+            await self.app.start_recording(trial_number, trial_label)
             return True
         if action in ("stop_recording", "pause"):
             await self.app.stop_recording()

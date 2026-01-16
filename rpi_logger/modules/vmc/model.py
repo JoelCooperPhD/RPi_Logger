@@ -86,6 +86,7 @@ class StubCodexModel:
         self._state: ModuleState = ModuleState.INITIALIZING
         self._recording: bool = False
         self._trial_number: Optional[int] = None
+        self._trial_label: str = ""
         self._session_dir: Optional[Path] = None
         self._error_message: Optional[str] = None
         self._observers: List[Callable[[str, Any], None]] = []
@@ -322,6 +323,17 @@ class StubCodexModel:
             return
         self._trial_number = value
         self._notify("trial_number", value)
+
+    @property
+    def trial_label(self) -> str:
+        return self._trial_label
+
+    @trial_label.setter
+    def trial_label(self, value: str) -> None:
+        if self._trial_label == value:
+            return
+        self._trial_label = value or ""
+        self._notify("trial_label", self._trial_label)
 
     @property
     def session_dir(self) -> Optional[Path]:

@@ -110,7 +110,8 @@ class CommandHandler:
     async def _handle_start_recording(self, cmd: dict) -> None:
         session_dir = Path(cmd.get("session_dir", "."))
         trial_number = cmd.get("trial_number", 1)
-        await self._store.dispatch(StartRecording(session_dir, trial_number))
+        trial_label = cmd.get("trial_label", "")
+        await self._store.dispatch(StartRecording(session_dir, trial_number, trial_label))
 
     async def _handle_stop_recording(self, cmd: dict) -> None:
         await self._store.dispatch(StopRecording())

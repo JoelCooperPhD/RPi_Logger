@@ -92,6 +92,7 @@ class GPSModuleRuntime(ModuleRuntime):
         # Recording state
         self._recording_active = False
         self._active_trial_number: int = 1
+        self._active_trial_label: str = ""
         self._suppress_recording_event = False
         self._suppress_session_event = False
 
@@ -207,6 +208,7 @@ class GPSModuleRuntime(ModuleRuntime):
 
         if action == "start_recording":
             self._active_trial_number = self._coerce_trial_number(command.get("trial_number"))
+            self._active_trial_label = command.get("trial_label", "")
             session_dir = command.get("session_dir")
             if session_dir:
                 await self._ensure_session_dir(Path(session_dir), update_model=False)
@@ -403,7 +405,7 @@ class GPSModuleRuntime(ModuleRuntime):
             return
 
         for device_id, handler in self.handlers.items():
-            result = await asyncio.to_thread(handler.start_recording, self._active_trial_number)
+            result = await asyncio.to_thread(handler.start_recording, self._active_trial_number, self._active_trial_label)
             if result:
                 self.logger.info("Started recording on %s", device_id)
             else:

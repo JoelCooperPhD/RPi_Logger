@@ -114,7 +114,7 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
 
         logger.info("GPS handler stopped for %s", self.device_id)
 
-    def start_recording(self, trial_number: int = 1) -> bool:
+    def start_recording(self, trial_number: int = 1, trial_label: str = "") -> bool:
         """Start data recording. Returns True if successful."""
         if self._recording:
             logger.debug("Recording already active for %s", self.device_id)
@@ -123,7 +123,7 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
         self._trial_number = trial_number
 
         self._data_logger = GPSDataLogger(self.output_dir, self.device_id)
-        path = self._data_logger.start_recording(trial_number)
+        path = self._data_logger.start_recording(trial_number, trial_label)
 
         if path:
             self._recording = True
