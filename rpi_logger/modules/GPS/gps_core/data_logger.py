@@ -10,7 +10,7 @@ from queue import Queue, Empty
 from typing import Any, List, Optional, TextIO
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.base.storage_utils import derive_session_token
+from rpi_logger.modules.base.storage_utils import derive_session_token, sanitize_device_id
 from .constants import GPS_CSV_HEADER, MPS_PER_KNOT
 from .parsers.nmea_types import GPSFixSnapshot
 
@@ -55,17 +55,15 @@ class GPSDataLogger:
         """Number of records dropped due to queue overflow."""
         return self._dropped_records
 
-    def _sanitize_device_id(self) -> str:
-        """Convert device ID to safe filename component (GPS:serial0 -> GPS_serial0)."""
-        return self.device_id.replace(":", "_").replace("/", "_").replace("\\", "_")
-
     def _build_session_filepath(self) -> Optional[Path]:
         if not self.output_dir:
             return None
 
         token = derive_session_token(self.output_dir, "GPS")
-        device_safe = self._sanitize_device_id()
-        if device_safe.lower().startswith("gps_"):
+        device_safe = sanitize_device_id(self.device_id)
+        # Avoid redundant prefix (e.g., "GPS_GPS_...") when device ID already
+        # starts with the module code
+        if device_safe.startswith("gps_"):
             filename = f"{token}_{device_safe}.csv"
         else:
             filename = f"{token}_GPS_{device_safe}.csv"
@@ -89,7 +87,7 @@ class GPSDataLogger:
 
         try:
             self.output_dir.mkdir(parents=True, exist_ok=True)
-            device_safe = self._sanitize_device_id()
+            device_safe = sanitize_device_id(self.device_id)
             path = self._build_session_filepath()
             if path is None:
                 return None

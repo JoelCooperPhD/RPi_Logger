@@ -16,7 +16,7 @@ import numpy as np
 import sounddevice as sd
 
 from ..domain import AUDIO_BIT_DEPTH, AUDIO_CHANNELS_MONO, AudioDeviceInfo, LevelMeter
-from rpi_logger.modules.base.storage_utils import module_filename_prefix
+from rpi_logger.modules.base.storage_utils import module_filename_prefix, sanitize_device_id
 
 _CSV_FLUSH_INTERVAL = 200
 
@@ -283,12 +283,7 @@ class AudioDeviceRecorder:
         return int_samples.tobytes()
 
     def _make_filename(self, session_dir: Path, trial_number: int) -> Path:
-        safe_name = (
-            self.device.name.replace(" ", "-")
-            .replace(":", "")
-            .replace("_", "-")
-            .lower()
-        )
+        safe_name = sanitize_device_id(self.device.name)
         prefix = module_filename_prefix(session_dir, "Audio", trial_number, code="AUD")
         filename = f"{prefix}_MIC{self.device.device_id}_{safe_name}.wav"
         return session_dir / filename

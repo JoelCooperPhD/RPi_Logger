@@ -1,7 +1,7 @@
 """Abstract base protocol for VOG devices."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -101,5 +101,5 @@ class BaseVOGProtocol(ABC):
 
     @abstractmethod
     def format_csv_row(self, packet: VOGDataPacket, label: str,
-                      record_time_unix: float, record_time_mono: float) -> str:
-        """Format packet as CSV row (no newline)."""
+                      record_time_unix: float, record_time_mono: float) -> List[Any]:
+        """Format packet as CSV row (returns list of values for csv.writer)."""

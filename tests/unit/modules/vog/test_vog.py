@@ -422,22 +422,22 @@ class TestSVOGPolymorphicMethods:
         assert extended == {}
 
     def test_format_csv_row(self, svog_protocol, sample_svog_data_packet):
-        """Test CSV row formatting for sVOG."""
+        """Test CSV row formatting for sVOG returns list for csv.writer."""
         row = svog_protocol.format_csv_row(
             sample_svog_data_packet,
             label="test_label",
             record_time_unix=1700000000.123456,
             record_time_mono=12345.123456789,
         )
-        # Check format: trial,module,device_id,label,unix,mono,open,closed
-        parts = row.split(",")
-        assert parts[0] == "5"  # trial_number
-        assert parts[1] == "VOG"  # module
-        assert "SVOG_dev_ttyUSB0" in parts[2]  # device_id
-        assert parts[3] == "test_label"  # label
-        assert "1700000000" in parts[4]  # record_time_unix
-        assert parts[6] == "3000"  # shutter_open
-        assert parts[7] == "1500"  # shutter_closed
+        # format_csv_row now returns a list for csv.writer
+        assert isinstance(row, list)
+        assert row[0] == 5  # trial_number
+        assert row[1] == "VOG"  # module
+        assert "SVOG_dev_ttyUSB0" in row[2]  # device_id
+        assert row[3] == "test_label"  # label
+        assert "1700000000" in row[4]  # record_time_unix
+        assert row[6] == 3000  # shutter_open
+        assert row[7] == 1500  # shutter_closed
 
 
 # =============================================================================
@@ -779,24 +779,24 @@ class TestWVOGPolymorphicMethods:
         assert extended["device_unix_time"] == 1733150423
 
     def test_format_csv_row(self, wvog_protocol, sample_wvog_data_packet):
-        """Test CSV row formatting for wVOG includes extended fields."""
+        """Test CSV row formatting for wVOG returns list with extended fields."""
         row = wvog_protocol.format_csv_row(
             sample_wvog_data_packet,
             label="test_label",
             record_time_unix=1700000000.123456,
             record_time_mono=12345.123456789,
         )
-        # Check format includes extended fields
-        parts = row.split(",")
-        assert parts[0] == "3"  # trial_number
-        assert parts[1] == "VOG"  # module
-        assert "WVOG_dev_ttyACM0" in parts[2]  # device_id
-        assert parts[3] == "test_label"  # label
-        assert parts[6] == "2000"  # shutter_open
-        assert parts[7] == "1500"  # shutter_closed
-        assert parts[8] == "3500"  # shutter_total
-        assert parts[9] == "A"  # lens
-        assert parts[10] == "85"  # battery_percent
+        # format_csv_row now returns a list for csv.writer
+        assert isinstance(row, list)
+        assert row[0] == 3  # trial_number
+        assert row[1] == "VOG"  # module
+        assert "WVOG_dev_ttyACM0" in row[2]  # device_id
+        assert row[3] == "test_label"  # label
+        assert row[6] == 2000  # shutter_open
+        assert row[7] == 1500  # shutter_closed
+        assert row[8] == 3500  # shutter_total
+        assert row[9] == "A"  # lens
+        assert row[10] == 85  # battery_percent
 
 
 # =============================================================================
@@ -1150,7 +1150,8 @@ class TestCSVFormatValidation:
         )
 
         header_cols = len(header.split(","))
-        row_cols = len(row.split(","))
+        # format_csv_row now returns a list
+        row_cols = len(row)
         assert header_cols == row_cols
 
     def test_wvog_csv_row_matches_header(self, wvog_protocol, sample_wvog_data_packet):
@@ -1164,7 +1165,8 @@ class TestCSVFormatValidation:
         )
 
         header_cols = len(header.split(","))
-        row_cols = len(row.split(","))
+        # format_csv_row now returns a list
+        row_cols = len(row)
         assert header_cols == row_cols
 
     def test_svog_csv_row_preserves_precision(self, svog_protocol, sample_svog_data_packet):
@@ -1176,10 +1178,11 @@ class TestCSVFormatValidation:
             record_time_mono=12345.123456789,
         )
 
-        # Unix time should have at least 6 decimal places
-        assert "1700000000.123456" in row
-        # Mono time should have 9 decimal places
-        assert "12345.123456789" in row
+        # Row is now a list, check string elements for precision
+        # Unix time should have at least 6 decimal places (index 4)
+        assert "1700000000.123456" in row[4]
+        # Mono time should have 9 decimal places (index 5)
+        assert "12345.123456789" in row[5]
 
     def test_wvog_csv_row_preserves_precision(self, wvog_protocol, sample_wvog_data_packet):
         """Test that wVOG timestamps preserve required precision."""
@@ -1190,8 +1193,9 @@ class TestCSVFormatValidation:
             record_time_mono=12345.123456789,
         )
 
-        assert "1700000000.123456" in row
-        assert "12345.123456789" in row
+        # Row is now a list, check string elements for precision
+        assert "1700000000.123456" in row[4]
+        assert "12345.123456789" in row[5]
 
 
 # =============================================================================

@@ -21,13 +21,11 @@ class TestGPSDataLogger:
         assert logger.is_recording is False
         assert logger.filepath is None
 
-    def test_sanitize_device_id(self, tmp_path):
-        """Test device ID sanitization."""
-        logger = GPSDataLogger(tmp_path, "GPS:serial0")
-        assert logger._sanitize_device_id() == "GPS_serial0"
-
-        logger2 = GPSDataLogger(tmp_path, "/dev/ttyUSB0")
-        assert logger2._sanitize_device_id() == "_dev_ttyUSB0"
+    def test_sanitize_device_id_via_shared_function(self, tmp_path):
+        """Test that device ID sanitization uses the shared sanitize_device_id function."""
+        from rpi_logger.modules.base.storage_utils import sanitize_device_id
+        assert sanitize_device_id("GPS:serial0") == "gps_serial0"
+        assert sanitize_device_id("/dev/ttyUSB0") == "dev_ttyusb0"
 
     def test_start_recording_creates_file(self, tmp_path):
         """Test that start_recording creates a CSV file."""

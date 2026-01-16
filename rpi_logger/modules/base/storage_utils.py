@@ -6,7 +6,39 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import re
+
 from .io_utils import sanitize_path_component
+
+
+def sanitize_device_id(device_id: str) -> str:
+    """
+    Sanitize a device ID for use in filenames.
+
+    Converts device paths/identifiers to safe filename components by:
+    - Converting to lowercase
+    - Stripping leading slashes
+    - Replacing path separators (/, \\) and colons with underscores
+    - Removing other problematic characters (spaces, parentheses, brackets)
+    - Collapsing consecutive underscores
+    - Stripping leading/trailing underscores
+
+    Args:
+        device_id: Raw device identifier (e.g., "/dev/ttyUSB0", "GPS:serial0")
+
+    Returns:
+        Sanitized string safe for filenames (e.g., "dev_ttyusb0", "gps_serial0")
+    """
+    # Strip leading slashes and convert to lowercase
+    safe = device_id.lstrip("/").lower()
+    # Replace path separators and colons with underscores
+    safe = safe.replace("/", "_").replace("\\", "_").replace(":", "_")
+    # Remove spaces, parentheses, brackets
+    safe = re.sub(r"[\s()\[\]]", "", safe)
+    # Collapse consecutive underscores
+    safe = re.sub(r"_+", "_", safe)
+    # Strip leading/trailing underscores
+    return safe.strip("_") or "device"
 
 
 def _normalize_name(value: str) -> str:
@@ -92,4 +124,5 @@ __all__ = [
     "ensure_module_data_dir",
     "format_trial_suffix",
     "module_filename_prefix",
+    "sanitize_device_id",
 ]

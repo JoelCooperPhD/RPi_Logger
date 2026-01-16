@@ -1,13 +1,15 @@
 """VOG data logger for CSV file output."""
 
 import asyncio
+import csv
+import io
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, Callable, Awaitable
+from typing import List, Optional, Dict, Any, Callable, Awaitable
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.base.storage_utils import derive_session_token
+from rpi_logger.modules.base.storage_utils import derive_session_token, sanitize_device_id
 
 from .protocols import BaseVOGProtocol, VOGDataPacket
 
@@ -43,13 +45,11 @@ class VOGDataLogger:
         """Return True if recording is active."""
         return self._recording_start_time is not None
 
-    def _sanitize_port_name(self) -> str:
-        """Convert port path to safe filename component."""
-        return self.port.lstrip('/').replace('/', '_').replace('\\', '_').lower()
-
     def _resolve_data_file(self) -> Path:
         token = derive_session_token(self.output_dir, "VOG")
-        port_name = self._sanitize_port_name()
+        port_name = sanitize_device_id(self.port)
+        # VOG files always include the module prefix since device IDs
+        # (serial ports) never start with "vog"
         return self.output_dir / f"{token}_VOG_{port_name}.csv"
 
     async def log_trial_data(self, packet: VOGDataPacket, trial_number: int,
@@ -61,11 +61,11 @@ class VOGDataLogger:
             record_time_unix = time.time()
             record_time_mono = time.perf_counter()
 
-            line = self.protocol.format_csv_row(packet, label, record_time_unix, record_time_mono)
+            row = self.protocol.format_csv_row(packet, label, record_time_unix, record_time_mono)
             header = self.protocol.csv_header
 
             created_new = await asyncio.to_thread(
-                self._batch_write, self.output_dir, data_file, header, line)
+                self._batch_write, self.output_dir, data_file, header, row)
             if created_new:
                 self.logger.info("Created VOG data file: %s", data_file.name)
 
@@ -83,14 +83,18 @@ class VOGDataLogger:
         return 0
 
     @staticmethod
-    def _batch_write(output_dir: Path, data_file: Path, header: str, line: str) -> bool:
-        """Batch file I/O (run in thread). Returns True if new file created."""
+    def _batch_write(output_dir: Path, data_file: Path, header: str, row: List[Any]) -> bool:
+        """Batch file I/O (run in thread). Returns True if new file created.
+
+        Uses csv.writer for proper escaping of special characters in data.
+        """
         output_dir.mkdir(parents=True, exist_ok=True)
         created_new = not data_file.exists()
-        with open(data_file, 'w' if created_new else 'a', encoding='utf-8') as f:
+        with open(data_file, 'w' if created_new else 'a', encoding='utf-8', newline='') as f:
             if created_new:
                 f.write(header + '\n')
-            f.write(line + '\n')
+            writer = csv.writer(f)
+            writer.writerow(row)
         return created_new
 
     async def _dispatch_logged_event(self, packet: VOGDataPacket, trial_number: int,

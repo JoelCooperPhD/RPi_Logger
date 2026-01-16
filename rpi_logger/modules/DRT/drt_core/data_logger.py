@@ -1,11 +1,13 @@
 """DRT CSV data logger for sDRT and wDRT formats."""
 
+import csv
+import io
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, Awaitable
 
 from rpi_logger.core.logging_utils import get_module_logger
-from rpi_logger.modules.base.storage_utils import derive_session_token
+from rpi_logger.modules.base.storage_utils import derive_session_token, sanitize_device_id
 from .protocols import SDRT_CSV_HEADER, WDRT_CSV_HEADER, RT_TIMEOUT_VALUE
 
 logger = get_module_logger(__name__)
@@ -59,13 +61,9 @@ class DRTDataLogger:
         """Set the trial label for CSV output."""
         self._trial_label = label
 
-    def _sanitize_port_name(self) -> str:
-        """Convert device ID/port path to safe filename component."""
-        return self.device_id.lstrip('/').replace('/', '_').replace('\\', '_').lower()
-
     def _format_device_id_for_csv(self) -> str:
         """Format device ID for CSV output."""
-        port_clean = self._sanitize_port_name()
+        port_clean = sanitize_device_id(self.device_id)
         if self.device_type == 'wdrt':
             return f"wDRT_{port_clean}"
         return f"DRT_{port_clean}"
@@ -76,6 +74,8 @@ class DRTDataLogger:
 
         token = derive_session_token(self.output_dir, "DRT")
         device_id_csv = self._format_device_id_for_csv()
+        # Avoid redundant prefix (e.g., "DRT_DRT_...") when the formatted
+        # device ID already starts with the module code
         if device_id_csv.lower().startswith("drt_"):
             filename = f"{token}_{device_id_csv}.csv"
         else:
@@ -188,27 +188,30 @@ class DRTDataLogger:
             reaction_time = data.get('reaction_time', RT_TIMEOUT_VALUE)
             label = self._trial_label if self._trial_label else ""
 
-            # Format CSV line based on device type
+            # Build row as list for proper CSV escaping
             # Column order: trial,module,device_id,label,record_time_unix,record_time_mono,...
             if self.device_type == 'wdrt':
                 battery = data.get('battery', 0)
                 device_utc = data.get('device_utc', 0)
-                csv_line = (
-                    f"{trial_number},DRT,{device_id_csv},{label},{unix_time:.6f},"
-                    f"{record_time_mono:.9f},{device_timestamp},{device_utc},"
-                    f"{clicks},{reaction_time},{battery}\n"
-                )
+                row = [
+                    trial_number, "DRT", device_id_csv, label,
+                    f"{unix_time:.6f}", f"{record_time_mono:.9f}",
+                    device_timestamp, device_utc, clicks, reaction_time, battery
+                ]
             else:
                 # sDRT format
                 device_time_unix = ""
-                csv_line = (
-                    f"{trial_number},DRT,{device_id_csv},{label},{unix_time:.6f},"
-                    f"{record_time_mono:.9f},{device_timestamp},{device_time_unix},"
-                    f"{clicks},{reaction_time}\n"
-                )
+                row = [
+                    trial_number, "DRT", device_id_csv, label,
+                    f"{unix_time:.6f}", f"{record_time_mono:.9f}",
+                    device_timestamp, device_time_unix, clicks, reaction_time
+                ]
 
-            # Write to cached file handle (line-buffered, so flushes automatically)
-            self._csv_file.write(csv_line)
+            # Write using csv.writer for proper escaping of special characters
+            buffer = io.StringIO()
+            writer = csv.writer(buffer)
+            writer.writerow(row)
+            self._csv_file.write(buffer.getvalue())
 
             return True
 

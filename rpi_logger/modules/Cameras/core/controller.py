@@ -17,9 +17,10 @@ from ..capture import (
 )
 
 try:
-    from rpi_logger.modules.base.storage_utils import module_filename_prefix
+    from rpi_logger.modules.base.storage_utils import module_filename_prefix, sanitize_device_id
 except ImportError:
     module_filename_prefix = None
+    sanitize_device_id = None
 
 logger = logging.getLogger(__name__)
 
@@ -245,17 +246,6 @@ class CameraController:
         self._audio = None
         self._camera = None
 
-    def _sanitize_device_name(self, name: str) -> str:
-        """Sanitize device name for use in filenames."""
-        # Remove/replace problematic characters
-        safe = name.replace(" ", "-").replace(":", "").replace("_", "-")
-        safe = safe.replace("(", "").replace(")", "").replace("/", "-")
-        safe = safe.replace("\\", "-").replace("[", "").replace("]", "")
-        # Remove consecutive dashes
-        while "--" in safe:
-            safe = safe.replace("--", "-")
-        return safe.strip("-").lower() or "camera"
-
     async def start_recording(
         self, output_dir: Path, trial: int, *, trial_label: str = "", cameras_dir: Optional[Path] = None
     ) -> bool:
@@ -307,7 +297,7 @@ class CameraController:
 
         # Build filename using standard module prefix
         device_name = self._state.device_name or "camera"
-        safe_name = self._sanitize_device_name(device_name)
+        safe_name = sanitize_device_id(device_name) if sanitize_device_id else device_name.lower()
 
         # Use cameras_dir for token derivation (so derive_session_token can climb to session)
         prefix_dir = cameras_dir if cameras_dir else output_dir

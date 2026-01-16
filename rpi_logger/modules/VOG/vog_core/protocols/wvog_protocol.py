@@ -216,9 +216,11 @@ class WVOGProtocol(BaseVOGProtocol):
                 'battery_percent': packet.battery_percent, 'device_unix_time': packet.device_unix_time}
 
     def format_csv_row(self, packet, label: str, record_time_unix: float,
-                      record_time_mono: float) -> str:
-        """Format wVOG CSV row (extended format)."""
-        return (f"{packet.trial_number},VOG,{packet.device_id},{label},"
-                f"{record_time_unix:.6f},{record_time_mono:.9f},"
-                f"{packet.shutter_open},{packet.shutter_closed},"
-                f"{packet.shutter_total},{packet.lens},{packet.battery_percent}")
+                      record_time_mono: float) -> list:
+        """Format wVOG CSV row (returns list of values for csv.writer)."""
+        return [
+            packet.trial_number, "VOG", packet.device_id, label,
+            f"{record_time_unix:.6f}", f"{record_time_mono:.9f}",
+            packet.shutter_open, packet.shutter_closed,
+            packet.shutter_total, packet.lens, packet.battery_percent
+        ]

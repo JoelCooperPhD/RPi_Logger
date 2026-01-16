@@ -524,10 +524,11 @@ class TestDRTDataLogger:
 
         assert data_logger_wdrt.csv_header == WDRT_CSV_HEADER
 
-    def test_sanitize_port_name(self, data_logger_sdrt):
-        """Test port name sanitization for filenames."""
+    def test_sanitize_device_id_via_shared_function(self, data_logger_sdrt):
+        """Test that device ID sanitization uses the shared sanitize_device_id function."""
+        from rpi_logger.modules.base.storage_utils import sanitize_device_id
         # Should convert /dev/ttyACM0 to dev_ttyacm0
-        sanitized = data_logger_sdrt._sanitize_port_name()
+        sanitized = sanitize_device_id(data_logger_sdrt.device_id)
         assert "/" not in sanitized
         assert "\\" not in sanitized
         assert sanitized == "dev_ttyacm0"

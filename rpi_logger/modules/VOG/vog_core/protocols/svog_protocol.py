@@ -198,8 +198,10 @@ class SVOGProtocol(BaseVOGProtocol):
         return {}
 
     def format_csv_row(self, packet, label: str, record_time_unix: float,
-                      record_time_mono: float) -> str:
-        """Format sVOG CSV row."""
-        return (f"{packet.trial_number},VOG,{packet.device_id},{label},"
-                f"{record_time_unix:.6f},{record_time_mono:.9f},"
-                f"{packet.shutter_open},{packet.shutter_closed}")
+                      record_time_mono: float) -> list:
+        """Format sVOG CSV row (returns list of values for csv.writer)."""
+        return [
+            packet.trial_number, "VOG", packet.device_id, label,
+            f"{record_time_unix:.6f}", f"{record_time_mono:.9f}",
+            packet.shutter_open, packet.shutter_closed
+        ]
