@@ -267,36 +267,43 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - name: Publish Release
-        uses: softprops/action-gh-release@v1
-        with:
-          draft: false
-          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          body: |
-            ## Logger ${{ github.ref_name }}
-
-            ### Downloads
-
-            | Platform | File | Notes |
-            |----------|------|-------|
-            | **Windows** | `Logger-Windows.zip` | Extract and run `Logger.exe` |
-            | **macOS** | `Logger-macOS.zip` | Extract and run `Logger.app` |
-            | **Linux (x86_64)** | `Logger-Linux-x86_64.tar.gz` | Extract and run `./logger` |
-            | **Linux (AppImage)** | `Logger-x86_64.AppImage` | Make executable and run directly |
-            | **Raspberry Pi** | `Logger-RaspberryPi-arm64.tar.gz` | Extract and run `./logger` |
-
-            ### Installation
-
-            **No installation required!** Just download, extract (if needed), and run.
-
-            #### macOS Note
-            On first run, you may need to right-click and select "Open" to bypass Gatekeeper,
-            or go to System Preferences > Security & Privacy to allow the app.
-
-            #### Linux AppImage
-            ```bash
-            chmod +x Logger-x86_64.AppImage
-            ./Logger-x86_64.AppImage
-            ```
+      - name: Publish Draft Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find the draft release for this tag and publish it
+          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases --jq '.[] | select(.tag_name == "${{ github.ref_name }}" and .draft == true) | .id' | head -1)
+          if [ -n "$RELEASE_ID" ]; then
+            gh api -X PATCH repos/${{ github.repository }}/releases/$RELEASE_ID \
+              -f draft=false \
+              -f prerelease=${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }} \
+              -f body="## Logger ${{ github.ref_name }}
+
+          ### Downloads
+
+          | Platform | File | Notes |
+          |----------|------|-------|
+          | **Windows** | \`Logger-Windows.zip\` | Extract and run \`Logger.exe\` |
+          | **macOS** | \`Logger-macOS.zip\` | Extract and run \`Logger.app\` |
+          | **Linux (x86_64)** | \`Logger-Linux-x86_64.tar.gz\` | Extract and run \`./logger\` |
+          | **Linux (AppImage)** | \`Logger-x86_64.AppImage\` | Make executable and run directly |
+          | **Raspberry Pi** | \`Logger-RaspberryPi-arm64.tar.gz\` | Extract and run \`./logger\` |
+
+          ### Installation
+
+          **No installation required!** Just download, extract (if needed), and run.
+
+          #### macOS Note
+          On first run, you may need to right-click and select \"Open\" to bypass Gatekeeper,
+          or go to System Preferences > Security & Privacy to allow the app.
+
+          #### Linux AppImage
+          \`\`\`bash
+          chmod +x Logger-x86_64.AppImage
+          ./Logger-x86_64.AppImage
+          \`\`\`"
+            echo "Published release $RELEASE_ID"
+          else
+            echo "No draft release found for ${{ github.ref_name }}"
+            exit 1
+          fi
