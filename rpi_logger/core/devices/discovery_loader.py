@@ -142,6 +142,34 @@ class DiscoveryRegistry:
             if spec.uart_path is not None
         ]
 
+    def get_multi_instance_modules(self) -> set[str]:
+        """Get normalized set of module IDs that support multiple instances.
+
+        Returns module IDs normalized (uppercase, no underscores) to match
+        the format used by InstanceIdentity.is_multi_instance_module().
+        """
+        return {
+            spec.module_id.upper().replace("_", "")
+            for spec in self._specs.values()
+            if spec.multi_instance
+        }
+
+    def get_module_for_device_id(self, device_id: str) -> Optional[ModuleDiscoverySpec]:
+        """Get the module spec that handles a device ID based on prefix.
+
+        Looks up modules by their device_id_prefix field if present.
+
+        Args:
+            device_id: The device identifier (e.g., "picam:0")
+
+        Returns:
+            The ModuleDiscoverySpec for the matching module, or None if no match.
+        """
+        for spec in self._specs.values():
+            if spec.device_id_prefix and device_id.startswith(spec.device_id_prefix):
+                return spec
+        return None
+
 
 def load_module_discovery(module_dir: Path) -> Optional[BaseModuleDiscovery]:
     """

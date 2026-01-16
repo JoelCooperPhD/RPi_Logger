@@ -9,9 +9,33 @@ can run multiple simultaneous instances for different hardware devices.
 from typing import Dict, Optional, Set, Tuple
 
 
-# Modules that support multiple simultaneous instances (one per device)
-# Keys are normalized (uppercase, no underscores) for consistent matching
-MULTI_INSTANCE_MODULES: Set[str] = {"DRT", "VOG", "CAMERAS", "CAMERASCSI", "AUDIO"}
+# Cached multi-instance modules (lazy-loaded from discovery registry)
+_multi_instance_modules: Optional[Set[str]] = None
+
+
+def get_multi_instance_modules() -> Set[str]:
+    """Get the set of modules that support multiple simultaneous instances.
+
+    Lazily loads from the discovery registry on first call. The registry
+    provides module specs with multi_instance=True, which are then normalized
+    to match the format expected by is_multi_instance_module().
+
+    Returns:
+        Set of normalized module IDs (uppercase, no underscores).
+    """
+    global _multi_instance_modules
+    if _multi_instance_modules is None:
+        from rpi_logger.core.devices.discovery_loader import get_discovery_registry
+        registry = get_discovery_registry()
+        _multi_instance_modules = registry.get_multi_instance_modules()
+    return _multi_instance_modules
+
+
+# Backwards compatibility: MULTI_INSTANCE_MODULES is now a property-like
+# that calls get_multi_instance_modules() at import time
+# NOTE: This is evaluated at import time, so the registry must be ready
+# For deferred evaluation, use get_multi_instance_modules() directly
+MULTI_INSTANCE_MODULES: Set[str] = get_multi_instance_modules()
 
 
 class InstanceIdentity:
@@ -29,11 +53,11 @@ class InstanceIdentity:
 
         Args:
             multi_instance_modules: Set of module names that support multiple instances.
-                                   If None, uses the default MULTI_INSTANCE_MODULES.
+                                   If None, loads from the discovery registry.
         """
         self._multi_instance_modules = (
             multi_instance_modules if multi_instance_modules is not None
-            else MULTI_INSTANCE_MODULES
+            else get_multi_instance_modules()
         )
         # Device-to-instance mapping: device_id -> instance_id
         self._device_instance_map: Dict[str, str] = {}

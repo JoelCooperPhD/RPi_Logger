@@ -17,4 +17,6 @@ DISCOVERY_SPEC = ModuleDiscoverySpec(
     has_custom_scanner=True,  # Module provides its own scanner
     multi_instance=True,
     platforms=["raspberry_pi"],  # Only available on Raspberry Pi
+    device_id_prefix="picam:",  # CSI cameras use "picam:0", "picam:1" etc.
+    extra_cli_args={"camera_index": "--camera-index"},
 )

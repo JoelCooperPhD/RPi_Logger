@@ -58,6 +58,10 @@ class ModuleDiscoverySpec:
     is_internal: bool = False
     platforms: list[str] = field(default_factory=lambda: ["*"])
 
+    # Device ID handling for modules with special device ID formats
+    device_id_prefix: Optional[str] = None  # e.g., "picam:" for CSI cameras
+    extra_cli_args: dict[str, str] = field(default_factory=dict)  # e.g., {"camera_index": "--camera-index"}
+
 
 @dataclass
 class DeviceMatch:

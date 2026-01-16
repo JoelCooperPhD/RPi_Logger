@@ -117,16 +117,24 @@ class DeviceConnectionCoordinator:
         """
         self.logger.info("connect_and_start_device: %s", device_id)
 
-        # Check if this is a CSI camera
-        is_csi_camera = device_id.startswith("picam:")
+        # Check if device uses a module-defined device_id_prefix (e.g., CSI cameras)
+        from rpi_logger.core.devices.discovery_loader import get_discovery_registry
+        registry = get_discovery_registry()
+        device_spec = registry.get_module_for_device_id(device_id)
+
         camera_index: int | None = None
-        if is_csi_camera:
-            # Extract camera index from device_id (picam:0 → 0, picam:1 → 1)
-            try:
-                camera_index = int(device_id.split(":")[1])
-            except (IndexError, ValueError):
-                self.logger.error("Invalid CSI camera device_id format: %s", device_id)
-                return False
+        uses_cli_init = False  # Modules that init via CLI args rather than assign_device
+
+        if device_spec and device_spec.device_id_prefix:
+            uses_cli_init = bool(device_spec.extra_cli_args)
+            # Extract index from device_id (e.g., picam:0 → 0)
+            if "camera_index" in device_spec.extra_cli_args:
+                try:
+                    camera_index = int(device_id.split(":")[1])
+                except (IndexError, ValueError):
+                    self.logger.error("Invalid device_id format for %s: %s",
+                                      device_spec.module_id, device_id)
+                    return False
 
         try:
             device = self.device_system.get_device(device_id)
@@ -182,11 +190,11 @@ class DeviceConnectionCoordinator:
             self.logger.info("Instance %s is ready, proceeding with device connection", instance_id)
 
             # Send assign_device command via InstanceStateManager (non-blocking)
-            # CSI cameras are special: they init via --camera-index CLI arg, not assign_device
-            if is_csi_camera:
-                # CSI cameras init on startup via CLI arg. The module sends device_ready
-                # when camera is initialized and frames are flowing.
-                await self._wait_for_csi_connected(instance_id, timeout=30.0)
+            # Modules with extra_cli_args (e.g., CSI cameras) init via CLI arg, not assign_device
+            if uses_cli_init:
+                # Module inits on startup via CLI args. The module sends device_ready
+                # when device is initialized and ready.
+                await self._wait_for_cli_init_connected(instance_id, timeout=30.0)
             elif not device.is_internal:
                 self.logger.info("Sending assign_device to non-internal device %s", device_id)
                 command_builder = self._build_assign_device_command_builder(device)
@@ -201,12 +209,15 @@ class DeviceConnectionCoordinator:
             self.logger.error("Failed to connect device %s: %s", device_id, e)
             return False
 
-    async def _wait_for_csi_connected(self, instance_id: str, timeout: float = 30.0) -> bool:
-        """Wait for a CSI camera instance to reach CONNECTED state.
+    async def _wait_for_cli_init_connected(self, instance_id: str, timeout: float = 30.0) -> bool:
+        """Wait for a CLI-initialized instance to reach CONNECTED state.
+
+        Used for modules that initialize via CLI arguments rather than assign_device
+        command (e.g., CSI cameras with --camera-index).
 
         Args:
             instance_id: The instance to wait for
-            timeout: Maximum time to wait in seconds (default 30s for camera init)
+            timeout: Maximum time to wait in seconds (default 30s for device init)
 
         Returns:
             True if instance reached CONNECTED state, False on timeout
@@ -230,7 +241,7 @@ class DeviceConnectionCoordinator:
             elapsed += interval
 
         self.logger.warning(
-            "Timeout waiting for CSI camera %s to connect (%.1fs)",
+            "Timeout waiting for %s to connect (%.1fs)",
             instance_id, timeout
         )
         return False
