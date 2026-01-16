@@ -119,6 +119,7 @@ class MainWindow:
         self.logger_frame: Optional[ttk.LabelFrame] = None
         self.logger_text: Optional[ScrolledText] = None
         self.logger_visible_var: Optional[tk.BooleanVar] = None
+        self.log_level_var: Optional[tk.IntVar] = None
         self.log_handler: Optional[logging.Handler] = None
 
         # Device UI components
@@ -248,12 +249,17 @@ class MainWindow:
         # Build Modules menu for enabling/disabling data logging modules
         self._build_modules_menu(menubar)
 
+        # Read gui_logger_visible from config, but defer log level menu creation
+        # to avoid potential Tk rendering issues during initialization
         config_manager = get_config_manager()
         logger_visible_default = True
         if CONFIG_PATH.exists():
             config = config_manager.read_config(CONFIG_PATH)
             logger_visible_default = config_manager.get_bool(config, 'gui_logger_visible', default=True)
         self.logger_visible_var = tk.BooleanVar(value=logger_visible_default)
+        # Log level menu will be added after mainloop starts via _deferred_log_level_menu()
+        # NOTE: Log level is NOT restored from config to avoid DEBUG flooding on startup
+        self.log_level_var = None
 
         view_menu = tk.Menu(menubar, tearoff=0)
         Theme.configure_menu(view_menu)
@@ -264,6 +270,10 @@ class MainWindow:
             variable=self.logger_visible_var,
             command=self._toggle_logger
         )
+
+        # Store view_menu reference for deferred log level menu creation
+        # Log level menu is created after mainloop starts to avoid Tk rendering issues
+        self._view_menu = view_menu
 
         help_menu = tk.Menu(menubar, tearoff=0)
         Theme.configure_menu(help_menu)
@@ -277,6 +287,13 @@ class MainWindow:
         help_menu.add_command(
             label="Report Issue",
             command=self.controller.report_issue
+        )
+
+        help_menu.add_separator()
+
+        help_menu.add_command(
+            label="Export Logs for Support...",
+            command=self.controller.export_logs
         )
 
         help_menu.add_command(
@@ -570,12 +587,106 @@ class MainWindow:
         config_manager.write_config(CONFIG_PATH, {'gui_logger_visible': visible})
         self.logger.debug("System log visibility set to: %s", visible)
 
+    def _deferred_log_level_menu(self) -> None:
+        """Create log level menu after mainloop has started.
+
+        This deferred creation avoids potential Tk rendering issues that can occur
+        when creating certain menu elements during initial window construction.
+        """
+        if not hasattr(self, '_view_menu') or self._view_menu is None:
+            self.logger.warning("Cannot create log level menu - view menu not available")
+            return
+
+        # Read saved log level from config for menu selection display
+        # NOTE: We only use this for the IntVar (menu selection), NOT for setting handlers
+        config_manager = get_config_manager()
+        saved_level = logging.INFO
+        if CONFIG_PATH.exists():
+            config = config_manager.read_config(CONFIG_PATH)
+            level_str = config_manager.get_str(config, 'log_level', default='info').upper()
+            saved_level = getattr(logging, level_str, logging.INFO)
+        self.log_level_var = tk.IntVar(value=saved_level)
+
+        # Add separator and log level cascade menu
+        self._view_menu.add_separator()
+        log_level_menu = tk.Menu(self._view_menu, tearoff=0)
+        Theme.configure_menu(log_level_menu)
+
+        for level_value, level_label in [
+            (logging.DEBUG, 'Debug'),
+            (logging.INFO, 'Info'),
+            (logging.WARNING, 'Warning'),
+            (logging.ERROR, 'Error'),
+            (logging.CRITICAL, 'Critical'),
+        ]:
+            log_level_menu.add_radiobutton(
+                label=level_label,
+                variable=self.log_level_var,
+                value=level_value,
+                command=self._on_log_level_change
+            )
+
+        self._view_menu.add_cascade(label="Log Level", menu=log_level_menu)
+
+        # Apply saved level to logging system
+        saved_level = self.log_level_var.get()
+        root_logger = logging.getLogger()
+        root_logger.setLevel(saved_level)
+
+        # Apply to file/stream handlers (not TextHandler)
+        for handler in root_logger.handlers:
+            if handler is not self.log_handler:
+                handler.setLevel(saved_level)
+
+        # TextHandler: apply level but floor at INFO to prevent DEBUG flooding
+        if self.log_handler:
+            ui_level = max(saved_level, logging.INFO)
+            self.log_handler.setLevel(ui_level)
+
+        self.logger.debug("Log level menu created, level: %s", logging.getLevelName(saved_level))
+
+    def _on_log_level_change(self) -> None:
+        """Handle log level selection change from View menu."""
+        if self.log_level_var is None:
+            return
+
+        numeric_level = self.log_level_var.get()
+
+        # Update root logger and file handlers only
+        # TextHandler stays at INFO minimum to avoid UI flooding from DEBUG spam
+        root_logger = logging.getLogger()
+        root_logger.setLevel(numeric_level)
+        for handler in root_logger.handlers:
+            if handler is not self.log_handler:
+                handler.setLevel(numeric_level)
+
+        # TextHandler (UI log) uses INFO as minimum to prevent flooding
+        if self.log_handler:
+            ui_level = max(numeric_level, logging.INFO)
+            self.log_handler.setLevel(ui_level)
+
+        # Persist to config using after() to avoid blocking the UI
+        level_name = logging.getLevelName(numeric_level).lower()
+        self.root.after(0, lambda: self._persist_log_level(level_name))
+
+    def _persist_log_level(self, level_name: str) -> None:
+        """Persist log level to config file (called via after to avoid UI blocking)."""
+        config_manager = get_config_manager()
+        config_manager.write_config(CONFIG_PATH, {'log_level': level_name})
+        self.logger.info("Log level changed to: %s", level_name.upper())
+
     def _setup_log_handler(self) -> None:
         if self.logger_text is None:
             return
 
         self.log_handler = TextHandler(self.logger_text)
-        self.log_handler.setLevel(logging.INFO)
+
+        # Use configured log level (IntVar stores numeric level directly)
+        if self.log_level_var:
+            numeric_level = self.log_level_var.get()
+            self.log_handler.setLevel(numeric_level)
+        else:
+            self.log_handler.setLevel(logging.INFO)
 
         root_logger = logging.getLogger()
         root_logger.addHandler(self.log_handler)
@@ -705,6 +816,10 @@ class MainWindow:
         This provides true parallelism and keeps the UI responsive.
         """
         self.build_ui()
+
+        # Defer log level menu creation to after mainloop processes first events
+        # This avoids potential Tk rendering issues during initial window construction
+        self.root.after(100, self._deferred_log_level_menu)
 
         # Create and start the AsyncBridge for background async work
         self.bridge = AsyncBridge(self.root)
