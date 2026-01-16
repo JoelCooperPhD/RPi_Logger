@@ -33,6 +33,11 @@ from .base_viewer import BaseStreamViewer
 # Constants
 # =============================================================================
 
+# Error logging flags (log-once pattern to avoid per-event spam)
+_logged_perclos_error = False
+_logged_event_error = False
+_logged_viz_error = False
+
 # Event type mappings (Pupil Labs API)
 EVENT_TYPE_SACCADE = 0
 EVENT_TYPE_FIXATION = 1
@@ -694,7 +699,10 @@ class EventsViewer(BaseStreamViewer):
             try:
                 self._perclos_buffer.add_gaze_sample(gaze_data)
             except Exception as exc:
-                self._logger.debug("PERCLOS gaze update failed: %s", exc)
+                global _logged_perclos_error
+                if not _logged_perclos_error:
+                    self._logger.debug("PERCLOS gaze update failed: %s", exc)
+                    _logged_perclos_error = True
 
         # Add event to buffer FIRST (before updating visualizations)
         # Only add if it's a NEW event (not the same one we already processed)
@@ -715,7 +723,10 @@ class EventsViewer(BaseStreamViewer):
                     self._update_info_line()
 
                 except Exception as exc:
-                    self._logger.debug("Event update failed: %s", exc)
+                    global _logged_event_error
+                    if not _logged_event_error:
+                        self._logger.debug("Event update failed: %s", exc)
+                        _logged_event_error = True
 
         # Update visualizations (they use buffered data)
         for viz in self._visualizations:
@@ -726,7 +737,10 @@ class EventsViewer(BaseStreamViewer):
                 else:
                     viz.update(self._buffer)
             except Exception as exc:
-                self._logger.debug("Visualization update failed: %s", exc)
+                global _logged_viz_error
+                if not _logged_viz_error:
+                    self._logger.debug("Visualization update failed: %s", exc)
+                    _logged_viz_error = True
 
     def _update_info_line(self) -> None:
         """Update the single-line info display."""

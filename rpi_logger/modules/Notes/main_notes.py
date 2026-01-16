@@ -85,7 +85,7 @@ def build_runtime(context):
 async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
     if not args.enable_commands:
-        logger.error("Notes module must be launched by the logger controller.")
+        logger.info("Notes module must be launched by the logger controller.")
         return
 
     def show_notes_help(parent):

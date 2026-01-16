@@ -59,7 +59,7 @@ class XBeeProxyTransport:
     async def connect(self) -> bool:
         """Mark transport as connected."""
         self._connected = True
-        logger.info(f"XBee proxy transport ready for {self.node_id}")
+        logger.debug(f"XBee proxy transport ready for {self.node_id}")
         return True
 
     async def disconnect(self) -> None:
@@ -71,19 +71,18 @@ class XBeeProxyTransport:
                 self._receive_buffer.get_nowait()
             except asyncio.QueueEmpty:
                 break
-        logger.info(f"XBee proxy transport disconnected for {self.node_id}")
+        logger.debug(f"XBee proxy transport disconnected for {self.node_id}")
 
     async def write(self, data: bytes) -> bool:
         """Send data via the proxy callback."""
         if not self._connected:
-            logger.error(f"Cannot write to {self.node_id}: not connected")
+            logger.debug(f"Cannot write to {self.node_id}: not connected")
             return False
 
         try:
             # Strip newline - XBee doesn't need it (each send is a discrete packet).
             # This matches XBeeTransport.write() behavior for consistency.
             data_str = data.decode('utf-8', errors='replace').strip()
-            logger.debug("XBee proxy sending to %s: %r", self.node_id, data_str)
             return await self._send_callback(self.node_id, data_str)
         except Exception as e:
             logger.error(f"XBee proxy write error to {self.node_id}: {e}")
@@ -123,10 +122,6 @@ class XBeeProxyTransport:
         stripped = data.strip()
         try:
             self._receive_buffer.put_nowait(stripped)
-            logger.debug(
-                f"XBee proxy buffered for {self.node_id}: '{stripped}' "
-                f"(queue size: {self._receive_buffer.qsize()})"
-            )
         except asyncio.QueueFull:
             # Buffer full - drop oldest to make room (ring buffer behavior)
             try:

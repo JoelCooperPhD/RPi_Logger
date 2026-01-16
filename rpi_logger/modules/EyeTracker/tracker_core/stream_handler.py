@@ -214,7 +214,7 @@ class StreamHandler:
             raise
         except Exception as e:
             if self.running:
-                logger.error("Video stream error: %s", e)
+                logger.warning("Video stream error: %s", e)
         finally:
             logger.debug("Video stream ended (frames=%d)", frame_count)
             self._video_task_active = False
@@ -238,7 +238,7 @@ class StreamHandler:
             raise
         except Exception as e:
             if self.running:
-                logger.error("Gaze stream error: %s", e)
+                logger.warning("Gaze stream error: %s", e)
         finally:
             logger.debug("Gaze stream ended (samples=%d)", gaze_count)
             self._gaze_task_active = False
@@ -269,7 +269,7 @@ class StreamHandler:
             raise
         except Exception as exc:
             if self.running:
-                logger.error("IMU stream error: %s", exc)
+                logger.warning("IMU stream error: %s", exc)
         finally:
             logger.debug("IMU stream ended (samples=%d)", imu_count)
             self._imu_task_active = False
@@ -300,7 +300,7 @@ class StreamHandler:
             raise
         except Exception as exc:
             if self.running:
-                logger.error("Eye events stream error: %s", exc)
+                logger.warning("Eye events stream error: %s", exc)
         finally:
             logger.debug("Events stream ended (events=%d)", event_count)
             self._event_task_active = False
@@ -324,7 +324,7 @@ class StreamHandler:
             raise
         except Exception as exc:
             if self.running:
-                logger.error("Audio stream error: %s", exc)
+                logger.warning("Audio stream error: %s", exc)
         finally:
             logger.debug("Audio stream ended (frames=%d)", audio_count)
             self._audio_task_active = False
@@ -373,7 +373,7 @@ class StreamHandler:
             raise
         except Exception as e:
             if self.running:
-                logger.error("Eyes stream error: %s", e)
+                logger.warning("Eyes stream error: %s", e)
         finally:
             logger.debug("Eyes stream ended (frames=%d)", frame_count)
             self._eyes_task_active = False

@@ -131,7 +131,6 @@ class CameraScanner:
 
     async def reannounce_devices(self) -> None:
         """Re-emit discovery events for all known devices."""
-        logger.debug(f"Re-announcing {len(self._known_devices)} cameras")
         for camera in self._known_devices.values():
             if self._on_device_found:
                 try:
@@ -181,7 +180,7 @@ class CameraScanner:
         for device_id, camera in current_devices.items():
             if device_id not in self._known_devices:
                 self._known_devices[device_id] = camera
-                logger.info(f"Camera found: {camera.friendly_name} ({device_id})")
+                logger.debug(f"Camera found: {camera.friendly_name} ({device_id})")
                 if self._on_device_found:
                     try:
                         await self._on_device_found(camera)

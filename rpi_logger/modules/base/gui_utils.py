@@ -22,7 +22,7 @@ def parse_geometry_string(geometry_str: str) -> Optional[Tuple[int, int, int, in
     try:
         match = re.match(r'(\d+)x(\d+)([\+\-]\d+)([\+\-]\d+)', geometry_str)
         if not match:
-            logger.error("Failed to parse geometry string: '%s'", geometry_str)
+            logger.warning("Failed to parse geometry string: '%s'", geometry_str)
             return None
 
         width = int(match.group(1))
@@ -33,7 +33,7 @@ def parse_geometry_string(geometry_str: str) -> Optional[Tuple[int, int, int, in
         return (width, height, x, y)
 
     except Exception as e:
-        logger.error("Exception parsing geometry string '%s': %s", geometry_str, e)
+        logger.warning("Exception parsing geometry string '%s': %s", geometry_str, e)
         return None
 
 
@@ -65,10 +65,6 @@ def clamp_geometry_to_screen(
         bottom_limit = max(0, screen_height - SCREEN_BOTTOM_RESERVED)
         max_y = max(0, bottom_limit - height)
         if y > max_y:
-            logger.debug(
-                "Clamping window to visible region (screen=%d, reserve=%d, height=%d, y=%d->%d)",
-                screen_height, SCREEN_BOTTOM_RESERVED, height, y, max_y,
-            )
             y = max_y
 
     return width, height, x, y
@@ -114,18 +110,12 @@ def get_frame_position(root_widget) -> Tuple[int, int, int, int]:
     offset_x = root_x - geom_x
     offset_y = root_y - geom_y
 
-    logger.debug(
-        "Geometry analysis: geom=(%d,%d) winfo_root=(%d,%d) offset=(%d,%d)",
-        geom_x, geom_y, root_x, root_y, offset_x, offset_y
-    )
-
     # Determine frame position
     if offset_y >= 10:
         # offset_y is a reasonable title bar height (10+ pixels)
         # This means geometry() returned frame position correctly
         frame_x = geom_x
         frame_y = geom_y
-        logger.debug("geometry() returned frame position (offset=%d)", offset_y)
     else:
         # offset_y is suspiciously small (< 10 pixels)
         # This suggests geometry() returned content position (X11 bug)
@@ -137,10 +127,6 @@ def get_frame_position(root_widget) -> Tuple[int, int, int, int]:
         frame_y = geom_y - estimated_title_bar
         # Ensure we don't go negative
         frame_y = max(0, frame_y)
-        logger.debug(
-            "geometry() likely returned content position, adjusting Y: %d -> %d (est. title_bar=%d)",
-            geom_y, frame_y, estimated_title_bar
-        )
 
     return width, height, frame_x, frame_y
 
@@ -160,17 +146,14 @@ def send_geometry_to_parent(root_widget, instance_id: Optional[str] = None) -> b
         True if sent successfully, False otherwise
     """
     try:
-        logger.debug("Sending geometry to parent process")
         from rpi_logger.core.commands import StatusMessage
 
         # Get frame position (compensates for X11 geometry asymmetry)
         try:
             width, height, x, y = get_frame_position(root_widget)
         except ValueError as e:
-            logger.error("Failed to get frame position: %s", e)
+            logger.warning("Failed to get frame position: %s", e)
             return False
-
-        logger.debug("Frame position: %dx%d+%d+%d", width, height, x, y)
 
         # Clamp to screen bounds (keeps window above taskbar)
         width, height, x, y = clamp_geometry_to_screen(
@@ -188,16 +171,12 @@ def send_geometry_to_parent(root_widget, instance_id: Optional[str] = None) -> b
         # Include instance_id for multi-instance geometry persistence
         if instance_id:
             payload["instance_id"] = instance_id
-            logger.debug("Including instance_id in geometry payload: %s", instance_id)
 
         StatusMessage.send("geometry_changed", payload)
-        logger.info("Sent geometry to parent: %dx%d+%d+%d (instance: %s)",
-                    width, height, x, y, instance_id or "none")
         return True
 
-    except ImportError as e:
-        logger.debug("StatusMessage not available (standalone mode): %s", e)
-        return False
+    except ImportError:
+        return False  # Expected in standalone mode
     except Exception as e:
-        logger.error("Failed to send geometry to parent: %s", e, exc_info=True)
+        logger.warning("Failed to send geometry to parent: %s", e, exc_info=True)
         return False

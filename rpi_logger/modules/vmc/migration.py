@@ -58,7 +58,6 @@ class LegacyTkViewBridge:
             raise RuntimeError("Stub view unavailable; cannot mount legacy content")
 
         def _wrapped(parent) -> None:
-            self.logger.debug("Mounting legacy Tk content inside stub frame")
             result = builder(parent)
             cleanup = getattr(result, "destroy", None)
             if callable(cleanup):

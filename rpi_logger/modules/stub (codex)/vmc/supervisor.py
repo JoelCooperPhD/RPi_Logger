@@ -126,7 +126,7 @@ class StubCodexSupervisor:
         self.logger.info("%s supervisor initialized in GUI mode", self.display_name)
 
         elapsed = (time.perf_counter() - start) * 1000.0
-        self.logger.info("%s supervisor constructed in %.2f ms", self.display_name, elapsed)
+        self.logger.debug("%s supervisor constructed in %.2f ms", self.display_name, elapsed)
 
     async def run(self) -> None:
         await self._run_hook(self.hooks.before_start, "before_start")
@@ -327,7 +327,7 @@ class StubCodexSupervisor:
         if not runtime:
             return
 
-        self.logger.info("Stopping module runtime (%s)", reason)
+        self.logger.debug("Stopping module runtime (%s)", reason)
 
         try:
             await runtime.shutdown()

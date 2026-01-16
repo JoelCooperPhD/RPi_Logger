@@ -95,7 +95,7 @@ class ConfigManager:
                 for key in sorted(existing.keys()):
                     fh.write(f"{key} = {existing[key]}\n")
 
-            logger.info("Stored config overrides in %s", override_path)
+            logger.debug("Stored config overrides in %s", override_path)
             return True
         except Exception as exc:
             logger.error("Failed to write config override %s: %s", override_path, exc)
@@ -133,8 +133,6 @@ class ConfigManager:
                     config = self._parse_config_lines(f)
             except Exception as e:
                 logger.error("Failed to read config %s: %s", config_path, e)
-        else:
-            logger.debug("Config file not found: %s", config_path)
 
         overrides = self._load_override_sync(config_path)
         if overrides:
@@ -155,8 +153,6 @@ class ConfigManager:
                 config = self._parse_config_lines(lines)
             except Exception as e:
                 logger.error("Failed to read config %s: %s", config_path, e)
-        else:
-            logger.debug("Config file not found: %s", config_path)
 
         overrides = await asyncio.to_thread(self._load_override_sync, config_path)
         if overrides:
@@ -207,13 +203,12 @@ class ConfigManager:
                 if key not in updated_keys:
                     value_str = self._stringify_value(value)
                     lines.append(f"{key} = {value_str}\n")
-                    logger.info("Added new config key: %s = %s", key, value_str)
+                    logger.debug("Added new config key: %s = %s", key, value_str)
 
             with open(config_path, 'w', encoding='utf-8') as f:
                 f.writelines(lines)
 
             self._clear_override(config_path)
-            logger.debug("Updated config file: %s (%d keys)", config_path, len(updates))
             return True
 
         except OSError as e:
@@ -260,13 +255,12 @@ class ConfigManager:
                     if key not in updated_keys:
                         value_str = self._stringify_value(value)
                         lines.append(f"{key} = {value_str}\n")
-                        logger.info("Added new config key: %s = %s", key, value_str)
+                        logger.debug("Added new config key: %s = %s", key, value_str)
 
                 async with aiofiles.open(config_path, 'w', encoding='utf-8') as f:
                     await f.writelines(lines)
 
                 await asyncio.to_thread(self._clear_override, config_path)
-                logger.debug("Updated config file: %s (%d keys)", config_path, len(updates))
                 return True
 
             except OSError as e:

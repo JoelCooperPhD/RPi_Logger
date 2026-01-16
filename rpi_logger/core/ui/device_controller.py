@@ -143,7 +143,7 @@ class DeviceUIController:
         enabled: bool
     ) -> None:
         """Handle a connection toggle from the UI."""
-        logger.info(
+        logger.debug(
             f"Connection toggle: {interface.value}:{family.value} -> {enabled}"
         )
 
@@ -207,7 +207,7 @@ class DeviceUIController:
 
     def _handle_device_connect_toggle(self, device_id: str, connect: bool) -> None:
         """Handle a device connect/disconnect toggle from the UI."""
-        logger.info(f"Device toggle: {device_id} -> {'connect' if connect else 'disconnect'}")
+        logger.debug(f"Device toggle: {device_id} -> {'connect' if connect else 'disconnect'}")
 
         if connect:
             if self._on_connect_device:

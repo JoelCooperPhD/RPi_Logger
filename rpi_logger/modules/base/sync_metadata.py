@@ -56,7 +56,7 @@ class SyncMetadataWriter:
             logger.info("Wrote sync metadata: %s", filename)
             return sync_path
         except Exception as e:
-            logger.error("Failed to write sync metadata: %s", e)
+            logger.warning("Failed to write sync metadata: %s", e)
             return None
 
     @staticmethod
@@ -69,7 +69,7 @@ class SyncMetadataWriter:
         try:
             return await asyncio.to_thread(read_json_sync)
         except Exception as e:
-            logger.error("Failed to read sync metadata from %s: %s", sync_path, e)
+            logger.warning("Failed to read sync metadata from %s: %s", sync_path, e)
             return None
 
     @staticmethod

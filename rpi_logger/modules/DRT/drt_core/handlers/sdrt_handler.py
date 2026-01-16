@@ -49,6 +49,7 @@ class SDRTHandler(BaseDRTHandler):
         # Device sends cumulative counts; we calculate per-trial by tracking delta
         self._device_click_count = 0
         self._trial_start_click_count = 0
+        self._logged_unknown_response = False
 
         # Data logger for CSV output
         self._data_logger = DRTDataLogger(
@@ -83,7 +84,7 @@ class SDRTHandler(BaseDRTHandler):
             True if command was sent successfully
         """
         if command not in SDRT_COMMANDS:
-            logger.error("Unknown sDRT command: %s", command)
+            logger.warning("Unknown sDRT command: %s", command)
             return False
 
         cmd_string = SDRT_COMMANDS[command]
@@ -220,7 +221,9 @@ class SDRTHandler(BaseDRTHandler):
             # Route to appropriate handler
             response_type = SDRT_RESPONSES.get(key)
             if response_type is None:
-                logger.debug("Unknown sDRT response: %s", key)
+                if not self._logged_unknown_response:
+                    logger.debug("Unknown sDRT response: %s", key)
+                    self._logged_unknown_response = True
                 return
 
             if response_type == 'click':
@@ -244,13 +247,11 @@ class SDRTHandler(BaseDRTHandler):
             self._device_click_count = int(value)
             # Calculate per-trial clicks as delta from trial start
             self._click_count = self._device_click_count - self._trial_start_click_count
-            logger.debug("Click: device=%d, trial_start=%d, per_trial=%d",
-                        self._device_click_count, self._trial_start_click_count, self._click_count)
             self._create_background_task(self._dispatch_data_event('click', {
                 'count': self._click_count
             }))
         except ValueError:
-            logger.error("Invalid click value: %s", value)
+            logger.warning("Invalid click value: %s", value)
 
     def _handle_trial(self, value: str) -> None:
         """
@@ -273,7 +274,6 @@ class SDRTHandler(BaseDRTHandler):
                     'reaction_time': reaction_time,
                 }
 
-                logger.debug("Trial data: %s", self._buffered_trial_data)
                 self._create_background_task(self._dispatch_data_event('trial', {
                     'timestamp': timestamp,
                     'trial_number': trial_number,
@@ -281,7 +281,7 @@ class SDRTHandler(BaseDRTHandler):
                 }))
 
         except (ValueError, IndexError) as e:
-            logger.error("Error parsing trial data '%s': %s", value, e)
+            logger.warning("Error parsing trial data '%s': %s", value, e)
 
     def _handle_end(self) -> None:
         """Handle experiment end response."""
@@ -308,7 +308,6 @@ class SDRTHandler(BaseDRTHandler):
                 # Save baseline and reset per-trial count
                 self._trial_start_click_count = self._device_click_count
                 self._click_count = 0
-                logger.debug("Trial start: baseline click count = %d", self._trial_start_click_count)
             else:
                 # Stimulus OFF: log trial data if we have it
                 # This captures clicks from stimulus ON to stimulus OFF
@@ -320,13 +319,12 @@ class SDRTHandler(BaseDRTHandler):
                         )
                     self._buffered_trial_data = None
 
-            logger.debug("Stimulus state: %s", "ON" if self._stimulus_on else "OFF")
             self._create_background_task(self._dispatch_data_event('stimulus', {
                 'state': self._stimulus_on
             }))
 
         except ValueError:
-            logger.error("Invalid stimulus value: %s", value)
+            logger.warning("Invalid stimulus value: %s", value)
 
     def _handle_config(self, value: str) -> None:
         """
@@ -349,4 +347,4 @@ class SDRTHandler(BaseDRTHandler):
                 self._config_future.set_result(config)
 
         except Exception as e:
-            logger.error("Error parsing config '%s': %s", value, e)
+            logger.warning("Error parsing config '%s': %s", value, e)

@@ -70,8 +70,6 @@ class TkinterGUIBase:
         # Step 2: Set window title when we own the toplevel
         if not self._embedded_mode:
             self.root.title(title)
-        else:
-            logger.debug("Embedded GUI '%s' mounted inside host container", title)
 
         # Step 3: Initialize window geometry for standalone windows only
         self.initialize_window_geometry(default_width, default_height)
@@ -105,8 +103,6 @@ class TkinterGUIBase:
                     protocol_target("WM_DELETE_WINDOW", callback)
                 except Exception:
                     logger.warning("Unable to bind WM_DELETE_WINDOW handler", exc_info=True)
-            else:
-                logger.debug("No WM protocol target available; close handler not bound")
         else:
             logger.warning("No window close callback provided")
 
@@ -118,15 +114,12 @@ class TkinterGUIBase:
         if not hasattr(self, 'args'):
             raise AttributeError("TkinterGUIBase requires 'self.args' attribute")
         if getattr(self, "_embedded_mode", False):
-            logger.debug("Embedded GUI inherits geometry from host window")
             return
 
         if hasattr(self.args, 'window_geometry') and self.args.window_geometry:
             self.root.geometry(self.args.window_geometry)
-            logger.info("Applied window geometry from master: %s", self.args.window_geometry)
         else:
             self.root.geometry(f"{default_width}x{default_height}")
-            logger.debug("Applied default window geometry: %dx%d", default_width, default_height)
 
 
     def create_standard_layout(self, logger_height: int = 4, content_title: str = "Module", enable_content_toggle: bool = True):
@@ -349,7 +342,6 @@ class TkinterGUIBase:
     def send_geometry_to_parent(self):
         """Send current window geometry to parent process for persistence."""
         if getattr(self, "_embedded_mode", False):
-            logger.debug("Embedded GUI geometry managed by host; skipping send")
             return
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
@@ -367,9 +359,8 @@ class TkinterGUIBase:
         try:
             from rpi_logger.core.commands import StatusMessage
             StatusMessage.send("quitting", {"reason": "user_closed_window"})
-            logger.debug("Sent quitting status to parent")
-        except Exception as e:
-            logger.debug("Failed to send quitting status: %s", e)
+        except Exception:
+            pass  # Expected in standalone mode
 
     def withdraw_window(self):
         if not hasattr(self, 'root'):
@@ -389,23 +380,19 @@ class TkinterGUIBase:
 
         try:
             self.root.destroy()
-        except Exception as e:
-            logger.debug("Error destroying window: %s", e)
+        except Exception:
+            pass  # Window may already be destroyed
 
     def handle_window_close(self):
         """Handle window close - send geometry to parent and signal quitting."""
         if getattr(self, "_embedded_mode", False):
-            logger.debug("Embedded GUI close handled by host container")
             return
         if not hasattr(self, 'root'):
             raise AttributeError("TkinterGUIBase requires 'self.root' attribute")
 
-        logger.info("Sending window geometry before shutdown")
-
         try:
             self.send_geometry_to_parent()
-            logger.info("Sent geometry to parent")
-        except Exception as e:
-            logger.debug("Failed to send geometry to parent: %s", e)
+        except Exception:
+            pass  # Expected in standalone mode
 
         self.send_quitting_status()

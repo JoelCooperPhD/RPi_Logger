@@ -25,7 +25,7 @@ class EventLogger:
             await f.write("timestamp,event_type,details\n")
 
         self.initialized = True
-        logger.info("Event logger initialized: %s", self.event_log_path)
+        logger.debug("Event logger initialized: %s", self.event_log_path)
 
     async def log_event(self, event_type: str, details: str = "") -> None:
         if not self.initialized:
@@ -41,8 +41,6 @@ class EventLogger:
                 writer = csv.writer(buffer)
                 writer.writerow([timestamp, event_type, details])
                 await f.write(buffer.getvalue())
-
-        logger.debug("Logged event: %s - %s", event_type, details)
 
     async def log_session_start(self, session_dir: str) -> None:
         await self.log_event("session_start", f"path={session_dir}")

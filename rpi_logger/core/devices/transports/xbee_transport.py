@@ -84,10 +84,10 @@ class XBeeTransport:
         """
         if self._coordinator and self._coordinator.is_open():
             self._connected = True
-            logger.info(f"XBee transport ready for {self.node_id}")
+            logger.debug(f"XBee transport ready for {self.node_id}")
             return True
         else:
-            logger.error(f"Cannot connect XBee transport: coordinator not open")
+            logger.warning(f"Cannot connect XBee transport: coordinator not open")
             return False
 
     async def disconnect(self) -> None:
@@ -97,7 +97,7 @@ class XBeeTransport:
         Note: Does not close the coordinator - that's managed by XBeeManager.
         """
         self._connected = False
-        logger.info(f"XBee transport disconnected for {self.node_id}")
+        logger.debug(f"XBee transport disconnected for {self.node_id}")
 
     async def write(self, data: bytes) -> bool:
         """
@@ -110,7 +110,7 @@ class XBeeTransport:
             True if send was successful
         """
         if not self.is_connected:
-            logger.error(
+            logger.debug(
                 f"Cannot write to {self.node_id}: not connected "
                 f"(connected={self._connected}, coordinator={self._coordinator is not None}, "
                 f"open={self._coordinator.is_open() if self._coordinator else False}, "
@@ -121,13 +121,11 @@ class XBeeTransport:
         try:
             # Send as string (strip newline - XBee doesn't need it)
             cmd_str = data.decode('utf-8', errors='replace').strip()
-            logger.debug(f"XBee sending to {self.node_id}: '{cmd_str}'")
             await asyncio.to_thread(
                 self._coordinator.send_data,
                 self._remote_device,
                 cmd_str
             )
-            logger.debug(f"XBee sent to {self.node_id}: '{cmd_str}'")
             return True
 
         except Exception as e:
@@ -184,10 +182,6 @@ class XBeeTransport:
         try:
             # Try to put data in buffer without blocking
             self._receive_buffer.put_nowait(stripped_data)
-            logger.debug(
-                f"XBee buffered from {self.node_id}: {stripped_data} "
-                f"(queue size: {self._receive_buffer.qsize()})"
-            )
         except queue.Full:
             # Buffer full - drop oldest message to make room (ring buffer behavior)
             try:

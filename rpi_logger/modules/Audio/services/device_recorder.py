@@ -93,7 +93,7 @@ class AudioDeviceRecorder:
             except Exception:
                 actual_rate = None
             if actual_rate and actual_rate != self.sample_rate:
-                self.logger.info("Device %d rate adjusted %d -> %d", self.device.device_id, self.sample_rate, actual_rate)
+                self.logger.warning("Device %d rate adjusted %d -> %d", self.device.device_id, self.sample_rate, actual_rate)
                 self.sample_rate = actual_rate
             self.stream = stream
             self.logger.info("Input stream started (%d Hz)", self.sample_rate)

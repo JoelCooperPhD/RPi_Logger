@@ -47,7 +47,7 @@ class SessionManager:
         # Update output directory for all modules
         for module_name, process in module_processes.items():
             process.output_dir = session_dir
-            self.logger.info("Updated %s output_dir to: %s", module_name, session_dir)
+            self.logger.debug("Updated %s output_dir to: %s", module_name, session_dir)
 
         results = {}
         tasks = []
@@ -55,10 +55,10 @@ class SessionManager:
 
         for module_name, process in module_processes.items():
             if not process.is_running():
-                self.logger.warning("Module %s not running, skipping session start", module_name)
+                self.logger.info("Module %s not running, skipping session start", module_name)
                 results[module_name] = False
             elif not process.is_initialized():
-                self.logger.warning("Module %s not initialized, skipping session start", module_name)
+                self.logger.info("Module %s not initialized, skipping session start", module_name)
                 results[module_name] = False
             else:
                 task_modules.append(module_name)
@@ -106,10 +106,10 @@ class SessionManager:
 
         for module_name, process in module_processes.items():
             if not process.is_running():
-                self.logger.warning("Module %s not running, skipping session stop", module_name)
+                self.logger.info("Module %s not running, skipping session stop", module_name)
                 results[module_name] = False
             elif not process.is_initialized():
-                self.logger.warning("Module %s not initialized, skipping session stop", module_name)
+                self.logger.info("Module %s not initialized, skipping session stop", module_name)
                 results[module_name] = False
             else:
                 task_modules.append(module_name)
@@ -160,7 +160,7 @@ class SessionManager:
                         trial_label if trial_label else "N/A")
 
         if self.recording or self.is_any_recording(module_processes):
-            self.logger.warning("Already recording")
+            self.logger.info("Already recording")
             self.recording = True
             return {}
 
@@ -174,10 +174,10 @@ class SessionManager:
 
         for module_name, process in module_processes.items():
             if not process.is_running():
-                self.logger.warning("Module %s not running, skipping", module_name)
+                self.logger.info("Module %s not running, skipping", module_name)
                 results[module_name] = False
             elif not process.is_initialized():
-                self.logger.warning("Module %s not initialized, skipping recording", module_name)
+                self.logger.info("Module %s not initialized, skipping recording", module_name)
                 results[module_name] = False
             else:
                 task_modules.append(module_name)
@@ -227,7 +227,7 @@ class SessionManager:
         self.logger.info("Pausing recording on all modules")
 
         if not self.recording and not self.is_any_recording(module_processes):
-            self.logger.warning("Not recording")
+            self.logger.info("Not recording")
             return {}
 
         results = {}
@@ -236,10 +236,10 @@ class SessionManager:
 
         for module_name, process in module_processes.items():
             if not process.is_running():
-                self.logger.warning("Module %s not running, skipping pause", module_name)
+                self.logger.info("Module %s not running, skipping pause", module_name)
                 results[module_name] = False
             elif not process.is_initialized():
-                self.logger.warning("Module %s not initialized, skipping pause", module_name)
+                self.logger.info("Module %s not initialized, skipping pause", module_name)
                 results[module_name] = False
             else:
                 task_modules.append(module_name)

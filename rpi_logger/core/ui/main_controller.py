@@ -145,7 +145,6 @@ class MainController:
                 self.logger.info("Starting session in: %s", session_dir)
 
                 config_manager.write_config(CONFIG_PATH, {'last_session_dir': session_dir})
-                self.logger.debug("Saved last session directory to config: %s", session_dir)
 
                 running_modules = self.logger_system.get_running_modules()
                 if not running_modules:
@@ -157,7 +156,7 @@ class MainController:
                     if not response:
                         self.logger.info("Session start cancelled - no modules running")
                         return
-                    self.logger.warning("User chose to start session with no modules running")
+                    self.logger.info("User chose to start session with no modules running")
 
                 self._schedule_task(self._start_session_async(Path(session_dir)))
             else:
@@ -363,7 +362,7 @@ class MainController:
 
     async def _status_callback(self, module_name: str, state: ModuleState, status) -> None:
         """Handle module state changes - log only, no UI checkboxes to update."""
-        self.logger.debug("Module %s state changed to %s", module_name, state.value)
+        pass  # State changes logged by ModuleStateManager
 
     async def on_module_menu_toggle(self, module_name: str) -> None:
         """Handle module menu checkbox toggle."""
@@ -378,7 +377,7 @@ class MainController:
         device_module_info = _lookup_device_module(module_name)
         if device_module_info:
             interface, family = device_module_info
-            self.logger.info(
+            self.logger.debug(
                 "%s device section: %s (%s > %s)",
                 "Showing" if desired_state else "Hiding",
                 module_name, interface.value, family.value
@@ -389,7 +388,7 @@ class MainController:
 
         await self.logger_system.toggle_module_enabled(module_name, desired_state)
 
-        self.logger.info("%s module: %s", "Starting" if desired_state else "Stopping", module_name)
+        self.logger.debug("%s module: %s", "Starting" if desired_state else "Stopping", module_name)
         self._schedule_task(self._handle_module_toggle(module_name, desired_state))
 
     async def _handle_module_toggle(self, module_name: str, desired_state: bool) -> None:
@@ -405,7 +404,7 @@ class MainController:
                     f"Failed to {action} module: {module_name}\nCheck logs for details."
                 )
             else:
-                self.logger.info("Module %s %s successfully", module_name, "started" if desired_state else "stopped")
+                self.logger.debug("Module %s %s successfully", module_name, "started" if desired_state else "stopped")
                 if self.logger_system.event_logger:
                     if desired_state:
                         await self.logger_system.event_logger.log_module_started(module_name)
@@ -438,7 +437,7 @@ class MainController:
             if not enabled:
                 # Stop all running instances of this module
                 if self.logger_system.has_running_instances(module_name):
-                    self.logger.info("Stopping all instances of %s before disabling", module_name)
+                    self.logger.debug("Stopping all instances of %s before disabling", module_name)
                     await self.logger_system.stop_all_instances_for_module(module_name)
 
             # Enable/disable the connection type (updates both device_system and device_manager)
@@ -450,7 +449,7 @@ class MainController:
             # Notify devices changed to refresh UI
             self.logger_system.notify_devices_changed()
 
-            self.logger.info(
+            self.logger.debug(
                 "Device module %s %s (section %s)",
                 module_name, "enabled" if enabled else "disabled", family.value
             )
@@ -467,13 +466,13 @@ class MainController:
                 device_module_info = _lookup_device_module(module_name)
                 if device_module_info:
                     interface, family = device_module_info
-                    self.logger.info("Auto-enabling device section: %s", module_name)
+                    self.logger.debug("Auto-enabling device section: %s", module_name)
                     self.logger_system.set_connection_enabled(interface, family, True)
                 else:
-                    self.logger.info("Auto-starting module: %s", module_name)
+                    self.logger.debug("Auto-starting module: %s", module_name)
                     success = await self.logger_system.set_module_enabled(module_name, True)
                     if not success:
-                        self.logger.error("Failed to auto-start module: %s", module_name)
+                        self.logger.warning("Failed to auto-start module: %s", module_name)
 
         # Refresh UI after enabling device sections
         self.logger_system.notify_devices_changed()
@@ -536,7 +535,7 @@ class MainController:
             elif sys.platform == 'win32':
                 subprocess.Popen(['explorer', str(target_dir)])
 
-            self.logger.info("Opened last session location: %s", target_dir)
+            self.logger.debug("Opened last session location: %s", target_dir)
         except Exception as e:
             self.logger.error("Failed to open last session location: %s", e)
 
@@ -557,7 +556,7 @@ class MainController:
             elif sys.platform == 'win32':
                 subprocess.Popen(['notepad.exe', str(MASTER_LOG_FILE)])
 
-            self.logger.info("Opened log file: %s", MASTER_LOG_FILE)
+            self.logger.debug("Opened log file: %s", MASTER_LOG_FILE)
         except Exception as e:
             self.logger.error("Failed to open log file: %s", e)
 
@@ -577,7 +576,7 @@ class MainController:
             elif sys.platform == 'win32':
                 subprocess.Popen(['explorer', str(logs_dir)])
 
-            self.logger.info("Opened logs directory: %s", logs_dir)
+            self.logger.debug("Opened logs directory: %s", logs_dir)
         except Exception as e:
             self.logger.error("Failed to open logs directory: %s", e)
 
@@ -594,7 +593,7 @@ class MainController:
             elif sys.platform == 'win32':
                 subprocess.Popen(['notepad.exe', str(CONFIG_PATH)])
 
-            self.logger.info("Opened config file: %s", CONFIG_PATH)
+            self.logger.debug("Opened config file: %s", CONFIG_PATH)
         except Exception as e:
             self.logger.error("Failed to open config file: %s", e)
 
@@ -609,7 +608,7 @@ class MainController:
         try:
             url = "https://github.com/JoelCooperPhD/RPi_Logger/issues"
             webbrowser.open(url)
-            self.logger.info("Opened issue tracker: %s", url)
+            self.logger.debug("Opened issue tracker: %s", url)
         except Exception as e:
             self.logger.error("Failed to open issue tracker: %s", e)
 
@@ -629,10 +628,10 @@ class MainController:
         """Handle USB scanning toggle triggered by module enable/disable."""
         try:
             if enabled:
-                self.logger.info("Enabling USB device scanning")
+                self.logger.debug("Enabling USB device scanning")
                 await self.logger_system.start_device_scanning()
             else:
-                self.logger.info("Disabling USB device scanning")
+                self.logger.debug("Disabling USB device scanning")
                 await self.logger_system.stop_device_scanning()
         except Exception as e:
             self.logger.error("Error toggling USB scan: %s", e, exc_info=True)
@@ -645,12 +644,12 @@ class MainController:
         """
         try:
             if connect:
-                self.logger.info("Connecting device: %s", device_id)
+                self.logger.debug("Connecting device: %s", device_id)
                 success = await self.logger_system.connect_and_start_device(device_id)
                 if not success:
-                    self.logger.error("Failed to connect device: %s", device_id)
+                    self.logger.warning("Failed to connect device: %s", device_id)
             else:
-                self.logger.info("Disconnecting device: %s", device_id)
+                self.logger.debug("Disconnecting device: %s", device_id)
                 await self.logger_system.stop_and_disconnect_device(device_id)
         except Exception as e:
             self.logger.error("Error changing device connection: %s", e, exc_info=True)

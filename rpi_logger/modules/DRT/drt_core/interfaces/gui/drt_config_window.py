@@ -190,9 +190,8 @@ class DRTConfigWindow:
                     self._config_path,
                     {self.CONFIG_DIALOG_GEOMETRY_KEY: position}
                 )
-                self.logger.debug("Saved config dialog position: %s", position)
-        except Exception as e:
-            self.logger.debug("Could not save position: %s", e)
+        except Exception:
+            pass  # Position save is best-effort
 
     def _on_close(self):
         """Handle dialog close."""

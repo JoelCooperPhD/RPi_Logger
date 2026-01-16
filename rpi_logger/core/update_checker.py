@@ -78,8 +78,6 @@ async def check_for_updates(current_version: str) -> Optional[UpdateInfo]:
         latest_version, release_notes, assets = result
 
         if not is_newer_version(current_version, latest_version):
-            logger.debug("No update available (current: %s, latest: %s)",
-                        current_version, latest_version)
             return None
 
         logger.info("Update available: %s -> %s", current_version, latest_version)

@@ -228,7 +228,7 @@ class EyeTrackerConfigWindow:
     def _load_config(self):
         """Load current configuration from runtime."""
         if not self.runtime or not self.runtime._tracker_config:
-            self.logger.warning("No tracker config available")
+            self.logger.debug("No tracker config available")
             return
 
         config = self.runtime._tracker_config
@@ -358,6 +358,5 @@ class EyeTrackerConfigWindow:
                     self._config_path,
                     {self.CONFIG_DIALOG_GEOMETRY_KEY: position}
                 )
-                self.logger.debug("Saved config dialog position: %s", position)
-        except Exception as e:
-            self.logger.debug("Could not save position: %s", e)
+        except Exception:
+            pass  # Position save is best-effort

@@ -32,9 +32,8 @@ try:
         get_vid_pid_for_camera_name,
     )
     IOKIT_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     IOKIT_AVAILABLE = False
-    logger.debug(f"IOKit utilities not available - audio sibling detection disabled: {e}")
 
 # Try to import OpenCV
 try:
@@ -111,15 +110,6 @@ class MacOSCameraBackend:
                     camera_index=index,
                 ))
 
-                if audio_sibling:
-                    logger.info(
-                        f"Discovered macOS camera at index {index}: {friendly_name} "
-                        f"(audio: {audio_sibling.name})"
-                    )
-                else:
-                    logger.debug(
-                        f"Discovered macOS camera at index {index}: {friendly_name} (no audio)"
-                    )
             else:
                 if cap:
                     cap.release()
@@ -147,15 +137,13 @@ class MacOSCameraBackend:
                 unique_id = device.uniqueID() or ""
                 model_id = device.modelID() or ""
                 result.append((name, unique_id, model_id))
-                logger.debug(f"AVFoundation device: {name} (model: {model_id})")
 
             return result if result else None
 
         except ImportError:
-            logger.debug("PyObjC AVFoundation not available, using generic camera names")
             return None
         except Exception as e:
-            logger.warning(f"Failed to enumerate AVFoundation devices: {e}")
+            logger.warning("Failed to enumerate AVFoundation devices: %s", e)
             return None
 
     def _find_audio_sibling(
@@ -181,8 +169,6 @@ class MacOSCameraBackend:
             # Strategy 1: VID:PID matching for USB webcams
             vid_pid = get_vid_pid_for_camera_name(camera_name)
             if vid_pid:
-                logger.debug(f"Camera '{camera_name}' has VID:PID {vid_pid}")
-
                 audio_info = find_audio_device_with_vid_pid(vid_pid)
                 if audio_info:
                     audio_sibling = AudioSiblingInfo(
@@ -191,10 +177,6 @@ class MacOSCameraBackend:
                         channels=audio_info.get("channels", 2),
                         sample_rate=audio_info.get("sample_rate", 48000.0),
                         name=audio_info.get("name", ""),
-                    )
-                    logger.info(
-                        f"Found USB audio sibling for '{camera_name}': "
-                        f"'{audio_sibling.name}' (index={audio_sibling.sounddevice_index})"
                     )
                     return audio_sibling, vid_pid
 
@@ -209,17 +191,12 @@ class MacOSCameraBackend:
                     sample_rate=builtin_audio.get("sample_rate", 48000.0),
                     name=builtin_audio.get("name", ""),
                 )
-                logger.info(
-                    f"Found built-in audio sibling for '{camera_name}': "
-                    f"'{audio_sibling.name}' (index={audio_sibling.sounddevice_index})"
-                )
                 return audio_sibling, vid_pid
 
-            logger.debug(f"No audio sibling found for camera '{camera_name}'")
             return None, vid_pid
 
         except Exception as e:
-            logger.warning(f"Audio sibling detection failed for '{camera_name}': {e}")
+            logger.warning("Audio sibling detection failed for '%s': %s", camera_name, e)
             return None, None
 
     def _create_stable_id(

@@ -308,7 +308,7 @@ class GPSConfigWindow:
             if hasattr(self.system, 'apply_settings_change'):
                 self.system.apply_settings_change()
 
-            self.logger.info("GPS config applied: baud=%d, speed=%s, alt=%s, rate=%dHz, sentences=%s",
+            self.logger.debug("GPS config applied: baud=%d, speed=%s, alt=%s, rate=%dHz, sentences=%s",
                              baud, speed_unit, alt_unit, update_rate, enabled_sentences)
 
             if messagebox:

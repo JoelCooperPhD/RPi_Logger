@@ -114,7 +114,7 @@ class StreamControls:
             return
 
         enabled = state.enabled.get()
-        self._logger.info("Stream '%s' %s", stream, "enabled" if enabled else "disabled")
+        self._logger.debug("Stream '%s' %s", stream, "enabled" if enabled else "disabled")
 
         # Update viewer visibility
         if state.viewer is not None:

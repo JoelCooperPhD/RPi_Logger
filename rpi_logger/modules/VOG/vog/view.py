@@ -186,7 +186,7 @@ class VOGTkinterGUI:
             try:
                 title = "VOG - Visual Occlusion Glasses"
                 self._plotter = VOGPlotter(self._content_frame, title=title)
-                self.logger.info("Created plotter for %s", port or "pending device")
+                self.logger.debug("Created plotter for %s", port or "pending device")
             except Exception as e:
                 self.logger.warning("Could not create plotter: %s", e)
                 self._plotter = None
@@ -209,7 +209,7 @@ class VOGTkinterGUI:
         self.logger.info("%s device connected: %s", type_str.upper(), port)
 
         if self._port is not None:
-            self.logger.warning("Device already connected at %s, ignoring new connection at %s", self._port, port)
+            self.logger.info("Device already connected at %s, ignoring new connection at %s", self._port, port)
             return
 
         self._port = port
@@ -251,7 +251,6 @@ class VOGTkinterGUI:
             # Primary: Use instance_id if available (for multi-instance modules)
             if hasattr(self.args, 'instance_id') and self.args.instance_id:
                 title = self.args.instance_id
-                self.logger.debug("VOG using instance_id for title: %s", title)
             # Fallback: Build from device info (original logic)
             elif self._port and self._device_type:
                 # Format: "VOG(USB):ACM0" or "VOG(XBee):ACM0"
@@ -270,34 +269,26 @@ class VOGTkinterGUI:
                     conn_type = "USB"
 
                 title = f"VOG({conn_type}):{port_short}"
-                self.logger.debug("VOG using device info for title: %s", title)
             else:
                 title = "VOG"
-                self.logger.debug("VOG using default title: %s", title)
 
             toplevel.title(title)
-            self.logger.debug("VOG window title set to: %s", title)
         except Exception as e:
-            self.logger.warning("Failed to update window title: %s", e)
+            self.logger.debug("Failed to update window title: %s", e)
 
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         """Handle data from device - update plots and displays."""
-        self.logger.debug("on_device_data: port=%s type=%s data=%s", port, data_type, data)
-
         if port != self._port:
-            self.logger.warning("on_device_data: port %s does not match connected port %s", port, self._port)
             return
 
         # Handle stimulus state updates
         if data_type == 'stimulus' or data.get('event') == 'stimulus':
             state = data.get('state', data.get('value'))
-            self.logger.debug("Stimulus update: state=%s, plotter=%s, running=%s", state, self._plotter, self._running)
             if state is not None and self._plotter:
                 try:
-                    self.logger.debug("Calling state_update: recording=%s, run=%s", self._plotter.recording, self._plotter.run)
                     self._plotter.state_update(int(state))
                 except (ValueError, TypeError) as e:
-                    self.logger.error("state_update failed: %s", e)
+                    self.logger.warning("state_update failed: %s", e)
 
         # Handle trial data updates
         elif data_type == 'data' or data.get('event') == 'data':
@@ -376,19 +367,19 @@ class VOGTkinterGUI:
 
     def _on_configure_clicked(self):
         """Handle configure button click - show config dialog."""
-        self.logger.info("Configure button clicked for port: %s", self._port)
+        self.logger.debug("Configure button clicked for port: %s", self._port)
 
         if self._port is None:
-            self.logger.warning("No device connected - cannot configure")
+            self.logger.debug("No device connected - cannot configure")
             return
 
         if VOGConfigWindow is None:
-            self.logger.warning("Configuration dialog not available (import failed)")
+            self.logger.debug("Configuration dialog not available (import failed)")
             return
 
         # Check if runtime is properly bound (not placeholder)
         if isinstance(self.system, _SystemPlaceholder):
-            self.logger.warning("Runtime not yet bound - cannot configure device")
+            self.logger.debug("Runtime not yet bound - cannot configure device")
             try:
                 from tkinter import messagebox
                 messagebox.showwarning(
@@ -401,7 +392,7 @@ class VOGTkinterGUI:
             return
 
         if not self.system or not hasattr(self.system, 'get_device_handler'):
-            self.logger.warning("System not available for configuration (system=%s)", type(self.system).__name__)
+            self.logger.debug("System not available for configuration (system=%s)", type(self.system).__name__)
             return
 
         # Get root window for the dialog
@@ -410,16 +401,16 @@ class VOGTkinterGUI:
             try:
                 root = self._frame.winfo_toplevel()
             except Exception as e:
-                self.logger.error("Failed to get toplevel window: %s", e)
+                self.logger.debug("Failed to get toplevel window: %s", e)
 
         if not root:
-            self.logger.warning("No root window available for config dialog")
+            self.logger.debug("No root window available for config dialog")
             return
 
         try:
             VOGConfigWindow(root, self._port, self.system, self._device_type, async_bridge=self.async_bridge)
         except Exception as e:
-            self.logger.error("Failed to create config window: %s", e, exc_info=True)
+            self.logger.warning("Failed to create config window: %s", e, exc_info=True)
 
     # ------------------------------------------------------------------
     # UI helpers
@@ -481,8 +472,8 @@ class VOGView:
             try:
                 root = parent.winfo_toplevel()
                 Theme.apply(root)
-            except Exception as e:
-                self.logger.debug("Could not apply theme: %s", e)
+            except Exception:
+                pass  # Theme application is best-effort
 
         frame_cls = ttk.Frame if ttk is not None else tk.Frame
         if hasattr(parent, "columnconfigure"):
@@ -515,7 +506,7 @@ class VOGView:
         # Apply pending runtime binding if bind_runtime was called before GUI was created
         if self._runtime:
             gui.system = self._runtime
-            self.logger.info("Applied pending runtime binding to GUI (system=%s)", type(self._runtime).__name__)
+            self.logger.debug("Applied pending runtime binding to GUI (system=%s)", type(self._runtime).__name__)
 
         return container
 
@@ -523,10 +514,10 @@ class VOGView:
         """Allow the runtime to expose its API to the GUI once ready."""
         self._runtime = runtime
         if not self.gui:
-            self.logger.warning("bind_runtime called but self.gui is None")
+            self.logger.debug("bind_runtime called but self.gui is None")
             return
         self.gui.system = runtime
-        self.logger.info("Runtime bound to GUI (system=%s)", type(runtime).__name__)
+        self.logger.debug("Runtime bound to GUI (system=%s)", type(runtime).__name__)
         if isinstance(self.gui.async_bridge, _LoopAsyncBridge):
             loop = getattr(runtime, "_loop", None)
             if loop:
@@ -652,8 +643,8 @@ class VOGView:
             # Delete existing "Quick Start Guide" entry and add VOG-specific one
             help_menu.delete(0)
             help_menu.add_command(label="Quick Start Guide", command=self._show_vog_help)
-        except Exception as e:
-            self.logger.debug("Could not override help menu: %s", e)
+        except Exception:
+            pass  # Help menu override is best-effort
 
     def _show_vog_help(self) -> None:
         """Show VOG-specific help dialog."""
@@ -663,7 +654,7 @@ class VOGView:
             if root:
                 VOGHelpDialog(root)
         except Exception as e:
-            self.logger.error("Failed to show VOG help dialog: %s", e)
+            self.logger.warning("Failed to show VOG help dialog: %s", e)
 
     # ------------------------------------------------------------------
     # Capture Stats panel
@@ -761,8 +752,8 @@ class VOGView:
             if view_menu is not None:
                 view_menu.entryconfigure("Lens: ON", state=state)
                 view_menu.entryconfigure("Lens: OFF", state=state)
-        except tk.TclError as e:
-            self.logger.debug("Failed to update menu state: %s", e)
+        except tk.TclError:
+            pass  # Menu state update is best-effort
 
     def _on_lens_on(self) -> None:
         """Handle Lens: ON menu command."""

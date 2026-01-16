@@ -175,13 +175,13 @@ class DeviceLifecycleManager:
 
         # 5. Store device
         self._devices[event.device_id] = device_info
-        logger.info(f"Device discovered: {display_name} ({event.device_id})")
+        logger.debug(f"Device discovered: {display_name} ({event.device_id})")
 
         # 6. Check auto-connect
         # Use device-aware method to support multi-instance modules (DRT, VOG, Cameras)
         # which need to auto-connect ALL devices, not just the first one
         if self._selection.consume_auto_connect_for_device(event.module_id, event.device_id):
-            logger.info(f"Auto-connecting device {event.device_id} for module {event.module_id}")
+            logger.debug(f"Auto-connecting device {event.device_id} for module {event.module_id}")
             if self._connect_callback:
                 await self._connect_callback(event.device_id)
             return  # notify_changed called by connect callback
@@ -209,7 +209,7 @@ class DeviceLifecycleManager:
         # 3. Remove from storage
         device = self._devices.pop(device_id, None)
         if device:
-            logger.info(f"Device lost: {device.display_name} ({device_id})")
+            logger.debug(f"Device lost: {device.display_name} ({device_id})")
 
         # 4. Notify observers
         self._notify_changed()

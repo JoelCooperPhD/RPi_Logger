@@ -46,7 +46,7 @@ class BackgroundTaskManager:
                 self._logger.exception("%s failed extracting task exception", self._name, exc_info=err)
                 return
             if exc:
-                self._logger.error("%s task %s failed: %s", self._name, t.get_name(), exc, exc_info=exc)
+                self._logger.warning("%s task %s failed: %s", self._name, t.get_name(), exc, exc_info=exc)
 
         task.add_done_callback(_on_done)
 

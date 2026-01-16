@@ -130,7 +130,7 @@ class TimerManager:
 
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
-            self.logger.debug("Session timer task cancelled")
+            pass  # Normal cancellation on session stop
 
     async def _update_trial_timer(self) -> None:
         try:
@@ -146,7 +146,7 @@ class TimerManager:
 
                 await asyncio.sleep(1.0)
         except asyncio.CancelledError:
-            self.logger.debug("Trial timer task cancelled")
+            pass  # Normal cancellation on trial stop
 
     async def _update_system_monitor(self) -> None:
         try:
@@ -176,4 +176,4 @@ class TimerManager:
 
                 await asyncio.sleep(2.0)
         except asyncio.CancelledError:
-            self.logger.debug("System monitor task cancelled")
+            pass  # Normal cancellation on shutdown

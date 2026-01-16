@@ -25,14 +25,13 @@ class RecorderService:
             await self.disable_device()
         if self.recorder is None:
             self.recorder = AudioDeviceRecorder(device, effective_rate, meter, self.logger)
-        self.logger.debug("Enabling recorder for device %d (%s)", device.device_id, device.name)
         try:
             await asyncio.wait_for(asyncio.to_thread(self.recorder.start_stream), timeout=self.start_timeout)
             return True
         except asyncio.TimeoutError:
-            self.logger.error("Timeout starting device %d", device.device_id)
+            self.logger.warning("Timeout starting device %d", device.device_id)
         except Exception as exc:
-            self.logger.error("Failed to start device %d: %s", device.device_id, exc)
+            self.logger.warning("Failed to start device %d: %s", device.device_id, exc)
         self.recorder = None
         return False
 
@@ -40,7 +39,6 @@ class RecorderService:
         if not (recorder := self.recorder):
             return
         self.recorder = None
-        self.logger.debug("Disabling recorder for device %d", recorder.device.device_id)
         try:
             await asyncio.wait_for(asyncio.to_thread(recorder.stop_stream), timeout=self.stop_timeout)
         except Exception as exc:
@@ -48,10 +46,9 @@ class RecorderService:
 
     async def begin_recording(self, session_dir: Path, trial_number: int) -> bool:
         if not self.recorder:
-            self.logger.warning("No recorder available for recording")
+            self.logger.info("No recorder available for recording")
             return False
         try:
-            self.logger.debug("Starting recording for device %d (trial %d)", self.recorder.device.device_id, trial_number)
             await asyncio.to_thread(self.recorder.begin_recording, session_dir, trial_number)
             return True
         except Exception as exc:
@@ -63,8 +60,6 @@ class RecorderService:
             return None
         try:
             handle = await asyncio.to_thread(self.recorder.finish_recording)
-            if handle:
-                self.logger.debug("Finished recording: %s", handle.file_path.name)
             return handle
         except Exception as exc:
             self.logger.error("Failed to finish recording: %s", exc)

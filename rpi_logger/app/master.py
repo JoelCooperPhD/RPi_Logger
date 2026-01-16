@@ -161,7 +161,7 @@ def run_gui(args, logger_system: LoggerSystem, api_server: Optional[APIServer] =
     This function runs the Tkinter mainloop on the main thread.
     Async operations run in a background thread via AsyncBridge.
     """
-    logger.info("Starting in GUI mode")
+    logger.debug("Starting in GUI mode")
 
     ui = MainWindow(logger_system)
     shutdown_requested = False
@@ -262,10 +262,10 @@ async def main(argv: Optional[list[str]] = None) -> None:
     logger.info("=" * 60)
     if args.api:
         debug_info = " (debug mode)" if args.api_debug else ""
-        logger.info("REST API: http://%s:%d%s", args.api_host, args.api_port, debug_info)
-    logger.info("Data directory: %s", args.data_dir)
-    logger.info("Log file: %s", MASTER_LOG_FILE)
-    logger.info("Session will be created when user starts recording")
+        logger.debug("REST API: http://%s:%d%s", args.api_host, args.api_port, debug_info)
+    logger.debug("Data directory: %s", args.data_dir)
+    logger.debug("Log file: %s", MASTER_LOG_FILE)
+    logger.debug("Session will be created when user starts recording")
     logger.info("=" * 60)
 
     initial_session_dir = args.data_dir.resolve()
@@ -280,9 +280,9 @@ async def main(argv: Optional[list[str]] = None) -> None:
     await logger_system.async_init()
 
     modules = logger_system.get_available_modules()
-    logger.info("Discovered %d modules:", len(modules))
+    logger.debug("Discovered %d modules:", len(modules))
     for module in modules:
-        logger.info("  - %s: %s", module.name, module.entry_point)
+        logger.debug("  - %s: %s", module.name, module.entry_point)
 
     # Start API server if enabled (async)
     shutdown_coordinator = get_shutdown_coordinator()

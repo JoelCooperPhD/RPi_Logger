@@ -25,7 +25,7 @@ session_prefix = session
 
 # Last used session directory (automatically updated when user selects location via UI)
 # This is where session data and recordings are actually saved
-last_session_dir = C:/Users/joelc/OneDrive/Desktop
+last_session_dir = /home/joel
 
 
 ################################################################################
@@ -43,9 +43,16 @@ last_session_dir = C:/Users/joelc/OneDrive/Desktop
 # LOGGING
 ################################################################################
 
-# Master log file: logs/master.log
-log_level = info              # Python log level (debug/info/warning/error/critical)
-console_output = false        # Also print to console (true/false)
+# Master log file location (platform-specific, XDG-compliant):
+#   Linux:   ~/.local/state/rpi_logger/logs/master.log
+#   macOS:   ~/Library/Logs/RPILogger/master.log
+#   Windows: %LOCALAPPDATA%/RPILogger/logs/master.log
+#
+# Override log location by setting the RPI_LOGGER_STATE_DIR environment variable.
+# When set, logs are written to: {RPI_LOGGER_STATE_DIR}/logs/master.log
+#
+log_level = debug
+console_output = false        # Also print log messages to console (true/false)
 
 
 ################################################################################
@@ -116,13 +123,13 @@ ui_update_rate_hz = 10        # Status display refresh rate (1-30 Hz)
 #        └── Notes/
 #            └── 20251014_120000_NTS_trial001_notes.csv
 #
-#    Master logger logs go to: logs/master.log
+#    Master logger logs go to platform-specific location (see LOGGING section above).
 #
 # 4. Module Communication:
 #    - Master launches modules with: --mode gui --output-dir {session_dir}/ModuleName/ --enable-commands
 #    - JSON protocol over stdin/stdout for commands and status
 #    - Each module runs independently and can be stopped individually
-gui_logger_visible = false
+gui_logger_visible = true
 camera_1_alias = Camera 1
 camera_2_alias = Camera 2
 enabled_connections = CSI:Camera-CSI,Network:EyeTracker-Neon,UART:GPS,USB:Camera-USB,USB:DRT,USB:VOG

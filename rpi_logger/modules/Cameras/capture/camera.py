@@ -64,7 +64,7 @@ class Camera:
 
         # Log MSMF HW transforms setting for diagnostics
         hw_transforms = os.environ.get("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "not set")
-        logger.info("Opening camera %s (MSMF_HW_TRANSFORMS=%s)", device, hw_transforms)
+        logger.debug("Opening camera %s (MSMF_HW_TRANSFORMS=%s)", device, hw_transforms)
 
         # Explicitly select backend to avoid "DSHOW can't capture by index" warnings.
         # On Windows, use MSMF which gets better FPS than DSHOW.
@@ -75,7 +75,7 @@ class Camera:
         else:
             self._cap = cv2.VideoCapture(device)
         elapsed = time.time() - start_time
-        logger.info("cv2.VideoCapture(%s) took %.2f seconds", device, elapsed)
+        logger.debug("cv2.VideoCapture(%s) took %.2f seconds", device, elapsed)
 
         if not self._cap or not self._cap.isOpened():
             logger.error("Failed to open camera: %s", self._device)
@@ -138,7 +138,7 @@ class Camera:
         intervals: list[float] = []
         last_time = time.monotonic()
 
-        logger.info("Capture loop started")
+        logger.debug("Capture loop started")
 
         while self._running and self._cap and self._cap.isOpened():
             ret, frame_data = self._cap.read()
@@ -167,7 +167,7 @@ class Camera:
             )
             self._buffer.put(frame)
 
-        logger.info(
+        logger.debug(
             "Capture loop ended: frames=%d, hardware_fps=%.1f",
             self._frame_number,
             self._hardware_fps,

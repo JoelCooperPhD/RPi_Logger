@@ -53,19 +53,16 @@ class USBPhysicalIdResolver:
             sysfs_path = Path(f"/sys/class/video4linux/{video_name}/device")
 
             if not sysfs_path.exists():
-                logger.debug("No sysfs path for %s", dev_path)
                 return None
 
             resolved = sysfs_path.resolve()
 
             if not _is_usb_path(resolved):
-                logger.debug("%s is not a USB device", dev_path)
                 return None
 
             return _extract_usb_bus_path(resolved)
 
-        except Exception as e:
-            logger.debug("Could not resolve USB path for %s: %s", dev_path, e)
+        except Exception:
             return None
 
     @staticmethod
@@ -83,19 +80,16 @@ class USBPhysicalIdResolver:
             sysfs_path = Path(f"/sys/class/sound/card{card_index}/device")
 
             if not sysfs_path.exists():
-                logger.debug("No sysfs path for ALSA card %d", card_index)
                 return None
 
             resolved = sysfs_path.resolve()
 
             if not _is_usb_path(resolved):
-                logger.debug("ALSA card %d is not USB", card_index)
                 return None
 
             return _extract_usb_bus_path(resolved)
 
-        except Exception as e:
-            logger.debug("Could not resolve USB path for ALSA card %d: %s", card_index, e)
+        except Exception:
             return None
 
     @staticmethod
@@ -130,10 +124,8 @@ class USBPhysicalIdResolver:
             return _find_alsa_card_by_name_match(device_name)
 
         except ImportError:
-            logger.debug("sounddevice not available")
             return None
-        except Exception as e:
-            logger.debug("Could not resolve USB path for sounddevice %d: %s", sd_index, e)
+        except Exception:
             return None
 
     @staticmethod
@@ -152,19 +144,16 @@ class USBPhysicalIdResolver:
             sysfs_path = Path(f"/sys/class/tty/{tty_name}/device")
 
             if not sysfs_path.exists():
-                logger.debug("No sysfs path for %s", port)
                 return None
 
             resolved = sysfs_path.resolve()
 
             if not _is_usb_path(resolved):
-                logger.debug("%s is not a USB device", port)
                 return None
 
             return _extract_usb_bus_path(resolved)
 
-        except Exception as e:
-            logger.debug("Could not resolve USB path for %s: %s", port, e)
+        except Exception:
             return None
 
     @staticmethod
@@ -193,8 +182,6 @@ class USBPhysicalIdResolver:
         if not video_bus_path:
             return None
 
-        logger.debug("Looking for audio sibling of %s (bus path: %s)", dev_path, video_bus_path)
-
         try:
             import sounddevice as sd
             devices = sd.query_devices()
@@ -207,10 +194,6 @@ class USBPhysicalIdResolver:
                 # Check if this device has same USB bus path
                 audio_bus_path = USBPhysicalIdResolver.from_sounddevice_index(idx)
                 if audio_bus_path == video_bus_path:
-                    logger.info(
-                        "Found audio sibling for %s: index=%d, name=%s",
-                        dev_path, idx, device_info.get("name", "")
-                    )
                     return {
                         "sounddevice_index": idx,
                         "alsa_card": _extract_alsa_card_from_name(device_info.get("name", "")),
@@ -220,9 +203,9 @@ class USBPhysicalIdResolver:
                     }
 
         except ImportError:
-            logger.debug("sounddevice not available for audio sibling detection")
-        except Exception as e:
-            logger.debug("Error finding audio sibling: %s", e)
+            pass
+        except Exception:
+            pass
 
         return None
 
@@ -336,7 +319,7 @@ def get_all_usb_audio_bus_paths() -> dict[int, str]:
 
     except ImportError:
         pass
-    except Exception as e:
-        logger.debug("Error getting USB audio bus paths: %s", e)
+    except Exception:
+        pass
 
     return result

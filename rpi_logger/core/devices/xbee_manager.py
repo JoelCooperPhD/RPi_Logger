@@ -298,7 +298,7 @@ class XBeeManager:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in XBee scan loop: {e}")
+                logger.warning(f"Error in XBee scan loop: {e}")
 
     async def _scan_for_dongle(self) -> None:
         """Scan for XBee dongle and initialize if found."""
@@ -319,7 +319,7 @@ class XBeeManager:
                 await self._close_coordinator()
 
         except Exception as e:
-            logger.error(f"Error scanning for XBee dongle: {e}")
+            logger.warning(f"Error scanning for XBee dongle: {e}")
 
     async def _initialize_coordinator(self, port: str) -> None:
         """Initialize the XBee coordinator on the given port."""
@@ -338,7 +338,7 @@ class XBeeManager:
             # Set up message callback
             self._coordinator.add_data_received_callback(self._on_message_received)
 
-            logger.info(f"XBee coordinator initialized on {port}")
+            logger.debug(f"XBee coordinator initialized on {port}")
 
             if self.on_dongle_connected:
                 await self.on_dongle_connected(port)
@@ -383,7 +383,7 @@ class XBeeManager:
                 if self._coordinator.is_open():
                     await asyncio.to_thread(self._coordinator.close)
             except Exception as e:
-                logger.error(f"Error closing XBee coordinator: {e}")
+                logger.warning(f"Error closing XBee coordinator: {e}")
             finally:
                 self._coordinator = None
                 self._coordinator_port = None
@@ -410,7 +410,6 @@ class XBeeManager:
             return
 
         try:
-            logger.info("Starting XBee network discovery")
             self._state = XBeeManagerState.DISCOVERING
 
             # Notify scanning started
@@ -436,7 +435,7 @@ class XBeeManager:
 
     async def _periodic_rediscovery_loop(self) -> None:
         """Periodically trigger network rediscovery to find new devices."""
-        logger.info(
+        logger.debug(
             f"Starting periodic network rediscovery "
             f"(interval: {self._rediscovery_interval}s)"
         )
@@ -448,13 +447,12 @@ class XBeeManager:
                 if not self.is_connected:
                     break
 
-                logger.debug("Running periodic network rediscovery")
                 await self._start_network_discovery()
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in periodic rediscovery: {e}")
+                logger.warning(f"Error in periodic rediscovery: {e}")
 
         logger.debug("Periodic rediscovery loop ended")
 
@@ -471,15 +469,15 @@ class XBeeManager:
             network = self._coordinator.get_network()
             devices = network.get_devices()
 
-            logger.info(f"Network discovery found {len(devices)} device(s)")
-
             loop = self._loop
             if loop is None or not loop.is_running():
                 logger.error("No running event loop for discovery callback")
                 return
 
             for device in devices:
-                def schedule_discovery(d=device):
+                node_id = device.get_node_id()
+
+                def schedule_discovery(d=device, nid=node_id):
                     if loop.is_running():
                         loop.create_task(self._handle_device_discovered(d))
 
@@ -514,14 +512,12 @@ class XBeeManager:
 
             # Skip if already known
             if node_id in self._discovered_devices:
-                logger.debug(f"Device already known: {node_id}")
                 return
-
             spec = get_spec(device_type)
             address = str(remote_device.get_64bit_addr())
             device_number = extract_device_number(node_id)
 
-            logger.info(f"Discovered wireless device: {node_id} ({device_type.value})")
+            logger.debug(f"Discovered wireless device: {node_id} ({device_type.value})")
 
             # Store device info
             device = WirelessDevice(
@@ -551,7 +547,7 @@ class XBeeManager:
         self._remote_devices.pop(node_id, None)
 
         if device:
-            logger.info(f"Lost wireless device: {node_id}")
+            logger.debug(f"Lost wireless device: {node_id}")
 
             if self.on_device_lost:
                 await self.on_device_lost(node_id)
@@ -578,7 +574,6 @@ class XBeeManager:
 
             # Decode data
             data = message.data.decode('utf-8', errors='replace')
-            logger.debug(f"XBee received from {node_id}: '{data.strip()}'")
 
             # Route to registered handler (direct call - handler must be thread-safe)
             handler = self._data_handlers.get(node_id)
@@ -619,7 +614,7 @@ class XBeeManager:
         This is called from the UI when the user clicks the Rescan button.
         Clears all discovered devices first, then rediscovers them fresh.
         """
-        logger.info("XBee network rescan initiated - clearing existing devices")
+        logger.debug("XBee network rescan initiated - clearing existing devices")
 
         # Clear all discovered devices first (notify lost for each)
         for node_id in list(self._discovered_devices.keys()):
@@ -643,20 +638,18 @@ class XBeeManager:
             True if send was successful
         """
         if not self.is_connected:
-            logger.warning(f"Cannot send to {node_id}: XBee coordinator not connected")
+            logger.debug(f"Cannot send to {node_id}: XBee coordinator not connected")
             return False
 
         remote = self._remote_devices.get(node_id)
         if not remote:
-            logger.error(f"Unknown device: {node_id} (known devices: {list(self._remote_devices.keys())})")
+            logger.warning(f"Unknown device: {node_id} (known devices: {list(self._remote_devices.keys())})")
             return False
 
         try:
-            logger.debug(f"Sending to {node_id}: {data!r}")
             await asyncio.to_thread(
                 self._coordinator.send_data, remote, data
             )
-            logger.debug(f"Successfully sent data to {node_id}")
             return True
         except Exception as e:
             logger.error(f"Failed to send to {node_id}: {e}")

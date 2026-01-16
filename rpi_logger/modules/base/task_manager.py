@@ -83,7 +83,6 @@ class AsyncTaskManager:
         record = _TaskRecord(task=task, name=name, created=time.perf_counter(), done_callback=done_callback)
         self._records[task] = record
         self._name_index[name].add(task)
-        self._logger.debug("%s registered task %s (pending=%d)", self._name, name, self.active_count())
 
         def _finalizer(t: asyncio.Task) -> None:
             rec = self._records.pop(t, None)
@@ -96,7 +95,7 @@ class AsyncTaskManager:
                 elapsed_ms = (time.perf_counter() - rec.created) * 1000
             else:
                 elapsed_ms = 0.0
-            self._logger.info(
+            self._logger.debug(
                 "%s task %s finished (%s) in %.1fms",
                 self._name,
                 (rec.name if rec else t.get_name() or f"Task@{id(t):x}"),
@@ -123,7 +122,6 @@ class AsyncTaskManager:
         if not pending:
             return True
 
-        self._logger.debug("%s cancelling %d pending task(s)", self._name, len(pending))
         return await self._cancel_and_wait(pending, timeout=timeout, reason="shutdown")
 
     async def cancel(self, name: str, *, timeout: float = 5.0) -> bool:
@@ -133,7 +131,6 @@ class AsyncTaskManager:
         if not tasks:
             return True
 
-        self._logger.debug("%s cancelling %d task(s) named %s", self._name, len(tasks), name)
         return await self._cancel_and_wait(tasks, timeout=timeout, reason=f"cancel:{name}")
 
     async def cancel_matching(self, names: Iterable[str], *, timeout: float = 5.0) -> bool:
@@ -147,12 +144,6 @@ class AsyncTaskManager:
         if not to_cancel:
             return True
 
-        self._logger.debug(
-            "%s cancelling %d task(s) (names=%s)",
-            self._name,
-            len(to_cancel),
-            ",".join(sorted(set(names_list))),
-        )
         return await self._cancel_and_wait(to_cancel, timeout=timeout, reason="cancel_matching")
 
     async def _cancel_and_wait(

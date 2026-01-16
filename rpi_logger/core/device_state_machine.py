@@ -131,10 +131,9 @@ class DeviceStateMachine:
         """
         current = self.get_state(device_id)
         if current == DeviceState.ON:
-            self.logger.debug("Device %s already ON", device_id)
             return True
 
-        self.logger.info("Device %s: requesting ON", device_id)
+        self.logger.debug("Device %s: requesting ON", device_id)
 
         if self._state_change_callback:
             try:
@@ -161,10 +160,9 @@ class DeviceStateMachine:
         """
         current = self.get_state(device_id)
         if current == DeviceState.OFF:
-            self.logger.debug("Device %s already OFF", device_id)
             return True
 
-        self.logger.info("Device %s: requesting OFF", device_id)
+        self.logger.debug("Device %s: requesting OFF", device_id)
 
         if self._state_change_callback:
             try:
@@ -206,7 +204,7 @@ class DeviceStateMachine:
             return
 
         self._states[device_id] = state
-        self.logger.info("Device %s: %s -> %s", device_id, old_state.value, state.value)
+        self.logger.debug("Device %s: %s -> %s", device_id, old_state.value, state.value)
 
         # Update UI
         self._notify_ui(device_id)

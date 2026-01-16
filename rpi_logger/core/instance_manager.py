@@ -146,7 +146,7 @@ class InstanceStateManager:
                     return False
             elif existing.state != InstanceState.STOPPED:
                 # Already starting/running/connected - reject duplicate
-                logger.warning(
+                logger.info(
                     "Instance %s already exists in state %s, ignoring duplicate start",
                     instance_id, existing.state.value
                 )
@@ -244,7 +244,7 @@ class InstanceStateManager:
             return False
 
         if info.state not in {InstanceState.RUNNING, InstanceState.CONNECTING}:
-            logger.warning(
+            logger.info(
                 "Instance %s in state %s, expected RUNNING",
                 instance_id, info.state.value
             )
@@ -300,7 +300,7 @@ class InstanceStateManager:
         """
         info = self._instances.get(instance_id)
         if not info:
-            logger.warning("Instance %s not found for stop", instance_id)
+            logger.debug("Instance %s not found for stop", instance_id)
             return True
 
         if info.state == InstanceState.STOPPED:
@@ -349,14 +349,13 @@ class InstanceStateManager:
         """
         info = self._instances.get(instance_id)
         if not info:
-            # Log at INFO level to help debug - this is important!
-            logger.info(
-                "Status from UNKNOWN instance %s: %s (known instances: %s)",
+            logger.debug(
+                "Status from unknown instance %s: %s (known instances: %s)",
                 instance_id, status_type, list(self._instances.keys())
             )
             return
 
-        logger.info(
+        logger.debug(
             "Instance %s status: %s (state: %s, pending: %s)",
             instance_id, status_type, info.state.value,
             instance_id in self._pending_connections

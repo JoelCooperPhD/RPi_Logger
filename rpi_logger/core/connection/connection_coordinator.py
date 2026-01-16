@@ -338,7 +338,7 @@ class ConnectionCoordinator:
         # Execute with retries
         retry_result = await self._retry_policy.execute(
             operation=attempt_connect,
-            on_retry=lambda attempt, error: logger.info(
+            on_retry=lambda attempt, error: logger.debug(
                 "Retry %d for %s: %s", attempt, instance_id, error
             ),
         )
@@ -397,7 +397,7 @@ class ConnectionCoordinator:
             await self._transition(instance_id, ConnectionEvent.DEVICE_DISCONNECTED)
             return True
         except Exception as e:
-            logger.error("Disconnect error for %s: %s", instance_id, e)
+            logger.warning("Disconnect error for %s: %s", instance_id, e)
             await self._transition(instance_id, ConnectionEvent.DEVICE_DISCONNECTED)
             return True
 
@@ -434,7 +434,7 @@ class ConnectionCoordinator:
             await self._transition(instance_id, ConnectionEvent.PROCESS_STOPPED)
             return True
         except Exception as e:
-            logger.error("Stop error for %s: %s", instance_id, e)
+            logger.warning("Stop error for %s: %s", instance_id, e)
             await self._transition(instance_id, ConnectionEvent.PROCESS_STOPPED)
             return True
 

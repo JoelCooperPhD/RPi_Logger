@@ -533,7 +533,7 @@ class EyeTrackerRuntime(ModuleRuntime):
 
         except Exception as exc:
             # Rollback all state changes on failure
-            self.logger.error("Failed to connect to assigned device: %s", exc)
+            self.logger.warning("Failed to connect to assigned device: %s", exc)
 
             # Restore previous device manager state
             if self._device_manager:

@@ -79,15 +79,11 @@ def _get_windows_webcam_audio_indices() -> Set[int]:
         # Get VID:PIDs of all video/camera devices
         video_vid_pids = _query_windows_video_vid_pids()
         if not video_vid_pids:
-            logger.debug("No video devices found for webcam mic detection")
             return set()
-
-        logger.debug(f"Found video device VID:PIDs: {video_vid_pids}")
 
         # Get USB audio devices with their VID:PIDs
         audio_devices = _query_windows_audio_devices()
         if not audio_devices:
-            logger.debug("No USB audio devices found")
             return set()
 
         # Identify webcam audio devices (those with VID:PID matching video devices)
@@ -96,12 +92,8 @@ def _get_windows_webcam_audio_indices() -> Set[int]:
             vid_pid = audio_dev.get("vid_pid", "")
             if vid_pid and vid_pid in video_vid_pids:
                 webcam_audio_names.append(audio_dev.get("name", ""))
-                logger.debug(
-                    f"Webcam audio device: {audio_dev.get('name')} (VID:PID {vid_pid})"
-                )
 
         if not webcam_audio_names:
-            logger.debug("No webcam audio devices found")
             return set()
 
         # Find ALL sounddevice indices that match webcam audio device names
@@ -117,11 +109,10 @@ def _get_windows_webcam_audio_indices() -> Set[int]:
             for webcam_name in webcam_audio_names:
                 if _names_match(sd_name, webcam_name):
                     webcam_audio_indices.add(sd_idx)
-                    logger.info(
-                        f"Detected webcam mic: sounddevice {sd_idx} "
-                        f"'{sd_name}' matches '{webcam_name}'"
-                    )
                     break
+
+        if webcam_audio_indices:
+            logger.debug("Detected %d webcam microphone(s) to exclude", len(webcam_audio_indices))
 
     except Exception as e:
         logger.warning(f"Error detecting webcam mics: {e}")
@@ -314,7 +305,7 @@ class AudioScanner:
                 try:
                     await self._on_device_lost(device_id)
                 except Exception as e:
-                    logger.error(f"Error in device lost callback: {e}")
+                    logger.warning(f"Error in device lost callback: {e}")
 
         self._known_devices.clear()
         self._known_indices.clear()
@@ -327,13 +318,12 @@ class AudioScanner:
 
     async def reannounce_devices(self) -> None:
         """Re-emit discovery events for all known devices."""
-        logger.debug(f"Re-announcing {len(self._known_devices)} audio devices")
         for device in self._known_devices.values():
             if self._on_device_found:
                 try:
                     await self._on_device_found(device)
                 except Exception as e:
-                    logger.error(f"Error re-announcing device: {e}")
+                    logger.warning(f"Error re-announcing device: {e}")
 
     async def _scan_loop(self) -> None:
         """Main scanning loop."""
@@ -354,7 +344,7 @@ class AudioScanner:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in audio scan loop: {e}")
+                logger.warning(f"Error in audio scan loop: {e}")
 
     async def _scan_devices(self) -> None:
         """Scan for audio input devices and detect changes."""
@@ -368,20 +358,12 @@ class AudioScanner:
                 self._webcam_audio_indices = await asyncio.to_thread(
                     _get_windows_webcam_audio_indices
                 )
-                if self._webcam_audio_indices:
-                    logger.debug(
-                        f"Windows webcam mic indices: {self._webcam_audio_indices}"
-                    )
             elif sys.platform == "darwin" and COREAUDIO_AVAILABLE:
                 # On macOS, use CoreAudio to identify hardware audio devices
                 # (USB + Built-in, excluding Virtual/Aggregate)
                 self._macos_usb_device_names = await asyncio.to_thread(
                     get_usb_audio_device_names
                 )
-                if self._macos_usb_device_names:
-                    logger.debug(
-                        f"macOS hardware audio devices: {self._macos_usb_device_names}"
-                    )
 
             # Run blocking query_devices() in thread
             devices = await asyncio.to_thread(sd.query_devices)
@@ -411,19 +393,14 @@ class AudioScanner:
 
                 # Windows: Check if this is a webcam mic (detected via VID:PID)
                 if index in self._webcam_audio_indices:
-                    logger.debug(
-                        f"Excluding webcam mic {index} ({name}) - VID:PID matches camera"
-                    )
                     continue
 
                 # Check if this device should be excluded (e.g., webcam mic on Linux)
                 if self._exclude_filter and self._exclude_filter(index):
-                    logger.debug(f"Excluding audio device {index} ({name}) - filtered")
                     continue
 
                 # Only show one entry per physical device (first one wins, typically MME)
                 if name in seen_device_names:
-                    logger.debug(f"Skipping duplicate device {index} ({name})")
                     continue
                 seen_device_names.add(name)
 
@@ -456,7 +433,7 @@ class AudioScanner:
                     try:
                         await self._on_device_found(device)
                     except Exception as e:
-                        logger.error(f"Error in device found callback: {e}")
+                        logger.warning(f"Error in device found callback: {e}")
 
             # Check for disconnected devices
             lost_indices = self._known_indices - current_indices
@@ -472,10 +449,10 @@ class AudioScanner:
                         try:
                             await self._on_device_lost(device_id)
                         except Exception as e:
-                            logger.error(f"Error in device lost callback: {e}")
+                            logger.warning(f"Error in device lost callback: {e}")
 
         except Exception as e:
-            logger.error(f"Error scanning audio devices: {e}")
+            logger.warning(f"Error scanning audio devices: {e}")
 
     def get_device(self, device_id: str) -> Optional[DiscoveredAudioDevice]:
         """Get a specific device by ID."""

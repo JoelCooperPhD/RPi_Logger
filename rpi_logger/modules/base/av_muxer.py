@@ -48,10 +48,7 @@ class AVMuxer:
             logger.warning("Cannot calculate audio offset: missing start times")
             return None
 
-        offset = audio_start - video_start
-        logger.debug("Calculated audio offset: %.3f seconds (audio_start=%.6f, video_start=%.6f)",
-                    offset, audio_start, video_start)
-        return offset
+        return audio_start - video_start
 
     async def mux_audio_video(
         self,
@@ -73,11 +70,11 @@ class AVMuxer:
             True if successful, False otherwise
         """
         if not video_path.exists():
-            logger.error("Video file not found: %s", video_path)
+            logger.warning("Video file not found: %s", video_path)
             return False
 
         if not audio_path.exists():
-            logger.error("Audio file not found: %s", audio_path)
+            logger.warning("Audio file not found: %s", audio_path)
             return False
 
         video_str = str(video_path.resolve())
@@ -146,7 +143,6 @@ class AVMuxer:
                 try:
                     video_path.unlink()
                     audio_path.unlink()
-                    logger.debug("Deleted source files after muxing")
                 except Exception as e:
                     logger.warning("Failed to delete source files: %s", e)
 

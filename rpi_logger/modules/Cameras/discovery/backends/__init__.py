@@ -16,11 +16,8 @@ Licensed under the Apache License, Version 2.0
 """
 
 from rpi_logger.core.platform_info import get_platform_info
-from rpi_logger.core.logging_utils import get_module_logger
 
 from .base import CameraBackend, DiscoveredCamera, DiscoveredUSBCamera, AudioSiblingInfo
-
-logger = get_module_logger("CameraBackends")
 
 
 def get_camera_backend() -> CameraBackend:
@@ -36,18 +33,15 @@ def get_camera_backend() -> CameraBackend:
 
     if platform.platform == "linux":
         from .linux import LinuxCameraBackend
-        logger.debug("Using Linux camera backend (sysfs + OpenCV)")
         return LinuxCameraBackend()
 
     elif platform.platform == "darwin":
         from .macos import MacOSCameraBackend
-        logger.debug("Using macOS camera backend (AVFoundation + OpenCV)")
         return MacOSCameraBackend()
 
     else:
         # Windows and other platforms
         from .windows import WindowsCameraBackend
-        logger.debug("Using Windows camera backend (OpenCV)")
         return WindowsCameraBackend()
 
 

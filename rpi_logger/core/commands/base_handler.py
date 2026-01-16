@@ -16,7 +16,6 @@ class BaseCommandHandler(ABC):
 
     async def handle_command(self, command_data: Dict[str, Any]) -> bool:
         command = command_data.get("command", "").lower()
-        self.logger.debug("Received command: %s", command)
 
         try:
             if command == "start_session":
@@ -74,10 +73,9 @@ class BaseCommandHandler(ABC):
 
     async def handle_start_session(self, command_data: Dict[str, Any]) -> None:
         self._update_session_dir(command_data)
-        self.logger.debug("start_session command received")
 
     async def handle_stop_session(self, command_data: Dict[str, Any]) -> None:
-        self.logger.debug("stop_session command received (no default implementation)")
+        pass  # Subclasses can override if needed
 
     async def handle_record(self, command_data: Dict[str, Any]) -> None:
         if not self._check_recording_state(should_be_recording=False):
@@ -156,7 +154,7 @@ class BaseCommandHandler(ABC):
         if hasattr(self.system, 'output_dir'):
             self.system.output_dir = session_dir
 
-        self.logger.info("Updated session directory to: %s", session_dir)
+        self.logger.debug("Updated session directory to: %s", session_dir)
 
     def _get_recording_started_status_data(self, trial_number: int) -> Dict[str, Any]:
         return {"trial": trial_number}
@@ -212,10 +210,6 @@ class BaseCommandHandler(ABC):
                     "x": x,
                     "y": y
                 })
-                self.logger.debug(
-                    "Sent geometry to parent: %dx%d+%d+%d",
-                    width, height, x, y,
-                )
             else:
                 StatusMessage.send("error", {"message": f"Failed to parse window geometry: {geometry_str}"})
 
@@ -240,7 +234,7 @@ class BaseCommandHandler(ABC):
         if self.gui and hasattr(self.gui, 'send_geometry_to_parent'):
             try:
                 self.gui.send_geometry_to_parent()
-                self.logger.info("QUIT_HANDLER: Sent geometry to parent")
+                self.logger.debug("QUIT_HANDLER: Sent geometry to parent")
             except Exception as e:
                 self.logger.debug("QUIT_HANDLER: Failed to send geometry to parent: %s", e)
 
@@ -264,7 +258,7 @@ class BaseCommandHandler(ABC):
             if window:
                 try:
                     window.destroy()
-                    self.logger.info("QUIT_HANDLER: ✓ Destroyed window")
+                    self.logger.debug("QUIT_HANDLER: Destroyed window")
                 except Exception as e:
                     self.logger.error("QUIT_HANDLER: ✗ Failed to destroy window: %s", e)
 
@@ -365,8 +359,6 @@ class BaseCommandHandler(ABC):
         level_str = command_data.get("level", "info").upper()
         target = command_data.get("target", "all")
 
-        self.logger.debug("set_log_level: level=%s, target=%s", level_str, target)
-
         # Try to use ModuleLogManager if available (preferred)
         try:
             from rpi_logger.core.module_log_manager import get_module_log_manager
@@ -432,7 +424,7 @@ class BaseCommandHandler(ABC):
         is_wireless = command_data.get("is_wireless", False)
         command_id = command_data.get("command_id")  # For acknowledgment tracking
 
-        self.logger.info(
+        self.logger.debug(
             "assign_device: device_id=%s, type=%s, port=%s, baudrate=%s, wireless=%s, cmd_id=%s",
             device_id, device_type, port, baudrate, is_wireless, command_id
         )
@@ -479,7 +471,7 @@ class BaseCommandHandler(ABC):
         """Handle device unassignment from main logger."""
         device_id = command_data.get("device_id")
 
-        self.logger.info("unassign_device: device_id=%s", device_id)
+        self.logger.debug("unassign_device: device_id=%s", device_id)
 
         if hasattr(self.system, 'unassign_device'):
             try:
@@ -496,7 +488,7 @@ class BaseCommandHandler(ABC):
 
     async def handle_show_window(self, command_data: Dict[str, Any]) -> None:
         """Handle show window command from main logger."""
-        self.logger.info("show_window command received")
+        self.logger.debug("show_window command received")
 
         if self.gui:
             window = None
@@ -522,7 +514,7 @@ class BaseCommandHandler(ABC):
 
     async def handle_hide_window(self, command_data: Dict[str, Any]) -> None:
         """Handle hide window command from main logger."""
-        self.logger.info("hide_window command received")
+        self.logger.debug("hide_window command received")
 
         if self.gui:
             window = None

@@ -35,13 +35,9 @@ class ConfigLoader:
         config = defaults.copy() if defaults else {}
 
         if not config_path.exists():
-            if defaults:
-                logger.debug("Config file not found at %s, using defaults", config_path)
-            else:
+            if not defaults:
                 logger.warning("Config file not found at %s and no defaults provided", config_path)
             return config
-
-        logger.debug("Loading config from: %s", config_path)
 
         try:
             with open(config_path, 'r') as f:
@@ -79,11 +75,11 @@ class ConfigLoader:
                     else:
                         config[key] = ConfigLoader._parse_value(value)
 
-            logger.info("Loaded config from %s (%d values)", config_path, len(config))
+            logger.debug("Loaded config from %s (%d values)", config_path, len(config))
             return config
 
         except Exception as e:
-            logger.error("Failed to load config file: %s", e)
+            logger.warning("Failed to load config file: %s", e)
             return config  # Return defaults on error
 
     @staticmethod

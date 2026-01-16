@@ -111,7 +111,7 @@ def cleanup_orphaned_processes(timeout: float = 5.0) -> int:
         gone, alive = psutil.wait_procs(orphaned, timeout=timeout)
 
         if gone:
-            logger.info("Gracefully terminated %d process(es)", len(gone))
+            logger.debug("Gracefully terminated %d process(es)", len(gone))
 
         # Force kill any survivors
         for proc in alive:

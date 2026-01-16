@@ -85,7 +85,7 @@ class NotesArchive:
         if await asyncio.to_thread(target.exists):
             self.note_count = await asyncio.to_thread(self._count_existing_notes, target)
             await asyncio.to_thread(self._open_for_append, target)
-            self.logger.info("Appending to note file: %s (%d notes)", target, self.note_count)
+            self.logger.debug("Appending to note file: %s (%d notes)", target, self.note_count)
         else:
             await asyncio.to_thread(self._write_header, target)
             self.note_count = 0
@@ -358,7 +358,7 @@ class NotesRuntime(ModuleRuntime):
             (command.get("command") or "").lower(),
             note_text=(command.get("note") or command.get("note_text") or "").strip() or None,
             posted_at=self._extract_note_timestamp(command),
-            on_empty_note=lambda: self.logger.warning("add_note command without text"),
+            on_empty_note=lambda: self.logger.info("add_note command without text"),
         )
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
@@ -366,7 +366,7 @@ class NotesRuntime(ModuleRuntime):
             (action or "").lower(),
             note_text=(kwargs.get("note") or kwargs.get("note_text") or "").strip() or None,
             posted_at=time.time(),
-            on_empty_note=lambda: self.logger.debug("add_note action with empty text"),
+            on_empty_note=None,
         )
 
     @staticmethod
@@ -559,7 +559,6 @@ class NotesRuntime(ModuleRuntime):
             archive = self.archive = NotesArchive(module_dir, self.logger.getChild("Archive"))
 
         if archive.recording:
-            self.logger.debug("Archive already active: %s", archive.file_path)
             return False
 
         trial_number = self._resolve_trial_number()
@@ -617,7 +616,7 @@ class NotesRuntime(ModuleRuntime):
         self._history.append(record)
         self._history = self._history[-self.history_limit:]
         self._render_history()
-        self.logger.info("Note %d: %s", record.index, record.text[:77] + "..." if len(record.text) > 80 else record.text)
+        self.logger.debug("Note %d: %s", record.index, record.text[:77] + "..." if len(record.text) > 80 else record.text)
         self._emit_status("note_added", {
             "note_index": record.index,
             "trial_number": record.trial_number,
@@ -712,7 +711,7 @@ class NotesRuntime(ModuleRuntime):
             except Exception:
                 self.logger.warning("Failed to show session prompt")
         else:
-            self.logger.warning(message)
+            self.logger.info(message)
 
     async def _read_recording_modules(self) -> List[str]:
         modules_file = self.project_root / "data" / "running_modules.json"

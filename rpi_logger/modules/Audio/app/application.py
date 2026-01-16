@@ -57,7 +57,8 @@ class AudioApp:
             self.logger,
         )
 
-        self.logger.debug("Initialized AudioApp with settings: %s", settings)
+        self.logger.debug("AudioApp initialized: sample_rate=%d, shutdown_timeout=%.1fs",
+                          settings.sample_rate, settings.shutdown_timeout)
 
         self._stop_event = asyncio.Event()
         self._pending_trial = 1
@@ -103,7 +104,6 @@ class AudioApp:
             state_data = audio_prefs.snapshot()
             if state_data:
                 self.state.restore_from_state(state_data)
-                self.logger.debug("Restored audio state from config")
         except Exception as e:
             self.logger.warning("Failed to restore audio state: %s", e)
 
@@ -117,7 +117,6 @@ class AudioApp:
                 return
             prefixed = {f"audio.{k}": v for k, v in state_data.items()}
             await prefs.write_async(prefixed)
-            self.logger.debug("Saved audio state to config: %s", state_data)
         except Exception as e:
             self.logger.warning("Failed to save audio state: %s", e)
 
@@ -125,7 +124,6 @@ class AudioApp:
         self.logger.info("Audio module started (waiting for device assignments)")
         if self.view.enabled:
             self.task_manager.create(self._meter_refresh_loop(), name="meter_refresh")
-            self.logger.debug("Meter refresh loop scheduled (view enabled)")
 
     async def shutdown(self) -> None:
         await self.shutdown_guard.start()
@@ -177,13 +175,11 @@ class AudioApp:
 
     async def _meter_refresh_loop(self) -> None:
         interval = max(0.05, self.settings.meter_refresh_interval)
-        self.logger.debug("Meter refresh loop running every %.2fs", interval)
         while not self._stop_event.is_set():
             await asyncio.sleep(interval)
             self.view.draw_level_meters()
 
     def _handle_bridge_recording_event(self, active: bool) -> None:
-        self.logger.debug("Bridge set recording=%s", active)
         if active:
             self.task_manager.create(self.start_recording(), name="recording_from_bridge")
         else:
@@ -192,23 +188,18 @@ class AudioApp:
     def _handle_bridge_trial_event(self, value: Any) -> None:
         try:
             self._pending_trial = max(1, int(value))
-            self.logger.debug("Bridge set trial number to %d", self._pending_trial)
         except (TypeError, ValueError):
             self._pending_trial = 1
-            self.logger.debug("Bridge trial value %r invalid; reset to 1", value)
 
     def _handle_bridge_session_event(self, value: Any) -> None:
         if not value:
             self.state.set_session_dir(None)
-            self.logger.debug("Bridge session directory cleared")
             return
         try:
             path = Path(value)
         except TypeError:
-            self.logger.debug("Bridge session value %r invalid; ignoring", value)
             return
         self.state.set_session_dir(path)
-        self.logger.debug("Bridge session directory updated to %s", path)
 
     def _emit_status(self, status_type: StatusType, payload: dict[str, Any]) -> None:
         try:

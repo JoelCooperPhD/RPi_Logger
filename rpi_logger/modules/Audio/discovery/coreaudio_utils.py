@@ -238,7 +238,7 @@ def get_usb_audio_device_names() -> Set[str]:
         )
 
         if status != 0:
-            logger.warning(f"Failed to get device list size: {status}")
+            logger.debug(f"Failed to get device list size: {status}")
             return set()
 
         # Get device IDs
@@ -255,7 +255,7 @@ def get_usb_audio_device_names() -> Set[str]:
         )
 
         if status != 0:
-            logger.warning(f"Failed to get device list: {status}")
+            logger.debug(f"Failed to get device list: {status}")
             return set()
 
         # Check each device
@@ -280,10 +280,9 @@ def get_usb_audio_device_names() -> Set[str]:
 
             if name:
                 hardware_device_names.add(name)
-                transport_name = "USB" if transport == kAudioDeviceTransportTypeUSB else "Built-in"
-                logger.debug(f"Found {transport_name} audio input device: {name}")
 
-        logger.info(f"Found {len(hardware_device_names)} hardware audio input devices")
+        if hardware_device_names:
+            logger.debug("CoreAudio discovery: %d hardware input devices", len(hardware_device_names))
 
     except Exception as e:
         logger.warning(f"Error querying CoreAudio devices: {e}")

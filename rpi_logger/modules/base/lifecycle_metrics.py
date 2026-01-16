@@ -18,7 +18,7 @@ class LifecycleTimer:
         timestamp = time.perf_counter()
         self.phases[phase_name] = timestamp
         elapsed_ms = (timestamp - self.start_time) * 1000
-        self.logger.info("LIFECYCLE [%s] %s at +%.1fms", self.module_name, phase_name, elapsed_ms)
+        self.logger.debug("LIFECYCLE [%s] %s at +%.1fms", self.module_name, phase_name, elapsed_ms)
 
     def get_duration(self, start_phase: str, end_phase: Optional[str] = None) -> float:
         if start_phase not in self.phases:

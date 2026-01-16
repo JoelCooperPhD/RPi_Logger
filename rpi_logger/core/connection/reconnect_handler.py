@@ -229,7 +229,7 @@ class ReconnectingMixin:
                     self._reconnect_config.max_reconnect_attempts,
                 )
             except Exception as e:
-                logger.error("Reconnect callback error: %s", e)
+                logger.warning("Reconnect callback error: %s", e)
 
     @property
     def reconnect_state(self) -> ReconnectState:

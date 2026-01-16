@@ -103,7 +103,7 @@ class CameraView:
     def attach(self) -> None:
         """Attach to the stub (codex) view."""
         if not self._stub_view:
-            self._logger.info("No stub view available (headless mode)")
+            self._logger.debug("No stub view available (headless mode)")
             return
 
         try:
@@ -413,7 +413,7 @@ class CameraView:
                 )
                 if self._settings_callback:
                     self._settings_callback(new_settings)
-                self._logger.info(
+                self._logger.debug(
                     "Settings updated: res=%dx%d, fps=%d, scale=%.2f, audio=%s",
                     resolution[0], resolution[1],
                     new_settings.frame_rate, new_settings.preview_scale,
@@ -548,15 +548,15 @@ class CameraView:
         """
         if not self._has_ui or not self._canvas or self._shutting_down:
             if self._frame_count == 0 and not self._shutting_down:
-                self._logger.warning("push_frame: no UI (has_ui=%s, canvas=%s)",
-                                     self._has_ui, self._canvas is not None)
+                self._logger.debug("push_frame: no UI (has_ui=%s, canvas=%s)",
+                                   self._has_ui, self._canvas is not None)
             return
 
         self._frame_count += 1
 
         if self._frame_count <= 3:
-            self._logger.info("push_frame: frame %d, data_len=%d",
-                              self._frame_count, len(ppm_data) if ppm_data else 0)
+            self._logger.debug("push_frame: frame %d, data_len=%d",
+                               self._frame_count, len(ppm_data) if ppm_data else 0)
 
         def update():
             self._render_frame(ppm_data)
@@ -570,8 +570,8 @@ class CameraView:
                 return
 
             if self._frame_count <= 3:
-                self._logger.info("_render_frame: creating PhotoImage, canvas=%dx%d",
-                                  self._canvas_width, self._canvas_height)
+                self._logger.debug("_render_frame: creating PhotoImage, canvas=%dx%d",
+                                   self._canvas_width, self._canvas_height)
 
             self._photo = self._tk.PhotoImage(data=ppm_data)
 
@@ -586,7 +586,7 @@ class CameraView:
                     x, y, image=self._photo, anchor="center"
                 )
                 if self._frame_count <= 3:
-                    self._logger.info("_render_frame: created image at (%d, %d)", x, y)
+                    self._logger.debug("_render_frame: created image at (%d, %d)", x, y)
 
         except Exception as e:
             # Always log render errors - they indicate a real problem

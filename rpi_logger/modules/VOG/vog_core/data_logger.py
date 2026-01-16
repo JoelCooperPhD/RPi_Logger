@@ -69,14 +69,11 @@ class VOGDataLogger:
             if created_new:
                 self.logger.info("Created VOG data file: %s", data_file.name)
 
-            self.logger.debug("Logged trial: T=%s, Open=%s, Closed=%s",
-                            trial_number, packet.shutter_open, packet.shutter_closed)
-
             await self._dispatch_logged_event(packet, trial_number, label,
                                              record_time_unix, record_time_mono, data_file)
             return data_file
         except Exception as e:
-            self.logger.error("Error logging trial data: %s", e, exc_info=True)
+            self.logger.warning("Error logging trial data: %s", e, exc_info=True)
             return None
 
     def _calculate_ms_since_record(self) -> int:
@@ -112,4 +109,4 @@ class VOGDataLogger:
         try:
             await self._event_callback('trial_logged', payload)
         except Exception as e:
-            self.logger.error("Error dispatching trial_logged event: %s", e)
+            self.logger.warning("Error dispatching trial_logged event: %s", e)

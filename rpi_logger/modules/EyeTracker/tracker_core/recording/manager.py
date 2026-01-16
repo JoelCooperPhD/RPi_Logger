@@ -451,7 +451,7 @@ class RecordingManager(RecordingManagerBase):
             self._last_gaze_timestamp = timestamp
             self._gaze_samples_written += 1
         except Exception as exc:
-            logger.error("Failed to write gaze sample: %s", exc)
+            logger.warning("Failed to write gaze sample: %s", exc)
 
     def write_imu_sample(self, imu: Optional[Any]) -> None:
         """Write an IMU sample to CSV."""
@@ -488,7 +488,7 @@ class RecordingManager(RecordingManagerBase):
             self._imu_writer.enqueue(self._csv_line(fields))
             self._imu_samples_written += 1
         except Exception as exc:
-            logger.error("Failed to write IMU sample: %s", exc)
+            logger.warning("Failed to write IMU sample: %s", exc)
 
     def write_event_sample(self, event: Optional[Any]) -> None:
         """Write an eye event to CSV."""
@@ -542,7 +542,7 @@ class RecordingManager(RecordingManagerBase):
             self._event_writer.enqueue(self._csv_line(fields))
             self._event_samples_written += 1
         except Exception as exc:
-            logger.error("Failed to write event sample: %s", exc)
+            logger.warning("Failed to write event sample: %s", exc)
 
     async def cleanup(self) -> None:
         """Clean up resources."""
@@ -731,7 +731,7 @@ class RecordingManager(RecordingManagerBase):
             chunk = np.ascontiguousarray(samples.T).tobytes()
             return sample_rate, channels, [chunk]
         except Exception as exc:
-            logger.error("Failed to prepare audio frame: %s", exc)
+            logger.warning("Failed to prepare audio frame: %s", exc)
             return None, None, []
 
     def _compose_gaze_line(

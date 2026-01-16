@@ -192,7 +192,7 @@ def load_module_discovery(module_dir: Path) -> Optional[BaseModuleDiscovery]:
             # Look for DISCOVERY_SPEC and create a basic handler
             if hasattr(discovery_module, "DISCOVERY_SPEC"):
                 spec = discovery_module.DISCOVERY_SPEC
-                logger.info(f"Loaded discovery spec from {module_name}")
+                logger.debug(f"Loaded discovery spec from {module_name}")
 
                 # Create a wrapper discovery instance
                 class SpecOnlyDiscovery(BaseModuleDiscovery):
@@ -214,7 +214,7 @@ def load_module_discovery(module_dir: Path) -> Optional[BaseModuleDiscovery]:
             logger.warning(f"Discovery class in {import_path} missing 'spec' attribute")
             return None
 
-        logger.info(f"Loaded discovery handler from {module_name}")
+        logger.debug(f"Loaded discovery handler from {module_name}")
         return instance
 
     except ImportError as e:
@@ -246,7 +246,7 @@ def load_all_module_discoveries(
         logger.error(f"Modules directory not found: {modules_dir}")
         return registry
 
-    logger.info(f"Loading module discoveries from: {modules_dir}")
+    logger.debug(f"Loading module discoveries from: {modules_dir}")
 
     for module_dir in sorted(modules_dir.iterdir()):
         if not module_dir.is_dir():
@@ -266,7 +266,7 @@ def load_all_module_discoveries(
                 discovery=discovery,
             )
 
-    logger.info(f"Loaded {len(registry._specs)} module discovery packages")
+    logger.debug(f"Loaded {len(registry._specs)} module discovery packages")
     return registry
 
 

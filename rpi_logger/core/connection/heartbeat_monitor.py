@@ -216,12 +216,12 @@ class HeartbeatMonitor:
                 timeout=self.callback_timeout
             )
         except asyncio.TimeoutError:
-            logger.error(
+            logger.warning(
                 "Recovered callback for %s timed out after %.1fs",
                 instance_id, self.callback_timeout
             )
         except Exception as e:
-            logger.error("Recovered callback error for %s: %s", instance_id, e)
+            logger.warning("Recovered callback error for %s: %s", instance_id, e)
 
     def get_status(self, instance_id: str) -> HealthStatus:
         """Get current health status of an instance."""
@@ -264,7 +264,7 @@ class HeartbeatMonitor:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("Heartbeat monitor error: %s", e)
+                logger.warning("Heartbeat monitor error: %s", e)
 
     async def _check_all_instances(self) -> None:
         """Check health of all registered instances."""
@@ -304,4 +304,4 @@ class HeartbeatMonitor:
                     try:
                         await self._unhealthy_callback(instance_id, info)
                     except Exception as e:
-                        logger.error("Unhealthy callback error: %s", e)
+                        logger.warning("Unhealthy callback error: %s", e)

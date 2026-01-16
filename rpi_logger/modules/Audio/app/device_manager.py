@@ -14,7 +14,6 @@ class DeviceManager:
         self.logger = logger.getChild("DeviceManager")
 
     async def enable_device(self, device: AudioDeviceInfo) -> bool:
-        self.logger.debug("Enabling device %d (%s)", device.device_id, device.name)
         self.state.set_device(device)
         meter = self.state.level_meter or LevelMeter()
         if not await self.recorder_service.enable_device(device, meter):
@@ -28,7 +27,6 @@ class DeviceManager:
         if self.state.device is None:
             return True
         device_id = self.state.device.device_id
-        self.logger.debug("Disabling device %d", device_id)
         await self.recorder_service.disable_device()
         self.state.clear_device()
         self.logger.info("Device %d disabled", device_id)

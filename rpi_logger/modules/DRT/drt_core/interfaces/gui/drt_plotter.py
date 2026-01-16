@@ -275,8 +275,8 @@ class DRTPlotter:
             state_view = self._get_circular_view(self._state_array, self._state_index)
             self._state_xy[0].set_ydata(state_view)
 
-        except (KeyError, IndexError) as e:
-            self.logger.debug("Animation error: %s", e)
+        except (KeyError, IndexError):
+            pass
 
         return self._plot_lines
 
@@ -346,7 +346,6 @@ class DRTPlotter:
 
     def start_session(self):
         """Start a new session - clear plot and start animation (blank)."""
-        self.logger.debug("Starting session: clearing plot and starting animation")
         self.clear_all()
         self.run = True
         self._session_active = True
@@ -354,12 +353,9 @@ class DRTPlotter:
 
     def start_recording(self):
         """Start recording - data will start appearing on plot."""
-        self.logger.debug("Starting recording")
         if not self._session_active:
-            self.logger.debug("First recording - clearing plot")
             self.start_session()
         else:
-            self.logger.debug("Resuming animation from frozen state")
             self.run = True
 
         if self._device_added:
@@ -369,14 +365,12 @@ class DRTPlotter:
 
     def stop_recording(self):
         """Pause recording - creates gap in data, animation keeps marching."""
-        self.logger.debug("Stop recording: creating gap, animation continues")
         if self._device_added:
             self._state_now = np.nan
         self._recording = False
 
     def stop(self):
         """Stop session completely - freeze animation."""
-        self.logger.debug("Stopping session: freezing animation")
         if self._device_added and self._state_array is not None:
             idx = self._state_index
             self._state_array[idx] = np.nan

@@ -128,7 +128,7 @@ class DRTModuleRuntime(ModuleRuntime):
         if action == "unassign_all_devices":
             # Disconnect device before shutdown to release serial port
             command_id = command.get("command_id")
-            self.logger.info("Unassigning device before shutdown (command_id=%s)", command_id)
+            self.logger.debug("Unassigning device before shutdown (command_id=%s)", command_id)
 
             port_released = False
             if self.handler:
@@ -246,13 +246,13 @@ class DRTModuleRuntime(ModuleRuntime):
             self.logger.warning("Device already assigned (current: %s, new: %s)", self.device_id, device_id)
             return True
 
-        self.logger.info(
+        self.logger.debug(
             "Assigning device: id=%s, type=%s, port=%s, baudrate=%d, wireless=%s, display_name=%r",
             device_id, device_type, port, baudrate, is_wireless, display_name
         )
 
         StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
-        self.logger.info("Sent device_ack for %s", device_id)
+        self.logger.debug("Sent device_ack for %s", device_id)
 
         try:
             # Parse device type string to enum
@@ -310,10 +310,9 @@ class DRTModuleRuntime(ModuleRuntime):
             self.logger.info("Device %s assigned and started (%s)", device_id, drt_device_type.value)
 
             # Update window title to show device display name
-            self.logger.debug("Checking window title update: view=%s, display_name=%r", bool(self.view), display_name)
             if self.view and display_name:
                 try:
-                    self.logger.info("Setting window title to: %s", display_name)
+                    self.logger.debug("Setting window title to: %s", display_name)
                     self.view.set_window_title(display_name)
                 except Exception as e:
                     self.logger.warning("Failed to set window title: %s", e)
@@ -332,7 +331,7 @@ class DRTModuleRuntime(ModuleRuntime):
                 handler._trial_label = self.trial_label
                 try:
                     await handler.start_experiment()
-                    self.logger.info("Started experiment on newly connected device %s", device_id)
+                    self.logger.debug("Started experiment on newly connected device %s", device_id)
                 except Exception as exc:  # pragma: no cover - defensive
                     self.logger.error("Failed to start experiment on new device %s: %s", device_id, exc)
 
@@ -359,10 +358,10 @@ class DRTModuleRuntime(ModuleRuntime):
             device_id: The device to unassign (for compatibility, ignored - uses self.device_id)
         """
         if self.handler is None:
-            self.logger.warning("No device assigned")
+            self.logger.debug("No device assigned")
             return
 
-        self.logger.info("Unassigning device: %s", self.device_id)
+        self.logger.debug("Unassigning device: %s", self.device_id)
 
         try:
             handler = self.handler
@@ -442,7 +441,7 @@ class DRTModuleRuntime(ModuleRuntime):
 
     async def _on_xbee_status_change(self, status: str, detail: str) -> None:
         """Handle XBee dongle status changes."""
-        self.logger.info("XBee dongle status change: %s %s", status, detail)
+        self.logger.debug("XBee dongle status change: %s %s", status, detail)
         if self.view:
             self.view.on_xbee_dongle_status_change(status, detail)
 
@@ -463,7 +462,6 @@ class DRTModuleRuntime(ModuleRuntime):
         This is called by the XBeeProxyTransport when the handler wants
         to send data to the device.
         """
-        self.logger.debug("Requesting XBee send to %s: %s", node_id, data[:50])
         StatusMessage.send_xbee_data(node_id, data)
         # Can't know result immediately - it's async through the command protocol
         return True
@@ -477,7 +475,7 @@ class DRTModuleRuntime(ModuleRuntime):
             self.logger.debug("Recording already active for %s", self.device_id)
             return True
         if not self.handler:
-            self.logger.error("Cannot start recording - no device connected")
+            self.logger.warning("Cannot start recording - no device connected")
             return False
 
         self.handler.set_active_trial_number(self.active_trial_number)
@@ -577,7 +575,7 @@ class DRTModuleRuntime(ModuleRuntime):
             stub_view = self.view._stub_view
             if hasattr(stub_view, 'show_window'):
                 stub_view.show_window()
-                self.logger.info("DRT window shown")
+                self.logger.debug("DRT window shown")
 
     def _hide_window(self) -> None:
         """Hide the DRT window (called when main logger sends hide_window command)."""
@@ -585,7 +583,7 @@ class DRTModuleRuntime(ModuleRuntime):
             stub_view = self.view._stub_view
             if hasattr(stub_view, 'hide_window'):
                 stub_view.hide_window()
-                self.logger.info("DRT window hidden")
+                self.logger.debug("DRT window hidden")
 
     # ------------------------------------------------------------------
     # Utility methods

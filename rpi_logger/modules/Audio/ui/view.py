@@ -44,7 +44,7 @@ class AudioView:
 
         if not self.enabled:
             if not (tk and ttk):
-                self.logger.info("Tk unavailable; running without GUI")
+                self.logger.warning("Tk unavailable; running without GUI")
             else:
                 self.logger.debug("GUI container not available; view disabled")
             return

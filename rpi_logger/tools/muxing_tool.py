@@ -42,7 +42,7 @@ def _prompt_for_session_dir(allow_gui: bool) -> Optional[Path]:
 async def _run_mux(session_dir: Path) -> int:
     trial_numbers = discover_trial_numbers(session_dir)
     if not trial_numbers:
-        logger.error("No trial files found in %s", session_dir)
+        logger.warning("No trial files found in %s", session_dir)
         return 1
 
     await process_session(session_dir, trial_numbers, mux=True)
@@ -71,7 +71,7 @@ def main() -> int:
     if session_path is None:
         session_path = _prompt_for_session_dir(allow_gui=not args.no_gui)
         if session_path is None:
-            logger.error("Session directory selection was cancelled")
+            logger.warning("Session directory selection was cancelled")
             return 1
 
     session_path = session_path.expanduser().resolve()

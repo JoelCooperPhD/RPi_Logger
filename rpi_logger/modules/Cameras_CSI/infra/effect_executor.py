@@ -91,7 +91,7 @@ class EffectExecutor:
                     self._settings_save_callback(settings)
                 # Reconfigure camera hardware if frame rate changed
                 if self._camera and old_frame_rate != self._frame_rate:
-                    self._logger.info("Frame rate changed %d -> %d, reconfiguring camera",
+                    self._logger.debug("Frame rate changed %d -> %d, reconfiguring camera",
                                      old_frame_rate, self._frame_rate)
                     # Stop capture loop, reconfigure camera, restart capture loop
                     await self._stop_capture_loop()
@@ -129,12 +129,12 @@ class EffectExecutor:
                 camera_id=camera_id,
                 sensor_modes=tuple(modes),
             )
-            self._logger.info("Camera probed: %s with %d modes", camera_id, len(modes))
+            self._logger.debug("Camera probed: %s with %d modes", camera_id, len(modes))
             await dispatch(CameraAssigned(camera_id, camera_index, caps))
             if self._status_callback:
                 self._status_callback("camera_assigned", {"camera_id": camera_id})
         except Exception as e:
-            self._logger.error("Camera probe failed: %s", e)
+            self._logger.warning("Camera probe failed: %s", e)
             await dispatch(CameraError(str(e)))
             if self._status_callback:
                 self._status_callback("camera_error", {"error": str(e)})
@@ -148,7 +148,7 @@ class EffectExecutor:
         if self._camera:
             await self._camera.stop()
 
-        self._logger.info("Opening camera %d at %dx%d @ %d fps",
+        self._logger.debug("Opening camera %d at %dx%d @ %d fps",
                         camera_index, resolution[0], resolution[1], fps)
         self._camera = PicamSource(
             camera_index=camera_index,
@@ -159,16 +159,15 @@ class EffectExecutor:
 
     async def _close_camera(self) -> None:
         if self._camera:
-            self._logger.info("Closing camera")
+            self._logger.debug("Closing camera")
             await self._camera.stop()
             self._camera = None
 
     def _start_capture_loop(self, dispatch: Callable[[Action], Awaitable[None]]) -> None:
         if self._capture_task and not self._capture_task.done():
-            self._logger.debug("Capture task already running")
             return
 
-        self._logger.info("Starting capture loop task")
+        self._logger.debug("Starting capture loop task")
         self._capture_task = asyncio.create_task(self._capture_loop(dispatch))
 
     async def _stop_capture_loop(self) -> None:
@@ -186,7 +185,7 @@ class EffectExecutor:
             return
 
         preview_fps = max(1, self._frame_rate // self._preview_divisor)
-        self._logger.info("Capture loop starting, preview_callback=%s, frame_rate=%s, preview_fps=%s",
+        self._logger.debug("Capture loop starting, preview_callback=%s, frame_rate=%s, preview_fps=%s",
                          self._preview_callback is not None, self._frame_rate, preview_fps)
 
         frame_count = 0

@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, Callable, Awaitable, Set
 from pathlib import Path
 import asyncio
-import logging
 
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.core.connection import ReconnectingMixin, ReconnectConfig
@@ -107,7 +106,7 @@ class BaseDRTHandler(ABC, ReconnectingMixin):
         This begins monitoring the device for incoming data.
         """
         if self._running:
-            logger.warning("Handler %s already running", self.device_id)
+            logger.debug("Handler %s already running", self.device_id)
             return
 
         self._running = True
@@ -244,10 +243,7 @@ class BaseDRTHandler(ABC, ReconnectingMixin):
                 while lines_processed < 50:  # Limit to prevent infinite loop
                     line = await self.transport.read_line()
                     if line:
-                        stripped = line.strip()
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug("Processing line from %s: %s", self.device_id, stripped)
-                        self._process_response(stripped)
+                        self._process_response(line.strip())
                         lines_processed += 1
                     else:
                         break
@@ -268,8 +264,8 @@ class BaseDRTHandler(ABC, ReconnectingMixin):
                     config.error_backoff * (2 ** (self._consecutive_errors - 1)),
                     config.max_error_backoff
                 )
-                logger.error(
-                    "Error in read loop for %s (%d/%d): %s",
+                logger.warning(
+                    "Error in read loop for %s (%d/%d), retrying: %s",
                     self.device_id,
                     self._consecutive_errors,
                     config.max_consecutive_errors,

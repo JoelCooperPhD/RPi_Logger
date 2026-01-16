@@ -41,7 +41,6 @@ class InstanceGeometryStore:
     def _load(self) -> None:
         """Load geometry data from file."""
         if not self._file_path.exists():
-            logger.debug("No instance geometry file found at %s", self._file_path)
             return
 
         try:
@@ -55,11 +54,11 @@ class InstanceGeometryStore:
                     width=geom_dict.get('width', 800),
                     height=geom_dict.get('height', 600),
                 )
-            logger.info("Loaded geometry for %d instances", len(self._cache))
+            logger.debug("Loaded geometry for %d instances", len(self._cache))
         except json.JSONDecodeError as e:
-            logger.error("Invalid JSON in instance geometry file: %s", e)
+            logger.warning("Invalid JSON in instance geometry file: %s", e)
         except Exception as e:
-            logger.error("Failed to load instance geometry: %s", e)
+            logger.warning("Failed to load instance geometry: %s", e)
 
     def _save(self) -> None:
         """Save geometry data to file."""
@@ -96,8 +95,6 @@ class InstanceGeometryStore:
                         tmp_path.unlink()
                     except FileNotFoundError:
                         pass
-
-            logger.debug("Saved geometry for %d instances", len(self._cache))
         except Exception as e:
             logger.error("Failed to save instance geometry: %s", e)
 
@@ -121,7 +118,6 @@ class InstanceGeometryStore:
         """
         self._cache[instance_id] = geometry
         self._save()
-        logger.debug("Stored geometry for %s: %s", instance_id, geometry.to_geometry_string())
 
     def remove(self, instance_id: str) -> bool:
         """Remove geometry for an instance.

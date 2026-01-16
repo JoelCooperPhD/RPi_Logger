@@ -150,13 +150,13 @@ class KnownCamerasCache:
             self._entries = cleaned
             self._loaded = True
             if removed:
-                self._logger.info(
+                self._logger.debug(
                     "Removed %d legacy cache entries with unstable IDs: %s",
                     len(removed), removed
                 )
                 # Persist the cleanup
                 await self._write_file(self._entries)
-            self._logger.debug("Known cameras cache loaded (%d entries)", len(self._entries))
+            self._logger.debug("Camera cache loaded: %d entries", len(self._entries))
 
     async def save(self) -> None:
         async with self._lock:
@@ -179,7 +179,6 @@ class KnownCamerasCache:
             }
             self._entries[state.descriptor.camera_id.key] = entry
             await self._write_file(self._entries)
-            self._logger.debug("Updated cache for %s", state.descriptor.camera_id.key)
 
     async def remove(self, camera_id: CameraId) -> None:
         await self.load()
@@ -187,7 +186,6 @@ class KnownCamerasCache:
             if camera_id.key in self._entries:
                 self._entries.pop(camera_id.key, None)
                 await self._write_file(self._entries)
-                self._logger.debug("Removed cache entry for %s", camera_id.key)
 
     async def list_ids(self) -> Iterable[str]:
         await self.load()
@@ -237,7 +235,7 @@ class KnownCamerasCache:
                 if selected_configs:
                     migrated = self._migrate_selected_configs(selected_configs)
                     if migrated:
-                        self._logger.info(
+                        self._logger.debug(
                             "Migrated selected_configs to settings for %s", camera_key
                         )
                         # Store migrated settings (don't await inside get, schedule write)
@@ -248,10 +246,6 @@ class KnownCamerasCache:
         # Validate settings against capabilities if validator provided
         if settings and validator:
             validated = validator.validate_settings(settings)
-            if validated != settings:
-                self._logger.debug(
-                    "Validated settings for %s: %s -> %s", camera_key, settings, validated
-                )
             return validated
 
         return settings
@@ -358,13 +352,7 @@ class KnownCamerasCache:
 
         # Validate settings against capabilities if validator provided
         if validator:
-            validated = validator.validate_settings(settings)
-            if validated != settings:
-                self._logger.debug(
-                    "Validated settings before save for %s: %s -> %s",
-                    camera_key, settings, validated
-                )
-            settings = validated
+            settings = validator.validate_settings(settings)
 
         async with self._lock:
             if camera_key not in self._entries:
@@ -372,7 +360,6 @@ class KnownCamerasCache:
             self._entries[camera_key]["settings"] = dict(settings)
             self._entries[camera_key]["updated_at"] = time.time()
             await self._write_file(self._entries)
-            self._logger.debug("Saved settings for %s: %s", camera_key, settings)
 
     async def get_all_settings(self) -> Dict[str, Dict[str, Any]]:
         """Get settings for all cameras."""
@@ -427,9 +414,6 @@ class KnownCamerasCache:
             self._entries[camera_key]["fingerprint"] = fingerprint
             self._entries[camera_key]["updated_at"] = time.time()
             await self._write_file(self._entries)
-            self._logger.debug(
-                "Stored model association for %s: model=%s", camera_key, model_key
-            )
 
     # ------------------------------------------------------------------
     # Capabilities caching (for resolution options)
@@ -462,10 +446,6 @@ class KnownCamerasCache:
             self._entries[camera_key]["capabilities"] = capabilities
             self._entries[camera_key]["updated_at"] = time.time()
             await self._write_file(self._entries)
-            self._logger.debug(
-                "Stored capabilities for %s: %d modes",
-                camera_key, len(capabilities.get("modes", []))
-            )
 
     # ------------------------------------------------------------------
     # IO helpers
@@ -484,7 +464,7 @@ class KnownCamerasCache:
             return {}
         schema_version = int(parsed.get("schema", 0) or 0)
         if schema_version not in (1, 2):
-            self._logger.info("Known cameras cache schema mismatch; ignoring old data")
+            self._logger.debug("Known cameras cache schema mismatch; ignoring old data")
             return {}
 
         entries = parsed.get("entries") or {}

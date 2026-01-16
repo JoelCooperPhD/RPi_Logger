@@ -179,7 +179,6 @@ class ModulePreferences:
         state_data = scoped.snapshot()
         if state_data:
             state_obj.restore_from_state(state_data)
-            logger.debug("Restored state for %s: %d keys", prefix, len(state_data))
 
     # ------------------------------------------------------------------
     # Mutation helpers
@@ -241,8 +240,8 @@ class ModulePreferences:
             change = PreferenceChange(updated=dict(updates), removed=removed_set)
             try:
                 self._on_change(change)
-            except Exception:  # pragma: no cover - defensive logging
-                logger.debug("Preference change callback failed", exc_info=True)
+            except Exception:  # pragma: no cover - defensive
+                pass
 
     def _strip_keys_from_file(self, keys: Set[str]) -> None:
         if not keys:

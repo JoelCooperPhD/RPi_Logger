@@ -76,7 +76,7 @@ class UARTScanner:
                     path=spec.fixed_path,
                 )
                 self._active_devices[device_id] = device
-                logger.info(
+                logger.debug(
                     "UART device discovered: %s at %s (%s)",
                     spec.display_name, spec.fixed_path, device_id
                 )
@@ -108,7 +108,6 @@ class UARTScanner:
 
     async def reannounce_devices(self) -> None:
         """Re-emit discovery events for all known devices."""
-        logger.debug(f"Re-announcing {len(self._active_devices)} UART devices")
         for device in self._active_devices.values():
             if self._on_device_found:
                 try:

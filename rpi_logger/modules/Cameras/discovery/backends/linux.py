@@ -64,15 +64,10 @@ class LinuxCameraBackend:
             dev_path = f"/dev/video{index}"
             device_root = self._device_root(index)
             if device_root is None:
-                logger.debug(f"Skipping non-USB video node: /dev/video{index}")
                 continue
 
             root_key = str(device_root)
             if root_key in seen_roots:
-                logger.debug(
-                    f"Skipping duplicate USB node /dev/video{index} for device "
-                    f"{device_root.name} (already using /dev/video{seen_roots[root_key]})"
-                )
                 continue
             seen_roots[root_key] = index
 
@@ -91,10 +86,6 @@ class LinuxCameraBackend:
                         channels=sibling_info.get("channels", 2),
                         sample_rate=sibling_info.get("sample_rate", 48000.0),
                         name=sibling_info.get("name", ""),
-                    )
-                    logger.info(
-                        f"Found audio sibling for {base_name}: {audio_sibling.name} "
-                        f"(index={audio_sibling.sounddevice_index})"
                     )
 
             cameras.append(DiscoveredUSBCamera(

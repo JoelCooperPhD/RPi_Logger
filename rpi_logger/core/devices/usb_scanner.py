@@ -113,13 +113,12 @@ class USBScanner:
         Call this when a connection type gets enabled to re-announce
         devices that were previously discovered but ignored.
         """
-        logger.debug(f"Re-announcing {len(self._known_devices)} USB devices")
         for device in self._known_devices.values():
             if self._on_device_found:
                 try:
                     await self._on_device_found(device)
                 except Exception as e:
-                    logger.error(f"Error re-announcing USB device: {e}")
+                    logger.warning(f"Error re-announcing USB device: {e}")
 
     async def _scan_loop(self) -> None:
         """Main scanning loop.
@@ -147,7 +146,7 @@ class USBScanner:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in USB scan loop: {e}")
+                logger.warning(f"Error in USB scan loop: {e}")
 
     async def _scan_ports(self) -> None:
         """Scan for USB devices and detect changes."""
@@ -183,30 +182,30 @@ class USBScanner:
                 )
 
                 self._known_devices[port] = device
-                logger.info(f"USB device found: {spec.display_name} on {port}")
+                logger.debug(f"USB device found: {spec.display_name} on {port}")
 
                 if self._on_device_found:
                     try:
                         await self._on_device_found(device)
                     except Exception as e:
-                        logger.error(f"Error in device found callback: {e}")
+                        logger.warning(f"Error in device found callback: {e}")
 
             # Check for disconnected devices
             lost_ports = set(self._known_devices.keys()) - current_ports
             for port in lost_ports:
                 device = self._known_devices.pop(port)
-                logger.info(f"USB device lost: {device.spec.display_name} on {port}")
+                logger.debug(f"USB device lost: {device.spec.display_name} on {port}")
 
                 if self._on_device_lost:
                     try:
                         await self._on_device_lost(port)
                     except Exception as e:
-                        logger.error(f"Error in device lost callback: {e}")
+                        logger.warning(f"Error in device lost callback: {e}")
 
             self._known_ports = current_ports
 
         except Exception as e:
-            logger.error(f"Error scanning USB ports: {e}")
+            logger.warning(f"Error scanning USB ports: {e}")
 
     def get_device(self, port: str) -> Optional[DiscoveredUSBDevice]:
         """Get a specific device by port."""

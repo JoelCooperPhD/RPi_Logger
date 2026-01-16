@@ -188,7 +188,7 @@ class GPSModuleRuntime(ModuleRuntime):
 
         if action == "unassign_all_devices":
             command_id = command.get("command_id")
-            self.logger.info("Unassigning all devices before shutdown (command_id=%s)", command_id)
+            self.logger.debug("Unassigning all devices before shutdown (command_id=%s)", command_id)
 
             device_ids = list(self.handlers.keys())
             for device_id in device_ids:
@@ -281,16 +281,16 @@ class GPSModuleRuntime(ModuleRuntime):
             True if device was successfully assigned
         """
         if device_id in self.handlers:
-            self.logger.warning("Device %s already assigned", device_id)
+            self.logger.info("Device %s already assigned", device_id)
             return True
 
-        self.logger.info(
+        self.logger.debug(
             "Assigning GPS device: id=%s, port=%s, baudrate=%d, display_name=%r",
             device_id, port, baudrate, display_name
         )
 
         StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
-        self.logger.info("Sent device_ack for %s", device_id)
+        self.logger.debug("Sent device_ack for %s", device_id)
 
         try:
             # Create transport
@@ -365,7 +365,7 @@ class GPSModuleRuntime(ModuleRuntime):
             self.logger.debug("Device %s not assigned", device_id)
             return
 
-        self.logger.info("Unassigning GPS device: %s", device_id)
+        self.logger.debug("Unassigning GPS device: %s", device_id)
 
         try:
             handler = self.handlers.pop(device_id)
@@ -385,7 +385,7 @@ class GPSModuleRuntime(ModuleRuntime):
                 if callable(on_disconnected):
                     on_disconnected(device_id)
 
-            self.logger.info("GPS device %s unassigned", device_id)
+            self.logger.debug("GPS device %s unassigned", device_id)
 
         except Exception as e:
             self.logger.error("Error unassigning GPS device %s: %s", device_id, e, exc_info=True)
@@ -399,7 +399,7 @@ class GPSModuleRuntime(ModuleRuntime):
             return
 
         if not self.handlers:
-            self.logger.warning("Cannot start recording - no GPS devices connected")
+            self.logger.info("Cannot start recording - no GPS devices connected")
             return
 
         for device_id, handler in self.handlers.items():
@@ -581,13 +581,11 @@ class GPSModuleRuntime(ModuleRuntime):
         """Show the GPS window."""
         if self.view and hasattr(self.view, "show_window"):
             self.view.show_window()
-            self.logger.debug("GPS window shown")
 
     def _hide_window(self) -> None:
         """Hide the GPS window."""
         if self.view and hasattr(self.view, "hide_window"):
             self.view.hide_window()
-            self.logger.debug("GPS window hidden")
 
     # ------------------------------------------------------------------
     # Settings management
@@ -600,7 +598,7 @@ class GPSModuleRuntime(ModuleRuntime):
             parser = getattr(handler, '_parser', None)
             if parser and hasattr(parser, 'set_enabled_sentences'):
                 parser.set_enabled_sentences(enabled)
-        self.logger.info("Applied settings: enabled_sentences=%s", enabled)
+        self.logger.debug("Applied settings: enabled_sentences=%s", enabled)
 
     # ------------------------------------------------------------------
     # Stats helpers

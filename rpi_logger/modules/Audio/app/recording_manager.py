@@ -44,19 +44,15 @@ class RecordingManager:
         return session_dir
 
     async def start(self, trial_number: int) -> bool:
-        self.logger.debug("Recording start requested for trial %d", trial_number)
-
         if self.state.recording or self._start_lock.locked():
-            self.logger.debug("Recording already active or starting")
             return False
 
         async with self._start_lock:
             if self.state.recording:
-                self.logger.debug("Recording already active inside lock")
                 return False
 
             if self.state.device is None:
-                self.logger.warning("No device assigned for recording")
+                self.logger.info("No device assigned for recording")
                 return False
 
             session_dir = await self.ensure_session_dir(self.state.session_dir)
@@ -86,7 +82,6 @@ class RecordingManager:
             return True
 
     async def stop(self) -> bool:
-        self.logger.debug("Recording stop requested (active=%s)", self.state.recording)
         if not self.state.recording:
             return False
 

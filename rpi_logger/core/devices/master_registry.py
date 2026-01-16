@@ -122,7 +122,7 @@ class MasterDeviceRegistry:
         device.capabilities[capability] = info
 
         if was_new:
-            logger.info(
+            logger.debug(
                 "Registered capability %s for device %s (%s)",
                 capability.value, physical_id, device.display_name
             )
@@ -155,7 +155,7 @@ class MasterDeviceRegistry:
             return False
 
         del device.capabilities[capability]
-        logger.info(
+        logger.debug(
             "Unregistered capability %s from device %s",
             capability.value, physical_id
         )
@@ -182,7 +182,7 @@ class MasterDeviceRegistry:
         if device:
             for capability in list(device.capabilities.keys()):
                 self._notify(physical_id, capability, added=False)
-            logger.info("Removed device: %s (%s)", physical_id, device.display_name)
+            logger.debug("Removed device: %s (%s)", physical_id, device.display_name)
         return device
 
     def clear(self) -> None:

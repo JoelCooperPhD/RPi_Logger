@@ -107,8 +107,6 @@ class DRTTkinterGUI:
 
     def _build_ui(self, parent: tk.Widget):
         """Build the embedded UI with plotter and controls."""
-        self.logger.debug("Building DRTTkinterGUI UI")
-
         try:
             # Main frame
             self._frame = ttk.Frame(parent)
@@ -124,7 +122,6 @@ class DRTTkinterGUI:
 
             # Build device UI immediately with default device type
             self._build_device_ui(None, DRTDeviceType.SDRT)
-            self.logger.debug("DRTTkinterGUI UI build completed")
         except Exception as e:
             self.logger.error("Failed to build DRTTkinterGUI UI: %s", e, exc_info=True)
 
@@ -139,7 +136,7 @@ class DRTTkinterGUI:
             self._plotter = DRTPlotter(self._content_frame, title="DRT - Detection Response Task")
             if port:
                 self._plotter.add_device(port)
-            self.logger.info("Created plotter for %s", port or "pending device")
+            self.logger.debug("Created plotter for %s", port or "pending device")
         except Exception as e:
             self.logger.warning("Could not create plotter: %s", e)
             self._plotter = None
@@ -234,16 +231,12 @@ class DRTTkinterGUI:
                 title = "DRT"
 
             toplevel.title(title)
-            self.logger.debug("DRT window title set to: %s", title)
         except Exception as e:
             self.logger.warning("Failed to update window title: %s", e)
 
     def on_device_data(self, port: str, data_type: str, data: Dict[str, Any]):
         """Handle data from device - update plots and displays."""
-        self.logger.debug("on_device_data: port=%s type=%s data=%s", port, data_type, data)
-
         if port != self._port:
-            self.logger.warning("on_device_data: port %s does not match connected port %s", port, self._port)
             return
 
         # Handle stimulus state updates
@@ -340,7 +333,7 @@ class DRTTkinterGUI:
 
     def on_xbee_dongle_status_change(self, status: str, detail: str) -> None:
         """Handle XBee dongle status changes (placeholder for compatibility)."""
-        self.logger.info("XBee dongle status: %s %s", status, detail)
+        self.logger.debug("XBee dongle status: %s %s", status, detail)
 
     # ------------------------------------------------------------------
     # Recording state management
@@ -420,10 +413,10 @@ class DRTTkinterGUI:
 
     def _on_configure_clicked(self):
         """Handle configure button click - show config dialog."""
-        self.logger.info("Configure button clicked for port: %s", self._port)
+        self.logger.debug("Configure button clicked for port: %s", self._port)
 
         if self._port is None:
-            self.logger.warning("No device connected - cannot configure")
+            self.logger.debug("No device connected - cannot configure")
             return
 
         # Check if runtime is properly bound (not placeholder)
@@ -481,7 +474,7 @@ class DRTTkinterGUI:
         """Upload config to wDRT device and fetch updated config."""
         try:
             await handler.send_command('set', params)
-            self.logger.info("wDRT config uploaded successfully")
+            self.logger.debug("wDRT config uploaded successfully")
             # Fetch the new config from the device and update the window
             await self._fetch_and_update_config(handler)
         except Exception as e:
@@ -493,29 +486,29 @@ class DRTTkinterGUI:
             if 'lowerISI' in params:
                 value = params['lowerISI']
                 if value < 0:
-                    self.logger.warning("Invalid lowerISI value: %d, skipping", value)
+                    self.logger.debug("Invalid lowerISI value: %d, skipping", value)
                 else:
                     await handler.set_lower_isi(value)
             if 'upperISI' in params:
                 value = params['upperISI']
                 if value < 0:
-                    self.logger.warning("Invalid upperISI value: %d, skipping", value)
+                    self.logger.debug("Invalid upperISI value: %d, skipping", value)
                 else:
                     await handler.set_upper_isi(value)
             if 'stimDur' in params:
                 value = params['stimDur']
                 if value < 0:
-                    self.logger.warning("Invalid stimDur value: %d, skipping", value)
+                    self.logger.debug("Invalid stimDur value: %d, skipping", value)
                 else:
                     await handler.set_stim_duration(value)
             if 'intensity' in params:
                 value = params['intensity']
                 if not (0 <= value <= 100):
-                    self.logger.warning("Invalid intensity value: %d, must be 0-100, skipping", value)
+                    self.logger.debug("Invalid intensity value: %d, must be 0-100, skipping", value)
                 else:
                     intensity = int(value * 2.55)
                     await handler.set_intensity(intensity)
-            self.logger.info("sDRT config uploaded successfully")
+            self.logger.debug("sDRT config uploaded successfully")
             # Fetch the new config from the device and update the window
             await self._fetch_and_update_config(handler)
         except Exception as e:
@@ -534,7 +527,7 @@ class DRTTkinterGUI:
         """Set ISO params on sDRT and fetch updated config."""
         try:
             await handler.set_iso_params()
-            self.logger.info("sDRT ISO preset applied successfully")
+            self.logger.debug("sDRT ISO preset applied successfully")
             await self._fetch_and_update_config(handler)
         except Exception as e:
             self.logger.error("Failed to set sDRT ISO preset: %s", e, exc_info=True)
@@ -543,7 +536,7 @@ class DRTTkinterGUI:
         """Set ISO params on wDRT and fetch updated config."""
         try:
             await handler.send_command('iso')
-            self.logger.info("wDRT ISO preset applied successfully")
+            self.logger.debug("wDRT ISO preset applied successfully")
             await self._fetch_and_update_config(handler)
         except Exception as e:
             self.logger.error("Failed to set wDRT ISO preset: %s", e, exc_info=True)
@@ -625,14 +618,12 @@ class DRTView:
         self._override_help_menu()
 
     def _build_embedded_gui(self, parent) -> Optional[Any]:
-        self.logger.debug("Building embedded GUI")
-
         # Apply theme to root window
         try:
             root = parent.winfo_toplevel()
             Theme.apply(root)
-        except Exception as e:
-            self.logger.debug("Could not apply theme: %s", e)
+        except Exception:
+            pass  # Theme application is best-effort
 
         if hasattr(parent, "columnconfigure"):
             try:
@@ -661,7 +652,6 @@ class DRTView:
         # Apply pending runtime binding if bind_runtime was called before GUI was created
         if self._runtime:
             gui.system = self._runtime
-            self.logger.debug("Applied pending runtime binding to GUI")
 
         # Build capture stats content with DRT results
         self._build_capture_stats()
@@ -669,7 +659,6 @@ class DRTView:
         # Install menu items
         self._install_menu_items()
 
-        self.logger.debug("Embedded GUI build completed")
         return container
 
     def _build_capture_stats(self) -> None:
@@ -770,8 +759,8 @@ class DRTView:
             if view_menu is not None:
                 view_menu.entryconfigure("Stimulus: ON", state=state)
                 view_menu.entryconfigure("Stimulus: OFF", state=state)
-        except tk.TclError as e:
-            self.logger.debug("Failed to update menu state: %s", e)
+        except tk.TclError:
+            pass  # Menu state update is best-effort
 
     def _update_battery_display(self, device_type: DRTDeviceType = None) -> None:
         """Show/hide battery display based on device type (wDRT only)."""
@@ -787,8 +776,8 @@ class DRTView:
             else:
                 # Hide battery frame for sDRT or no device
                 self._battery_frame.grid_remove()
-        except tk.TclError as e:
-            self.logger.debug("Failed to update battery display: %s", e)
+        except tk.TclError:
+            pass  # Battery display update is best-effort
 
     def _on_lens_on(self) -> None:
         """Handle Lens: ON menu command."""
@@ -812,10 +801,10 @@ class DRTView:
         """Allow the runtime to expose its API to the GUI once ready."""
         self._runtime = runtime
         if not self.gui:
-            self.logger.warning("bind_runtime called but self.gui is None")
+            self.logger.debug("bind_runtime called but self.gui is None")
             return
         self.gui.system = runtime
-        self.logger.info("Runtime bound to GUI (system=%s)", type(runtime).__name__)
+        self.logger.debug("Runtime bound to GUI (system=%s)", type(runtime).__name__)
         if isinstance(self.gui.async_bridge, _LoopAsyncBridge):
             loop = getattr(runtime, "_loop", None)
             if loop:
@@ -861,7 +850,7 @@ class DRTView:
 
     def on_xbee_dongle_status_change(self, status: str, detail: str) -> None:
         """Handle XBee dongle status changes."""
-        self.logger.info("View: XBee dongle status change: %s %s", status, detail)
+        self.logger.debug("View: XBee dongle status change: %s %s", status, detail)
         if not self.gui:
             return
         self.call_in_gui(self.gui.on_xbee_dongle_status_change, status, detail)
@@ -911,8 +900,8 @@ class DRTView:
             # Delete existing "Quick Start Guide" entry and add DRT-specific one
             help_menu.delete(0)
             help_menu.add_command(label="Quick Start Guide", command=self._show_drt_help)
-        except Exception as e:
-            self.logger.debug("Could not override help menu: %s", e)
+        except Exception:
+            pass  # Help menu override is best-effort
 
     def _show_drt_help(self) -> None:
         """Show DRT-specific help dialog."""

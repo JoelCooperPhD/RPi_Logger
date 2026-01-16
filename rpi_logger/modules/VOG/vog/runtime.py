@@ -154,7 +154,7 @@ class VOGModuleRuntime(ModuleRuntime):
             True if device was successfully assigned
         """
         if self.handler is not None:
-            self.logger.warning("Device already assigned (current: %s, new: %s)", self.device_id, device_id)
+            self.logger.info("Device already assigned (current: %s, new: %s)", self.device_id, device_id)
             return True
 
         self.logger.info(
@@ -240,7 +240,7 @@ class VOGModuleRuntime(ModuleRuntime):
                     await handler.start_experiment()
                     self.logger.info("Started experiment on newly connected device %s", device_id)
                 except Exception as exc:
-                    self.logger.error("Failed to start experiment on new device %s: %s", device_id, exc)
+                    self.logger.warning("Failed to start experiment on new device %s: %s", device_id, exc)
 
             # If recording is active, also start trial
             if self._recording_active:
@@ -248,7 +248,7 @@ class VOGModuleRuntime(ModuleRuntime):
                     await handler.start_trial()
                     self.logger.info("Started trial on newly connected device %s", device_id)
                 except Exception as exc:
-                    self.logger.error("Failed to start trial on new device %s: %s", device_id, exc)
+                    self.logger.warning("Failed to start trial on new device %s: %s", device_id, exc)
 
             return True
 
@@ -272,7 +272,7 @@ class VOGModuleRuntime(ModuleRuntime):
             device_id: The device to unassign (for compatibility, ignored - uses self.device_id)
         """
         if self.handler is None:
-            self.logger.warning("No device assigned")
+            self.logger.debug("No device assigned")
             return
 
         self.logger.info("Unassigning device: %s", self.device_id)
@@ -449,7 +449,6 @@ class VOGModuleRuntime(ModuleRuntime):
 
     async def _on_device_data(self, port: str, data_type: str, payload: Dict[str, Any]) -> None:
         """Handle data received from device - forward to view."""
-        self.logger.debug("Device data: port=%s type=%s payload=%s", port, data_type, payload)
         if self.view:
             self.view.on_device_data(port, data_type, payload)
 
@@ -464,16 +463,16 @@ class VOGModuleRuntime(ModuleRuntime):
             return True
 
         if not self.handler:
-            self.logger.warning("Cannot start session - no device connected")
+            self.logger.debug("Cannot start session - no device connected")
             return False
 
         try:
             started = await self.handler.start_experiment()
             if not started:
-                self.logger.error("Failed to start session on: %s", self.device_id)
+                self.logger.warning("Failed to start session on: %s", self.device_id)
                 return False
         except Exception as exc:
-            self.logger.error("start_experiment failed on %s: %s", self.device_id, exc)
+            self.logger.warning("start_experiment failed on %s: %s", self.device_id, exc)
             return False
 
         self._session_active = True
@@ -493,9 +492,9 @@ class VOGModuleRuntime(ModuleRuntime):
             try:
                 stopped = await self.handler.stop_experiment()
                 if not stopped:
-                    self.logger.error("Failed to stop session on: %s", self.device_id)
+                    self.logger.warning("Failed to stop session on: %s", self.device_id)
             except Exception as exc:
-                self.logger.error("stop_experiment failed on %s: %s", self.device_id, exc)
+                self.logger.warning("stop_experiment failed on %s: %s", self.device_id, exc)
 
         self._session_active = False
         self.logger.info("Session stopped (exp>0)")
@@ -510,7 +509,7 @@ class VOGModuleRuntime(ModuleRuntime):
             self.logger.debug("Recording already active for %s", self.device_id)
             return True
         if not self.handler:
-            self.logger.error("Cannot start recording - no device connected")
+            self.logger.debug("Cannot start recording - no device connected")
             return False
 
         # Ensure session is started first
@@ -522,10 +521,10 @@ class VOGModuleRuntime(ModuleRuntime):
         try:
             started = await self.handler.start_trial()
             if not started:
-                self.logger.error("Failed to start recording on: %s", self.device_id)
+                self.logger.warning("Failed to start recording on: %s", self.device_id)
                 return False
         except Exception as exc:
-            self.logger.error("start_trial failed on %s: %s", self.device_id, exc)
+            self.logger.warning("start_trial failed on %s: %s", self.device_id, exc)
             return False
 
         self._recording_active = True
@@ -552,9 +551,9 @@ class VOGModuleRuntime(ModuleRuntime):
             try:
                 stopped = await self.handler.stop_trial()
                 if not stopped:
-                    self.logger.error("Failed to stop recording on: %s", self.device_id)
+                    self.logger.warning("Failed to stop recording on: %s", self.device_id)
             except Exception as exc:
-                self.logger.error("stop_trial failed on %s: %s", self.device_id, exc)
+                self.logger.warning("stop_trial failed on %s: %s", self.device_id, exc)
 
         self._recording_active = False
         self.trial_label = ""
@@ -593,7 +592,7 @@ class VOGModuleRuntime(ModuleRuntime):
             stub_view = self.view._stub_view
             if hasattr(stub_view, 'show_window'):
                 stub_view.show_window()
-                self.logger.info("VOG window shown")
+                self.logger.debug("VOG window shown")
 
     def _hide_window(self) -> None:
         """Hide the VOG window (called when main logger sends hide_window command)."""
@@ -601,7 +600,7 @@ class VOGModuleRuntime(ModuleRuntime):
             stub_view = self.view._stub_view
             if hasattr(stub_view, 'hide_window'):
                 stub_view.hide_window()
-                self.logger.info("VOG window hidden")
+                self.logger.debug("VOG window hidden")
 
     # ------------------------------------------------------------------
     # Config control
@@ -689,7 +688,6 @@ class VOGModuleRuntime(ModuleRuntime):
         This is called by the XBeeProxyTransport when the handler wants
         to send data to the device.
         """
-        self.logger.debug("Requesting XBee send to %s: %s", node_id, data[:50] if len(data) > 50 else data)
         StatusMessage.send_xbee_data(node_id, data)
         # Can't know result immediately - it's async through the command protocol
         return True

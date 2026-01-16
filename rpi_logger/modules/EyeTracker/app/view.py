@@ -460,7 +460,7 @@ class NeonEyeTrackerTkinterGUI:
             from rpi_logger.modules.EyeTracker.tracker_core.interfaces.gui.config_window import EyeTrackerConfigWindow
             EyeTrackerConfigWindow(self.root, self.system)
         except ImportError as e:
-            self.logger.warning("Config window not available: %s", e)
+            self.logger.debug("Config window not available: %s", e)
         except Exception as e:
             self.logger.error("Failed to create config window: %s", e, exc_info=True)
 

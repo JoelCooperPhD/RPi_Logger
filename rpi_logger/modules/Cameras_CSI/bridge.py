@@ -71,17 +71,17 @@ class CSICamerasRuntime(ModuleRuntime):
         self.view = CSICameraView(ctx.view, logger=self.logger)
 
     async def start(self) -> None:
-        self.logger.info("=" * 60)
-        self.logger.info("CSI CAMERAS RUNTIME STARTING (Elm/Redux architecture)")
-        self.logger.info("=" * 60)
+        self.logger.debug("=" * 60)
+        self.logger.debug("CSI CAMERAS RUNTIME STARTING (Elm/Redux architecture)")
+        self.logger.debug("=" * 60)
 
         args = self.ctx.args
-        self.logger.info("LAUNCH PARAMETERS:")
-        self.logger.info("  instance_id:     %s", getattr(args, "instance_id", None))
-        self.logger.info("  camera_index:    %s", getattr(args, "camera_index", None))
-        self.logger.info("  output_dir:      %s", getattr(args, "output_dir", None))
-        self.logger.info("  record:          %s", getattr(args, "record", False))
-        self.logger.info("=" * 60)
+        self.logger.debug("LAUNCH PARAMETERS:")
+        self.logger.debug("  instance_id:     %s", getattr(args, "instance_id", None))
+        self.logger.debug("  camera_index:    %s", getattr(args, "camera_index", None))
+        self.logger.debug("  output_dir:      %s", getattr(args, "output_dir", None))
+        self.logger.debug("  record:          %s", getattr(args, "record", False))
+        self.logger.debug("=" * 60)
 
         self._auto_record = getattr(args, "record", False)
         if output_dir := getattr(args, "output_dir", None):
@@ -105,14 +105,14 @@ class CSICamerasRuntime(ModuleRuntime):
         camera_index = getattr(self.ctx.args, "camera_index", None)
 
         if camera_index is not None:
-            self.logger.info("Auto-assigning CSI camera %d via CLI arg", camera_index)
+            self.logger.debug("Auto-assigning CSI camera %d via CLI arg", camera_index)
             await self._assign_camera({
                 "command_id": "cli_auto_assign",
                 "device_id": f"picam:{camera_index}",
                 "camera_index": camera_index,
             })
         else:
-            self.logger.info("Waiting for assign_device command")
+            self.logger.debug("Waiting for assign_device command")
 
     async def shutdown(self) -> None:
         self.logger.info("Shutting down CSI Cameras runtime")
@@ -123,7 +123,6 @@ class CSICamerasRuntime(ModuleRuntime):
 
     async def handle_command(self, command: Dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
-        self.logger.debug("Received command: %s", action)
 
         if action == "assign_device":
             return await self._assign_camera(command)
@@ -187,7 +186,6 @@ class CSICamerasRuntime(ModuleRuntime):
         device_id = command.get("device_id", "")
 
         StatusMessage.send("device_ack", {"device_id": device_id or "unknown"}, command_id=command_id)
-        self.logger.debug("Sent device_ack for %s", device_id)
 
         camera_index = 0
         if "camera_index" in command:
@@ -203,13 +201,11 @@ class CSICamerasRuntime(ModuleRuntime):
         return True
 
     def _on_effect_status(self, status_type: str, payload: dict) -> None:
-        self.logger.debug("Effect status: %s - %s", status_type, payload)
-
         if status_type == "camera_assigned":
             if self._pending_device_ready:
                 device_id, command_id = self._pending_device_ready
                 self._pending_device_ready = None
-                self.logger.info("Camera assigned - sending device_ready: %s", device_id)
+                self.logger.debug("Camera assigned - sending device_ready: %s", device_id)
                 StatusMessage.send("device_ready", {"device_id": device_id}, command_id=command_id)
 
                 controller = getattr(self.ctx, "controller", None)
@@ -255,7 +251,6 @@ class CSICamerasRuntime(ModuleRuntime):
         }
         try:
             await self._preferences.write_async(updates)
-            self.logger.debug("Settings persisted: %s", updates)
         except Exception as e:
             self.logger.warning("Failed to persist settings: %s", e)
 

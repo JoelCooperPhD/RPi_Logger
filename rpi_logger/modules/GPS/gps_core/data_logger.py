@@ -141,7 +141,7 @@ class GPSDataLogger:
                 logger.warning("Writer thread did not stop in time for %s, retrying", self.device_id)
                 self._writer_thread.join(timeout=2.0)
                 if self._writer_thread.is_alive():
-                    logger.error("Writer thread still alive for %s, proceeding with cleanup", self.device_id)
+                    logger.warning("Writer thread still alive for %s, proceeding with cleanup", self.device_id)
         self._writer_thread = None
 
         if self._record_file:

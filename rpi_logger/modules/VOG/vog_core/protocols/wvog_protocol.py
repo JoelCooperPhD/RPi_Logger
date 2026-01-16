@@ -95,7 +95,7 @@ class WVOGProtocol(BaseVOGProtocol):
     def format_command(self, command: str, value: Optional[str] = None) -> bytes:
         """Format wVOG command with optional value substitution."""
         if command not in self.COMMANDS:
-            self.logger.warning("Unknown wVOG command: %s", command)
+            self.logger.debug("Unknown wVOG command: %s", command)
             return b''
         cmd_string = self.COMMANDS[command]
         if value is not None:
@@ -120,7 +120,6 @@ class WVOGProtocol(BaseVOGProtocol):
 
         response_type = self.RESPONSE_TYPES.get(keyword, ResponseType.UNKNOWN)
         if response_type == ResponseType.UNKNOWN:
-            self.logger.debug("Unrecognized wVOG response: %s", response)
             return None
 
         data = {}

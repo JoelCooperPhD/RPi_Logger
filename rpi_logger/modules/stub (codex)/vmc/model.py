@@ -203,7 +203,7 @@ class StubCodexModel:
             module_name=self.display_name,
         )
         if self._using_fallback_config:
-            logger.info(
+            logger.debug(
                 "Using writable config store %s (template %s unavailable for writes)",
                 self.config_path,
                 self._template_config_path,
@@ -485,10 +485,6 @@ class StubCodexModel:
             payload["instance_id"] = instance_id
 
         StatusMessage.send("geometry_changed", payload)
-        logger.debug(
-            "Sent geometry_changed to parent: %dx%d+%d+%d (instance: %s)",
-            width, height, x, y, instance_id or "none"
-        )
 
     def has_pending_window_geometry(self) -> bool:
         return bool(self._pending_window_geometry)

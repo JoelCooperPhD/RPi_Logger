@@ -41,7 +41,7 @@ class StubCodexController:
     async def start(self) -> None:
         await self.model.prepare_environment(self.logger)
 
-        self.logger.info("%s module initializing", self.display_name)
+        self.logger.debug("%s module initializing", self.display_name)
         StatusMessage.send(StatusType.INITIALIZING, {"message": f"{self.display_name} starting"})
         await asyncio.sleep(0)
 
@@ -51,14 +51,14 @@ class StubCodexController:
         # Skip command listener if not enabled, but allow standalone test mode
         test_camera_index = getattr(self.args, "camera_index", None)
         if not self.args.enable_commands and test_camera_index is None:
-            self.logger.warning("Command channel disabled; initiating shutdown")
+            self.logger.info("Command channel disabled; initiating shutdown")
             await self._begin_shutdown("commands disabled")
             return
 
         # If camera_index is provided, defer command listener until after camera init
         # This prevents stdin reading from interfering with libcamera initialization
         if test_camera_index is not None:
-            self.logger.info("Deferring command listener start (camera init via --camera-index)")
+            self.logger.debug("Deferring command listener start (camera init via --camera-index)")
             return
 
         # Start command listener if commands are enabled
@@ -148,7 +148,7 @@ class StubCodexController:
                         self.logger.debug("Failed to parse command: %s", line[:100])
                         continue
 
-                    self.logger.info("Received command: %s", command.get("command", "unknown"))
+                    self.logger.debug("Received command: %s", command.get("command", "unknown"))
                     await self._process_command(command)
             finally:
                 self._stdin_shutdown.set()
@@ -182,7 +182,7 @@ class StubCodexController:
                         self.logger.debug("Failed to parse command: %s", line[:100])
                         continue
 
-                    self.logger.info("Received command: %s", command.get("command", "unknown"))
+                    self.logger.debug("Received command: %s", command.get("command", "unknown"))
                     await self._process_command(command)
             finally:
                 self._stdin_shutdown.set()
@@ -231,10 +231,10 @@ class StubCodexController:
             handled = True
 
         if not handled and self._runtime:
-            self.logger.info("Forwarding command to runtime: %s", action)
+            self.logger.debug("Forwarding command to runtime: %s", action)
             try:
                 handled = await self._runtime.handle_command(command)
-                self.logger.info("Runtime handled command %s: %s", action, handled)
+                self.logger.debug("Runtime handled command %s: %s", action, handled)
             except Exception:
                 self.logger.exception("Runtime command handler failed [%s]", action)
                 handled = True
@@ -250,7 +250,7 @@ class StubCodexController:
             return
         path = Path(session_dir)
         self.model.session_dir = path
-        self.logger.info("Session directory set to %s", path)
+        self.logger.debug("Session directory set to %s", path)
         runtime = self._runtime
         if runtime and hasattr(runtime, "on_session_dir_available"):
             try:
@@ -275,7 +275,7 @@ class StubCodexController:
     async def _handle_stop_session(self) -> None:
         await self._handle_stop_recording()
         if self.model.session_dir is not None:
-            self.logger.info("Session directory cleared (stop_session command)")
+            self.logger.debug("Session directory cleared (stop_session command)")
         self.model.session_dir = None
 
     async def _forward_to_runtime(self, command: Dict[str, Any]) -> bool:
@@ -325,7 +325,7 @@ class StubCodexController:
             self.logger.debug("Commands not enabled, skipping listener start")
             return
 
-        self.logger.info("Starting deferred command listener (camera init complete)")
+        self.logger.debug("Starting deferred command listener (camera init complete)")
         self._command_task = asyncio.create_task(
             self._listen_for_commands(), name="StubCodexCommands"
         )

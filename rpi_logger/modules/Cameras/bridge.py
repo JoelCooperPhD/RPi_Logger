@@ -129,7 +129,7 @@ class CamerasRuntime(ModuleRuntime):
             config = self._preferences.snapshot()
             restored = settings_from_persistable(config, Settings())
             self.controller._state.settings = restored
-            self.logger.info(
+            self.logger.debug(
                 "Restored camera settings: %dx%d @ %dfps, audio=%s",
                 restored.resolution[0],
                 restored.resolution[1],
@@ -166,7 +166,7 @@ class CamerasRuntime(ModuleRuntime):
         if audio_device_arg is not None:
             try:
                 audio_index = int(audio_device_arg)
-                self.logger.info("Using explicit audio device: %d", audio_index)
+                self.logger.debug("Using explicit audio device: %d", audio_index)
                 try:
                     import sounddevice as sd
                     devices = sd.query_devices()
@@ -210,7 +210,7 @@ class CamerasRuntime(ModuleRuntime):
                     devices = sd.query_devices()
                     for idx, dev in enumerate(devices):
                         if dev.get("max_input_channels", 0) > 0:
-                            self.logger.info(
+                            self.logger.debug(
                                 "Using first audio input (--audio=on): %s (index=%d)",
                                 dev.get("name"), idx
                             )
@@ -252,7 +252,7 @@ class CamerasRuntime(ModuleRuntime):
             for cam in cameras:
                 if cam.camera_index == camera_index and cam.audio_sibling:
                     sibling = cam.audio_sibling
-                    self.logger.info(
+                    self.logger.debug(
                         "Found audio sibling via VID:PID matching: %s (index=%d)",
                         sibling.name, sibling.sounddevice_index
                     )
@@ -263,7 +263,7 @@ class CamerasRuntime(ModuleRuntime):
                         "supported_sample_rates": (int(sibling.sample_rate),),
                     }
 
-            self.logger.info("No audio sibling found for camera index %d", camera_index)
+            self.logger.debug("No audio sibling found for camera index %d", camera_index)
         except ImportError as e:
             self.logger.debug("Camera backend not available: %s", e)
         except Exception as e:
@@ -273,17 +273,17 @@ class CamerasRuntime(ModuleRuntime):
 
     async def start(self) -> None:
         """Start the runtime."""
-        self.logger.info("=" * 60)
-        self.logger.info("CAMERAS RUNTIME STARTING")
-        self.logger.info("=" * 60)
+        self.logger.debug("=" * 60)
+        self.logger.debug("CAMERAS RUNTIME STARTING")
+        self.logger.debug("=" * 60)
 
         args = self.ctx.args
-        self.logger.info("LAUNCH PARAMETERS:")
-        self.logger.info("  device:       %s", getattr(args, "device", None))
-        self.logger.info("  audio:        %s", getattr(args, "audio", "auto"))
-        self.logger.info("  output_dir:   %s", getattr(args, "output_dir", None))
-        self.logger.info("  record:       %s", getattr(args, "record", False))
-        self.logger.info("=" * 60)
+        self.logger.debug("LAUNCH PARAMETERS:")
+        self.logger.debug("  device:       %s", getattr(args, "device", None))
+        self.logger.debug("  audio:        %s", getattr(args, "audio", "auto"))
+        self.logger.debug("  output_dir:   %s", getattr(args, "output_dir", None))
+        self.logger.debug("  record:       %s", getattr(args, "record", False))
+        self.logger.debug("=" * 60)
 
         self._auto_record = getattr(args, "record", False)
         if output_dir := getattr(args, "output_dir", None):
@@ -322,7 +322,7 @@ class CamerasRuntime(ModuleRuntime):
         # Handle CLI device argument
         device_arg = getattr(self.ctx.args, "device", None)
         if device_arg:
-            self.logger.info("Auto-assigning camera %s via CLI arg", device_arg)
+            self.logger.debug("Auto-assigning camera %s via CLI arg", device_arg)
             try:
                 device = int(device_arg)
             except ValueError:
@@ -347,7 +347,7 @@ class CamerasRuntime(ModuleRuntime):
             }
 
             if audio_info.get("has_audio"):
-                self.logger.info(
+                self.logger.debug(
                     "Audio device detected: index=%s, channels=%s",
                     audio_info.get("audio_device_index"),
                     audio_info.get("audio_channels"),
@@ -356,7 +356,7 @@ class CamerasRuntime(ModuleRuntime):
             self._pending_device_ready = (str(device_arg), "cli_auto_assign")
             await self._start_camera(device, device_info)
         else:
-            self.logger.info("Waiting for assign_device command")
+            self.logger.debug("Waiting for assign_device command")
 
     async def shutdown(self) -> None:
         """Shutdown the runtime."""
@@ -390,7 +390,6 @@ class CamerasRuntime(ModuleRuntime):
             True if command was handled
         """
         action = (command.get("command") or "").lower()
-        self.logger.debug("Received command: %s", action)
 
         if action == "assign_device":
             return await self._handle_assign_device(command)
@@ -461,7 +460,7 @@ class CamerasRuntime(ModuleRuntime):
         )
         display_name = command.get("display_name") or f"Camera ({stable_id})"
 
-        self.logger.info(
+        self.logger.debug(
             "assign_device: camera_index=%s, dev_path=%s, stable_id=%s",
             camera_index,
             camera_dev_path,
@@ -499,7 +498,7 @@ class CamerasRuntime(ModuleRuntime):
 
         has_audio = audio_index is not None
         if has_audio:
-            self.logger.info(
+            self.logger.debug(
                 "Audio device available: index=%s, channels=%s, rate=%s",
                 audio_index,
                 audio_channels,
@@ -524,7 +523,7 @@ class CamerasRuntime(ModuleRuntime):
         """Start camera with given device."""
         # If already streaming, just acknowledge - don't send error
         if self.controller.state.phase == Phase.STREAMING:
-            self.logger.info("Camera already streaming, ignoring duplicate assign")
+            self.logger.debug("Camera already streaming, ignoring duplicate assign")
             if self._pending_device_ready:
                 device_id, command_id = self._pending_device_ready
                 self._pending_device_ready = None
@@ -689,7 +688,7 @@ class CamerasRuntime(ModuleRuntime):
 
         # Restart streaming if needed (resolution or audio changed)
         if needs_restart:
-            self.logger.info("Settings require stream restart, restarting...")
+            self.logger.debug("Settings require stream restart, restarting...")
             asyncio.create_task(self._restart_streaming())
 
     async def _restart_streaming(self) -> None:
@@ -703,7 +702,7 @@ class CamerasRuntime(ModuleRuntime):
             self.logger.warning("Cannot restart streaming: no device")
             return
 
-        self.logger.info("Stopping stream for restart...")
+        self.logger.debug("Stopping stream for restart...")
         await self.controller.stop_streaming()
 
         # Brief pause to let hardware settle
@@ -712,19 +711,19 @@ class CamerasRuntime(ModuleRuntime):
         # Re-detect audio if audio is now enabled but device_info lacks audio
         settings = self.controller.state.settings
         if settings.audio_enabled and not self._current_device_info.get("has_audio"):
-            self.logger.info("Audio enabled, re-detecting audio device...")
+            self.logger.debug("Audio enabled, re-detecting audio device...")
             # Only re-detect if device is an integer camera index
             if isinstance(device, int):
                 audio_info = self._discover_camera_audio_sibling(device)
                 if audio_info and audio_info.get("has_audio"):
                     self._current_device_info.update(audio_info)
-                    self.logger.info(
+                    self.logger.debug(
                         "Audio device found: index=%s, channels=%s",
                         audio_info.get("audio_device_index"),
                         audio_info.get("audio_channels"),
                     )
 
-        self.logger.info("Restarting stream with new settings...")
+        self.logger.debug("Restarting stream with new settings...")
         await self._start_camera(device, self._current_device_info)
 
     def _save_settings(self, settings: Settings) -> None:

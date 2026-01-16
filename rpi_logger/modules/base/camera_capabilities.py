@@ -48,11 +48,6 @@ def build_capabilities(
     capabilities.dedupe()
     capabilities.default_preview_mode = select_default_preview(capabilities)
     capabilities.default_record_mode = select_default_record(capabilities)
-    log.debug(
-        "Built capabilities (%d modes) source=%s",
-        len(capabilities.modes),
-        capabilities.source.value,
-    )
     return capabilities
 
 

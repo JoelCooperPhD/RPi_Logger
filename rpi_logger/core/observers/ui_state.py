@@ -59,7 +59,6 @@ class UIStateObserver:
     def register_checkbox(self, module_name: str, var: tk.BooleanVar) -> None:
         """Register a checkbox variable for a module."""
         self._checkbox_vars[module_name] = var
-        self.logger.debug("Registered checkbox for module %s", module_name)
 
     def unregister_checkbox(self, module_name: str) -> None:
         """Unregister a checkbox variable."""
@@ -112,10 +111,6 @@ class UIStateObserver:
                 current = var.get()
                 if current != new_value:
                     var.set(new_value)
-                    self.logger.debug(
-                        "Updated checkbox for %s: %s -> %s",
-                        module_name, current, new_value
-                    )
             except tk.TclError:
                 # Widget may have been destroyed
                 pass
@@ -150,14 +145,14 @@ class UIStateObserver:
                     if new_state in STOPPED_STATES and current:
                         # Module stopped but checkbox is checked - uncheck it
                         var.set(False)
-                        self.logger.info(
+                        self.logger.debug(
                             "Unchecking %s (state: %s)",
                             module_name, new_state.value
                         )
                     elif new_state in RUNNING_STATES and not current:
                         # Module running but checkbox unchecked - check it
                         var.set(True)
-                        self.logger.info(
+                        self.logger.debug(
                             "Checking %s (state: %s)",
                             module_name, new_state.value
                         )

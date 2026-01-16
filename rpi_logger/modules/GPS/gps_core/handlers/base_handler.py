@@ -85,7 +85,7 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
     async def start(self) -> None:
         """Start read loop to monitor device for NMEA data."""
         if self._running:
-            logger.warning("Handler %s already running", self.device_id)
+            logger.info("Handler %s already running", self.device_id)
             return
 
         self._running = True
@@ -177,7 +177,6 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
                     self._consecutive_errors = 0
                     self._logged_stale = False
                     if line.startswith("$"):
-                        logger.debug("GPS sentence from %s: %s", self.device_id, line)
                         self._process_sentence(line)
 
                 self._check_staleness()
@@ -192,7 +191,7 @@ class BaseGPSHandler(ABC, ReconnectingMixin):
                     config.error_backoff * (2 ** (self._consecutive_errors - 1)),
                     config.max_error_backoff
                 )
-                logger.error(
+                logger.warning(
                     "Error in GPS read loop for %s (%d/%d): %s",
                     self.device_id, self._consecutive_errors, config.max_consecutive_errors, e
                 )

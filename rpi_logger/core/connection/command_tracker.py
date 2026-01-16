@@ -158,11 +158,6 @@ class CommandTracker:
         async with self._lock:
             self._pending[command_id] = pending
 
-        logger.debug(
-            "Sending command %s (type=%s, device=%s, timeout=%.1fs)",
-            command_id, command_type, device_id, timeout
-        )
-
         try:
             # Send the command
             await send_func(command_json)
@@ -235,11 +230,6 @@ class CommandTracker:
 
         pending.future.set_result(result)
 
-        logger.debug(
-            "Command %s resolved: success=%s, elapsed=%.1fms",
-            command_id, success, pending.elapsed_ms()
-        )
-
         return True
 
     def on_device_ready(self, device_id: str, data: Optional[Dict[str, Any]] = None) -> bool:
@@ -306,9 +296,9 @@ class CommandTracker:
                                 error="Command expired",
                                 duration_ms=pending.elapsed_ms(),
                             ))
-                            logger.debug("Expired command: %s", cmd_id)
+                            logger.debug("Command %s expired in cleanup", cmd_id)
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("Cleanup loop error: %s", e)
+                logger.warning("Cleanup loop error: %s", e)

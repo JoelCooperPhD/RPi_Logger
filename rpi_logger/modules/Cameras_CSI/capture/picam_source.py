@@ -38,13 +38,14 @@ class PicamSource:
         self._frame_count = 0
         self._drop_count = 0
         self._hardware_fps = 0.0
+        self._logged_capture_error = False
         self._camera_id = ""
 
     async def start(self) -> None:
         if self._running:
             return
 
-        logger.info("Opening CSI camera %d at %dx%d @ %d fps",
+        logger.debug("Opening CSI camera %d at %dx%d @ %d fps",
                     self._camera_index, self._resolution[0], self._resolution[1], self._fps)
 
         self._camera = Picamera2(self._camera_index)
@@ -71,7 +72,6 @@ class PicamSource:
         if not self._running:
             return
 
-        logger.debug("Stopping CSI camera %s", self._camera_id)
         self._running = False
         self._buffer.stop()
 
@@ -132,8 +132,9 @@ class PicamSource:
                     self._hardware_fps = 1.0 / avg_interval if avg_interval > 0 else 0.0
 
             except Exception as e:
-                if self._running:
+                if self._running and not self._logged_capture_error:
                     logger.debug("CSI capture error: %s", e)
+                    self._logged_capture_error = True
                     time.sleep(0.001)
 
     async def frames(self) -> AsyncIterator[CapturedFrame]:

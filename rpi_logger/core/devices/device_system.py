@@ -411,6 +411,16 @@ class DeviceSystem:
         if enabled:
             asyncio.create_task(self._reannounce_devices_for_connection(interface, family))
 
+            # If enabling a family that supports XBee, and dongle is already connected,
+            # also enable XBee for that family (handles race condition where dongle
+            # connects before family is enabled)
+            if self._xbee_dongle_connected and family in {DeviceFamily.DRT, DeviceFamily.VOG}:
+                if not self._selection.is_connection_enabled(InterfaceType.XBEE, family):
+                    logger.debug(f"Auto-enabling XBee:{family.value} (dongle already connected)")
+                    self._selection.set_connection_enabled(InterfaceType.XBEE, family, True)
+                    # Reannounce any XBee devices that were ignored
+                    asyncio.create_task(self._reannounce_xbee_devices_for_family(family))
+
         return []
 
     async def _reannounce_devices_for_connection(
@@ -428,12 +438,12 @@ class DeviceSystem:
         if scanner:
             # Start scanner if not already started
             if scanner not in self._started_scanners:
-                logger.info(f"Starting scanner for {interface.value}:{family.value}")
+                logger.debug(f"Starting scanner for {interface.value}:{family.value}")
                 await self._start_scanner(scanner)
                 self._started_scanners.add(scanner)
             else:
                 # Scanner already running, just reannounce existing devices
-                logger.info(f"Reannouncing devices for {interface.value}:{family.value}")
+                logger.debug(f"Reannouncing devices for {interface.value}:{family.value}")
                 await scanner.reannounce_devices()
 
     def get_enabled_connections(self) -> set[ConnectionKey]:
@@ -564,26 +574,25 @@ class DeviceSystem:
         started. Scanners that haven't been started (because their connection
         type isn't enabled) are skipped.
         """
-        logger.debug("USB hotplug event - triggering device rescans")
 
         # Only rescan scanners that have been started
         if self._usb_scanner in self._started_scanners:
             try:
                 await self._usb_scanner.force_scan()
             except Exception as e:
-                logger.error(f"Error rescanning USB devices: {e}")
+                logger.warning(f"Error rescanning USB devices: {e}")
 
         if self._camera_scanner and self._camera_scanner in self._started_scanners:
             try:
                 await self._camera_scanner.force_scan()
             except Exception as e:
-                logger.error(f"Error rescanning USB cameras: {e}")
+                logger.warning(f"Error rescanning USB cameras: {e}")
 
         if self._audio_scanner and self._audio_scanner in self._started_scanners:
             try:
                 await self._audio_scanner.force_scan()
             except Exception as e:
-                logger.error(f"Error rescanning audio devices: {e}")
+                logger.warning(f"Error rescanning audio devices: {e}")
 
     def _handle_ui_connection_toggle(
         self,
@@ -592,7 +601,7 @@ class DeviceSystem:
         enabled: bool
     ) -> None:
         """Handle connection toggle from UI controller."""
-        logger.info(f"Connection toggled: {interface.value}:{family.value} -> {enabled}")
+        logger.debug(f"Connection toggled: {interface.value}:{family.value} -> {enabled}")
 
         if self._on_connection_changed:
             result = self._on_connection_changed(interface, family, enabled)
@@ -773,7 +782,7 @@ class DeviceSystem:
         Also auto-enables XBee connections for families that already have another
         interface enabled (e.g., if USB:DRT is enabled, also enable XBee:DRT).
         """
-        logger.info(f"XBee dongle connected on {port}")
+        logger.debug(f"XBee dongle connected on {port}")
         self._xbee_dongle_connected = True
 
         # Auto-enable XBee interface for families that already have another interface enabled
@@ -795,7 +804,7 @@ class DeviceSystem:
 
         Updates internal state, UI controller, and forwards to external callback.
         """
-        logger.info("XBee dongle disconnected")
+        logger.debug("XBee dongle disconnected")
         self._xbee_dongle_connected = False
 
         # Update UI controller
@@ -834,7 +843,7 @@ class DeviceSystem:
 
     def _handle_xbee_rescan(self) -> None:
         """Handle XBee rescan request from UI."""
-        logger.info("XBee rescan requested")
+        logger.debug("XBee rescan requested")
         if self._xbee_manager and self._xbee_dongle_connected:
             asyncio.create_task(self._xbee_manager.rescan_network())
 
@@ -854,8 +863,26 @@ class DeviceSystem:
             if self._selection.is_family_enabled(family):
                 # Also enable XBee for this family
                 if not self._selection.is_connection_enabled(InterfaceType.XBEE, family):
-                    logger.info(f"Auto-enabling XBee:{family.value} (family already enabled)")
+                    logger.debug(f"Auto-enabling XBee:{family.value} (family already enabled)")
                     self._selection.set_connection_enabled(InterfaceType.XBEE, family, True)
+
+    async def _reannounce_xbee_devices_for_family(self, family: DeviceFamily) -> None:
+        """Reannounce already-discovered XBee devices for a family.
+
+        Called when XBee:FAMILY is enabled after devices were already discovered.
+        This re-emits discovery events for devices that were previously ignored.
+        """
+        if not self._xbee_manager:
+            return
+
+        port = self._xbee_manager.coordinator_port
+        if not port:
+            return
+
+        for device in self._xbee_manager.discovered_devices.values():
+            if device.family == family:
+                logger.debug(f"Reannouncing XBee device: {device.node_id}")
+                await self._adapter.on_wireless_device_found(device, port)
 
     def _update_wireless_device_count(self) -> None:
         """Update the wireless device count in the UI controller."""

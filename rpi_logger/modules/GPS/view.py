@@ -559,7 +559,6 @@ class GPSTkinterGUI:
                 title = "GPS"
 
             toplevel.title(title)
-            self.logger.debug("GPS window title set to: %s", title)
         except Exception as e:
             self.logger.warning("Failed to update window title: %s", e)
 
@@ -569,22 +568,20 @@ class GPSTkinterGUI:
     def handle_session_started(self) -> None:
         """Handle session start (Start button) - prepare for recording."""
         self._session_active = True
-        self.logger.debug("GPS session started")
 
     def handle_session_stopped(self) -> None:
         """Handle session stop (Stop button) - finalize session."""
         self._session_active = False
-        self.logger.debug("GPS session stopped")
 
     # ------------------------------------------------------------------
     # Configuration dialog
 
     def _on_configure_clicked(self) -> None:
         """Handle configure button click - show config dialog."""
-        self.logger.info("Configure button clicked for port: %s", self._port)
+        self.logger.debug("Configure button clicked for port: %s", self._port)
 
         if self._port is None:
-            self.logger.warning("No device connected - cannot configure")
+            self.logger.info("No device connected - cannot configure")
             return
 
         if GPSConfigWindow is None:
@@ -593,7 +590,7 @@ class GPSTkinterGUI:
 
         # Check if runtime is properly bound (not placeholder)
         if isinstance(self.system, _SystemPlaceholder):
-            self.logger.warning("Runtime not yet bound - cannot configure device")
+            self.logger.info("Runtime not yet bound - cannot configure device")
             try:
                 from tkinter import messagebox
                 messagebox.showwarning(
@@ -611,7 +608,7 @@ class GPSTkinterGUI:
             try:
                 root = self._frame.winfo_toplevel()
             except Exception as e:
-                self.logger.error("Failed to get toplevel window: %s", e)
+                self.logger.warning("Failed to get toplevel window: %s", e)
 
         if not root:
             self.logger.warning("No root window available for config dialog")
@@ -698,8 +695,8 @@ class GPSView:
             try:
                 root = parent.winfo_toplevel()
                 Theme.apply(root)
-            except Exception as e:
-                self.logger.debug("Could not apply theme: %s", e)
+            except Exception:
+                pass  # Theme application is best-effort
 
         frame_cls = ttk.Frame if ttk is not None else tk.Frame
         if hasattr(parent, "columnconfigure"):
@@ -730,7 +727,7 @@ class GPSView:
         if self._runtime:
             gui.system = self._runtime
             gui._zoom_callback = self._handle_zoom_request
-            self.logger.info("Applied pending runtime binding to GUI")
+            self.logger.debug("Applied pending runtime binding to GUI")
 
         # Build capture stats panel after GUI is ready
         self._build_capture_stats()
@@ -768,11 +765,11 @@ class GPSView:
     def bind_runtime(self, runtime) -> None:
         self._runtime = runtime
         if not self.gui:
-            self.logger.warning("bind_runtime called but self.gui is None")
+            self.logger.debug("bind_runtime called but self.gui is None")
             return
         self.gui.system = runtime
         self.gui._zoom_callback = self._handle_zoom_request
-        self.logger.info("Runtime bound to GUI (system=%s)", type(runtime).__name__)
+        self.logger.debug("Runtime bound to GUI (system=%s)", type(runtime).__name__)
         if isinstance(self.gui.async_bridge, _LoopAsyncBridge):
             loop = getattr(runtime, "_loop", None)
             if loop:
@@ -945,8 +942,8 @@ class GPSView:
             # Delete existing "Quick Start Guide" entry and add GPS-specific one
             help_menu.delete(0)
             help_menu.add_command(label="Quick Start Guide", command=self._show_gps_help)
-        except Exception as e:
-            self.logger.debug("Could not override help menu: %s", e)
+        except Exception:
+            pass  # Help menu override is best-effort
 
     def _show_gps_help(self) -> None:
         """Show GPS-specific help dialog."""
@@ -956,7 +953,7 @@ class GPSView:
             if root:
                 GPSHelpDialog(root)
         except Exception as e:
-            self.logger.error("Failed to show GPS help dialog: %s", e)
+            self.logger.warning("Failed to show GPS help dialog: %s", e)
 
     def _finalize_menus(self) -> None:
         """Finalize View and File menus with standard items."""

@@ -107,7 +107,6 @@ class ShutdownCoordinator:
         self._pending_acks[command_id] = ack_event
 
         log_prefix = f"[{instance_id}] " if instance_id else ""
-        logger.debug("%sSending unassign_all_devices (command_id=%s)", log_prefix, command_id)
 
         try:
             # Send command with correlation ID
@@ -164,7 +163,6 @@ class ShutdownCoordinator:
             self._ack_data[command_id] = data
 
         ack_event.set()
-        logger.debug("Unassign acknowledged for command_id: %s", command_id)
         return True
 
     async def drain_process_pipes(
@@ -324,7 +322,7 @@ class ShutdownCoordinator:
                 except asyncio.TimeoutError:
                     # Phase 4: SIGKILL
                     phase = ShutdownPhase.KILLING
-                    logger.error("%sProcess did not terminate, sending SIGKILL", log_prefix)
+                    logger.warning("%sProcess did not terminate, sending SIGKILL", log_prefix)
 
                     process.kill()
                     await process.wait()
@@ -333,7 +331,6 @@ class ShutdownCoordinator:
 
             # Phase 5: Drain pipes
             if phase == ShutdownPhase.DRAINING:
-                logger.debug("%sPhase 5: Draining process pipes", log_prefix)
                 await self.drain_process_pipes(
                     stdout=process.stdout,
                     stderr=process.stderr,

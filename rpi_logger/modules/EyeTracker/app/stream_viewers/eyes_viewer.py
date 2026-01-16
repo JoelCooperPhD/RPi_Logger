@@ -31,6 +31,9 @@ from .base_viewer import BaseStreamViewer
 if TYPE_CHECKING:
     import numpy as np
 
+# Error logging flag (log-once pattern to avoid per-frame spam)
+_logged_eyes_error = False
+
 
 class EyesViewer(BaseStreamViewer):
     """Dual eye camera display showing left and right eye frames.
@@ -184,7 +187,10 @@ class EyesViewer(BaseStreamViewer):
             )
 
         except Exception as exc:
-            self._logger.debug("Eye preview update failed: %s", exc)
+            global _logged_eyes_error
+            if not _logged_eyes_error:
+                self._logger.debug("Eye preview update failed: %s", exc)
+                _logged_eyes_error = True
 
     def _update_eye_canvas(
         self,

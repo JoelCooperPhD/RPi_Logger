@@ -145,9 +145,9 @@ def detect_platform() -> PlatformInfo:
         python_version=platform.python_version(),
     )
 
-    logger.info("Platform detected: %s", info)
+    logger.debug("Platform detected: %s", info)
     if is_pi:
-        logger.info("Raspberry Pi model: %s", pi_model)
+        logger.debug("Raspberry Pi model: %s", pi_model)
 
     return info
 

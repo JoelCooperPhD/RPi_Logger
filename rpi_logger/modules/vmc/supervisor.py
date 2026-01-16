@@ -123,10 +123,10 @@ class StubCodexSupervisor:
             display_name=self.display_name,
             **view_kwargs,
         )
-        self.logger.info("%s supervisor initialized in GUI mode", self.display_name)
+        self.logger.debug("%s supervisor initialized in GUI mode", self.display_name)
 
         elapsed = (time.perf_counter() - start) * 1000.0
-        self.logger.info("%s supervisor constructed in %.2f ms", self.display_name, elapsed)
+        self.logger.debug("%s supervisor constructed in %.2f ms", self.display_name, elapsed)
 
     async def run(self) -> None:
         await self._run_hook(self.hooks.before_start, "before_start")
@@ -320,7 +320,7 @@ class StubCodexSupervisor:
                 await self._run_hook(retry_policy.on_retry, "runtime_retry")
                 await self._sleep_with_shutdown_awareness(max(0.1, float(retry_policy.interval)))
 
-        self.logger.warning("Runtime start aborted due to pending shutdown")
+        self.logger.info("Runtime start aborted due to pending shutdown")
 
     async def _stop_runtime(self, *, reason: str) -> None:
         runtime = self.runtime

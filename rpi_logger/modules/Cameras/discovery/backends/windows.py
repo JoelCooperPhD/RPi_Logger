@@ -65,27 +65,11 @@ class WindowsCameraBackend:
             logger.debug("OpenCV not available, skipping camera discovery")
             return []
 
-        logger.info("=" * 60)
-        logger.info("WINDOWS CAMERA DISCOVERY")
-        logger.info("=" * 60)
-
         cameras: list[DiscoveredUSBCamera] = []
 
         # Get WMI device info for better names and VID:PID
         wmi_video_devices = self._get_wmi_video_devices()
         wmi_audio_devices = self._get_wmi_audio_devices() if SOUNDDEVICE_AVAILABLE else []
-
-        # Log WMI discovery results
-        logger.info(f"WMI Video Devices: {len(wmi_video_devices)}")
-        for i, dev in enumerate(wmi_video_devices):
-            logger.info(f"  [{i}] {dev.get('name')} | VID:PID={dev.get('vid_pid')}")
-
-        logger.info(f"WMI Audio Devices: {len(wmi_audio_devices)}")
-        for i, dev in enumerate(wmi_audio_devices):
-            logger.info(
-                f"  [{i}] {dev.get('name')} | VID:PID={dev.get('vid_pid')} | "
-                f"sd_idx={dev.get('sounddevice_index', 'N/A')}"
-            )
 
         # Track which WMI devices have been matched to avoid duplicates
         used_wmi_indices: set[int] = set()
@@ -107,21 +91,12 @@ class WindowsCameraBackend:
                     else f"USB Camera {index}"
                 )
 
-                logger.debug(
-                    f"OpenCV camera index {index}: name='{friendly_name}', vid_pid='{vid_pid}'"
-                )
-
                 # Find audio sibling by VID:PID first
                 audio_sibling = None
                 if vid_pid and SOUNDDEVICE_AVAILABLE:
                     audio_sibling = self._find_audio_sibling_by_vid_pid(
                         vid_pid, wmi_audio_devices
                     )
-                    if audio_sibling:
-                        logger.debug(
-                            f"  Audio sibling found via VID:PID matching: "
-                            f"{audio_sibling.name}"
-                        )
 
                 # Fallback: try name-based matching if VID:PID failed
                 if not audio_sibling and SOUNDDEVICE_AVAILABLE:
@@ -141,28 +116,10 @@ class WindowsCameraBackend:
                     camera_index=index,
                 ))
 
-                if audio_sibling:
-                    logger.info(
-                        f"Found audio sibling for {friendly_name}: {audio_sibling.name} "
-                        f"(index={audio_sibling.sounddevice_index})"
-                    )
-                else:
-                    logger.debug(f"No audio sibling found for {friendly_name}")
             else:
                 if cap:
                     cap.release()
                 break
-
-        logger.info("=" * 60)
-        logger.info(f"DISCOVERY COMPLETE: {len(cameras)} cameras")
-        for cam in cameras:
-            audio_status = (
-                f"audio_idx={cam.audio_sibling.sounddevice_index}"
-                if cam.audio_sibling
-                else "NO AUDIO"
-            )
-            logger.info(f"  {cam.friendly_name} | {cam.stable_id} | {audio_status}")
-        logger.info("=" * 60)
 
         return cameras
 
@@ -197,14 +154,13 @@ class WindowsCameraBackend:
             if result.returncode == 0 and result.stdout.strip():
                 devices = self._parse_powershell_csv(result.stdout)
                 if devices:
-                    logger.debug(f"PowerShell found {len(devices)} video devices")
                     return devices
         except FileNotFoundError:
-            logger.debug("PowerShell not available")
+            pass  # PowerShell not available, will try wmic fallback
         except subprocess.TimeoutExpired:
             logger.warning("PowerShell video device query timed out")
-        except Exception as e:
-            logger.debug(f"PowerShell video device query failed: {e}")
+        except Exception:
+            pass  # Silent fallback to wmic
         return []
 
     def _query_video_devices_wmic(self) -> list[dict]:
@@ -222,14 +178,13 @@ class WindowsCameraBackend:
             if result.returncode == 0:
                 devices = self._parse_wmi_csv(result.stdout)
                 if devices:
-                    logger.debug(f"wmic found {len(devices)} video devices")
                     return devices
         except FileNotFoundError:
-            logger.debug("wmic not available")
+            pass  # wmic not available
         except subprocess.TimeoutExpired:
             logger.warning("wmic video device query timed out")
-        except Exception as e:
-            logger.debug(f"wmic video device query failed: {e}")
+        except Exception:
+            pass
         return []
 
     def _get_wmi_audio_devices(self) -> list[dict]:
@@ -267,14 +222,13 @@ class WindowsCameraBackend:
             if result.returncode == 0 and result.stdout.strip():
                 devices = self._parse_powershell_csv(result.stdout)
                 if devices:
-                    logger.debug(f"PowerShell found {len(devices)} USB audio devices")
                     return devices
         except FileNotFoundError:
-            logger.debug("PowerShell not available for audio query")
+            pass  # PowerShell not available, will try wmic fallback
         except subprocess.TimeoutExpired:
             logger.warning("PowerShell audio device query timed out")
-        except Exception as e:
-            logger.debug(f"PowerShell audio device query failed: {e}")
+        except Exception:
+            pass  # Silent fallback to wmic
         return []
 
     def _query_audio_devices_wmic(self) -> list[dict]:
@@ -293,14 +247,13 @@ class WindowsCameraBackend:
                 # _parse_wmi_csv already filters for USB devices (requires VID:PID)
                 devices = self._parse_wmi_csv(result.stdout)
                 if devices:
-                    logger.debug(f"wmic found {len(devices)} USB audio devices")
                     return devices
         except FileNotFoundError:
-            logger.debug("wmic not available for audio query")
+            pass  # wmic not available
         except subprocess.TimeoutExpired:
             logger.warning("wmic audio device query timed out")
-        except Exception as e:
-            logger.debug(f"wmic audio device query failed: {e}")
+        except Exception:
+            pass
         return []
 
     def _correlate_audio_with_sounddevice(self, devices: list[dict]) -> None:
@@ -326,8 +279,8 @@ class WindowsCameraBackend:
                         dev["channels"] = sd_dev.get("max_input_channels", 2)
                         dev["sample_rate"] = sd_dev.get("default_samplerate", 48000.0)
                         break
-        except Exception as e:
-            logger.debug(f"sounddevice correlation failed: {e}")
+        except Exception:
+            pass  # sounddevice correlation is best-effort
 
     def _parse_wmi_csv(self, csv_output: str) -> list[dict]:
         """Parse WMI CSV output to extract device info.
@@ -362,9 +315,9 @@ class WindowsCameraBackend:
                         "device_id": device_id
                     })
         except csv.Error as e:
-            logger.warning(f"CSV parsing error: {e}")
-        except Exception as e:
-            logger.debug(f"WMI CSV parsing failed: {e}")
+            logger.warning("CSV parsing error: %s", e)
+        except Exception:
+            pass  # WMI CSV parsing best-effort
 
         return devices
 
@@ -401,9 +354,9 @@ class WindowsCameraBackend:
                         "device_id": instance_id
                     })
         except csv.Error as e:
-            logger.warning(f"PowerShell CSV parsing error: {e}")
-        except Exception as e:
-            logger.debug(f"PowerShell CSV parsing failed: {e}")
+            logger.warning("PowerShell CSV parsing error: %s", e)
+        except Exception:
+            pass  # PowerShell CSV parsing best-effort
 
         return devices
 
@@ -498,19 +451,11 @@ class WindowsCameraBackend:
         unused = [i for i in range(len(wmi_video_devices)) if i not in used_wmi_indices]
         if len(unused) == 1:
             idx = unused[0]
-            logger.debug(
-                f"Correlating OpenCV index {opencv_index} to WMI device "
-                f"'{wmi_video_devices[idx].get('name')}' (only remaining device)"
-            )
             used_wmi_indices.add(idx)
             return wmi_video_devices[idx]
 
         # If index matches and hasn't been used, use positional match as fallback
         if opencv_index < len(wmi_video_devices) and opencv_index not in used_wmi_indices:
-            logger.debug(
-                f"Correlating OpenCV index {opencv_index} to WMI device "
-                f"'{wmi_video_devices[opencv_index].get('name')}' (positional match)"
-            )
             used_wmi_indices.add(opencv_index)
             return wmi_video_devices[opencv_index]
 
@@ -538,12 +483,7 @@ class WindowsCameraBackend:
 
         camera_keywords = self._extract_keywords(camera_name)
         if not camera_keywords:
-            logger.debug(f"No keywords extracted from camera name: {camera_name}")
             return None
-
-        logger.debug(
-            f"Fallback audio search for '{camera_name}' with keywords: {camera_keywords}"
-        )
 
         best_match = None
         best_score = 0
@@ -570,10 +510,6 @@ class WindowsCameraBackend:
 
         # Require at least score of 2 to avoid false positives
         if best_match and best_score >= 2:
-            logger.info(
-                f"Fallback: matched camera '{camera_name}' to audio "
-                f"'{best_match.get('name')}' (score={best_score})"
-            )
             return AudioSiblingInfo(
                 sounddevice_index=best_match["sounddevice_index"],
                 alsa_card=None,
@@ -587,10 +523,6 @@ class WindowsCameraBackend:
         candidates = [d for d in wmi_audio_devices if "sounddevice_index" in d]
         if len(candidates) == 1:
             candidate = candidates[0]
-            logger.info(
-                f"Fallback: using sole USB audio device '{candidate.get('name')}' "
-                f"for camera '{camera_name}'"
-            )
             return AudioSiblingInfo(
                 sounddevice_index=candidate["sounddevice_index"],
                 alsa_card=None,
@@ -599,7 +531,6 @@ class WindowsCameraBackend:
                 name=candidate.get("name", ""),
             )
 
-        logger.debug(f"No audio sibling found for camera '{camera_name}'")
         return None
 
 

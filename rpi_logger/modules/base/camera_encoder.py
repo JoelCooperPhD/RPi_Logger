@@ -299,7 +299,7 @@ class Encoder:
         # Let PyAV manage time_base automatically - don't override it
         # The stream inherits time_base from the framerate (1/fps)
 
-        logger.info("PyAV encoder: %s %dx%d @ %s fps",
+        logger.debug("PyAV encoder: %s %dx%d @ %s fps",
                 self.video_path, self._resolution[0], self._resolution[1], fps_fraction)
         self._kind = "pyav"
 

@@ -97,7 +97,7 @@ class CSICameraView:
         self._install_menus()
 
         self._has_ui = True
-        self._logger.info("CSI Camera view attached")
+        self._logger.debug("CSI Camera view attached")
 
     def bind_dispatch(self, dispatch: Callable[[Action], Awaitable[None]]) -> None:
         self._dispatch = dispatch

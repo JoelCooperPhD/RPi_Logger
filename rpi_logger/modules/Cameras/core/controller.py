@@ -402,7 +402,7 @@ class CameraController:
         preview_times: list[float] = []
 
         frame_count = 0
-        logger.info("Consumer loop started")
+        logger.debug("Consumer loop started")
 
         def calc_fps(times: list[float]) -> float:
             """Calculate FPS from timestamp list."""
@@ -418,7 +418,7 @@ class CameraController:
 
                 # Initialize timing on first frame
                 if frame_count == 1:
-                    logger.info("First frame: %dx%d", frame.size[0], frame.size[1])
+                    logger.debug("First frame: %dx%d", frame.size[0], frame.size[1])
                     preview_next = now
                     metrics_next = now + 1.0
 
@@ -518,8 +518,8 @@ class CameraController:
             ppm_data = f"P6\n{w} {h}\n255\n".encode() + rgb.tobytes()
 
             if frame.frame_number <= 3:
-                logger.info("Preview frame %d: %dx%d, scale=%.2f, ppm_len=%d",
-                            frame.frame_number, w, h, scale, len(ppm_data))
+                logger.debug("Preview frame %d: %dx%d, scale=%.2f, ppm_len=%d",
+                             frame.frame_number, w, h, scale, len(ppm_data))
 
             return ppm_data
         except Exception as e:
@@ -536,7 +536,7 @@ class CameraController:
 
         if self._state.phase == Phase.STREAMING:
             if old.resolution != settings.resolution:
-                logger.warning(
+                logger.info(
                     "Resolution change from %s to %s requires restart",
                     old.resolution,
                     settings.resolution,

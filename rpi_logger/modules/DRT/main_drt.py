@@ -121,7 +121,7 @@ async def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
 
     if not args.enable_commands:
-        logger.error("DRT module must be launched by the logger controller (commands disabled).")
+        logger.warning("DRT module must be launched by the logger controller (commands disabled).")
         return
 
     defaults = DRTConfig()

@@ -241,11 +241,6 @@ class LoggerSystem:
         effective_id = instance_id or module_name
 
         if status:
-            self.logger.debug(
-                "Module %s status: %s (instance: %s)",
-                module_name, status.get_status_type(), effective_id
-            )
-
             if status.get_status_type() == "recording_started":
                 self.logger.info("Module %s started recording", module_name)
                 await self.state_manager.set_actual_state(
@@ -270,7 +265,7 @@ class LoggerSystem:
                 if device_id:
                     await self._cleanup_device_disconnect(device_id, module_name)
                 else:
-                    self.logger.warning(
+                    self.logger.debug(
                         "No device found for instance %s, cleanup skipped", effective_id
                     )
 
@@ -358,12 +353,10 @@ class LoggerSystem:
 
     def _notify_device_connected(self, device_id: str, connected: bool) -> None:
         """Update device connection state in device_system."""
-        self.logger.debug("Device %s connected=%s", device_id, connected)
         self.device_system.set_device_connected(device_id, connected)
 
     def _notify_device_connecting(self, device_id: str) -> None:
         """Set device to CONNECTING state (yellow indicator)."""
-        self.logger.debug("Device %s connecting", device_id)
         self.device_system.set_device_connecting(device_id)
 
     async def _on_instance_ui_update(
@@ -374,10 +367,6 @@ class LoggerSystem:
         This is the single point where device UI state is updated based on
         instance lifecycle state.
         """
-        self.logger.debug(
-            "Instance UI update: device=%s connected=%s connecting=%s",
-            device_id, connected, connecting
-        )
         if connected:
             self.device_system.set_device_connected(device_id, True)
         elif connecting:
@@ -575,20 +564,12 @@ class LoggerSystem:
             geometry = self._state.get_geometry(instance_id)
             if geometry:
                 normalized = self._normalize_geometry(geometry)
-                self.logger.debug(
-                    "Loaded geometry from store for instance %s: %s",
-                    instance_id, geometry.to_geometry_string()
-                )
                 return normalized
 
         # Try module-level geometry in store
         geometry = self._state.get_geometry(module_name)
         if geometry:
             normalized = self._normalize_geometry(geometry)
-            self.logger.debug(
-                "Loaded geometry from store for %s: %s",
-                module_name, geometry.to_geometry_string()
-            )
             return normalized
 
         # Fallback: Check module config file
@@ -596,7 +577,6 @@ class LoggerSystem:
         module_info = next((m for m in modules if m.name == module_name), None)
 
         if not module_info or not module_info.config_path:
-            self.logger.debug("No config path for module %s", module_name)
             return None
 
         config = await self.config_manager.read_config_async(module_info.config_path)
@@ -608,10 +588,9 @@ class LoggerSystem:
                 geometry = WindowGeometry.from_geometry_string(geometry_str)
                 if geometry:
                     normalized = self._normalize_geometry(geometry)
-                    self.logger.debug("Loaded geometry from config for %s: %s", module_name, geometry_str)
                     return normalized
             except Exception:
-                self.logger.warning("Failed to parse window_geometry for %s: %s", module_name, geometry_str)
+                self.logger.debug("Failed to parse window_geometry for %s: %s", module_name, geometry_str)
 
         # Legacy fallback: decomposed fields
         x = self.config_manager.get_int(config, 'window_x', default=None)
@@ -621,10 +600,8 @@ class LoggerSystem:
 
         if all(v is not None for v in [x, y, width, height]):
             geometry = WindowGeometry(x=x, y=y, width=width, height=height)
-            self.logger.debug("Loaded legacy geometry for %s: %s", module_name, geometry.to_geometry_string())
             return geometry
         else:
-            self.logger.debug("No saved geometry found for %s", module_name)
             return None
 
     async def stop_module(self, module_name: str) -> bool:
@@ -845,14 +822,10 @@ class LoggerSystem:
     def _register_device_instance(self, device_id: str, instance_id: str) -> None:
         """Register a device-to-instance mapping."""
         self._device_instance_map[device_id] = instance_id
-        self.logger.debug("Registered device %s -> instance %s", device_id, instance_id)
 
     def _unregister_device_instance(self, device_id: str) -> Optional[str]:
         """Unregister a device-to-instance mapping. Returns the instance_id if found."""
-        instance_id = self._device_instance_map.pop(device_id, None)
-        if instance_id:
-            self.logger.debug("Unregistered device %s from instance %s", device_id, instance_id)
-        return instance_id
+        return self._device_instance_map.pop(device_id, None)
 
     def _find_device_for_instance(self, instance_id: str) -> Optional[str]:
         """Find the device_id associated with an instance_id."""
@@ -1013,12 +986,12 @@ class LoggerSystem:
         try:
             device = self.device_system.get_device(device_id)
             if not device:
-                self.logger.warning("Device not found: %s", device_id)
+                self.logger.info("Device not found: %s", device_id)
                 return False
 
             module_id = device.module_id
             if not module_id:
-                self.logger.warning("Device has no module_id: %s", device_id)
+                self.logger.info("Device has no module_id: %s", device_id)
                 return False
 
             # Generate instance ID for this device
@@ -1137,14 +1110,14 @@ class LoggerSystem:
 
         device = self.device_system.get_device(device_id)
         if not device:
-            self.logger.warning("Device not found: %s", device_id)
+            self.logger.debug("Device not found: %s", device_id)
             self._unregister_device_instance(device_id)
             self._notify_device_connected(device_id, False)
             return True
 
         module_id = device.module_id
         if not module_id:
-            self.logger.warning("Device has no module_id: %s", device_id)
+            self.logger.debug("Device has no module_id: %s", device_id)
             self._unregister_device_instance(device_id)
             self._notify_device_connected(device_id, False)
             return True
@@ -1179,7 +1152,6 @@ class LoggerSystem:
         # Find which module owns this device
         device = self.device_system.get_device(node_id)
         if not device:
-            self.logger.debug("XBee data for unknown device: %s", node_id)
             return
 
         # For multi-instance modules, use the device-to-instance mapping
@@ -1189,16 +1161,12 @@ class LoggerSystem:
             instance_id = device.module_id
 
         if not instance_id:
-            self.logger.debug("XBee device %s has no module_id or instance", node_id)
             return
 
         # Get the module process and forward the data
         module = self.module_manager.get_module(instance_id)
         if module and module.is_running():
-            self.logger.debug("Routing XBee data from %s to module %s", node_id, instance_id)
             await module.send_xbee_data(node_id, data)
-        else:
-            self.logger.debug("Module %s not running for XBee device %s", instance_id, node_id)
 
     async def _send_xbee_from_module(self, node_id: str, data: bytes) -> bool:
         """
@@ -1206,7 +1174,6 @@ class LoggerSystem:
 
         Called when a module process sends an xbee_send status message.
         """
-        self.logger.debug("Sending XBee data to %s: %r", node_id, data)
         result = await self.device_system.send_to_wireless_device(node_id, data)
         if not result:
             self.logger.warning("XBee send to %s failed", node_id)
@@ -1217,9 +1184,8 @@ class LoggerSystem:
         module = self.module_manager.get_module(module_id)
         if module:
             module.set_xbee_send_callback(self._send_xbee_from_module)
-            self.logger.debug("XBee send callback set for module %s", module_id)
         else:
-            self.logger.warning("Cannot set XBee send callback - module not found: %s", module_id)
+            self.logger.debug("Cannot set XBee send callback - module not found: %s", module_id)
 
     # =========================================================================
     # Log Level Control
@@ -1241,7 +1207,6 @@ class LoggerSystem:
         tasks = []
         for module_name, process in self.module_manager.module_processes.items():
             if process.is_running():
-                self.logger.debug("Sending set_log_level to %s", module_name)
                 tasks.append(process.set_log_level(level, target))
 
         if tasks:

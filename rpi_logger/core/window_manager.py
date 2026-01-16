@@ -50,7 +50,7 @@ class WindowManager:
         self.min_window_width = 400
         self.min_window_height = 300
 
-        logger.info("Screen resolution: %dx%d", self.screen_width, self.screen_height)
+        logger.debug("Screen resolution: %dx%d", self.screen_width, self.screen_height)
 
     def _get_screen_resolution(self) -> Tuple[int, int]:
         try:
@@ -73,10 +73,10 @@ class WindowManager:
             return {}
 
         if saved_geometries and len(saved_geometries) == num_modules:
-            logger.info("Using saved window geometries for %d modules", num_modules)
+            logger.debug("Using saved window geometries for %d modules", num_modules)
             return saved_geometries
 
-        logger.info("Calculating tiling layout for %d modules", num_modules)
+        logger.debug("Calculating tiling layout for %d modules", num_modules)
 
         grid_cols, grid_rows = self._calculate_grid_dimensions(num_modules)
 
@@ -104,7 +104,7 @@ class WindowManager:
                 height=window_height
             )
 
-        logger.info("Calculated %dx%d grid layout", grid_cols, grid_rows)
+        logger.debug("Calculated %dx%d grid layout", grid_cols, grid_rows)
         return geometries
 
     def _calculate_grid_dimensions(self, num_modules: int) -> Tuple[int, int]:

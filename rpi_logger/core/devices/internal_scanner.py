@@ -74,7 +74,7 @@ class InternalDeviceScanner:
                 spec=spec,
             )
             self._active_devices[device_id] = device
-            logger.info(f"Internal device discovered: {spec.display_name} ({device_id})")
+            logger.debug(f"Internal device discovered: {spec.display_name} ({device_id})")
             await self._on_device_found(device)
 
     async def stop(self) -> None:
@@ -98,7 +98,6 @@ class InternalDeviceScanner:
 
     async def reannounce_devices(self) -> None:
         """Re-emit discovery events for all known devices."""
-        logger.debug(f"Re-announcing {len(self._active_devices)} internal devices")
         for device in self._active_devices.values():
             if self._on_device_found:
                 try:

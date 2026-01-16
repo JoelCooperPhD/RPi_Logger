@@ -261,7 +261,7 @@ class USBHotplugMonitor:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in USB hotplug monitor: {e}")
+                logger.warning(f"Error in USB hotplug monitor: {e}")
 
     async def _notify_subscribers(self) -> None:
         """Notify all subscribers of a USB device change.
@@ -273,7 +273,7 @@ class USBHotplugMonitor:
             try:
                 await callback()
             except Exception as e:
-                logger.error(f"Error in USB hotplug callback: {e}")
+                logger.warning(f"Error in USB hotplug callback: {e}")
 
     async def trigger_rescan(self) -> None:
         """Manually trigger a rescan notification to all subscribers.

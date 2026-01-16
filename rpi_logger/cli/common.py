@@ -387,7 +387,7 @@ def setup_module_logging(
             fallback_reason,
             log_file.parent,
         )
-    runtime_logger.info("Module logs will be written to %s", log_file)
+    runtime_logger.debug("Module logs will be written to %s", log_file)
 
     args.session_dir = session_dir
     args.log_file = log_file

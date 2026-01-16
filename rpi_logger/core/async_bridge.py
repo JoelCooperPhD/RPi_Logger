@@ -31,15 +31,15 @@ class AsyncBridge:
 
     def start(self) -> None:
         """Start AsyncIO event loop in background thread."""
-        logger.info("Starting AsyncIO bridge in background thread")
+        logger.debug("Starting AsyncIO bridge in background thread")
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
 
         if not self._ready.wait(timeout=5.0):
             raise RuntimeError("AsyncIO loop failed to start within 5 seconds")
 
-        logger.info("AsyncIO event loop running in background (thread %s)",
-                   self.thread.ident)
+        logger.debug("AsyncIO event loop running in background (thread %s)",
+                    self.thread.ident)
 
     def _run_event_loop(self) -> None:
         """Run asyncio event loop (called in background thread)."""
@@ -121,7 +121,7 @@ class AsyncBridge:
         if not self.loop or not self._running:
             return True
 
-        logger.info("Stopping AsyncIO bridge")
+        logger.debug("Stopping AsyncIO bridge")
         self._running = False
 
         # Schedule shutdown and wait for completion
@@ -137,7 +137,7 @@ class AsyncBridge:
 
         # Wait for shutdown with timeout
         if not shutdown_complete.wait(timeout=timeout):
-            logger.error(
+            logger.warning(
                 "AsyncIO bridge shutdown timed out after %.1fs - forcing loop stop",
                 timeout
             )
@@ -145,7 +145,7 @@ class AsyncBridge:
             self.loop.call_soon_threadsafe(self.loop.stop)
             return False
 
-        logger.info("AsyncIO bridge shutdown completed")
+        logger.debug("AsyncIO bridge shutdown completed")
         return True
 
     async def _shutdown(self, task_timeout: float = 3.0) -> None:
@@ -159,11 +159,11 @@ class AsyncBridge:
                  if task is not asyncio.current_task()]
 
         if not tasks:
-            logger.info("No pending tasks to cancel")
+            logger.debug("No pending tasks to cancel")
             self.loop.stop()
             return
 
-        logger.info("Cancelling %d pending tasks", len(tasks))
+        logger.debug("Cancelling %d pending tasks", len(tasks))
 
         # Log task names for diagnostics
         for task in tasks:
@@ -205,4 +205,4 @@ class AsyncBridge:
             logger.error("Error during task cleanup: %s", e)
 
         self.loop.stop()
-        logger.info("AsyncIO loop stopped cleanly")
+        logger.debug("AsyncIO loop stopped cleanly")

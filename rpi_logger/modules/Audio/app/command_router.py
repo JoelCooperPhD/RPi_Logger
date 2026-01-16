@@ -19,7 +19,6 @@ class CommandRouter:
 
     async def handle_command(self, command: dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()
-        self.logger.debug("Handling command: %s", action)
         if action == "start_recording":
             await self.app.start_recording(int(command.get("trial_number", self.app.pending_trial_number)))
             return True
@@ -36,19 +35,16 @@ class CommandRouter:
             await self.app.stop_recording()
             self.app.state.set_session_dir(None)
             return True
-        self.logger.debug("Unhandled command: %s", action)
         return False
 
     async def handle_user_action(self, action: str, **kwargs: Any) -> bool:
         action = (action or "").lower()
-        self.logger.debug("Handling user action: %s", action)
         if action == "start_recording":
             await self.app.start_recording()
             return True
         if action == "stop_recording":
             await self.app.stop_recording()
             return True
-        self.logger.debug("Unhandled user action: %s", action)
         return False
 
 

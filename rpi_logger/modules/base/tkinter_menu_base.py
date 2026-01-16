@@ -22,7 +22,6 @@ class TkinterMenuBase:
         self._menus_available = not getattr(self, "_embedded_mode", False)
 
         if not self._menus_available:
-            logger.debug("Skipping legacy menu bar creation for embedded GUI")
             self.file_menu = None
             self.sources_menu = None
             self.view_menu = None
@@ -88,7 +87,6 @@ class TkinterMenuBase:
     def add_source_toggle(self, label: str, variable: tk.BooleanVar,
                          command: Callable) -> int:
         if not getattr(self, "_menus_available", True) or getattr(self, "sources_menu", None) is None:
-            logger.debug("Sources menu unavailable; cannot add toggle '%s'", label)
             return -1
         idx = self.sources_menu.index('end')
         if idx is None:
@@ -105,7 +103,6 @@ class TkinterMenuBase:
     def add_view_option(self, label: str, variable: tk.BooleanVar,
                        command: Callable) -> int:
         if not getattr(self, "_menus_available", True) or getattr(self, "view_menu", None) is None:
-            logger.debug("View menu unavailable; cannot add option '%s'", label)
             return -1
         idx = self.view_menu.index('end')
         if idx is None:
@@ -177,8 +174,8 @@ class TkinterMenuBase:
                         self.sources_menu.entryconfig(i, state=state)
                     except Exception:
                         pass  # Skip invalid indices
-        except Exception as e:
-            logger.debug("Error toggling sources menu: %s", e)
+        except Exception:
+            pass  # Menu may not be fully initialized
 
 
     def populate_module_menus(self):
@@ -235,16 +232,14 @@ class TkinterMenuBase:
                 # Prefer using preferences API if available (routes through ConfigManager)
                 if hasattr(self.system, 'preferences'):
                     self.system.preferences.write_sync({config_key: visible})
-                    logger.debug("Saved view state %s=%s via preferences", config_key, visible)
                 elif hasattr(self.system, 'config_file_path'):
                     from rpi_logger.modules.base import ConfigLoader
                     ConfigLoader.update_config_values(
                         self.system.config_file_path,
                         {config_key: visible}
                     )
-                    logger.debug("Saved view state %s=%s to config", config_key, visible)
         except Exception as e:
-            logger.error("Failed to save view state %s: %s", config_key, e)
+            logger.warning("Failed to save view state %s: %s", config_key, e)
 
 
     def get_logger_visible_from_config(self) -> bool:
@@ -256,10 +251,10 @@ class TkinterMenuBase:
         if hasattr(self, 'log_frame'):
             if visible:
                 self.log_frame.grid()
-                logger.info("System log shown")
+                logger.debug("System log shown")
             else:
                 self.log_frame.grid_remove()
-                logger.info("System log hidden")
+                logger.debug("System log hidden")
 
         self._save_view_state('gui_logger_visible', visible)
 
@@ -283,7 +278,7 @@ class TkinterMenuBase:
 
             logger.info("Opened output directory: %s", output_dir)
         except Exception as e:
-            logger.error("Failed to open output directory: %s", e)
+            logger.warning("Failed to open output directory: %s", e)
 
     def _on_open_log_file(self):
         try:
@@ -302,7 +297,7 @@ class TkinterMenuBase:
 
             logger.info("Opened log file: %s", log_file)
         except Exception as e:
-            logger.error("Failed to open log file: %s", e)
+            logger.warning("Failed to open log file: %s", e)
 
     def _on_quit(self):
         handler = None
@@ -329,7 +324,7 @@ class TkinterMenuBase:
             from rpi_logger.core.ui.dialogs.about import AboutDialog
             AboutDialog(self.root)
         except Exception as e:
-            logger.error("Failed to show About dialog: %s", e)
+            logger.warning("Failed to show About dialog: %s", e)
 
     def _show_system_info(self):
         try:
@@ -337,14 +332,14 @@ class TkinterMenuBase:
             logger_system = getattr(self, 'system', None)
             SystemInfoDialog(self.root, logger_system)
         except Exception as e:
-            logger.error("Failed to show System Info dialog: %s", e)
+            logger.warning("Failed to show System Info dialog: %s", e)
 
     def _show_help(self):
         try:
             from rpi_logger.core.ui.dialogs.quick_start import QuickStartDialog
             QuickStartDialog(self.root)
         except Exception as e:
-            logger.error("Failed to show Help dialog: %s", e)
+            logger.warning("Failed to show Help dialog: %s", e)
 
     def _open_logs_directory(self):
         try:
@@ -363,7 +358,7 @@ class TkinterMenuBase:
 
             logger.info("Opened logs directory: %s", logs_dir)
         except Exception as e:
-            logger.error("Failed to open logs directory: %s", e)
+            logger.warning("Failed to open logs directory: %s", e)
 
     def _open_config_file(self):
         try:
@@ -385,7 +380,7 @@ class TkinterMenuBase:
 
             logger.info("Opened config file: %s", config_path)
         except Exception as e:
-            logger.error("Failed to open config file: %s", e)
+            logger.warning("Failed to open config file: %s", e)
 
     def _reset_settings(self):
         try:
@@ -397,7 +392,7 @@ class TkinterMenuBase:
             from rpi_logger.core.ui.dialogs.reset_settings import ResetSettingsDialog
             ResetSettingsDialog(self.root, config_path)
         except Exception as e:
-            logger.error("Failed to reset settings: %s", e)
+            logger.warning("Failed to reset settings: %s", e)
 
     def _report_issue(self):
         try:
@@ -405,4 +400,4 @@ class TkinterMenuBase:
             webbrowser.open(url)
             logger.info("Opened issue tracker: %s", url)
         except Exception as e:
-            logger.error("Failed to open issue tracker: %s", e)
+            logger.warning("Failed to open issue tracker: %s", e)

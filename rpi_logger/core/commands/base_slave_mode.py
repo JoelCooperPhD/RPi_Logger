@@ -58,7 +58,6 @@ class BaseSlaveMode(ABC):
         self._stdin_reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(self._stdin_reader)
         await loop.connect_read_pipe(lambda: protocol, sys.stdin)
-        self.logger.debug("stdin reader configured")
 
     async def _stdin_reader_loop(self) -> None:
         if not self._stdin_reader:
@@ -70,11 +69,11 @@ class BaseSlaveMode(ABC):
                 try:
                     line_bytes = await self._stdin_reader.readline()
                 except Exception as e:
-                    self.logger.error("Error reading stdin: %s", e)
+                    self.logger.warning("Error reading stdin: %s", e)
                     break
 
                 if not line_bytes:
-                    self.logger.info("stdin EOF - parent closed connection")
+                    self.logger.debug("stdin EOF - parent closed connection")
                     break
 
                 line_str = line_bytes.decode('utf-8', errors='ignore').strip()
@@ -88,7 +87,7 @@ class BaseSlaveMode(ABC):
                                 timeout=1.0
                             )
                         except asyncio.TimeoutError:
-                            self.logger.error("Command queue full, dropping command")
+                            self.logger.warning("Command queue full, dropping command")
                             StatusMessage.send("error", {"message": "Command queue full"})
                     else:
                         self.logger.warning("Invalid JSON command: %s", line_str[:100])

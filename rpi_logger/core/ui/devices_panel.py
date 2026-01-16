@@ -547,7 +547,7 @@ class DevicesPanel(ttk.LabelFrame):
 
     def _handle_xbee_rescan(self) -> None:
         """Handle XBee rescan button click."""
-        logger.info("XBee rescan requested from UI")
+        logger.debug("XBee rescan requested from UI")
         self._controller.request_xbee_rescan()
 
     def destroy(self) -> None:

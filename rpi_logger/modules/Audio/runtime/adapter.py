@@ -53,20 +53,20 @@ class AudioRuntime(ModuleRuntime):
         command_id: str | None = None,
     ) -> bool:
         if sounddevice_index is None:
-            self.logger.error("Cannot assign audio device without sounddevice_index")
+            self.logger.warning("Cannot assign audio device without sounddevice_index")
             StatusMessage.send("device_error", {
                 "device_id": device_id,
                 "error": "Missing sounddevice_index",
             }, command_id=command_id)
             return False
 
-        self.logger.info("Assigning device: %s (index=%d, ch=%s, rate=%s)", device_id, sounddevice_index, audio_channels, audio_sample_rate)
+        self.logger.debug("Assigning device: %s (index=%d, ch=%s, rate=%s)", device_id, sounddevice_index, audio_channels, audio_sample_rate)
 
         StatusMessage.send("device_ack", {"device_id": device_id}, command_id=command_id)
-        self.logger.info("Sent device_ack for %s", device_id)
+        self.logger.debug("Sent device_ack for %s", device_id)
 
         if self.app.state.device is not None:
-            self.logger.info("Replacing existing device with new assignment")
+            self.logger.debug("Replacing existing device with new assignment")
             await self._unassign_current_device()
         try:
             device_name = display_name or device_id
@@ -107,7 +107,7 @@ class AudioRuntime(ModuleRuntime):
             return False
 
     async def unassign_device(self, device_id: str) -> None:
-        self.logger.info("Unassigning device: %s", device_id)
+        self.logger.debug("Unassigning device: %s", device_id)
         await self._unassign_current_device()
 
     async def _unassign_current_device(self) -> None:
@@ -117,9 +117,9 @@ class AudioRuntime(ModuleRuntime):
         try:
             await self.app.disable_device()
             self._current_device_id = None
-            self.logger.info("Device unassigned")
+            self.logger.debug("Device unassigned")
         except Exception as e:
-            self.logger.error("Error unassigning device: %s", e, exc_info=True)
+            self.logger.warning("Error unassigning device: %s", e, exc_info=True)
 
     async def handle_command(self, command: dict[str, Any]) -> bool:
         action = (command.get("command") or "").lower()

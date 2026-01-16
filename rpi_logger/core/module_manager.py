@@ -226,7 +226,7 @@ class ModuleManager:
             None
         )
         if not module_info or not module_info.config_path:
-            self.logger.warning("Cannot update enabled state - no config for %s", module_name)
+            self.logger.debug("Cannot update enabled state - no config for %s", module_name)
             return False
 
         success = await self.config_manager.write_config_async(
@@ -533,11 +533,6 @@ class ModuleManager:
         module_name = process.module_info.name
 
         if status:
-            self.logger.debug(
-                "Instance %s (module %s) status: %s",
-                instance_id, module_name, status.get_status_type()
-            )
-
             # Handle quitting status
             if status.get_status_type() == "quitting":
                 self.logger.info("Instance %s quitting gracefully", instance_id)
@@ -905,19 +900,19 @@ class ModuleManager:
 
     async def send_command(self, module_name: str, command: str) -> bool:
         """Send a raw command string to a running module process."""
-        self.logger.info(
+        self.logger.debug(
             "send_command to %s (known processes: %s)",
             module_name, list(self.module_processes.keys())
         )
         process = self.module_processes.get(module_name)
         if not process or not process.is_running():
-            self.logger.warning(
+            self.logger.info(
                 "Cannot send command to %s - process not running (found: %s, running: %s)",
                 module_name, process is not None, process.is_running() if process else False
             )
             return False
         try:
-            self.logger.info("Sending command to %s: %s", module_name, command[:100])
+            self.logger.debug("Sending command to %s: %s", module_name, command[:100])
             await process.send_command(command)
             return True
         except Exception as exc:
@@ -937,4 +932,3 @@ class ModuleManager:
                     self.forcefully_stopped_modules.add(module_name)
                 else:
                     self.forcefully_stopped_modules.discard(module_name)
-                self.logger.debug("Cleaned up stopped process: %s", module_name)

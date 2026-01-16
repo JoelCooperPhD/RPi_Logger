@@ -164,7 +164,7 @@ class ScannerEventAdapter:
             - address: str
             - port: int
         """
-        logger.info(f"Network device callback received: {network_device.device_id}")
+        logger.debug(f"Network device callback received: {network_device.device_id}")
         spec = get_spec(DeviceType.PUPIL_LABS_NEON)
         if not spec:
             logger.warning("No spec found for PUPIL_LABS_NEON")
@@ -179,7 +179,7 @@ class ScannerEventAdapter:
             address=network_device.address,
             port=network_device.port,
         )
-        logger.info(f"Emitting network device event for {network_device.device_id}")
+        logger.debug(f"Emitting network device event for {network_device.device_id}")
         await self._emit(event)
 
     async def on_network_device_lost(self, device_id: str) -> None:
@@ -349,7 +349,7 @@ class ScannerEventAdapter:
                     alsa_card=getattr(audio_sibling, 'alsa_card', None),
                 ),
             )
-            logger.info(
+            logger.debug(
                 f"Registered webcam {camera.friendly_name} with audio sibling "
                 f"(index={audio_sibling.sounddevice_index})"
             )

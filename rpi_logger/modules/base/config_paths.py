@@ -60,7 +60,7 @@ def resolve_module_config_path(
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to seed fallback config %s: %s", fallback_path, exc)
 
-    logger.info(
+    logger.debug(
         "Using writable config store %s (template %s unavailable for writes)",
         fallback_path,
         template_path,
@@ -131,14 +131,14 @@ def resolve_instance_config_path(
         try:
             if template_path.exists():
                 shutil.copy2(template_path, fallback_path)
-                logger.info(
+                logger.debug(
                     "Seeded instance config %s from template %s",
                     fallback_path,
                     template_path,
                 )
             else:
                 fallback_path.touch()
-                logger.info("Created empty instance config %s", fallback_path)
+                logger.debug("Created empty instance config %s", fallback_path)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.warning("Failed to seed instance config %s: %s", fallback_path, exc)
 

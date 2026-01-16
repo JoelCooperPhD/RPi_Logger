@@ -122,7 +122,7 @@ class CSIScanner:
                 try:
                     await self._on_device_lost(device_id)
                 except Exception as e:
-                    logger.error(f"Error in device lost callback: {e}")
+                    logger.warning(f"Error in device lost callback: {e}")
 
         self._known_devices.clear()
         logger.info("CSI camera scanner stopped")
@@ -134,13 +134,12 @@ class CSIScanner:
 
     async def reannounce_devices(self) -> None:
         """Re-emit discovery events for all known devices."""
-        logger.debug(f"Re-announcing {len(self._known_devices)} CSI cameras")
         for camera in self._known_devices.values():
             if self._on_device_found:
                 try:
                     await self._on_device_found(camera)
                 except Exception as e:
-                    logger.error(f"Error re-announcing CSI camera: {e}")
+                    logger.warning(f"Error re-announcing CSI camera: {e}")
 
     async def _scan_devices(self) -> None:
         """Scan for CSI cameras and detect changes."""
@@ -160,7 +159,7 @@ class CSIScanner:
                     try:
                         await self._on_device_found(camera)
                     except Exception as e:
-                        logger.error(f"Error in device found callback: {e}")
+                        logger.warning(f"Error in device found callback: {e}")
 
         # Detect lost devices
         lost = set(self._known_devices.keys()) - set(current_devices.keys())
@@ -171,7 +170,7 @@ class CSIScanner:
                 try:
                     await self._on_device_lost(device_id)
                 except Exception as e:
-                    logger.error(f"Error in device lost callback: {e}")
+                    logger.warning(f"Error in device lost callback: {e}")
 
     def _discover_via_cli(self) -> list[DiscoveredCSICamera]:
         """Discover CSI cameras using libcamera-hello CLI."""
@@ -227,7 +226,6 @@ class CSIScanner:
         except Exception as exc:
             logger.warning(f"CSI camera discovery failed: {exc}")
 
-        logger.debug(f"Discovered {len(cameras)} CSI cameras")
         return cameras
 
     def get_device(self, device_id: str) -> Optional[DiscoveredCSICamera]:

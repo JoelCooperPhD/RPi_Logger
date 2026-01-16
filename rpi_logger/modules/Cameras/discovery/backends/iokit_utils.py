@@ -334,19 +334,11 @@ def get_vid_pid_for_camera_name(camera_name: str) -> Optional[str]:
 
         # Check bidirectional containment (handles different naming conventions)
         if camera_name_lower in dev_name_lower or dev_name_lower in camera_name_lower:
-            logger.debug(
-                f"Matched camera '{camera_name}' to USB device '{dev['name']}' "
-                f"({dev['vid_pid']})"
-            )
             return dev["vid_pid"]
 
         # Also check manufacturer string
         manufacturer_lower = dev.get("manufacturer", "").lower()
         if manufacturer_lower and camera_name_lower in manufacturer_lower:
-            logger.debug(
-                f"Matched camera '{camera_name}' to manufacturer '{dev['manufacturer']}' "
-                f"({dev['vid_pid']})"
-            )
             return dev["vid_pid"]
 
     return None
@@ -372,13 +364,11 @@ def find_audio_device_with_vid_pid(vid_pid: str) -> Optional[dict]:
     try:
         import sounddevice as sd
     except ImportError:
-        logger.debug("sounddevice not available for audio device matching")
         return None
 
     try:
         sd_devices = sd.query_devices()
-    except Exception as e:
-        logger.debug(f"Failed to query sounddevice: {e}")
+    except Exception:
         return None
 
     usb_devices = get_usb_devices()
@@ -402,9 +392,6 @@ def find_audio_device_with_vid_pid(vid_pid: str) -> Optional[dict]:
             # Check if names match (either direction containment)
             if usb_name in sd_name_lower or sd_name_lower in usb_name:
                 if usb_vid_pid == vid_pid:
-                    logger.debug(
-                        f"Matched sounddevice '{sd_name}' to VID:PID {vid_pid}"
-                    )
                     return {
                         "sounddevice_index": i,
                         "channels": sd_dev.get("max_input_channels", 2),
@@ -436,7 +423,6 @@ def find_builtin_audio_sibling(camera_name: str) -> Optional[dict]:
     try:
         import sounddevice as sd
     except ImportError:
-        logger.debug("sounddevice not available for built-in audio matching")
         return None
 
     if not camera_name:
@@ -464,8 +450,7 @@ def find_builtin_audio_sibling(camera_name: str) -> Optional[dict]:
 
     try:
         sd_devices = sd.query_devices()
-    except Exception as e:
-        logger.debug(f"Failed to query sounddevice: {e}")
+    except Exception:
         return None
 
     # Search for built-in microphone
@@ -482,9 +467,6 @@ def find_builtin_audio_sibling(camera_name: str) -> Optional[dict]:
             if "virtual" in sd_name_lower or "teams" in sd_name_lower:
                 continue
 
-            logger.debug(
-                f"Matched built-in camera '{camera_name}' to built-in mic '{sd_name}'"
-            )
             return {
                 "sounddevice_index": i,
                 "channels": sd_dev.get("max_input_channels", 1),

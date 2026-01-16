@@ -214,7 +214,7 @@ class CameraSettingsWindowBase:
                 self._window.deiconify()
                 self._window.lift()
             except Exception:
-                self._logger.debug("Unable to raise settings window", exc_info=True)
+                pass  # Window may be in transitional state
         self._refresh_ui()
         self._update_title()
         if self._toggle_var:
@@ -231,7 +231,7 @@ class CameraSettingsWindowBase:
             try:
                 self._window.destroy()
             except Exception:
-                self._logger.debug("Unable to hide settings window", exc_info=True)
+                pass  # Window may already be destroyed
             finally:
                 self._window = None
         if self._toggle_var:
@@ -254,7 +254,6 @@ class CameraSettingsWindowBase:
             self._apply_settings_to_ui(settings)
             return True
         except Exception:
-            self._logger.debug("Settings panel apply failed", exc_info=True)
             return False
 
     # ------------------------------------------------------------------
@@ -267,7 +266,6 @@ class CameraSettingsWindowBase:
         try:
             self._window = tk.Toplevel(self._root)
         except Exception:
-            self._logger.debug("Failed to create settings window", exc_info=True)
             self._window = None
             return
 
@@ -725,16 +723,13 @@ class CameraSettingsWindowBase:
             else:
                 value = var.get()
         except (ValueError, tk.TclError):
-            self._logger.debug("Invalid control value for %s", name)
             return
-
-        self._logger.debug("Control changed: %s = %s", name, value)
 
         if self._on_control_change:
             try:
                 self._on_control_change(self._active_camera, name, value)
             except Exception:
-                self._logger.debug("Control change callback failed", exc_info=True)
+                pass  # Callback may not be fully connected yet
 
         if any(parent == name for parent, _ in self.CONTROL_DEPENDENCIES.values()):
             self._update_dependent_control_states()
@@ -767,21 +762,19 @@ class CameraSettingsWindowBase:
 
     def _apply_resolution(self) -> None:
         """Apply resolution/FPS settings."""
-        self._logger.debug("_apply_resolution called, active_camera=%s", self._active_camera)
         if not self._active_camera:
             self._logger.warning("No active camera set - cannot apply")
             return
 
         settings = self._get_resolution_settings()
-        self._logger.debug("Settings to apply: %s", settings)
         self._latest[self._active_camera] = settings
 
         if self._on_apply_resolution:
-            self._logger.debug("Calling _on_apply_resolution callback")
             try:
                 self._on_apply_resolution(self._active_camera, settings)
+                self._logger.debug("Camera settings applied: %s -> %s", self._active_camera, settings)
             except Exception:
-                self._logger.debug("Resolution apply callback failed", exc_info=True)
+                self._logger.warning("Resolution apply callback failed", exc_info=True)
         else:
             self._logger.warning("No _on_apply_resolution callback registered")
 
@@ -793,7 +786,7 @@ class CameraSettingsWindowBase:
             try:
                 self._on_reprobe(self._active_camera)
             except Exception:
-                self._logger.debug("Reprobe callback failed", exc_info=True)
+                self._logger.warning("Reprobe request failed", exc_info=True)
 
     def _on_audio_setting_changed(self) -> None:
         """Handle audio recording checkbox change."""
@@ -804,14 +797,13 @@ class CameraSettingsWindowBase:
         value = self._record_audio_var.get()
         self._latest.setdefault(self._active_camera, dict(self.DEFAULT_SETTINGS))
         self._latest[self._active_camera]["record_audio"] = "true" if value else "false"
-        self._logger.debug("Audio recording setting changed: %s", value)
 
         if self._on_apply_resolution:
             try:
                 settings = self._get_resolution_settings()
                 self._on_apply_resolution(self._active_camera, settings)
             except Exception:
-                self._logger.debug("Audio setting apply callback failed", exc_info=True)
+                pass  # Audio setting will be applied on next explicit Apply
 
     def _update_audio_checkbox_visibility(self) -> None:
         """Show/hide audio checkbox based on whether camera has audio sibling."""
@@ -824,7 +816,7 @@ class CameraSettingsWindowBase:
             else:
                 self._record_audio_frame.grid_remove()
         except Exception:
-            self._logger.debug("Unable to update audio checkbox visibility", exc_info=True)
+            pass  # UI may be in transitional state
 
     def _handle_close(self) -> None:
         if self._debounce_id:
@@ -853,8 +845,6 @@ class CameraSettingsWindowBase:
         """Refresh resolution/FPS comboboxes."""
         has_preview_var = self._preview_res_var or self._preview_scale_var
         if not self._window or not has_preview_var:
-            self._logger.debug("_refresh_resolution_ui: window=%s, has_var=%s - skipping",
-                             self._window is not None, has_preview_var)
             return
 
         self._suppress_change = True
@@ -862,7 +852,6 @@ class CameraSettingsWindowBase:
             if self._active_camera:
                 settings = self._latest.get(self._active_camera, dict(self.DEFAULT_SETTINGS))
                 opts = self._options.get(self._active_camera, {})
-                self._logger.debug("_refresh_resolution_ui: settings=%s, opts=%s", settings, opts)
 
                 if self.USES_PREVIEW_SCALE:
                     # Scale-based mode (CSI cameras)
@@ -966,8 +955,6 @@ class CameraSettingsWindowBase:
         show_sensor_info_func, has_dialog = self._get_sensor_info_dialog()
         if has_dialog and show_sensor_info_func:
             show_sensor_info_func(self._window, sensor_info, camera_name)
-        else:
-            self._logger.debug("Sensor info dialog not available")
 
     def _apply_settings_to_ui(self, settings: Dict[str, str]) -> None:
         """Apply settings dict to resolution UI."""
@@ -1050,4 +1037,4 @@ class CameraSettingsWindowBase:
         try:
             self._window.title(f"{self.WINDOW_TITLE_PREFIX} - {camera_label}")
         except Exception:
-            self._logger.debug("Unable to set settings window title", exc_info=True)
+            pass  # Window may be in transitional state

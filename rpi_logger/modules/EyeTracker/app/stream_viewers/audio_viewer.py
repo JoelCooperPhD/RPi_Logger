@@ -31,6 +31,9 @@ except ImportError:
 
 from .base_viewer import BaseStreamViewer
 
+# Error logging flag (log-once pattern to avoid per-update spam)
+_logged_audio_error = False
+
 # Audio level constants
 DB_MIN = -60.0
 DB_MAX = 0.0
@@ -152,7 +155,10 @@ class AudioViewer(BaseStreamViewer):
             self._draw_meter(rms_db, self._peak_db)
 
         except Exception as exc:
-            self._logger.debug("Audio update failed: %s", exc)
+            global _logged_audio_error
+            if not _logged_audio_error:
+                self._logger.debug("Audio update failed: %s", exc)
+                _logged_audio_error = True
 
     def _calculate_rms_db(self, audio_data: Any) -> float:
         """Calculate RMS level in dB from audio data.

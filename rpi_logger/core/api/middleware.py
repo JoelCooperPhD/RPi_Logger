@@ -81,41 +81,11 @@ async def request_logging_middleware(request: web.Request, handler: Callable) ->
     path = request.path
     query = dict(request.query) if request.query else None
 
-    # Log request
-    if query:
-        logger.debug("API Request: %s %s ?%s", method, path, query)
-    else:
-        logger.debug("API Request: %s %s", method, path)
-
-    # In debug mode, log request body for POST/PUT
-    if _debug_mode and method in ("POST", "PUT", "PATCH"):
-        try:
-            body = await request.text()
-            if body:
-                # Truncate large bodies
-                if len(body) > 1000:
-                    body = body[:1000] + "... (truncated)"
-                logger.debug("API Request Body: %s", body)
-        except Exception:
-            pass
 
     try:
         response = await handler(request)
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
-
-        # Log response
-        logger.debug(
-            "API Response: %s %s -> %d (%.1fms)",
-            method, path, response.status, elapsed_ms
-        )
-
         return response
-    except Exception as e:
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
-        logger.debug(
-            "API Response: %s %s -> ERROR (%.1fms): %s",
-            method, path, elapsed_ms, type(e).__name__
-        )
+    except Exception:
         raise
 
 

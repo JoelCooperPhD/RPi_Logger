@@ -31,6 +31,9 @@ from .base_viewer import BaseStreamViewer
 if TYPE_CHECKING:
     import numpy as np
 
+# Error logging flag (log-once pattern to avoid per-frame spam)
+_logged_video_error = False
+
 
 class VideoViewer(BaseStreamViewer):
     """Main video preview canvas with optional gaze overlay.
@@ -77,7 +80,7 @@ class VideoViewer(BaseStreamViewer):
             enabled: Whether to show gaze overlay
         """
         self._gaze_overlay_enabled = enabled
-        self._logger.info("Gaze overlay %s", "enabled" if enabled else "disabled")
+        self._logger.debug("Gaze overlay %s", "enabled" if enabled else "disabled")
 
     def build_ui(self) -> "ttk.Frame":
         """Build the video preview canvas."""
@@ -145,7 +148,10 @@ class VideoViewer(BaseStreamViewer):
             self._photo_ref = photo
 
         except Exception as exc:
-            self._logger.debug("Video preview update failed: %s", exc)
+            global _logged_video_error
+            if not _logged_video_error:
+                self._logger.debug("Video preview update failed: %s", exc)
+                _logged_video_error = True
 
     def _show_placeholder(self) -> None:
         """Show placeholder text when no frame is available."""

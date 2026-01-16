@@ -61,6 +61,7 @@ class VOGHandler(ReconnectingMixin):
 
         # Circuit breaker error tracking (used by ReconnectingMixin)
         self._consecutive_errors = 0
+        self._logged_unrecognized_response = False
 
         # Initialize reconnection mixin for self-healing circuit breaker
         self._init_reconnect(
@@ -218,11 +219,9 @@ class VOGHandler(ReconnectingMixin):
             self.logger.warning("Failed to format command: %s", command)
             return False
 
-        self.logger.debug("Sending to %s: %r", self.port, data)
         success = await self.device.write(data)
 
         if success:
-            self.logger.debug("Command sent to %s: %s", self.port, command)
             # Small delay to let firmware process the command
             await asyncio.sleep(COMMAND_DELAY)
         else:
@@ -356,7 +355,6 @@ class VOGHandler(ReconnectingMixin):
                 if line:
                     # Reset error counter on successful read
                     self._consecutive_errors = 0
-                    self.logger.debug("Read line from %s: %r", self.port, line)
                     await self._process_response(line)
 
                 await asyncio.sleep(0.001)  # 1ms for responsiveness
@@ -371,7 +369,7 @@ class VOGHandler(ReconnectingMixin):
                     config.error_backoff * (2 ** (self._consecutive_errors - 1)),
                     config.max_error_backoff
                 )
-                self.logger.error(
+                self.logger.warning(
                     "Error in VOG read loop for %s (%d/%d): %s",
                     self.port,
                     self._consecutive_errors,
@@ -433,18 +431,18 @@ class VOGHandler(ReconnectingMixin):
             return False
 
         except Exception as e:
-            self.logger.error("Error during VOG reconnect attempt for %s: %s", self.port, e)
+            self.logger.warning("Error during VOG reconnect attempt for %s: %s", self.port, e)
             return False
 
     async def _process_response(self, response: str):
         """Process a response line from the device."""
-        self.logger.debug("Response from %s: %s", self.port, repr(response))
-
         try:
             parsed = self.protocol.parse_response(response)
 
             if parsed is None:
-                self.logger.debug("Unrecognized response: %s", response)
+                if not self._logged_unrecognized_response:
+                    self.logger.debug("Unrecognized response: %s", response)
+                    self._logged_unrecognized_response = True
                 return
 
             data = {
@@ -468,7 +466,7 @@ class VOGHandler(ReconnectingMixin):
                     try:
                         self._config_callback(dict(self._config))
                     except Exception as e:
-                        self.logger.error("Error in config callback: %s", e)
+                        self.logger.warning("Error in config callback: %s", e)
 
             elif parsed.response_type == ResponseType.BATTERY:
                 self._battery_percent = parsed.data.get('percent', 0)
@@ -490,7 +488,7 @@ class VOGHandler(ReconnectingMixin):
                 StatusMessage.send('vog_event', payload)
 
         except Exception as e:
-            self.logger.error("Error processing response from %s: %s", self.port, e)
+            self.logger.warning("Error processing response from %s: %s", self.port, e)
 
     async def _process_data_response(self, value: str, data: Dict[str, Any]):
         """Process a data response and log to CSV."""
@@ -532,7 +530,6 @@ class VOGHandler(ReconnectingMixin):
 
     async def _dispatch_data_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """Dispatch data event to callback."""
-        self.logger.debug("Dispatch event: type=%s data=%s", event_type, data)
         if not self._data_callback:
             return
 
@@ -542,7 +539,7 @@ class VOGHandler(ReconnectingMixin):
             else:
                 self._data_callback(self.port, event_type, data)
         except Exception as exc:
-            self.logger.error("Error in data callback for %s: %s", self.port, exc)
+            self.logger.warning("Error in data callback for %s: %s", self.port, exc)
 
     def _determine_trial_number(self, packet: VOGDataPacket) -> int:
         """Determine trial number from system or packet data.

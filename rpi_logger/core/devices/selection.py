@@ -126,11 +126,11 @@ class DeviceSelectionModel:
         if enabled and key not in self._enabled_connections:
             self._enabled_connections.add(key)
             changed = True
-            logger.info(f"Connection enabled: {interface.value}:{family.value}")
+            logger.debug(f"Connection enabled: {interface.value}:{family.value}")
         elif not enabled and key in self._enabled_connections:
             self._enabled_connections.discard(key)
             changed = True
-            logger.info(f"Connection disabled: {interface.value}:{family.value}")
+            logger.debug(f"Connection disabled: {interface.value}:{family.value}")
 
         if changed:
             self._notify_connection_observers()
@@ -143,7 +143,7 @@ class DeviceSelectionModel:
         """
         if connections != self._enabled_connections:
             self._enabled_connections = connections.copy()
-            logger.info(f"Enabled connections set: {len(connections)} connections")
+            logger.debug(f"Enabled connections set: {len(connections)} connections")
             self._notify_connection_observers()
 
     def toggle_connection(self, interface: InterfaceType, family: DeviceFamily) -> bool:

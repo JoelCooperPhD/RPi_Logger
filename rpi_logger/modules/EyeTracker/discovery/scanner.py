@@ -20,7 +20,7 @@ try:
     ZEROCONF_AVAILABLE = True
 except ImportError:
     ZEROCONF_AVAILABLE = False
-    logger.warning("zeroconf not available - network device discovery disabled")
+    logger.info("zeroconf not available - network device discovery disabled")
 
 
 @dataclass
@@ -84,7 +84,7 @@ class NetworkScanner:
             return
 
         if not ZEROCONF_AVAILABLE:
-            logger.warning("Cannot start network scanner - zeroconf not available")
+            logger.info("Cannot start network scanner - zeroconf not available")
             return
 
         self._running = True
@@ -119,7 +119,7 @@ class NetworkScanner:
                 await self._zeroconf.async_close()
                 self._zeroconf = None
         except Exception as e:
-            logger.error(f"Error stopping network scanner: {e}")
+            logger.warning(f"Error stopping network scanner: {e}")
 
         # Notify about lost devices
         for device_id in list(self._known_devices.keys()):
@@ -134,18 +134,16 @@ class NetworkScanner:
         Note: mDNS is event-driven, so this just logs a message.
         Devices announce themselves; we can't actively probe.
         """
-        if self._running:
-            logger.debug("Network scanner uses mDNS events - no manual scan needed")
+        pass  # Network scanner uses mDNS events - no manual scan needed
 
     async def reannounce_devices(self) -> None:
         """Re-emit discovery events for all known devices."""
-        logger.debug(f"Re-announcing {len(self._known_devices)} network devices")
         for device in self._known_devices.values():
             if self._on_device_found:
                 try:
                     await self._on_device_found(device)
                 except Exception as e:
-                    logger.error(f"Error re-announcing network device: {e}")
+                    logger.warning(f"Error re-announcing network device: {e}")
 
     def _on_service_state_change(self, **kwargs) -> None:
         """Handle mDNS service state changes."""
@@ -196,13 +194,13 @@ class NetworkScanner:
             return
 
         if info is None:
-            logger.warning(f"No service info available for {name}")
+            logger.debug(f"No service info available for {name}")
             return
 
         # Extract address and port
         addresses = info.parsed_addresses()
         if not addresses:
-            logger.warning(f"No addresses found for {name}")
+            logger.debug(f"No addresses found for {name}")
             return
 
         address = addresses[0]  # Use first address
@@ -248,7 +246,7 @@ class NetworkScanner:
             try:
                 await self._on_device_found(device)
             except Exception as e:
-                logger.error(f"Error in device found callback: {e}")
+                logger.warning(f"Error in device found callback: {e}")
 
     async def _handle_service_removed(self, name: str) -> None:
         """Handle an mDNS service being removed."""
@@ -272,7 +270,7 @@ class NetworkScanner:
                 try:
                     await self._on_device_lost(device_id)
                 except Exception as e:
-                    logger.error(f"Error in device lost callback: {e}")
+                    logger.warning(f"Error in device lost callback: {e}")
 
     def get_device(self, device_id: str) -> Optional[DiscoveredNetworkDevice]:
         """Get a specific device by ID."""

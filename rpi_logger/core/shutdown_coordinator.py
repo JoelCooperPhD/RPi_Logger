@@ -127,7 +127,7 @@ class ShutdownCoordinator:
                 self.logger.info("⏱️  Completed %s in %.3fs",
                                 callback.__name__, callback_duration)
             except Exception as e:
-                self.logger.error("Error in cleanup callback %s: %s",
+                self.logger.warning("Error in cleanup callback %s: %s",
                                 callback.__name__, e, exc_info=True)
 
     async def wait_for_shutdown(self) -> None:

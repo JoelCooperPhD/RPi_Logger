@@ -202,7 +202,7 @@ class ModuleLogManager:
         if target in ("ui", "all"):
             self.set_ui_level(level)
 
-        logger.info("Log level updated: level=%s, target=%s", level_str, target)
+        logger.debug("Log level updated: level=%s, target=%s", level_str, target)
         return True
 
     def cleanup(self) -> None:

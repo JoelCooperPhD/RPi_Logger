@@ -110,10 +110,6 @@ def validate_module_structure(module_dir: Path, entry_point: Path) -> bool:
         logger.warning("Failed to read entry point %s: %s", entry_point, e)
         return False
 
-    core_dirs = list(module_dir.glob('*_core'))
-    if not core_dirs:
-        logger.debug("No *_core directory found in %s (optional)", module_dir)
-
     return True
 
 
@@ -159,7 +155,7 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
 
     # Get platform info for filtering modules by compatibility
     platform_info = get_platform_info()
-    logger.info("Discovering modules in: %s (platform: %s)", modules_dir, platform_info.platform)
+    logger.debug("Discovering modules in: %s (platform: %s)", modules_dir, platform_info.platform)
     discovered = []
 
     for module_dir in sorted(modules_dir.iterdir()):
@@ -168,8 +164,6 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
 
         if module_dir.name.startswith('.') or module_dir.name in ('__pycache__', 'base'):
             continue
-
-        logger.debug("Checking module directory: %s", module_dir.name)
 
         entry_points = list(module_dir.glob('main_*.py'))
 
@@ -216,7 +210,6 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
                 config_path = config_template_path
             else:
                 config_template_path = None
-                logger.debug("No config.txt for %s", module_name)
 
         config = load_module_config(module_dir)
         display_name = module_name  # Default to module name
@@ -234,12 +227,12 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
                 platforms = ["*"]
 
         if not is_visible:
-            logger.info("Module %s marked hidden via config, skipping", module_name)
+            logger.debug("Module %s marked hidden via config, skipping", module_name)
             continue
 
         # Filter by platform compatibility
         if not platform_info.supports(platforms):
-            logger.info(
+            logger.debug(
                 "Module %s not compatible with platform %s (requires: %s), skipping",
                 module_name, platform_info.platform, platforms
             )
@@ -258,7 +251,7 @@ def discover_modules(modules_dir: Path = None) -> List[ModuleInfo]:
         )
 
         discovered.append(info)
-        logger.info("Discovered module: %s (entry: %s)", info.name, entry_point.name)
+        logger.debug("Discovered module: %s (entry: %s)", info.name, entry_point.name)
 
     logger.info("Discovery complete: %d module(s) found", len(discovered))
     return discovered

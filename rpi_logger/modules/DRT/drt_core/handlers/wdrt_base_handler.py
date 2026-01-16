@@ -37,6 +37,7 @@ class WDRTBaseHandler(BaseDRTHandler):
         self._device_utc: Optional[int] = None
         self._rtc_synced = False
         self._battery_poll_task: Optional[asyncio.Task] = None
+        self._logged_unknown_response = False
 
         # Data logger for CSV output
         self._data_logger = DRTDataLogger(
@@ -86,7 +87,7 @@ class WDRTBaseHandler(BaseDRTHandler):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error("Error in battery poll loop for %s: %s", self.device_id, e)
+            logger.warning("Error in battery poll loop for %s: %s", self.device_id, e)
 
     async def stop(self) -> None:
         """Stop the handler and clean up battery polling."""
@@ -95,7 +96,7 @@ class WDRTBaseHandler(BaseDRTHandler):
 
     async def send_command(self, command: str, value: Optional[str] = None) -> bool:
         if command not in WDRT_COMMANDS:
-            logger.error("Unknown wDRT command: %s", command)
+            logger.warning("Unknown wDRT command: %s", command)
             return False
 
         cmd_string = WDRT_COMMANDS[command]
@@ -159,7 +160,7 @@ class WDRTBaseHandler(BaseDRTHandler):
     async def sync_rtc(self) -> bool:
         """Synchronize the device's real-time clock with host time."""
         rtc_string = format_rtc_sync()
-        logger.info("Syncing RTC for %s: %s", self.device_id, rtc_string)
+        logger.debug("Syncing RTC for %s: %s", self.device_id, rtc_string)
         return await self.send_command('set_rtc', rtc_string)
 
     async def set_config_param(self, param: str, value: int) -> bool:
@@ -177,7 +178,9 @@ class WDRTBaseHandler(BaseDRTHandler):
             return
 
         if RESPONSE_DELIMITER not in line:
-            logger.debug("Unrecognized wDRT response format: %s", line)
+            if not self._logged_unknown_response:
+                logger.debug("Unrecognized wDRT response format: %s", line)
+                self._logged_unknown_response = True
             return
 
         try:
@@ -189,7 +192,9 @@ class WDRTBaseHandler(BaseDRTHandler):
 
             response_type = WDRT_RESPONSES.get(key)
             if response_type is None:
-                logger.debug("Unknown wDRT response: %s", key)
+                if not self._logged_unknown_response:
+                    logger.debug("Unknown wDRT response: %s", key)
+                    self._logged_unknown_response = True
                 return
 
             if response_type == 'click':
@@ -219,7 +224,7 @@ class WDRTBaseHandler(BaseDRTHandler):
                 'count': self._click_count
             }))
         except ValueError:
-            logger.error("Invalid click value: %s", value)
+            logger.warning("Invalid click value: %s", value)
 
     def _handle_trial(self, value: str) -> None:
         try:
@@ -228,7 +233,7 @@ class WDRTBaseHandler(BaseDRTHandler):
                 'trial_number': self._trial_number
             }))
         except ValueError:
-            logger.error("Invalid trial value: %s", value)
+            logger.warning("Invalid trial value: %s", value)
 
     def _handle_rt(self, value: str) -> None:
         try:
@@ -237,7 +242,7 @@ class WDRTBaseHandler(BaseDRTHandler):
                 'reaction_time': reaction_time
             }))
         except ValueError:
-            logger.error("Invalid RT value: %s", value)
+            logger.warning("Invalid RT value: %s", value)
 
     def _handle_stimulus(self, value: str) -> None:
         try:
@@ -247,7 +252,7 @@ class WDRTBaseHandler(BaseDRTHandler):
                 'state': self._stimulus_on
             }))
         except ValueError:
-            logger.error("Invalid stimulus value: %s", value)
+            logger.warning("Invalid stimulus value: %s", value)
 
     def _handle_config(self, value: str) -> None:
         try:
@@ -268,7 +273,7 @@ class WDRTBaseHandler(BaseDRTHandler):
                 self._config_future.set_result(config)
 
         except Exception as e:
-            logger.error("Error parsing config '%s': %s", value, e)
+            logger.warning("Error parsing config '%s': %s", value, e)
 
     def _handle_battery(self, value: str) -> None:
         try:
@@ -277,7 +282,7 @@ class WDRTBaseHandler(BaseDRTHandler):
                 'percent': self._battery_percent
             }))
         except ValueError:
-            logger.error("Invalid battery value: %s", value)
+            logger.warning("Invalid battery value: %s", value)
 
     def _handle_experiment(self, value: str) -> None:
         try:
@@ -287,7 +292,7 @@ class WDRTBaseHandler(BaseDRTHandler):
                 'running': self._recording
             }))
         except ValueError:
-            logger.error("Invalid experiment value: %s", value)
+            logger.warning("Invalid experiment value: %s", value)
 
     def _handle_data(self, value: str) -> None:
         """Handle data packet: block_ms,trial_n,clicks,rt,battery,device_utc"""
@@ -321,4 +326,4 @@ class WDRTBaseHandler(BaseDRTHandler):
                 self._create_background_task(self._dispatch_data_event('data', trial_data))
 
         except (ValueError, IndexError) as e:
-            logger.error("Error parsing data packet '%s': %s", value, e)
+            logger.warning("Error parsing data packet '%s': %s", value, e)

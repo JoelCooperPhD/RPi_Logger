@@ -77,7 +77,7 @@ class ModuleProcess:
 
     async def start(self) -> bool:
         if self.process is not None:
-            self.logger.warning("Process already running")
+            self.logger.info("Process already running")
             return False
 
         self.logger.info("Starting module: %s", self.module_info.name)
@@ -220,8 +220,6 @@ class ModuleProcess:
                     status = StatusMessage(line_str)
                     if status.is_valid():
                         await self._handle_status(status)
-                    else:
-                        self.logger.debug("Module output: %s", line_str)
 
         except Exception as e:
             self.logger.error("stdout reader error: %s", e, exc_info=True)
@@ -259,7 +257,6 @@ class ModuleProcess:
 
                     self.process.stdin.write(command.encode())
                     await self.process.stdin.drain()
-                    self.logger.debug("Sent command: %s", command.strip())
 
                 except asyncio.TimeoutError:
                     continue
@@ -303,8 +300,6 @@ class ModuleProcess:
         self.last_status = status
         status_type = status.get_status_type()
 
-        self.logger.info("Status: %s - %s", status_type, status.get_payload())
-
         if status_type == "ready":
             self.state = ModuleState.IDLE
         elif status_type == "recording_started":
@@ -347,7 +342,7 @@ class ModuleProcess:
 
     async def send_command(self, command: str) -> None:
         if self.state in (ModuleState.STOPPED, ModuleState.CRASHED):
-            self.logger.warning("Cannot send command - process not running")
+            self.logger.info("Cannot send command - process not running")
             return
 
         try:
@@ -413,18 +408,15 @@ class ModuleProcess:
             self.logger.warning("Invalid xbee_send payload: %s", payload)
             return
 
-        self.logger.debug("XBee send request: node_id=%s, data=%r", node_id, data)
-
         success = False
         if self._xbee_send_callback:
             try:
                 success = await self._xbee_send_callback(node_id, data.encode())
-                self.logger.debug("XBee send result for %s: %s", node_id, success)
             except Exception as e:
                 self.logger.error("XBee send callback error: %s", e)
                 success = False
         else:
-            self.logger.warning("XBee send callback not set for module %s - command dropped", self.module_info.name)
+            self.logger.info("XBee send callback not set for module %s - command dropped", self.module_info.name)
 
         # Send result back to module
         await self.send_command(CommandMessage.xbee_send_result(node_id, success))
@@ -455,7 +447,6 @@ class ModuleProcess:
         try:
             # Phase 1: Request device unassignment with ACK
             unassign_timeout = min(3.0, timeout * 0.3)
-            self.logger.debug("Phase 1: Requesting device unassignment (timeout=%.1fs)", unassign_timeout)
 
             try:
                 acknowledged, ack_data = await self._shutdown_coordinator.request_device_unassign(
@@ -467,12 +458,11 @@ class ModuleProcess:
                     port_released = ack_data.get("port_released", False) if ack_data else False
                     self.logger.info("Device unassignment confirmed (port_released=%s)", port_released)
                 else:
-                    self.logger.warning("Device unassign not acknowledged, continuing shutdown")
+                    self.logger.info("Device unassign not acknowledged, continuing shutdown")
             except Exception as e:
                 self.logger.warning("Error during device unassign: %s", e)
 
             # Phase 2: Send quit command
-            self.logger.debug("Phase 2: Sending quit command")
             try:
                 await self.send_command(CommandMessage.quit())
             except Exception as e:
@@ -481,7 +471,6 @@ class ModuleProcess:
             # Phase 3: Wait for graceful exit
             quit_timeout = timeout - unassign_timeout - 2.0  # Reserve time for SIGTERM
             quit_timeout = max(quit_timeout, 2.0)
-            self.logger.debug("Phase 3: Waiting for graceful exit (timeout=%.1fs)", quit_timeout)
 
             try:
                 await asyncio.wait_for(self.process.wait(), timeout=quit_timeout)
@@ -523,8 +512,8 @@ class ModuleProcess:
                     await asyncio.wait_for(task, timeout=1.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
-                except Exception as e:
-                    self.logger.debug("Error cleaning up task: %s", e)
+                except Exception:
+                    pass  # Task cleanup errors are expected during shutdown
 
     async def _close_subprocess_transport(self) -> None:
         """Close subprocess transport and pipes to prevent ResourceWarning.
@@ -601,18 +590,17 @@ class ModuleProcess:
                 config_manager = get_config_manager()
                 success = await config_manager.write_config_async(config_path, {'enabled': enabled})
                 if success:
-                    self.logger.info("Updated enabled state to %s in config", enabled)
+                    self.logger.debug("Updated enabled state to %s in config", enabled)
                 else:
                     self.logger.warning("Failed to update enabled state in config")
             else:
-                self.logger.warning("No config path available to update enabled state")
+                self.logger.debug("No config path available to update enabled state")
 
         except Exception as e:
             self.logger.error("Error updating enabled state: %s", e, exc_info=True)
 
     async def load_module_config(self) -> dict:
         if not self.module_info.config_path:
-            self.logger.debug("No config file for module %s", self.module_info.name)
             return {}
 
         config_manager = get_config_manager()
@@ -625,7 +613,7 @@ class ModuleProcess:
 
     async def update_enabled_state(self, enabled: bool) -> bool:
         if not self.module_info.config_path:
-            self.logger.warning("No config file to update enabled state")
+            self.logger.debug("No config file to update enabled state")
             return False
 
         config_manager = get_config_manager()

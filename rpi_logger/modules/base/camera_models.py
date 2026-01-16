@@ -139,7 +139,7 @@ class CameraModelDatabase:
             return
 
         if not self._path.exists():
-            self._logger.info("No camera_models.json found, starting fresh")
+            self._logger.debug("No camera_models.json found, starting fresh")
             self._loaded = True
             return
 
@@ -147,7 +147,7 @@ class CameraModelDatabase:
             text = self._path.read_text(encoding="utf-8")
             data = json.loads(text)
             self._parse_models(data)
-            self._logger.info(
+            self._logger.debug(
                 "Loaded %d camera models from %s", len(self._models), self._path
             )
         except Exception as e:
@@ -161,9 +161,9 @@ class CameraModelDatabase:
         text = json.dumps(data, indent=2, sort_keys=False)
         try:
             self._path.write_text(text, encoding="utf-8")
-            self._logger.info("Saved %d camera models to %s", len(self._models), self._path)
+            self._logger.debug("Saved %d camera models to %s", len(self._models), self._path)
         except Exception as e:
-            self._logger.error("Failed to save camera_models.json: %s", e)
+            self._logger.warning("Failed to save camera_models.json: %s", e)
 
     def lookup(self, raw_name: str, backend: str) -> Optional[CameraModel]:
         """
@@ -183,12 +183,8 @@ class CameraModelDatabase:
                 continue
             for pattern in model.match_patterns:
                 if fnmatch.fnmatch(raw_name, pattern):
-                    self._logger.debug(
-                        "Matched camera '%s' to model '%s'", raw_name, model.key
-                    )
                     return model
 
-        self._logger.debug("No model match for camera '%s' (%s)", raw_name, backend)
         return None
 
     def get(self, model_key: str) -> Optional[CameraModel]:
@@ -227,7 +223,6 @@ class CameraModelDatabase:
         # Check if we already have this model
         existing = self._models.get(key)
         if existing and not force_update:
-            self._logger.debug("Model '%s' already exists, skipping add", key)
             return existing
 
         if existing and force_update:
@@ -242,7 +237,7 @@ class CameraModelDatabase:
                 notes=existing.notes,
             )
             self._models[key] = model
-            self._logger.info("Updated camera model: %s (%s)", model.name, key)
+            self._logger.debug("Updated camera model: %s (%s)", model.name, key)
 
             if self._auto_save:
                 self.save()
@@ -263,7 +258,7 @@ class CameraModelDatabase:
         )
 
         self._models[key] = model
-        self._logger.info("Added new camera model: %s (%s)", model.name, key)
+        self._logger.debug("Added new camera model: %s (%s)", model.name, key)
 
         if self._auto_save:
             self.save()

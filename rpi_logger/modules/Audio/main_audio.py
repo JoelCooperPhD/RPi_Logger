@@ -81,7 +81,7 @@ async def main(argv: list[str] | None = None) -> None:
         logger.warning("Unknown log level '%s'; defaulting to %s", requested_level, effective_level)
 
     if not args.enable_commands:
-        logger.error("Audio module must be launched by the logger controller.")
+        logger.warning("Audio module must be launched by the logger controller.")
         return
     config_context = resolve_module_config_path(MODULE_DIR, MODULE_ID)
     setattr(args, "config_path", config_context.writable_path)

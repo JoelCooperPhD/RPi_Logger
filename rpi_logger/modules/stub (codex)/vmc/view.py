@@ -49,7 +49,7 @@ def _parse_geometry_string(geometry_str: str) -> Optional[tuple[int, int, int, i
     try:
         match = re.match(r"(\d+)x(\d+)([\+\-]\d+)([\+\-]\d+)", geometry_str)
         if not match:
-            _BASE_LOGGER.error("Failed to parse geometry string: '%s'", geometry_str)
+            _BASE_LOGGER.warning("Failed to parse geometry string: '%s'", geometry_str)
             return None
         width = int(match.group(1))
         height = int(match.group(2))
@@ -57,7 +57,7 @@ def _parse_geometry_string(geometry_str: str) -> Optional[tuple[int, int, int, i
         y = int(match.group(4))
         return width, height, x, y
     except Exception as exc:  # pragma: no cover - defensive
-        _BASE_LOGGER.error("Exception parsing geometry string '%s': %s", geometry_str, exc)
+        _BASE_LOGGER.warning("Exception parsing geometry string '%s': %s", geometry_str, exc)
         return None
 
 
@@ -229,7 +229,7 @@ class StubCodexView:
 
         self.stub_frame = ttk.Frame(main_frame, padding="0")
         self.stub_frame.grid(row=0, column=0, sticky="nsew")
-        self.logger.info("Stub frame added to main layout")
+        self.logger.debug("Stub frame added to main layout")
 
         self.io_view_frame = ttk.LabelFrame(main_frame, text="Capture Stats", padding="8")
         self.io_view_frame.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
@@ -618,7 +618,7 @@ class StubCodexView:
                 from rpi_logger.core.ui.dialogs.quick_start import QuickStartDialog
                 QuickStartDialog(self.root)
         except Exception as exc:
-            self.logger.error("Failed to open help dialog: %s", exc)
+            self.logger.warning("Failed to open help dialog: %s", exc)
 
     def _resolve_log_file(self) -> Optional[Path]:
         if getattr(self.model, 'log_file', None):
@@ -641,12 +641,12 @@ class StubCodexView:
         When the user clicks X, the module should terminate and notify
         the main logger so the UI toggle can be updated.
         """
-        self.logger.info("Window close requested - quitting module")
+        self.logger.debug("Window close requested - quitting module")
         self.request_quit()
 
     def show_window(self) -> None:
         """Show the window if it was hidden."""
-        self.logger.info("Showing window")
+        self.logger.debug("Showing window")
         try:
             self.root.deiconify()
             self.root.lift()
@@ -659,7 +659,7 @@ class StubCodexView:
 
     def hide_window(self) -> None:
         """Hide the window without terminating the process."""
-        self.logger.info("Hiding window")
+        self.logger.debug("Hiding window")
         self._cancel_geometry_save_handle(flush=True)
         try:
             self.root.withdraw()
@@ -695,7 +695,6 @@ class StubCodexView:
     # Model observation
 
     def _on_model_change(self, prop: str, value) -> None:
-        self.logger.debug("Model change: %s -> %s", prop, value)
         if prop == "session_dir":
             self._update_data_folder_menu_state()
 
@@ -703,7 +702,7 @@ class StubCodexView:
     # Lifecycle
 
     async def run(self) -> float:
-        self.logger.info("StubCodexView run loop starting")
+        self.logger.debug("StubCodexView run loop starting")
         if self._event_loop is None:
             try:
                 self._event_loop = asyncio.get_running_loop()
@@ -718,13 +717,13 @@ class StubCodexView:
                 try:
                     self.root.update()
                 except tk.TclError as exc:
-                    self.logger.error("Tk root.update() raised: %s", exc, exc_info=exc)
+                    self.logger.warning("Tk root.update() raised: %s", exc, exc_info=exc)
                     break
                 await asyncio.sleep(0.01)
         finally:
             self._window_duration_ms = max(0.0, (time.perf_counter() - open_time) * 1000.0)
             self._loop_running = False
-            self.logger.info("StubCodexView run loop finished (%.2f ms)", self._window_duration_ms)
+            self.logger.debug("StubCodexView run loop finished (%.2f ms)", self._window_duration_ms)
         return self._window_duration_ms
 
     def get_geometry(self) -> tuple[int, int, int, int]:

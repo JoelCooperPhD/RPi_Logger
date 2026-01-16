@@ -40,7 +40,7 @@ class USBTransport(BaseTransport):
     async def connect(self) -> bool:
         """Open serial connection. Returns True if successful."""
         if self.is_connected:
-            self.logger.warning("Already connected to %s", self.port)
+            self.logger.debug("Already connected to %s", self.port)
             return True
         try:
             self._serial = await asyncio.to_thread(
@@ -74,7 +74,7 @@ class USBTransport(BaseTransport):
             await asyncio.to_thread(_close_with_lock)
             self.logger.info("Disconnected from %s", self.port)
         except Exception as e:
-            self.logger.error("Error disconnecting from %s: %s", self.port, e)
+            self.logger.warning("Error disconnecting from %s: %s", self.port, e)
         finally:
             self._serial = None
             self._connected = False
@@ -82,7 +82,7 @@ class USBTransport(BaseTransport):
     async def write(self, data: bytes) -> bool:
         """Write data to serial port. Returns True if successful."""
         if not self.is_connected:
-            self.logger.error("Cannot write to %s: not connected", self.port)
+            self.logger.warning("Cannot write to %s: not connected", self.port)
             return False
         def _write_with_lock():
             with self._lock:
@@ -90,10 +90,9 @@ class USBTransport(BaseTransport):
                 self._serial.flush()
         try:
             await asyncio.to_thread(_write_with_lock)
-            self.logger.debug("Wrote to %s: %s", self.port, data)
             return True
         except serial.SerialException as e:
-            self.logger.error("Write error on %s: %s", self.port, e)
+            self.logger.warning("Write error on %s: %s", self.port, e)
             return False
 
     async def read_line(self) -> Optional[str]:
@@ -120,13 +119,11 @@ class USBTransport(BaseTransport):
             line_bytes = await asyncio.to_thread(_read_with_buffer)
             if line_bytes:
                 line = line_bytes.decode('utf-8', errors='replace').strip()
-                if line:
-                    self.logger.debug("Read from %s: %s", self.port, line)
                 return line if line else None
             return None
         except serial.SerialException as e:
-            self.logger.error("Read error on %s: %s", self.port, e)
+            self.logger.warning("Read error on %s: %s", self.port, e)
             return None
         except Exception as e:
-            self.logger.error("Unexpected error reading from %s: %s", self.port, e)
+            self.logger.warning("Unexpected error reading from %s: %s", self.port, e)
             return None

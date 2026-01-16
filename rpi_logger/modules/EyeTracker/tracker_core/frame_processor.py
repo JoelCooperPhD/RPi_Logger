@@ -178,7 +178,7 @@ class FrameProcessor:
             return processed, is_grayscale
 
         except Exception as e:
-            logger.error("Error processing frame: %s", e)
+            logger.warning("Error processing frame: %s", e)
             return raw_frame, len(raw_frame.shape) == 2
 
     @property

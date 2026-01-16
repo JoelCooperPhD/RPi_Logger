@@ -314,7 +314,7 @@ class VOGConfigWindow:
         if self.async_bridge:
             self.async_bridge.run_coroutine(handler.get_device_config())
         else:
-            self.logger.warning("No async bridge available - cannot request device config")
+            self.logger.debug("No async bridge available - cannot request device config")
             self._set_loading(False)
 
     def _set_loading(self, loading: bool):
@@ -339,7 +339,6 @@ class VOGConfigWindow:
         This is called from the handler's read loop when CONFIG responses arrive.
         We schedule UI update on the main thread via dialog.after().
         """
-        self.logger.debug("Config callback received: %s", config)
         try:
             if self.dialog.winfo_exists():
                 # Clear loading state and update UI
@@ -398,9 +397,8 @@ class VOGConfigWindow:
                     self._config_path,
                     {self.CONFIG_DIALOG_GEOMETRY_KEY: position}
                 )
-                self.logger.debug("Saved config dialog position: %s", position)
-        except Exception as e:
-            self.logger.debug("Could not save position: %s", e)
+        except Exception:
+            pass  # Position save is best-effort
 
     def _safe_update_ui(self, config: dict):
         """Safely update UI, checking if dialog still exists."""
@@ -560,7 +558,7 @@ class VOGConfigWindow:
             self.dialog.after(0, lambda: messagebox.showinfo("Success", "Configuration applied", parent=self.dialog))
 
         except Exception as e:
-            self.logger.error("Failed to apply config: %s", e)
+            self.logger.warning("Failed to apply config: %s", e)
             self.dialog.after(0, lambda: messagebox.showerror("Error", f"Failed to apply: {e}", parent=self.dialog))
 
     async def _apply_svog_config(self, handler):

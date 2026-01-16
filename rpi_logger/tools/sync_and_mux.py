@@ -176,7 +176,7 @@ async def _remux_h264_to_mp4(h264_path: Path) -> Optional[Path]:
         str(mp4_path)
     ]
 
-    logger.info("Converting %s to MP4 for muxing", h264_path.name)
+    logger.debug("Converting %s to MP4 for muxing", h264_path.name)
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -190,11 +190,11 @@ async def _remux_h264_to_mp4(h264_path: Path) -> Optional[Path]:
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
-            logger.error("ffmpeg remux timed out for %s", h264_path.name)
+            logger.warning("ffmpeg remux timed out for %s", h264_path.name)
             return None
 
         if process.returncode != 0:
-            logger.error(
+            logger.warning(
                 "ffmpeg remux failed for %s: %s",
                 h264_path.name,
                 stderr.decode('utf-8', errors='ignore')[:500]
@@ -202,17 +202,17 @@ async def _remux_h264_to_mp4(h264_path: Path) -> Optional[Path]:
             return None
 
         if not await asyncio.to_thread(mp4_path.exists):
-            logger.error(
+            logger.warning(
                 "ffmpeg reported success but MP4 not found for %s",
                 h264_path.name
             )
             return None
 
-        logger.info("Created MP4 for muxing: %s", mp4_path.name)
+        logger.debug("Created MP4 for muxing: %s", mp4_path.name)
         return mp4_path
 
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error("Failed to convert %s to MP4: %s", h264_path.name, exc)
+        logger.warning("Failed to convert %s to MP4: %s", h264_path.name, exc)
         return None
 
 
@@ -245,7 +245,7 @@ async def extract_timing_from_csv(csv_path: Path, module_type: str) -> dict:
                 'sensor_timestamp_ns': int(sensor_timestamp_ns) if sensor_timestamp_ns else None
             }
     except Exception as e:
-        logger.error("Failed to read timing from %s: %s", csv_path, e)
+        logger.warning("Failed to read timing from %s: %s", csv_path, e)
         return {}
 
 
@@ -259,7 +259,7 @@ async def generate_sync_metadata(session_dir: Path, trial_number: int) -> dict:
     files = await find_trial_files(session_dir, trial_number)
 
     if not files['audio'] and not files['videos']:
-        logger.error("No audio or video files found for trial %d", trial_number)
+        logger.warning("No audio or video files found for trial %d", trial_number)
         return {}
 
     modules_data = {}
@@ -359,7 +359,7 @@ async def process_trial(session_dir: Path, trial_number: int, mux: bool = True):
     sync_metadata = await generate_sync_metadata(session_dir, trial_number)
 
     if not sync_metadata.get('modules'):
-        logger.warning("No data found for trial %d, skipping", trial_number)
+        logger.info("No data found for trial %d, skipping", trial_number)
         return
 
     session_timestamp = sync_metadata.get('session_timestamp', 'session')
@@ -387,11 +387,11 @@ async def process_trial(session_dir: Path, trial_number: int, mux: bool = True):
     camera_modules = {k: v for k, v in modules.items() if k.startswith('Camera_')}
 
     if not camera_modules:
-        logger.info("No camera files found for muxing")
+        logger.debug("No camera files found for muxing")
         return
 
     if not audio_file:
-        logger.info("No audio file found for muxing")
+        logger.debug("No audio file found for muxing")
         return
 
     audio_has_timing = 'start_time_unix' in audio_data
@@ -459,7 +459,7 @@ async def process_session(
     numbers = list(dict.fromkeys(trial_numbers)) if trial_numbers else [1]
 
     if not numbers:
-        logger.error("No trial numbers found in %s", session_dir)
+        logger.warning("No trial numbers found in %s", session_dir)
         return False
 
     for trial_num in numbers:

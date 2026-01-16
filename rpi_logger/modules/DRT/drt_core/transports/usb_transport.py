@@ -51,7 +51,7 @@ class USBTransport(BaseTransport):
 
     async def connect(self) -> bool:
         if self.is_connected:
-            logger.warning("Already connected to %s", self.port)
+            logger.debug("Already connected to %s", self.port)
             return True
 
         try:
@@ -98,7 +98,7 @@ class USBTransport(BaseTransport):
 
     async def write(self, data: bytes) -> bool:
         if not self.is_connected:
-            logger.error("Cannot write to %s: not connected", self.port)
+            logger.warning("Cannot write to %s: not connected", self.port)
             return False
 
         def _write_with_lock():
@@ -109,7 +109,6 @@ class USBTransport(BaseTransport):
 
         try:
             await asyncio.to_thread(_write_with_lock)
-            logger.debug("Wrote to %s: %s", self.port, data)
             return True
         except serial.SerialException as e:
             logger.error("Write error on %s: %s", self.port, e)
@@ -152,15 +151,13 @@ class USBTransport(BaseTransport):
             line_bytes = await asyncio.to_thread(_read_with_buffer)
             if line_bytes:
                 line = line_bytes.decode('utf-8', errors='replace').strip()
-                if line:  # Only log non-empty lines
-                    logger.debug("Read from %s: %s", self.port, line)
                 return line if line else None
             return None
 
         except serial.SerialException as e:
-            logger.error("Read error on %s: %s", self.port, e)
+            logger.warning("Read error on %s: %s", self.port, e)
             return None
         except Exception as e:
-            logger.error("Unexpected error reading from %s: %s", self.port, e)
+            logger.warning("Unexpected error reading from %s: %s", self.port, e)
             return None
 

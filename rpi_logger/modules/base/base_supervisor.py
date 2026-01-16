@@ -44,7 +44,7 @@ class BaseSupervisor(ABC, Generic[SystemT, ErrorT]):
             except initialization_error:
                 if self.shutdown_event.is_set():
                     break
-                self.logger.info(
+                self.logger.warning(
                     "%s hardware not available; retrying in %.1fs",
                     system_name,
                     self.retry_interval,
@@ -67,12 +67,10 @@ class BaseSupervisor(ABC, Generic[SystemT, ErrorT]):
                 try:
                     await system.cleanup()
                 except Exception as exc:  # pragma: no cover - defensive
-                    self.logger.error("%s cleanup failed: %s", system_name, exc)
+                    self.logger.warning("%s cleanup failed: %s", system_name, exc)
                 self.system = None
 
             break
-
-        self.logger.debug("%s supervisor exiting", system_name)
 
     async def shutdown(self) -> None:
         if self.shutdown_event.is_set():

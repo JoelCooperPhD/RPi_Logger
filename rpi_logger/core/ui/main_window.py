@@ -315,7 +315,7 @@ class MainWindow:
                     geometry.width, geometry.height, width, height
                 )
             self.root.geometry(f"{width}x{height}+{geometry.x}+{geometry.y}")
-            self.logger.info("Applied saved window geometry: %dx%d+%d+%d", width, height, geometry.x, geometry.y)
+            self.logger.debug("Applied saved window geometry: %dx%d+%d+%d", width, height, geometry.x, geometry.y)
         else:
             self.root.geometry("800x600")
 
@@ -488,14 +488,14 @@ class MainWindow:
         """
         # Device connect callback - schedules async work via bridge
         def on_connect_device(device_id: str):
-            self.logger.info("Connect request for device: %s", device_id)
+            self.logger.debug("Connect request for device: %s", device_id)
             self._schedule_task(self.logger_system.connect_and_start_device(device_id))
 
         self.device_system.set_on_connect_device(on_connect_device)
 
         # Device disconnect callback - schedules async work via bridge
         def on_disconnect_device(device_id: str):
-            self.logger.info("Disconnect request for device: %s", device_id)
+            self.logger.debug("Disconnect request for device: %s", device_id)
             self._schedule_task(self.logger_system.stop_and_disconnect_device(device_id))
 
         self.device_system.set_on_disconnect_device(on_disconnect_device)
@@ -722,7 +722,6 @@ class MainWindow:
 
         config_manager = get_config_manager()
         config_manager.write_config(CONFIG_PATH, {'gui_logger_visible': visible})
-        self.logger.debug("System log visibility set to: %s", visible)
 
     def _deferred_log_level_menu(self) -> None:
         """Create log level menu after mainloop has started.
@@ -835,7 +834,7 @@ class MainWindow:
         # Start the periodic flush timer (must be on main thread)
         self.log_handler.start_flush_timer()
 
-        self.logger.info("System log display initialized")
+        self.logger.debug("System log display initialized")
 
     def cleanup_log_handler(self) -> None:
         if self.log_handler:
@@ -942,7 +941,7 @@ class MainWindow:
             geometry = WindowGeometry(x=x, y=y, width=width, height=height)
             geometry_store = get_instance_geometry_store()
             geometry_store.set("main_window", geometry)
-            self.logger.info("Saved main window geometry: %dx%d+%d+%d", width, height, x, y)
+            self.logger.debug("Saved main window geometry: %dx%d+%d+%d", width, height, x, y)
 
             # Save trial label separately to main config
             if self.trial_label_var:

@@ -3,7 +3,6 @@
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, Awaitable
-import logging
 
 from rpi_logger.core.logging_utils import get_module_logger
 from rpi_logger.modules.base.storage_utils import derive_session_token
@@ -210,9 +209,6 @@ class DRTDataLogger:
 
             # Write to cached file handle (line-buffered, so flushes automatically)
             self._csv_file.write(csv_line)
-
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug("Logged trial data to %s (clicks=%d)", self._csv_filepath, clicks)
 
             return True
 

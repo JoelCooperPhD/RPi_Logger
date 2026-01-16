@@ -63,7 +63,7 @@ class StateFacade:
         self._geometry: InstanceGeometryStore = get_instance_geometry_store()
         self._config: ConfigManager = get_config_manager()
 
-        self.logger.info("StateFacade initialized with %d modules", len(module_configs))
+        self.logger.debug("StateFacade initialized with %d modules", len(module_configs))
 
     # =========================================================================
     # Lifecycle State (phase-aware, async)
