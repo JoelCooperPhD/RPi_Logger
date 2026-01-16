@@ -13,7 +13,7 @@ import asyncio
 import math
 import time
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, Optional, Tuple
 
@@ -533,7 +533,7 @@ class GPSModuleRuntime(ModuleRuntime):
         """Ensure session directory exists and update handlers."""
         if new_dir is None:
             self.output_root.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             self.session_dir = self.output_root / f"{self.session_prefix}_{timestamp}"
         else:
             self.session_dir = Path(new_dir)

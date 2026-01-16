@@ -1,6 +1,7 @@
 
 import datetime
 import sys
+from datetime import timezone
 from pathlib import Path
 from typing import Tuple
 
@@ -35,7 +36,7 @@ def create_session_directory(
         session_name = session_dir.name
 
     else:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         prefix = sanitize_path_component(session_prefix).rstrip("_")
         session_name = f"{prefix}_{timestamp}" if prefix else timestamp

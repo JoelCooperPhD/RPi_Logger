@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import csv
 import datetime
+from datetime import timezone
 import io
 import time
 import wave
@@ -137,7 +138,7 @@ class RecordingManager(RecordingManagerBase):
         if self._is_recording:
             raise RuntimeError("Stop the active recording before starting a new experiment")
 
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         safe_label = None
         if label:
             candidate = "".join(

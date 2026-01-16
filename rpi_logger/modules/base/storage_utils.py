@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -89,7 +89,7 @@ def derive_session_token(path: Path, module_name: Optional[str] = None) -> str:
         candidate = name.split("_", 1)[1].strip("_")
         if candidate:
             return candidate
-    return name or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    return name or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
 def format_trial_suffix(trial_number: Optional[int], *, digits: int = 3) -> str:
